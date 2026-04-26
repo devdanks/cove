@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -11,7 +12,8 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db) : ControllerBase
+[RequiresPermission(Permissions.PerformersRead)]
+public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -97,6 +99,10 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.TagIds?.Count > 0) performer.PerformerTags = dto.TagIds.Select(id => new PerformerTag { TagId = id }).ToList();
 
         performer = await performerRepo.AddAsync(performer, ct);
+        if (dto.Urls?.Count > 0)
+            await entityIdentifiers.SyncAsync(EntityKinds.Performer, performer.Id, IdentifierSchemes.Url, dto.Urls, null, ct);
+        if (dto.Aliases?.Count > 0)
+            await entityIdentifiers.SyncAsync(EntityKinds.Performer, performer.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await performerRepo.GetByIdWithRelationsAsync(performer.Id, ct);
         return CreatedAtAction(nameof(GetById), new { id = performer.Id }, MapToDto(result!));
     }
@@ -149,6 +155,10 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.CustomFields != null) p.CustomFields = dto.CustomFields;
 
         await performerRepo.UpdateAsync(p, ct);
+        if (dto.Urls != null)
+            await entityIdentifiers.SyncAsync(EntityKinds.Performer, id, IdentifierSchemes.Url, dto.Urls, null, ct);
+        if (dto.Aliases != null)
+            await entityIdentifiers.SyncAsync(EntityKinds.Performer, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(MapToDto(updated!));
     }
@@ -327,6 +337,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.PerformersDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var p = await performerRepo.GetByIdAsync(id, ct);

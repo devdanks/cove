@@ -17,9 +17,11 @@ public class SystemController(
     IStudioRepository studioRepo, ITagRepository tagRepo,
     IGroupRepository groupRepo, ConfigService configService,
     ScraperService scraperService, MetadataServerService metadataServerService,
+    CoveConfiguration coveConfiguration,
     CoveContext db) : ControllerBase
 {
     [HttpGet("status")]
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public async Task<ActionResult<SystemStatusDto>> GetStatus()
     {
         string[] pending;
@@ -38,7 +40,8 @@ public class SystemController(
             ConfigFile: configService.ConfigPath,
             DatabasePath: "PostgreSQL",
             MigrationRequired: pending.Length > 0,
-            PendingMigrations: pending.Length > 0 ? pending : null
+            PendingMigrations: pending.Length > 0 ? pending : null,
+            AuthEnabled: coveConfiguration.Auth?.Enabled ?? false
         ));
     }
 

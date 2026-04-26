@@ -8,6 +8,8 @@ import { AppConfigProvider, useAppConfig } from "./state/AppConfigContext";
 import { ExtensionLoaderProvider, useExtensions } from "./extensions/ExtensionLoader";
 import { SceneQueueProvider } from "./state/SceneQueueContext";
 import { SetupWizardPage } from "./pages/SetupWizardPage";
+import { LoginPage } from "./pages/LoginPage";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { useKeySequence } from "./hooks/useKeySequence";
 import { LOCATION_CHANGE_EVENT, Route, buildCurrentUrl, buildRoutePath, navigateToUrl, parseCurrentRoute, parseLegacyHashRoute, syncRouteHistory } from "./router/location";
 
@@ -115,15 +117,55 @@ export default function App() {
   return (
     <RouteRegistryProvider>
       <AppConfigProvider>
-        <ExtensionLoaderProvider>
-          <SceneQueueProvider>
-            <AppShell route={route} navigate={navigate} />
-            <KeyboardShortcutsDialog open={showShortcuts} onClose={() => setShowShortcuts(false)} />
-          </SceneQueueProvider>
-        </ExtensionLoaderProvider>
+        <AuthGate>
+          <ExtensionLoaderProvider>
+            <SceneQueueProvider>
+              <AppShell route={route} navigate={navigate} />
+              <KeyboardShortcutsDialog open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+            </SceneQueueProvider>
+          </ExtensionLoaderProvider>
+        </AuthGate>
       </AppConfigProvider>
     </RouteRegistryProvider>
   );
+}
+
+/**
+ * Wraps the app with AuthProvider once we know whether auth is enabled (from /api/system/status),
+ * and renders the LoginPage when auth is required but the user is not yet signed in.
+ */
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { status, statusLoading } = useAppConfig();
+  const authEnabled = !!status?.authEnabled;
+
+  if (statusLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" />
+      </div>
+    );
+  }
+
+  return (
+    <AuthProvider authEnabled={authEnabled}>
+      <AuthGateInner>{children}</AuthGateInner>
+    </AuthProvider>
+  );
+}
+
+function AuthGateInner({ children }: { children: React.ReactNode }) {
+  const { authEnabled, user, loading } = useAuth();
+  if (authEnabled && loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" />
+      </div>
+    );
+  }
+  if (authEnabled && !user) {
+    return <LoginPage />;
+  }
+  return <>{children}</>;
 }
 
 function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => void }) {

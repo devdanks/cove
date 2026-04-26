@@ -215,7 +215,8 @@ public record SystemStatusDto(
     string ConfigFile,
     string DatabasePath,
     bool MigrationRequired = false,
-    string[]? PendingMigrations = null);
+    string[]? PendingMigrations = null,
+    bool AuthEnabled = false);
 
 public record CoveConfigDto
 {

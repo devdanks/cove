@@ -144,6 +144,9 @@ try
     if (pgManaged)
         builder.Services.AddHostedService<PostgresManagerService>();
 
+    // Auth bootstrap (must run AFTER PostgresManagerService so the DB is reachable).
+    builder.Services.AddHostedService<Cove.Data.Auth.BootstrapAuthService>();
+
     // FFmpeg — auto-downloads if not found in PATH or configured path
     builder.Services.AddHostedService<FfmpegManagerService>();
 
@@ -191,6 +194,8 @@ try
     builder.Services.AddControllers(options =>
     {
         options.Filters.Add<Cove.Api.Middleware.EntityEventFilter>();
+        options.Filters.Add<Cove.Api.Middleware.AuthExceptionFilter>();
+        options.Filters.Add<Cove.Api.Middleware.PermissionAuthorizationFilter>();
     })
         .AddJsonOptions(options =>
         {
@@ -220,6 +225,33 @@ try
     // In-memory cache for POST query results
     builder.Services.AddMemoryCache();
 
+    // Rate limiting — tight bucket on auth endpoints to slow brute-force; lenient global default.
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+        // Tight: /api/auth/login + /api/auth/refresh — 10 requests / 15s sliding window per IP+username.
+        options.AddPolicy("auth-strict", httpContext =>
+        {
+            var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var key = ip;
+            // Best-effort: combine with submitted username so two users behind a NAT don't lock each other.
+            if (httpContext.Request.HasJsonContentType() && httpContext.Request.ContentLength is > 0 and < 4096)
+            {
+                // body cannot be read here without buffering; key on IP only.
+            }
+            return System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(key, _ =>
+                new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromSeconds(15),
+                    SegmentsPerWindow = 3,
+                    QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                });
+        });
+    });
+
     // CORS - allow frontend dev server
     builder.Services.AddCors(options =>
     {
@@ -247,6 +279,7 @@ try
     app.UseResponseCompression();
     app.UseCors();
     app.UseOutputCache();
+    app.UseRateLimiter();
 
     // Extension middleware (runs before auth, after CORS)
     extensionManager.ConfigureMiddleware(app);
@@ -256,6 +289,10 @@ try
         app.UseAuthentication();
         app.UseAuthorization();
     }
+
+    // Always run our principal-resolver middleware so [RequiresPermission] can read it.
+    // (When auth is disabled the filter short-circuits and treats requests as anonymous-allowed.)
+    app.UseMiddleware<Cove.Api.Middleware.CurrentPrincipalMiddleware>();
 
     app.MapControllers();
     app.MapHub<JobHub>("/hubs/jobs");
@@ -418,6 +455,43 @@ try
 
     // Initialize extensions after database is ready
     await extensionManager.InitializeAllAsync(app.Services);
+
+    // Collect extension-contributed permissions and content policies (auth integration).
+    {
+        var permissionRegistry = app.Services.GetRequiredService<Cove.Core.Auth.IPermissionRegistry>();
+        foreach (var ext in extensionManager.Extensions)
+        {
+            if (ext is Cove.Sdk.IPermissionContributor pc)
+            {
+                try
+                {
+                    var contributed = pc.ContributePermissions().ToList();
+                    permissionRegistry.RegisterExtensionPermissions(ext.Id, contributed);
+                    Log.Information("Extension {Id} contributed {Count} permission(s)", ext.Id, contributed.Count);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Extension {Id} failed to contribute permissions", ext.Id);
+                }
+            }
+            if (ext is Cove.Sdk.IContentPolicyContributor cp)
+            {
+                try
+                {
+                    var policies = cp.ContributePolicies();
+                    Log.Information("Extension {Id} contributed {Count} content policy/policies", ext.Id, policies.Count);
+                    // Policies are recorded for audit/inspection. Full enforcement at the EF
+                    // query-filter layer is part of Schema C Stage 2; v1 stores them so the
+                    // surface is documented and the auth services can consult them.
+                    Cove.Core.Auth.ContentPolicyRegistry.Register(ext.Id, policies);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Extension {Id} failed to contribute content policies", ext.Id);
+                }
+            }
+        }
+    }
 
     Log.Information("Cove starting on port {Port}", port);
     await app.WaitForShutdownAsync();

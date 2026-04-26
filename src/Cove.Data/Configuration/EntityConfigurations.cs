@@ -420,33 +420,7 @@ public class ScrapeAttemptConfiguration : IEntityTypeConfiguration<ScrapeAttempt
     }
 }
 
-public class UserConfiguration : IEntityTypeConfiguration<User>
-{
-    public void Configure(EntityTypeBuilder<User> builder)
-    {
-        builder.ToTable("users");
-        builder.HasKey(u => u.Id);
-        builder.Property(u => u.Username).IsRequired().HasMaxLength(200);
-        builder.Property(u => u.PasswordHash).IsRequired().HasMaxLength(500);
-        builder.Property(u => u.ApiKey).HasMaxLength(200);
-
-        builder.HasIndex(u => u.Username).IsUnique();
-        builder.HasIndex(u => u.ApiKey).IsUnique().HasFilter("\"ApiKey\" IS NOT NULL");
-
-        builder.HasMany(u => u.Roles).WithOne(r => r.User).HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
-public class UserRoleConfiguration : IEntityTypeConfiguration<UserRole>
-{
-    public void Configure(EntityTypeBuilder<UserRole> builder)
-    {
-        builder.ToTable("user_roles");
-        builder.HasKey(r => r.Id);
-        builder.Property(r => r.Role).IsRequired().HasMaxLength(100);
-        builder.HasIndex(r => new { r.UserId, r.Role }).IsUnique();
-    }
-}
+// User/Role/Permission configurations live in AuthConfigurations.cs (Cove.Data.Configuration).
 
 public class FolderConfiguration : IEntityTypeConfiguration<Folder>
 {

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -11,7 +12,8 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db) : ControllerBase
+[RequiresPermission(Permissions.StudiosRead)]
+public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -77,6 +79,10 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (dto.TagIds?.Count > 0) studio.StudioTags = dto.TagIds.Select(id => new StudioTag { TagId = id }).ToList();
 
         studio = await studioRepo.AddAsync(studio, ct);
+        if (dto.Urls?.Count > 0)
+            await entityIdentifiers.SyncAsync(EntityKinds.Studio, studio.Id, IdentifierSchemes.Url, dto.Urls, null, ct);
+        if (dto.Aliases?.Count > 0)
+            await entityIdentifiers.SyncAsync(EntityKinds.Studio, studio.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await studioRepo.GetByIdWithRelationsAsync(studio.Id, ct);
         return CreatedAtAction(nameof(GetById), new { id = studio.Id }, MapToDto(result!));
     }
@@ -113,11 +119,16 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (dto.CustomFields != null) studio.CustomFields = dto.CustomFields;
 
         await studioRepo.UpdateAsync(studio, ct);
+        if (dto.Urls != null)
+            await entityIdentifiers.SyncAsync(EntityKinds.Studio, id, IdentifierSchemes.Url, dto.Urls, null, ct);
+        if (dto.Aliases != null)
+            await entityIdentifiers.SyncAsync(EntityKinds.Studio, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = await studioRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(MapToDto(updated!));
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.StudiosDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var s = await studioRepo.GetByIdAsync(id, ct);

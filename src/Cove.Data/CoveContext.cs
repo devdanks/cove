@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Cove.Core.Entities;
+using Cove.Core.Entities.Auth;
 using Cove.Plugins;
 
 namespace Cove.Data;
@@ -30,9 +31,21 @@ public class CoveContext : DbContext
     public DbSet<GalleryChapter> GalleryChapters => Set<GalleryChapter>();
     public DbSet<ScrapeAttempt> ScrapeAttempts => Set<ScrapeAttempt>();
 
-    // Users
+    // Users / Auth / Permissions / Audit
     public DbSet<User> Users => Set<User>();
-    public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<UserRoleAssignment> UserRoleAssignments => Set<UserRoleAssignment>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<RoleContentRule> RoleContentRules => Set<RoleContentRule>();
+    public DbSet<RoleEntityOverride> RoleEntityOverrides => Set<RoleEntityOverride>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+    public DbSet<ShareLink> ShareLinks => Set<ShareLink>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+
+    // Schema C Stage 1: universal identifier table (dual-write with *Url/*Alias/*RemoteId)
+    public DbSet<EntityIdentifier> EntityIdentifiers => Set<EntityIdentifier>();
 
     // Extensions
     public DbSet<ExtensionData> ExtensionData => Set<ExtensionData>();

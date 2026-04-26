@@ -73,6 +73,65 @@ import type {
 
 const API_BASE = "/api";
 
+// ===== Auth-aware fetch =====
+// Lazy import to avoid circular deps; the auth module has no client.ts deps.
+import { authStore } from "../auth/authStore";
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const refresh = authStore.getRefreshToken();
+    if (!refresh) return false;
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: refresh }),
+      });
+      if (!res.ok) {
+        authStore.clear();
+        return false;
+      }
+      const body = await res.json() as { token?: string; refreshToken?: string };
+      if (!body.token) return false;
+      authStore.setTokens(body.token, body.refreshToken ?? refresh);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      // cleared by outer
+    }
+  })();
+  try { return await refreshInFlight; }
+  finally { refreshInFlight = null; }
+}
+
+async function authedFetch(input: string, init?: RequestInit): Promise<Response> {
+  const token = authStore.getAccessToken();
+  const headers = new Headers(init?.headers ?? {});
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  let res = await fetch(input, { ...init, headers });
+  if (res.status === 401 && token && authStore.getRefreshToken()) {
+    const ok = await tryRefresh();
+    if (ok) {
+      const retryToken = authStore.getAccessToken();
+      const retryHeaders = new Headers(init?.headers ?? {});
+      if (retryToken) retryHeaders.set("Authorization", `Bearer ${retryToken}`);
+      res = await fetch(input, { ...init, headers: retryHeaders });
+    } else {
+      // refresh failed: emit a global event so UI can react
+      window.dispatchEvent(new CustomEvent("cove-auth-required"));
+    }
+  } else if (res.status === 401 && !token) {
+    window.dispatchEvent(new CustomEvent("cove-auth-required"));
+  }
+  return res;
+}
+
 const CRITERION_MODIFIER_MAP: Record<string, string> = {
   EQUALS: "equals",
   NOT_EQUALS: "notEquals",
@@ -91,7 +150,7 @@ const CRITERION_MODIFIER_MAP: Record<string, string> = {
 };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await authedFetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -107,7 +166,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 async function requestOptional<T>(path: string, options?: RequestInit): Promise<T | null> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await authedFetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -416,13 +475,13 @@ export const groups = {
 async function uploadImage(path: string, file: File): Promise<{ blobId: string }> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE}${path}`, { method: "POST", body: formData });
+  const res = await authedFetch(`${API_BASE}${path}`, { method: "POST", body: formData });
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
   return res.json();
 }
 
 async function deleteImage(path: string): Promise<void> {
-  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  const res = await authedFetch(`${API_BASE}${path}`, { method: "DELETE" });
   if (!res.ok && res.status !== 404) throw new Error(`Delete failed: ${res.status}`);
 }
 
@@ -778,4 +837,107 @@ export const extensions = {
       method: "POST",
       body: JSON.stringify({ extensionId }),
     }),
+};
+
+// ===== Auth / RBAC =====
+export interface UserRow {
+  id: number;
+  username: string;
+  displayName?: string | null;
+  email?: string | null;
+  isActive: boolean;
+  isLocked: boolean;
+  isSystem: boolean;
+  mustChangePassword: boolean;
+  lastLoginAt?: string | null;
+  lastLoginIp?: string | null;
+  createdAt: string;
+  roles: string[];
+}
+export interface RoleRow {
+  id: number;
+  name: string;
+  description?: string | null;
+  isBuiltin: boolean;
+  isSystem: boolean;
+  source: string;
+  permissions: string[];
+}
+export interface PermissionInfo {
+  key: string;
+  category: string;
+  description: string;
+  source: string;
+  dangerous: boolean;
+  implies: string[];
+}
+export interface AuditEventRow {
+  id: number;
+  occurredAt: string;
+  actorUserId?: number | null;
+  actorUsername?: string | null;
+  actorKind: string;
+  ip?: string | null;
+  action: string;
+  targetKind?: string | null;
+  targetId?: string | null;
+  outcome: string;
+  detail?: string | null;
+}
+
+export const auth = {
+  me: () => request<{ user: { id: string; username: string; roles?: string[] }; permissions: string[] }>("/auth/me"),
+  login: (username: string, password: string) =>
+    request<{ token: string; refreshToken: string; user: unknown; username: string }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  logout: (refreshToken: string) =>
+    request<{ message: string }>("/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ message: string }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+};
+
+export const usersApi = {
+  list: () => request<UserRow[]>("/users"),
+  get: (id: number) => request<UserRow>(`/users/${id}`),
+  create: (req: { username: string; password: string; displayName?: string; email?: string; roles?: string[]; mustChangePassword?: boolean }) =>
+    request<UserRow>("/users", { method: "POST", body: JSON.stringify(req) }),
+  update: (id: number, req: { displayName?: string; email?: string; isActive?: boolean; mustChangePassword?: boolean }) =>
+    request<UserRow>(`/users/${id}`, { method: "PUT", body: JSON.stringify(req) }),
+  remove: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
+  setRoles: (id: number, roles: string[]) =>
+    request<UserRow>(`/users/${id}/roles`, { method: "PUT", body: JSON.stringify({ roles }) }),
+  adminChangePassword: (id: number, newPassword: string) =>
+    request<void>(`/users/${id}/password`, { method: "POST", body: JSON.stringify({ newPassword }) }),
+  unlock: (id: number) => request<void>(`/users/${id}/unlock`, { method: "POST" }),
+};
+
+export const rolesApi = {
+  list: () => request<RoleRow[]>("/roles"),
+  get: (id: number) => request<RoleRow>(`/roles/${id}`),
+  permissions: () => request<PermissionInfo[]>("/roles/permissions"),
+  create: (req: { name: string; description?: string; permissions?: string[] }) =>
+    request<RoleRow>("/roles", { method: "POST", body: JSON.stringify(req) }),
+  update: (id: number, req: { description?: string; permissions?: string[] }) =>
+    request<RoleRow>(`/roles/${id}`, { method: "PUT", body: JSON.stringify(req) }),
+  remove: (id: number) => request<void>(`/roles/${id}`, { method: "DELETE" }),
+};
+
+export const auditApi = {
+  list: (opts?: { action?: string; actor?: string; outcome?: string; page?: number; perPage?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.action) params.set("action", opts.action);
+    if (opts?.actor) params.set("actor", opts.actor);
+    if (opts?.outcome) params.set("outcome", opts.outcome);
+    if (opts?.page) params.set("page", String(opts.page));
+    if (opts?.perPage) params.set("perPage", String(opts.perPage));
+    const qs = params.toString();
+    return request<{ items: AuditEventRow[]; totalCount: number; page: number; perPage: number }>(
+      `/audit${qs ? "?" + qs : ""}`
+    );
+  },
 };

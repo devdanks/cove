@@ -76,6 +76,13 @@ public class AuthConfig
     public string? ApiKey { get; set; }
     public string JwtSecret { get; set; } = Guid.NewGuid().ToString();
     public int MaxSessionAgeMinutes { get; set; } = 60;
+    /// <summary>
+    /// When true, every controller action MUST declare a permission policy via
+    /// [RequiresPermission], [AllowWithoutPermission], or [AllowAnonymous]; actions
+    /// without any are rejected with 403. While the codebase is being migrated this
+    /// can be left false to permit attribute-less endpoints.
+    /// </summary>
+    public bool EnforceDefaultDeny { get; set; }
 }
 
 public class PostgresConfig

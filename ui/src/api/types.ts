@@ -577,6 +577,7 @@ export interface SystemStatus {
   databasePath: string;
   migrationRequired: boolean;
   pendingMigrations: string[] | null;
+  authEnabled?: boolean;
 }
 
 export type RatingSystemType = "stars" | "decimal";

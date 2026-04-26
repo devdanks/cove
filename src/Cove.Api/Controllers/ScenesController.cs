@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
@@ -12,7 +13,8 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService) : ControllerBase
+[RequiresPermission(Permissions.ScenesRead)]
+public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -90,6 +92,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             scene.SceneGalleries = dto.GalleryIds.Select(id => new SceneGallery { GalleryId = id }).ToList();
 
         scene = await sceneRepo.AddAsync(scene, ct);
+        if (dto.Urls?.Count > 0)
+            await entityIdentifiers.SyncAsync(EntityKinds.Scene, scene.Id, IdentifierSchemes.Url, dto.Urls, null, ct);
         var result = await sceneRepo.GetByIdWithRelationsAsync(scene.Id, ct);
         return CreatedAtAction(nameof(GetById), new { id = scene.Id }, MapToDto(result!));
     }
@@ -139,11 +143,14 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         if (dto.CustomFields != null) scene.CustomFields = dto.CustomFields;
 
         await sceneRepo.UpdateAsync(scene, ct);
+        if (dto.Urls != null)
+            await entityIdentifiers.SyncAsync(EntityKinds.Scene, id, IdentifierSchemes.Url, dto.Urls, null, ct);
         var updated = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(MapToDto(updated!));
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.ScenesDelete)]
     public async Task<IActionResult> Delete(int id, [FromQuery] bool deleteFile = false, CancellationToken ct = default)
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);

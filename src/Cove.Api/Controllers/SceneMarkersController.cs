@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
@@ -9,6 +10,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/scenes/{sceneId:int}/markers")]
+[RequiresPermission(Permissions.MarkersRead)]
 public class SceneMarkersController(ISceneMarkerRepository markerRepo, ISceneRepository sceneRepo, CoveContext db) : ControllerBase
 {
     /// <summary>Returns random scene markers for a wall/discovery view.</summary>
@@ -83,6 +85,7 @@ public class SceneMarkersController(ISceneMarkerRepository markerRepo, ISceneRep
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.MarkersDelete)]
     public async Task<IActionResult> Delete(int sceneId, int id, CancellationToken ct)
     {
         var marker = await markerRepo.GetByIdAsync(id, ct);

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -11,7 +12,8 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class TagsController(ITagRepository tagRepo, Data.CoveContext db) : ControllerBase
+[RequiresPermission(Permissions.TagsRead)]
+public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntityIdentifierService entityIdentifiers) : ControllerBase
 {
     private sealed record TagUsageCounts(
         int SceneCount,
@@ -164,6 +166,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db) : Contr
         if (dto.ChildIds?.Count > 0) tag.ChildRelations = dto.ChildIds.Select(cid => new TagParent { ChildId = cid }).ToList();
 
         tag = await tagRepo.AddAsync(tag, ct);
+        if (dto.Aliases?.Count > 0)
+            await entityIdentifiers.SyncAsync(EntityKinds.Tag, tag.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await tagRepo.GetByIdWithRelationsAsync(tag.Id, ct);
         return CreatedAtAction(nameof(GetById), new { id = tag.Id }, MapToDetailDto(result!));
     }
@@ -198,6 +202,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db) : Contr
         if (dto.CustomFields != null) tag.CustomFields = dto.CustomFields;
 
         await tagRepo.UpdateAsync(tag, ct);
+        if (dto.Aliases != null)
+            await entityIdentifiers.SyncAsync(EntityKinds.Tag, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = await tagRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(MapToDetailDto(updated!));
     }
@@ -294,6 +300,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db) : Contr
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.TagsDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var tag = await tagRepo.GetByIdAsync(id, ct);

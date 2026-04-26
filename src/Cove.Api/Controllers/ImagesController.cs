@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -10,6 +11,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.ImagesRead)]
 public class ImagesController(IImageRepository imageRepo, Data.CoveContext db) : ControllerBase
 {
     [HttpGet]
@@ -133,6 +135,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db) :
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.ImagesDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var img = await imageRepo.GetByIdAsync(id, ct);

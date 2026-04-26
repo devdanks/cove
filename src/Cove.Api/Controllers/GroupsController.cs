@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -10,6 +11,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.GroupsRead)]
 public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) : ControllerBase
 {
     [HttpGet]
@@ -104,6 +106,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.GroupsDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var g = await groupRepo.GetByIdAsync(id, ct);

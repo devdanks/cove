@@ -23,6 +23,9 @@ import {
   Upload,
   History,
   Search,
+  Users,
+  KeyRound,
+  FileText,
   X,
 } from "lucide-react";
 import { system, jobs, metadata, database, plugins as pluginsApi, logs as logsApi } from "../api/client";
@@ -53,14 +56,18 @@ import {
   queueImportedUrlDownloads,
   type DownloadSelectionEntity,
 } from "../utils/batchDownloads";
+import { UsersTab, RolesTab, AuditTab } from "./settings/AdminSections";
 
-type SettingsTab = "tasks" | "library" | "interface" | "security" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
+type SettingsTab = "tasks" | "library" | "interface" | "security" | "users" | "roles" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
 const tabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
   { key: "tasks", label: "Tasks", icon: PlayCircle },
   { key: "library", label: "Library", icon: FolderOpen },
   { key: "interface", label: "Interface", icon: Monitor },
   { key: "security", label: "Security", icon: Shield },
+  { key: "users", label: "Users", icon: Users },
+  { key: "roles", label: "Roles", icon: KeyRound },
+  { key: "audit", label: "Audit log", icon: FileText },
   { key: "metadata-providers", label: "Metadata Providers", icon: SearchCode },
   { key: "extensions", label: "Extensions", icon: Plug },
   { key: "logs", label: "Logs", icon: ScrollText },
@@ -569,6 +576,9 @@ export function SettingsPage() {
                 {activeTab === "library" && "Content locations, generated assets, and scan rules."}
                 {activeTab === "interface" && "Language, custom title, navigation, and rating presentation."}
                 {activeTab === "security" && "Authentication and session settings. Password changes are persisted immediately."}
+                {activeTab === "users" && "Manage local user accounts and their role assignments."}
+                {activeTab === "roles" && "Define roles and the permissions they grant. Built-in roles are read-only."}
+                {activeTab === "audit" && "Authentication, authorization, and admin action history."}
                 {activeTab === "metadata-providers" && "Scraper directories, package source URLs, configured MetadataServer endpoints, and discovered Cove-compatible scrapers."}
                 {activeTab === "extensions" && "Manage extensions, themes, and settings."}
                 {activeTab === "system" && "Host, port, and task concurrency. Server changes take effect after restart."}
@@ -1686,6 +1696,10 @@ export function SettingsPage() {
             </SectionCard>
           </>
         )}
+
+        {activeTab === "users" && <UsersTab />}
+        {activeTab === "roles" && <RolesTab />}
+        {activeTab === "audit" && <AuditTab />}
 
         {activeTab === "system" && (
           <>
