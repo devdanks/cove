@@ -447,13 +447,23 @@ public class PerformerScrapeService(
         if (string.IsNullOrWhiteSpace(url))
             return null;
 
-        if (Uri.TryCreate(url, UriKind.Absolute, out var absoluteUri))
+        var trimmedUrl = url.Trim();
+
+        // Treat file:// results from root-relative paths like "/images/foo.jpg" as relative
+        // web URLs that still need to be resolved against the scraper source URL.
+        if (Uri.TryCreate(trimmedUrl, UriKind.Absolute, out var absoluteUri) && !absoluteUri.IsFile)
             return absoluteUri.ToString();
 
-        if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) && Uri.TryCreate(baseUri, url, out var resolved))
-            return resolved.ToString();
+        if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri))
+        {
+            if (trimmedUrl.StartsWith("//", StringComparison.Ordinal))
+                return $"{baseUri.Scheme}:{trimmedUrl}";
 
-        return url;
+            if (Uri.TryCreate(baseUri, trimmedUrl, out var resolved))
+                return resolved.ToString();
+        }
+
+        return trimmedUrl;
     }
 
     private static bool TryParseDate(string value, out DateOnly parsed)
