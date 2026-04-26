@@ -17,6 +17,7 @@ import { useListUrlState } from "../hooks/useListUrlState";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
+import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
 
 /** Convert 2-letter ISO country code to flag emoji */
 function countryToFlag(code: string): string {
@@ -50,6 +51,7 @@ export function PerformersPage({ onNavigate }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
+  const [showMetadataBatch, setShowMetadataBatch] = useState(false);
   const queryClient = useQueryClient();
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
@@ -84,6 +86,13 @@ export function PerformersPage({ onNavigate }: Props) {
   return (
     <>
       <PerformerCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "performer", id })} />
+      <MetadataServerBatchDialog
+        open={showMetadataBatch}
+        entityType="performer"
+        selectedIds={[...selectedIds]}
+        onClose={() => setShowMetadataBatch(false)}
+        onQueued={selectNone}
+      />
       <ListPage
         title="Performers"
         pageKey="performers"
@@ -105,6 +114,13 @@ export function PerformersPage({ onNavigate }: Props) {
         onSelectNone={selectNone}
         selectionActions={
           <>
+            <button
+              onClick={() => setShowMetadataBatch(true)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+            >
+              <Users className="w-3 h-3" />
+              MetadataServer
+            </button>
             <button
               onClick={() => setShowBulkEdit(true)}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"

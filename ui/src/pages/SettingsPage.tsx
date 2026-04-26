@@ -33,16 +33,26 @@ import type {
   Plugin,
   RatingStarPrecision,
   RatingSystemType,
+  ScraperPreference,
   ScraperSummary,
   MetadataServer,
   CoveConfig,
   CovePathConfig,
+  DownloaderDescriptor,
+  DownloaderPathOverrideConfig,
   IdentifyDefaultsConfig,
   MetadataServerValidationResult,
 } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
+import { getScraperSiteKey } from "../components/sceneScrapeUtils";
 import { useAppConfig } from "../state/AppConfigContext";
 import { LOCATION_CHANGE_EVENT, buildCurrentUrl, navigateToUrl } from "../router/location";
+import {
+  DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS,
+  formatBatchDownloadSummary,
+  queueImportedUrlDownloads,
+  type DownloadSelectionEntity,
+} from "../utils/batchDownloads";
 
 type SettingsTab = "tasks" | "library" | "interface" | "security" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
@@ -62,6 +72,8 @@ const tabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
 const SETTINGS_TAB_QUERY_KEY = "tab";
 const TASK_SCAN_OPTIONS_KEY = "cove-settings-scan-options";
 const TASK_GENERATE_OPTIONS_KEY = "cove-settings-generate-options";
+const TASK_DOWNLOAD_IMPORT_OPTIONS_KEY = "cove-settings-download-import-options";
+const TASK_DOWNLOAD_IMPORT_CACHE_KEY = "cove-settings-download-import-cache";
 
 const DEFAULT_SCAN_OPTIONS: ScanOptions = {
   scanGenerateCovers: true,
@@ -193,6 +205,10 @@ function emptyPath(): CovePathConfig {
   return { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false };
 }
 
+function emptyDownloaderPathOverride(): DownloaderPathOverrideConfig {
+  return { downloaderId: "", site: "", path: "" };
+}
+
 function emptyPackageSource(): PackageSource {
   return { name: "", url: "" };
 }
@@ -211,6 +227,41 @@ function defaultIdentifyDefaults(): IdentifyDefaultsConfig {
   };
 }
 
+function defaultMetadataBatchDefaults() {
+  return {
+    refreshAlreadyTagged: false,
+    createParentStudios: true,
+    excludeFields: [] as string[],
+  };
+}
+
+function defaultScraperPreferences(): ScraperPreference[] {
+  return [];
+}
+
+const METADATA_BATCH_EXCLUDE_OPTIONS = [
+  { id: "name", label: "Name" },
+  { id: "description", label: "Description" },
+  { id: "disambiguation", label: "Disambiguation" },
+  { id: "gender", label: "Gender" },
+  { id: "birthdate", label: "Birth date" },
+  { id: "deathdate", label: "Death date" },
+  { id: "country", label: "Country" },
+  { id: "ethnicity", label: "Ethnicity" },
+  { id: "eyecolor", label: "Eye color" },
+  { id: "haircolor", label: "Hair color" },
+  { id: "height", label: "Height" },
+  { id: "measurements", label: "Measurements" },
+  { id: "faketits", label: "Fake tits" },
+  { id: "career", label: "Career dates" },
+  { id: "tattoos", label: "Tattoos" },
+  { id: "piercings", label: "Piercings" },
+  { id: "aliases", label: "Aliases" },
+  { id: "urls", label: "URLs" },
+  { id: "image", label: "Image" },
+  { id: "parent", label: "Parent studio" },
+];
+
 function cloneConfig(config: CoveConfig): CoveConfig {
   return JSON.parse(JSON.stringify(config)) as CoveConfig;
 }
@@ -227,6 +278,20 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
   return {
     ...config,
     covePaths: config.covePaths.filter((path) => path.path.trim() !== ""),
+    downloaderPathOverrides: (config.downloaderPathOverrides ?? [])
+      .map((overridePath) => ({
+        downloaderId: overridePath.downloaderId.trim(),
+        site: overridePath.site?.trim() || undefined,
+        path: overridePath.path.trim(),
+      }))
+      .filter((overridePath, index, items) => {
+        if (overridePath.downloaderId === "" || overridePath.path === "") {
+          return false;
+        }
+
+        const overrideKey = `${overridePath.downloaderId.toLowerCase()}::${overridePath.site?.toLowerCase() ?? ""}`;
+        return items.findIndex((candidate) => `${candidate.downloaderId.toLowerCase()}::${candidate.site?.toLowerCase() ?? ""}` === overrideKey) === index;
+      }),
     videoExtensions: config.videoExtensions.map((value) => value.trim()).filter(Boolean),
     imageExtensions: config.imageExtensions.map((value) => value.trim()).filter(Boolean),
     galleryExtensions: config.galleryExtensions.map((value) => value.trim()).filter(Boolean),
@@ -256,9 +321,26 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
           maxRequestsPerMinute: box.maxRequestsPerMinute,
         }))
         .filter((box) => box.endpoint !== ""),
+      scraperPreferences: (config.scraping.scraperPreferences ?? [])
+        .map((preference) => ({
+          site: preference.site.trim().toLowerCase(),
+          scraperId: preference.scraperId.trim(),
+        }))
+        .filter((preference, index, items) => {
+          if (preference.site === "" || preference.scraperId === "") {
+            return false;
+          }
+
+          return items.findIndex((candidate) => candidate.site === preference.site) === index;
+        }),
       identifyDefaults: {
         ...defaultIdentifyDefaults(),
         ...config.scraping.identifyDefaults,
+      },
+      metadataBatchDefaults: {
+        ...defaultMetadataBatchDefaults(),
+        ...config.scraping.metadataBatchDefaults,
+        excludeFields: (config.scraping.metadataBatchDefaults?.excludeFields ?? []).map((value) => value.trim()).filter(Boolean),
       },
     },
   };
@@ -278,6 +360,45 @@ export function SettingsPage() {
   const savingRef = useRef(false);
   const [metadataServerValidation, setMetadataServerValidation] = useState<Record<string, MetadataServerValidationResult>>({});
 
+  const { data: availableScrapers = [] } = useQuery({
+    queryKey: ["system-scrapers"],
+    queryFn: system.listScrapers,
+    enabled: activeTab === "metadata-providers",
+  });
+
+  const { data: availableDownloaders = [] } = useQuery({
+    queryKey: ["system-downloaders"],
+    queryFn: system.listDownloaders,
+    enabled: activeTab === "library",
+  });
+
+  const sceneScraperPreferenceGroups = useMemo(() => {
+    const groups = new Map<string, ScraperSummary[]>();
+
+    for (const scraper of availableScrapers) {
+      if (scraper.entityType.toLowerCase() !== "scene") {
+        continue;
+      }
+
+      const sites = new Set(scraper.urls.map((pattern) => getScraperSiteKey(pattern)).filter(Boolean));
+      for (const site of sites) {
+        const siteScrapers = groups.get(site) ?? [];
+        if (!siteScrapers.some((candidate) => candidate.id === scraper.id)) {
+          siteScrapers.push(scraper);
+        }
+        groups.set(site, siteScrapers);
+      }
+    }
+
+    return [...groups.entries()]
+      .map(([site, scrapers]) => ({
+        site,
+        scrapers: [...scrapers].sort((left, right) => left.name.localeCompare(right.name)),
+      }))
+      .filter((group) => group.scrapers.length > 1)
+      .sort((left, right) => left.site.localeCompare(right.site));
+  }, [availableScrapers]);
+
   useEffect(() => {
     if (!config) {
       return;
@@ -292,6 +413,7 @@ export function SettingsPage() {
     if (nextDraft.covePaths.length === 0) {
       nextDraft.covePaths = [emptyPath()];
     }
+    nextDraft.downloaderPathOverrides = nextDraft.downloaderPathOverrides ?? [];
     if (nextDraft.scraping.scraperPackageSources.length === 0) {
       nextDraft.scraping.scraperPackageSources = [emptyPackageSource()];
     }
@@ -301,6 +423,12 @@ export function SettingsPage() {
     if (!nextDraft.scraping.identifyDefaults) {
       nextDraft.scraping.identifyDefaults = defaultIdentifyDefaults();
     }
+    nextDraft.scraping.scraperPreferences = nextDraft.scraping.scraperPreferences ?? defaultScraperPreferences();
+    nextDraft.scraping.metadataBatchDefaults = {
+      ...defaultMetadataBatchDefaults(),
+      ...nextDraft.scraping.metadataBatchDefaults,
+      excludeFields: nextDraft.scraping.metadataBatchDefaults?.excludeFields ?? [],
+    };
     if (!nextDraft.ui.ratingSystemOptions) {
       nextDraft.ui.ratingSystemOptions = { type: "stars", starPrecision: "full" };
     }
@@ -556,6 +684,92 @@ export function SettingsPage() {
                   onChange={(value) => updateDraft((current) => ({ ...current, cachePath: value || undefined }))}
                   placeholder="D:\\Cove\\cache"
                 />
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Downloader Paths" description="Override where downloader imports land for a specific downloader or for a downloader/site combination.">
+              <div className="space-y-3">
+                {draft.downloaderPathOverrides.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border bg-card/40 px-4 py-3 text-sm text-secondary">
+                    No downloader path overrides are configured yet.
+                  </div>
+                ) : null}
+
+                {draft.downloaderPathOverrides.map((overridePath, index) => (
+                  <div key={`${overridePath.downloaderId || "override"}-${index}`} className="rounded-xl border border-border bg-card p-3">
+                    <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.2fr)_auto] xl:items-end">
+                      <label className="block text-sm">
+                        <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Downloader</span>
+                        <select
+                          value={overridePath.downloaderId}
+                          onChange={(event) =>
+                            updateDraft((current) => ({
+                              ...current,
+                              downloaderPathOverrides: current.downloaderPathOverrides.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, downloaderId: event.target.value } : item,
+                              ),
+                            }))
+                          }
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none"
+                        >
+                          <option value="">Select downloader</option>
+                          {availableDownloaders.map((downloader) => (
+                            <option key={downloader.id} value={downloader.id}>
+                              {downloader.name} ({downloader.id})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <TextField
+                        label="Site override (optional)"
+                        value={overridePath.site ?? ""}
+                        onChange={(value) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            downloaderPathOverrides: current.downloaderPathOverrides.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, site: value || undefined } : item,
+                            ),
+                          }))
+                        }
+                        placeholder="example.com"
+                      />
+                      <TextField
+                        label="Save path"
+                        value={overridePath.path}
+                        onChange={(value) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            downloaderPathOverrides: current.downloaderPathOverrides.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, path: value } : item,
+                            ),
+                          }))
+                        }
+                        placeholder="D:\\Media\\Downloader\\Example"
+                      />
+                      <button
+                        onClick={() =>
+                          updateDraft((current) => ({
+                            ...current,
+                            downloaderPathOverrides: current.downloaderPathOverrides.filter((_, itemIndex) => itemIndex !== index),
+                          }))
+                        }
+                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-2 text-xs text-red-300 hover:border-red-500 hover:text-red-200"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Remove
+                      </button>
+                    </div>
+                    <p className="mt-2 text-xs text-secondary">
+                      Choose a downloader first. Leave the optional site field blank to use this path for every site handled by that downloader, or add a host like example.com to override only that site.
+                    </p>
+                  </div>
+                ))}
+
+                <button
+                  onClick={() => updateDraft((current) => ({ ...current, downloaderPathOverrides: [...current.downloaderPathOverrides, emptyDownloaderPathOverride()] }))}
+                  className="inline-flex items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-sm text-secondary hover:text-foreground"
+                >
+                  <Plus className="h-4 w-4" /> Add downloader path override
+                </button>
               </div>
             </SectionCard>
 
@@ -1072,7 +1286,63 @@ export function SettingsPage() {
               </div>
             </SectionCard>
 
-            <SectionCard title="Metadata Server Instances" description="Configure remote metadata-server GraphQL endpoints, validate credentials, and use them from performer detail pages.">
+            <SectionCard
+              title="Preferred Scene Scrapers"
+              description="When multiple scene scrapers match the same site, pick the default one Cove should surface first in scrape dialogs."
+            >
+              {sceneScraperPreferenceGroups.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
+                  No overlapping scene scraper sites are available right now.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {sceneScraperPreferenceGroups.map((group) => {
+                    const selectedScraperId = draft.scraping.scraperPreferences.find((preference) => preference.site === group.site)?.scraperId ?? "";
+
+                    return (
+                      <div key={group.site} className="grid gap-3 rounded-xl border border-border bg-card p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
+                        <div>
+                          <div className="text-sm font-medium text-foreground">{group.site}</div>
+                          <p className="mt-1 text-xs text-secondary">
+                            Applies when a scene URL resolves to this host.
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium uppercase tracking-[0.14em] text-muted">Preferred scraper</label>
+                          <select
+                            value={selectedScraperId}
+                            onChange={(event) =>
+                              updateDraft((current) => ({
+                                ...current,
+                                scraping: {
+                                  ...current.scraping,
+                                  scraperPreferences: event.target.value
+                                    ? [
+                                        ...current.scraping.scraperPreferences.filter((preference) => preference.site !== group.site),
+                                        { site: group.site, scraperId: event.target.value },
+                                      ]
+                                    : current.scraping.scraperPreferences.filter((preference) => preference.site !== group.site),
+                                },
+                              }))
+                            }
+                            className="mt-2 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                          >
+                            <option value="">No preference</option>
+                            {group.scrapers.map((scraper) => (
+                              <option key={scraper.id} value={scraper.id}>
+                                {scraper.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </SectionCard>
+
+            <SectionCard title="Metadata Server Instances" description="Configure remote metadata-server GraphQL endpoints, validate credentials, and use them from entity detail pages.">
               <div className="space-y-3">
                 {draft.scraping.metadataServers.length === 0 && (
                   <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
@@ -1203,6 +1473,88 @@ export function SettingsPage() {
                 >
                   <Plus className="h-4 w-4" /> Add MetadataServer instance
                 </button>
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Default Batch Options" description="Defaults used to prefill MetadataServer batch-tag dialogs.">
+              <div className="space-y-4">
+                <label className="flex items-center gap-2 text-sm text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={draft.scraping.metadataBatchDefaults.refreshAlreadyTagged}
+                    onChange={(event) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        scraping: {
+                          ...current.scraping,
+                          metadataBatchDefaults: {
+                            ...current.scraping.metadataBatchDefaults,
+                            refreshAlreadyTagged: event.target.checked,
+                          },
+                        },
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
+                  />
+                  Refresh entities that already have MetadataServer links
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={draft.scraping.metadataBatchDefaults.createParentStudios}
+                    onChange={(event) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        scraping: {
+                          ...current.scraping,
+                          metadataBatchDefaults: {
+                            ...current.scraping.metadataBatchDefaults,
+                            createParentStudios: event.target.checked,
+                          },
+                        },
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
+                  />
+                  Create missing parent studios by default
+                </label>
+
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-foreground">Keep current fields by default</label>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {METADATA_BATCH_EXCLUDE_OPTIONS.map((option) => {
+                      const selected = draft.scraping.metadataBatchDefaults.excludeFields.includes(option.id);
+                      return (
+                        <label key={option.id} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm text-secondary">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(event) =>
+                              updateDraft((current) => ({
+                                ...current,
+                                scraping: {
+                                  ...current.scraping,
+                                  metadataBatchDefaults: {
+                                    ...current.scraping.metadataBatchDefaults,
+                                    excludeFields: event.target.checked
+                                      ? [...current.scraping.metadataBatchDefaults.excludeFields, option.id]
+                                      : current.scraping.metadataBatchDefaults.excludeFields.filter((value) => value !== option.id),
+                                  },
+                                },
+                              }))
+                            }
+                            className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
+                          />
+                          {option.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-muted">
+                    Each batch dialog applies only the defaults relevant to the selected entity type.
+                  </p>
+                </div>
               </div>
             </SectionCard>
 
@@ -1338,7 +1690,7 @@ export function SettingsPage() {
         {activeTab === "system" && (
           <>
             <SectionCard title="Server" description="Host and port are persisted immediately but require a restart to rebind the listener.">
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <TextField
                   label="Host"
                   value={draft.host}
@@ -1356,6 +1708,13 @@ export function SettingsPage() {
                   min={-1}
                   max={128}
                   onChange={(value) => updateDraft((current) => ({ ...current, maxParallelTasks: value ?? current.maxParallelTasks }))}
+                />
+                <NumberField
+                  label="Max concurrent downloads"
+                  value={draft.maxConcurrentDownloads}
+                  min={1}
+                  max={16}
+                  onChange={(value) => updateDraft((current) => ({ ...current, maxConcurrentDownloads: value ?? current.maxConcurrentDownloads }))}
                 />
               </div>
               <div className="mt-4">
@@ -1669,6 +2028,11 @@ function TasksPanel() {
     queryFn: () => jobs.list(),
     refetchInterval: 2000,
   });
+  const { data: recentJobs } = useQuery({
+    queryKey: ["jobs-history"],
+    queryFn: () => jobs.history(),
+    refetchInterval: 2000,
+  });
 
   // ---- Job Queue ----
   const jobQueue = activeJobs && activeJobs.length > 0 ? (
@@ -1681,9 +2045,20 @@ function TasksPanel() {
     </SectionCard>
   ) : null;
 
+  const jobHistory = recentJobs && recentJobs.length > 0 ? (
+    <SectionCard title="Recent Jobs" description="Recently completed, failed, or cancelled jobs.">
+      <div className="space-y-2">
+        {recentJobs.slice(0, 8).map((job) => (
+          <JobQueueCard key={job.id} job={job} />
+        ))}
+      </div>
+    </SectionCard>
+  ) : null;
+
   return (
     <>
       {jobQueue}
+      {jobHistory}
       <LibraryTasksSection refetchJobs={refetchJobs} />
       <DataManagementSection refetchJobs={refetchJobs} />
       <ExtensionTasksSection refetchJobs={refetchJobs} />
@@ -1702,7 +2077,7 @@ function formatJobDuration(ms: number): string {
   return `${hours}h ${mins.toString().padStart(2, "0")}m`;
 }
 
-function JobQueueCard({ job, onCancel }: { job: JobInfo; onCancel: () => void }) {
+function JobQueueCard({ job, onCancel }: { job: JobInfo; onCancel?: () => void }) {
   const [now, setNow] = useState(Date.now());
   const progressHistory = useRef<{ time: number; progress: number }[]>([]);
 
@@ -1775,12 +2150,14 @@ function JobQueueCard({ job, onCancel }: { job: JobInfo; onCancel: () => void })
           </>
         )}
       </div>
-      <button
-        onClick={onCancel}
-        className="ml-3 text-xs text-muted hover:text-red-300 flex-shrink-0"
-      >
-        Cancel
-      </button>
+      {onCancel && (job.status === "running" || job.status === "pending") ? (
+        <button
+          onClick={onCancel}
+          className="ml-3 text-xs text-muted hover:text-red-300 flex-shrink-0"
+        >
+          Cancel
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1798,6 +2175,33 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
 
   const [showGenOpts, setShowGenOpts] = useState(false);
   const [genOpts, setGenOpts] = useState<GenerateOptions>(() => loadStoredTaskOptions(TASK_GENERATE_OPTIONS_KEY, DEFAULT_GENERATE_OPTIONS));
+  const [showDownloadImportOpts, setShowDownloadImportOpts] = useState(false);
+  const [downloadImportEntity, setDownloadImportEntity] = useState<DownloadSelectionEntity>(() => {
+    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { entity: "Scene" as DownloadSelectionEntity });
+    return stored.entity as DownloadSelectionEntity;
+  });
+  const [downloadImportFile, setDownloadImportFile] = useState<File | null>(null);
+  const [downloadImportAutoApplyMetadata, setDownloadImportAutoApplyMetadata] = useState(() => {
+    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { scrapeScenes: false });
+    return !!stored.scrapeScenes;
+  });
+  const [downloadImportAllowDuplicateDownloads, setDownloadImportAllowDuplicateDownloads] = useState(() => {
+    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { allowDuplicateDownloads: false });
+    return !!stored.allowDuplicateDownloads;
+  });
+  const [downloadImportGenerateOpts, setDownloadImportGenerateOpts] = useState<GenerateOptions>(() => {
+    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { generate: DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS });
+    return { ...DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS, ...(stored.generate ?? {}) };
+  });
+  const [downloadImportCachedUrls, setDownloadImportCachedUrls] = useState<string[]>(() => {
+    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_CACHE_KEY, { urls: [] as string[] });
+    return Array.isArray(stored.urls) ? stored.urls.filter((value: unknown): value is string => typeof value === "string") : [];
+  });
+  const [downloadImportCachedFileName, setDownloadImportCachedFileName] = useState(() => {
+    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_CACHE_KEY, { fileName: "" });
+    return typeof stored.fileName === "string" ? stored.fileName : "";
+  });
+  const [downloadImportStatus, setDownloadImportStatus] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     const previousSelectablePaths = previousSelectablePathsRef.current;
@@ -1827,6 +2231,22 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
   useEffect(() => {
     localStorage.setItem(TASK_GENERATE_OPTIONS_KEY, JSON.stringify(genOpts));
   }, [genOpts]);
+
+  useEffect(() => {
+    localStorage.setItem(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, JSON.stringify({
+      entity: downloadImportEntity,
+      scrapeScenes: downloadImportAutoApplyMetadata,
+      allowDuplicateDownloads: downloadImportAllowDuplicateDownloads,
+      generate: downloadImportGenerateOpts,
+    }));
+  }, [downloadImportAllowDuplicateDownloads, downloadImportAutoApplyMetadata, downloadImportEntity, downloadImportGenerateOpts]);
+
+  useEffect(() => {
+    localStorage.setItem(TASK_DOWNLOAD_IMPORT_CACHE_KEY, JSON.stringify({
+      fileName: downloadImportCachedFileName,
+      urls: downloadImportCachedUrls,
+    }));
+  }, [downloadImportCachedFileName, downloadImportCachedUrls]);
 
   const effectiveScanOpts = useMemo<ScanOptions>(() => {
     const selectedPaths = scanOpts.paths?.filter((path) => selectablePaths.includes(path)) ?? [];
@@ -1881,6 +2301,42 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
   const scanMut = useMutation({ mutationFn: () => metadata.scan(effectiveScanOpts), onSuccess: () => refetchJobs() });
   const genMut = useMutation({ mutationFn: () => metadata.generate(effectiveGenOpts), onSuccess: () => refetchJobs() });
   const autoTagMut = useMutation({ mutationFn: () => metadata.autoTag(), onSuccess: () => refetchJobs() });
+  const downloadImportMut = useMutation({
+    mutationFn: async () => {
+      let urls: string[];
+      if (downloadImportFile) {
+        urls = linesToList(await downloadImportFile.text()).map((value) => value.trim()).filter(Boolean);
+        setDownloadImportCachedUrls(urls);
+        setDownloadImportCachedFileName(downloadImportFile.name);
+      } else {
+        urls = downloadImportCachedUrls;
+      }
+
+      if (urls.length === 0) {
+        throw new Error("Choose a text file with one URL per line, or reuse the last imported URLs.");
+      }
+
+      return queueImportedUrlDownloads(downloadImportEntity, urls, {
+        scrapeScenes: downloadImportAutoApplyMetadata,
+        allowDuplicateDownloads: downloadImportAllowDuplicateDownloads,
+        generate: downloadImportGenerateOpts,
+      });
+    },
+    onSuccess: (result) => {
+      refetchJobs();
+      const summary = formatBatchDownloadSummary(downloadImportEntity.toLowerCase(), result);
+      setDownloadImportStatus({
+        type: result.queuedCount > 0 ? "success" : "error",
+        text: summary,
+      });
+    },
+    onError: (error: Error) => {
+      setDownloadImportStatus({
+        type: "error",
+        text: error.message || "Failed to queue the URL imports.",
+      });
+    },
+  });
 
   return (
     <SectionCard title="Library Tasks" description="Scan for new content, generate supporting files, and auto-tag your library.">
@@ -1999,6 +2455,85 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             )}
           </div>
         </TaskCard>
+
+        <TaskCard
+          label="Download From File"
+          description="Read one URL per line from a text file and queue one backend batch job to resolve, create, and download them."
+          onRun={() => downloadImportMut.mutate()}
+          isPending={downloadImportMut.isPending}
+          expandable
+          expanded={showDownloadImportOpts}
+          onToggleExpand={() => setShowDownloadImportOpts(!showDownloadImportOpts)}
+          statusMessage={downloadImportStatus}
+        >
+          <div className="space-y-3 pt-3 border-t border-border/50">
+            <SelectField
+              label="Entity type"
+              value={downloadImportEntity}
+              onChange={(value) => {
+                setDownloadImportEntity(value as DownloadSelectionEntity);
+                setDownloadImportStatus(null);
+              }}
+              options={[
+                { value: "Scene", label: "Scenes" },
+                { value: "Image", label: "Images" },
+                { value: "Gallery", label: "Galleries" },
+              ]}
+            />
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">URL file</span>
+              <input
+                type="file"
+                accept=".txt,text/plain"
+                onChange={(event) => {
+                  setDownloadImportFile(event.target.files?.[0] ?? null);
+                  setDownloadImportStatus(null);
+                }}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-accent/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-accent"
+              />
+            </label>
+            {downloadImportEntity === "Scene" ? (
+              <CheckboxLabel
+                label="Auto-apply scene metadata after download"
+                checked={downloadImportAutoApplyMetadata}
+                onChange={(checked) => {
+                  setDownloadImportAutoApplyMetadata(checked);
+                  setDownloadImportStatus(null);
+                }}
+              />
+            ) : null}
+            <CheckboxLabel
+              label="Allow duplicate downloads for this batch"
+              checked={downloadImportAllowDuplicateDownloads}
+              onChange={(checked) => {
+                setDownloadImportAllowDuplicateDownloads(checked);
+                setDownloadImportStatus(null);
+              }}
+            />
+            <div className="space-y-2 rounded-xl border border-border/60 bg-surface/60 p-3">
+              <div>
+                <p className="text-xs font-medium text-foreground">Generate after download</p>
+                <p className="text-[11px] text-muted">Queue a follow-up generate scan after the batch download finishes.</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <CheckboxLabel label="Covers" checked={!!downloadImportGenerateOpts.thumbnails} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, thumbnails: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Previews" checked={!!downloadImportGenerateOpts.previews} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, previews: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Sprites" checked={!!downloadImportGenerateOpts.sprites} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, sprites: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Scene perceptual hashes" checked={!!downloadImportGenerateOpts.phashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, phashes: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="MD5 checksums" checked={!!downloadImportGenerateOpts.md5} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, md5: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Image thumbnails" checked={!!downloadImportGenerateOpts.imageThumbnails} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, imageThumbnails: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Image perceptual hashes" checked={!!downloadImportGenerateOpts.imagePhashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, imagePhashes: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Overwrite generated files" checked={!!downloadImportGenerateOpts.overwrite} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, overwrite: checked })); setDownloadImportStatus(null); }} />
+              </div>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-surface/60 p-3 text-[11px] text-muted">
+              <p>Use a plain text file with one URL per line.</p>
+              <p className="mt-1">Cove now queues the batch job immediately and remembers the last imported URLs and options for the next run.</p>
+              {downloadImportFile ? <p className="mt-1 text-secondary">Selected file: {downloadImportFile.name}</p> : null}
+              {!downloadImportFile && downloadImportCachedFileName ? <p className="mt-1 text-secondary">Reusing cached URLs from: {downloadImportCachedFileName}</p> : null}
+            </div>
+          </div>
+        </TaskCard>
       </div>
     </SectionCard>
   );
@@ -2072,17 +2607,43 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
   const optimizeMut = useMutation({ mutationFn: () => database.optimize(), onSuccess: () => refetchJobs() });
   const [wipeConfirm1, setWipeConfirm1] = useState(false);
   const [wipeConfirm2, setWipeConfirm2] = useState(false);
+  const [lastWipeConfigBackup, setLastWipeConfigBackup] = useState<string | null>(null);
   const wipeMut = useMutation({
     mutationFn: async () => {
-      await database.wipe();
-      // Clear library paths from config so setup wizard shows on reload
-      const cfgResp = await system.getConfig();
-      if (cfgResp) {
-        await system.saveConfig({ ...cfgResp, covePaths: [] });
-      }
+      // Backend now wipes BOTH the database AND the on-disk config file (and snapshots
+      // both first), so we no longer need to clear covePaths from here.
+      return database.wipe();
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      setLastWipeConfigBackup(result.configBackupPath);
       sessionStorage.removeItem("cove-setup-dismissed");
+      window.location.reload();
+    },
+  });
+
+  const [configRestorePath, setConfigRestorePath] = useState("");
+  const [configRestoreConfirmed, setConfigRestoreConfirmed] = useState(false);
+  const latestConfigBackupQuery = useQuery({
+    queryKey: ["settings", "latest-config-backup"],
+    queryFn: () => database.latestConfigBackup(),
+    retry: false,
+  });
+  const configBackupMut = useMutation({
+    mutationFn: () => database.backupConfig(),
+    onSuccess: async (result) => {
+      setConfigRestorePath(result.backupPath);
+      await queryClient.invalidateQueries({ queryKey: ["settings", "latest-config-backup"] });
+    },
+  });
+  const configRestoreMut = useMutation({
+    mutationFn: async () => {
+      const path = configRestorePath.trim();
+      if (!path) throw new Error("Config backup path is required.");
+      if (!configRestoreConfirmed) throw new Error("Confirm that restoring will replace the current config first.");
+      return database.restoreConfig(path);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
       window.location.reload();
     },
   });
@@ -2243,23 +2804,88 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
           />
         </div>
 
+        {/* Config Backup / Restore */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TaskCard
+            label="Backup Config"
+            description="Snapshot cove-config.json (library paths, downloader overrides, scraper preferences, UI settings, etc.) to the backups folder."
+            onRun={() => configBackupMut.mutate()}
+            isPending={configBackupMut.isPending}
+            statusMessage={
+              configBackupMut.isSuccess
+                ? { type: "success" as const, text: `Config saved to ${configBackupMut.data?.backupPath ?? "disk"}` }
+                : configBackupMut.isError
+                ? { type: "error" as const, text: `Config backup failed: ${configBackupMut.error instanceof Error ? configBackupMut.error.message : "Unknown error"}` }
+                : null
+            }
+          />
+          <TaskCard
+            label="Restore Config"
+            description="Replace the current cove-config.json with a previously saved snapshot. Reloads Cove on success."
+            onRun={() => configRestoreMut.mutate()}
+            isPending={configRestoreMut.isPending}
+            statusMessage={
+              configRestoreMut.isSuccess
+                ? { type: "success" as const, text: `Config restored from ${configRestorePath}. Reloading...` }
+                : configRestoreMut.isError
+                ? { type: "error" as const, text: `Config restore failed: ${configRestoreMut.error instanceof Error ? configRestoreMut.error.message : "Unknown error"}` }
+                : null
+            }
+          >
+            <div className="space-y-3 pt-3 border-t border-border/50">
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-3">
+                  <label className="block text-xs text-secondary">Config backup file path</label>
+                  {latestConfigBackupQuery.data && (
+                    <button
+                      type="button"
+                      onClick={() => setConfigRestorePath(latestConfigBackupQuery.data ?? "")}
+                      className="text-xs text-accent hover:text-accent-hover"
+                    >
+                      Use latest backup
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={configRestorePath}
+                  onChange={(e) => setConfigRestorePath(e.target.value)}
+                  placeholder="/path/to/cove_config_*.json"
+                  className="w-full rounded border border-border bg-surface px-3 py-1.5 text-sm text-foreground"
+                />
+                {latestConfigBackupQuery.data && (
+                  <p className="mt-2 text-xs text-secondary">Latest config backup: {latestConfigBackupQuery.data}</p>
+                )}
+              </div>
+              <CheckboxLabel
+                label="I understand this will replace the current config with the selected backup"
+                checked={configRestoreConfirmed}
+                onChange={setConfigRestoreConfirmed}
+              />
+            </div>
+          </TaskCard>
+        </div>
+
         {/* Wipe Database — danger zone */}
         <div className="border border-red-900/50 rounded-lg p-4 bg-red-950/20">
           <h4 className="text-sm font-semibold text-red-400 mb-1">Danger Zone</h4>
           <p className="text-xs text-secondary mb-3">
-            Permanently deletes all scenes, performers, tags, studios, galleries, and groups from the database. This cannot be undone.
+            Permanently deletes all scenes, performers, tags, studios, galleries, and groups from the database <strong>and</strong> resets your saved configuration (cove-config.json) to factory defaults so the setup wizard reappears. A snapshot of both the database and the config is taken first and saved to the backups folder, so you can restore them later from this Data Management page.
           </p>
+          {lastWipeConfigBackup && (
+            <p className="text-xs text-amber-300 mb-3">Last config snapshot from a wipe: {lastWipeConfigBackup}</p>
+          )}
           {!wipeConfirm1 && (
             <button
               onClick={() => setWipeConfirm1(true)}
               className="px-3 py-1.5 text-sm bg-red-900/40 hover:bg-red-900/70 text-red-400 hover:text-red-300 rounded border border-red-800/50 transition-colors"
             >
-              Wipe Database…
+              Wipe Database & Config…
             </button>
           )}
           {wipeConfirm1 && !wipeConfirm2 && (
             <div className="space-y-2">
-              <p className="text-sm text-red-300 font-medium">Are you sure? This will delete ALL your data.</p>
+              <p className="text-sm text-red-300 font-medium">Are you sure? This will delete ALL your data <strong>and</strong> reset your saved configuration. Snapshots of both will be saved to the backups folder.</p>
               <div className="flex gap-2">
                 <button
                   onClick={() => setWipeConfirm2(true)}

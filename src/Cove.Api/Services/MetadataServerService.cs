@@ -91,11 +91,11 @@ query SearchStudio($term: String!) {
 }
 """ + StudioFragment;
 
-        private const string FindStudioByIdQuery = """
-query FindStudioByID($id: ID!) {
-  findStudio(id: $id) {
-    ... StudioFields
-  }
+                private const string FindStudioQuery = """
+query FindStudio($id: ID, $name: String) {
+    findStudio(id: $id, name: $name) {
+        ... StudioFields
+    }
 }
 """ + StudioFragment;
 
@@ -125,6 +125,14 @@ fragment TagFields on Tag {
     aliases
 }
 """;
+
+                private const string FindTagQuery = """
+query FindTag($id: ID, $name: String) {
+    findTag(id: $id, name: $name) {
+        ... TagFields
+    }
+}
+""" + TagFragment;
 
         private const string FingerprintFragment = """
 fragment FingerprintFields on Fingerprint {
@@ -287,6 +295,19 @@ query Me {
         return ToMatchDto(box, performer);
     }
 
+    public async Task<IReadOnlyList<MetadataServerPerformerMatchDto>> GetPerformerMatchesAsync(string endpoint, IEnumerable<string> performerIds, CancellationToken ct)
+    {
+        var results = new List<MetadataServerPerformerMatchDto>();
+        foreach (var performerId in performerIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var match = await GetPerformerMatchAsync(endpoint, performerId, ct);
+            if (match != null)
+                results.Add(match);
+        }
+
+        return results;
+    }
+
     public async Task<bool> MergePerformerAsync(Performer performer, string endpoint, string performerId, CancellationToken ct)
     {
         var box = ResolveBox(endpoint);
@@ -337,10 +358,30 @@ query Me {
             .ToList();
     }
 
-    public async Task<bool> MergeStudioAsync(Studio studio, string endpoint, string studioId, CancellationToken ct)
+    public async Task<MetadataServerStudioMatchDto?> GetStudioMatchAsync(string endpoint, string studioId, CancellationToken ct)
     {
         var box = ResolveBox(endpoint);
-        var remote = await GetRemoteStudioAsync(box, studioId, ct);
+        var studio = await GetRemoteStudioAsync(box, studioId: studioId, studioName: null, ct);
+        return studio == null ? null : ToStudioMatchDto(box, studio);
+    }
+
+    public async Task<IReadOnlyList<MetadataServerStudioMatchDto>> GetStudioMatchesAsync(string endpoint, IEnumerable<string> studioIds, CancellationToken ct)
+    {
+        var results = new List<MetadataServerStudioMatchDto>();
+        foreach (var studioId in studioIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var match = await GetStudioMatchAsync(endpoint, studioId, ct);
+            if (match != null)
+                results.Add(match);
+        }
+
+        return results;
+    }
+
+    public async Task<bool> MergeStudioAsync(Studio studio, string endpoint, string studioId, CancellationToken ct, bool createParentStudios = true)
+    {
+        var box = ResolveBox(endpoint);
+        var remote = await GetRemoteStudioAsync(box, studioId: studioId, studioName: null, ct);
         if (remote == null)
             return false;
 
@@ -351,7 +392,7 @@ query Me {
         await DownloadStudioImageAsync(studio, remote, ct);
 
         // Resolve parent studio
-        if (remote.Parent != null && studio.ParentId == null)
+        if (createParentStudios && remote.Parent != null && studio.ParentId == null)
         {
             var parent = await _db.Studios
                 .Include(s => s.RemoteIds)
@@ -372,16 +413,195 @@ query Me {
         return true;
     }
 
-    private async Task<MetadataServerRemoteStudio?> GetRemoteStudioAsync(MetadataServerInstance box, string studioId, CancellationToken ct)
+    public async Task<IReadOnlyList<MetadataServerTagMatchDto>> SearchTagsAsync(string term, string? endpoint, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(term))
+            return [];
+
+        var boxes = ResolveBoxes(endpoint);
+        var strictEndpoint = !string.IsNullOrWhiteSpace(endpoint);
+        var results = new List<MetadataServerTagMatchDto>();
+
+        foreach (var box in boxes)
+        {
+            try
+            {
+                var tag = await GetRemoteTagAsync(box, tagId: null, tagName: term, ct);
+                if (tag != null)
+                    results.Add(ToTagMatchDto(box, tag));
+            }
+            catch (Exception ex) when (!strictEndpoint)
+            {
+                _logger.LogWarning(ex, "Skipping metadata-server tag search for {Endpoint}", box.Endpoint);
+            }
+        }
+
+        return results
+            .OrderByDescending(match => string.Equals(match.Name, term, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(match => match.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(match => match.MetadataServerName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public async Task<MetadataServerTagMatchDto?> GetTagMatchAsync(string endpoint, string tagId, CancellationToken ct)
+    {
+        var box = ResolveBox(endpoint);
+        var tag = await GetRemoteTagAsync(box, tagId, tagName: null, ct);
+        return tag == null ? null : ToTagMatchDto(box, tag);
+    }
+
+    public async Task<bool> MergeTagAsync(Tag tag, string endpoint, string tagId, CancellationToken ct)
+    {
+        var box = ResolveBox(endpoint);
+        var remote = await GetRemoteTagAsync(box, tagId, tagName: null, ct);
+        if (remote == null)
+            return false;
+
+        tag.Name = remote.Name.Trim();
+        tag.Description = Coalesce(tag.Description, remote.Description) ?? tag.Description;
+        MergeAliases(tag, remote.Aliases);
+        UpsertRemoteId(tag.RemoteIds, box.Endpoint, remote.Id, id => id.Endpoint, id => id.RemoteId, (id, value) => id.RemoteId = value, value => new TagRemoteId { Endpoint = box.Endpoint, RemoteId = value });
+        return true;
+    }
+
+    public async Task<MetadataServerBatchTagResultDto> BatchTagPerformersAsync(string endpoint, IEnumerable<int> performerIds, bool refreshAlreadyTagged, IEnumerable<string>? excludeFields, IJobProgress? progress, CancellationToken ct)
+    {
+        var performers = await _db.Performers
+            .Include(entity => entity.RemoteIds)
+            .Include(entity => entity.Aliases)
+            .Include(entity => entity.Urls)
+            .Where(entity => performerIds.Contains(entity.Id))
+            .OrderBy(entity => entity.Id)
+            .ToListAsync(ct);
+
+        var normalizedExcludeFields = NormalizeFieldNames(excludeFields);
+        return await ExecuteBatchTagAsync(
+            performers,
+            progress,
+            async performer =>
+            {
+                var remoteId = performer.RemoteIds.FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase))?.RemoteId;
+                if (!refreshAlreadyTagged && !string.IsNullOrWhiteSpace(remoteId))
+                    return new MetadataServerBatchTagItemResultDto(performer.Id, performer.Name, "skipped", remoteId, "Already tagged for this endpoint");
+
+                var match = !string.IsNullOrWhiteSpace(remoteId)
+                    ? await GetPerformerMatchAsync(endpoint, remoteId, ct)
+                    : await FindBestPerformerMatchAsync(endpoint, performer.Name, ct);
+                if (match == null)
+                    return new MetadataServerBatchTagItemResultDto(performer.Id, performer.Name, "skipped", null, "No remote match found");
+
+                var snapshot = CapturePerformerSnapshot(performer);
+                var imported = await MergePerformerAsync(performer, endpoint, match.Id, ct);
+                if (!imported)
+                    return new MetadataServerBatchTagItemResultDto(performer.Id, performer.Name, "failed", match.Id, "Remote performer no longer exists");
+
+                await RestoreExcludedPerformerFieldsAsync(performer, snapshot, normalizedExcludeFields, ct);
+                await _db.SaveChangesAsync(ct);
+                return new MetadataServerBatchTagItemResultDto(performer.Id, performer.Name, "updated", match.Id);
+            },
+            ct);
+    }
+
+    public async Task<MetadataServerBatchTagResultDto> BatchTagStudiosAsync(string endpoint, IEnumerable<int> studioIds, bool refreshAlreadyTagged, IEnumerable<string>? excludeFields, bool createParentStudios, IJobProgress? progress, CancellationToken ct)
+    {
+        var studios = await _db.Studios
+            .Include(entity => entity.Parent)
+            .Include(entity => entity.RemoteIds)
+            .Include(entity => entity.Aliases)
+            .Include(entity => entity.Urls)
+            .Where(entity => studioIds.Contains(entity.Id))
+            .OrderBy(entity => entity.Id)
+            .ToListAsync(ct);
+
+        var normalizedExcludeFields = NormalizeFieldNames(excludeFields);
+        return await ExecuteBatchTagAsync(
+            studios,
+            progress,
+            async studio =>
+            {
+                var remoteId = studio.RemoteIds.FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase))?.RemoteId;
+                if (!refreshAlreadyTagged && !string.IsNullOrWhiteSpace(remoteId))
+                    return new MetadataServerBatchTagItemResultDto(studio.Id, studio.Name, "skipped", remoteId, "Already tagged for this endpoint");
+
+                var match = !string.IsNullOrWhiteSpace(remoteId)
+                    ? await GetStudioMatchAsync(endpoint, remoteId, ct)
+                    : await FindBestStudioMatchAsync(endpoint, studio.Name, ct);
+                if (match == null)
+                    return new MetadataServerBatchTagItemResultDto(studio.Id, studio.Name, "skipped", null, "No remote match found");
+
+                var snapshot = CaptureStudioSnapshot(studio);
+                var imported = await MergeStudioAsync(studio, endpoint, match.Id, ct, createParentStudios);
+                if (!imported)
+                    return new MetadataServerBatchTagItemResultDto(studio.Id, studio.Name, "failed", match.Id, "Remote studio no longer exists");
+
+                await RestoreExcludedStudioFieldsAsync(studio, snapshot, normalizedExcludeFields, ct);
+                await _db.SaveChangesAsync(ct);
+                return new MetadataServerBatchTagItemResultDto(studio.Id, studio.Name, "updated", match.Id);
+            },
+            ct);
+    }
+
+    public async Task<MetadataServerBatchTagResultDto> BatchTagTagsAsync(string endpoint, IEnumerable<int> tagIds, bool refreshAlreadyTagged, IEnumerable<string>? excludeFields, IJobProgress? progress, CancellationToken ct)
+    {
+        var tags = await _db.Tags
+            .Include(entity => entity.RemoteIds)
+            .Include(entity => entity.Aliases)
+            .Where(entity => tagIds.Contains(entity.Id))
+            .OrderBy(entity => entity.Id)
+            .ToListAsync(ct);
+
+        var normalizedExcludeFields = NormalizeFieldNames(excludeFields);
+        return await ExecuteBatchTagAsync(
+            tags,
+            progress,
+            async tag =>
+            {
+                var remoteId = tag.RemoteIds.FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase))?.RemoteId;
+                if (!refreshAlreadyTagged && !string.IsNullOrWhiteSpace(remoteId))
+                    return new MetadataServerBatchTagItemResultDto(tag.Id, tag.Name, "skipped", remoteId, "Already tagged for this endpoint");
+
+                var match = !string.IsNullOrWhiteSpace(remoteId)
+                    ? await GetTagMatchAsync(endpoint, remoteId, ct)
+                    : await FindBestTagMatchAsync(endpoint, tag.Name, ct);
+                if (match == null)
+                    return new MetadataServerBatchTagItemResultDto(tag.Id, tag.Name, "skipped", null, "No remote match found");
+
+                var snapshot = CaptureTagSnapshot(tag);
+                var imported = await MergeTagAsync(tag, endpoint, match.Id, ct);
+                if (!imported)
+                    return new MetadataServerBatchTagItemResultDto(tag.Id, tag.Name, "failed", match.Id, "Remote tag no longer exists");
+
+                await RestoreExcludedTagFieldsAsync(tag, snapshot, normalizedExcludeFields);
+                await _db.SaveChangesAsync(ct);
+                return new MetadataServerBatchTagItemResultDto(tag.Id, tag.Name, "updated", match.Id);
+            },
+            ct);
+    }
+
+    private async Task<MetadataServerRemoteStudio?> GetRemoteStudioAsync(MetadataServerInstance box, string? studioId, string? studioName, CancellationToken ct)
     {
         try
         {
-            var response = await SendQueryAsync<MetadataServerFindStudioResponse>(box, FindStudioByIdQuery, new { id = studioId }, ct);
+            var response = await SendQueryAsync<MetadataServerFindStudioResponse>(box, FindStudioQuery, new { id = studioId, name = studioName }, ct);
             return response.FindStudio;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to fetch studio {StudioId} from {Endpoint}", studioId, box.Endpoint);
+            _logger.LogWarning(ex, "Failed to fetch studio {StudioIdOrName} from {Endpoint}", studioId ?? studioName, box.Endpoint);
+            return null;
+        }
+    }
+
+    private async Task<MetadataServerRemoteTag?> GetRemoteTagAsync(MetadataServerInstance box, string? tagId, string? tagName, CancellationToken ct)
+    {
+        try
+        {
+            var response = await SendQueryAsync<MetadataServerFindTagResponse>(box, FindTagQuery, new { id = tagId, name = tagName }, ct);
+            return response.FindTag;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch tag {TagIdOrName} from {Endpoint}", tagId ?? tagName, box.Endpoint);
             return null;
         }
     }
@@ -406,6 +626,320 @@ query Me {
             ParentName: studio.Parent?.Name
         );
     }
+
+    private static MetadataServerTagMatchDto ToTagMatchDto(MetadataServerInstance box, MetadataServerRemoteTag tag)
+    {
+        return new MetadataServerTagMatchDto(
+            Endpoint: box.Endpoint,
+            MetadataServerName: string.IsNullOrWhiteSpace(box.Name) ? box.Endpoint : box.Name,
+            Id: tag.Id,
+            Name: tag.Name,
+            Description: tag.Description,
+            Aliases: tag.Aliases
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+        );
+    }
+
+    private async Task<MetadataServerPerformerMatchDto?> FindBestPerformerMatchAsync(string endpoint, string name, CancellationToken ct)
+    {
+        var matches = await SearchPerformersAsync(name, endpoint, ct);
+        return matches.FirstOrDefault(match => !match.Deleted && string.Equals(match.Name, name, StringComparison.OrdinalIgnoreCase))
+            ?? matches.FirstOrDefault(match => !match.Deleted)
+            ?? matches.FirstOrDefault();
+    }
+
+    private async Task<MetadataServerStudioMatchDto?> FindBestStudioMatchAsync(string endpoint, string name, CancellationToken ct)
+    {
+        var box = ResolveBox(endpoint);
+        var exact = await GetRemoteStudioAsync(box, studioId: null, studioName: name, ct);
+        if (exact != null)
+            return ToStudioMatchDto(box, exact);
+
+        var matches = await SearchStudiosAsync(name, endpoint, ct);
+        return matches.FirstOrDefault(match => string.Equals(match.Name, name, StringComparison.OrdinalIgnoreCase))
+            ?? matches.FirstOrDefault();
+    }
+
+    private async Task<MetadataServerTagMatchDto?> FindBestTagMatchAsync(string endpoint, string name, CancellationToken ct)
+    {
+        var box = ResolveBox(endpoint);
+        var exact = await GetRemoteTagAsync(box, tagId: null, tagName: name, ct);
+        return exact == null ? null : ToTagMatchDto(box, exact);
+    }
+
+    private async Task<MetadataServerBatchTagResultDto> ExecuteBatchTagAsync<T>(
+        IReadOnlyList<T> items,
+        IJobProgress? progress,
+        Func<T, Task<MetadataServerBatchTagItemResultDto>> process,
+        CancellationToken ct)
+    {
+        var results = new List<MetadataServerBatchTagItemResultDto>(items.Count);
+        var updated = 0;
+        var skipped = 0;
+        var failed = 0;
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var item = items[index];
+            var (entityId, entityName) = DescribeBatchEntity(item);
+            progress?.Report(items.Count == 0 ? 1d : (double)index / items.Count, entityName);
+
+            MetadataServerBatchTagItemResultDto result;
+            try
+            {
+                result = await process(item);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed metadata batch tagging for {EntityType} {EntityId}", typeof(T).Name, entityId);
+                result = new MetadataServerBatchTagItemResultDto(entityId, entityName, "failed", null, ex.Message);
+            }
+
+            results.Add(result);
+            switch (result.Outcome.Trim().ToLowerInvariant())
+            {
+                case "updated":
+                    updated++;
+                    break;
+                case "failed":
+                    failed++;
+                    break;
+                default:
+                    skipped++;
+                    break;
+            }
+        }
+
+        progress?.Report(1d, $"Processed {items.Count} items");
+        return new MetadataServerBatchTagResultDto(items.Count, updated, skipped, failed, results);
+    }
+
+    private static (int Id, string Name) DescribeBatchEntity<T>(T item)
+    {
+        return item switch
+        {
+            Performer performer => (performer.Id, performer.Name),
+            Studio studio => (studio.Id, studio.Name),
+            Tag tag => (tag.Id, tag.Name),
+            _ => (0, typeof(T).Name),
+        };
+    }
+
+    private static HashSet<string> NormalizeFieldNames(IEnumerable<string>? fieldNames)
+    {
+        return fieldNames?
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(NormalizeFieldName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ?? [];
+    }
+
+    private static string NormalizeFieldName(string value)
+    {
+        return new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+    }
+
+    private static bool ShouldExclude(IReadOnlySet<string> excludedFields, params string[] candidates)
+    {
+        return candidates.Select(NormalizeFieldName).Any(excludedFields.Contains);
+    }
+
+    private static PerformerSnapshot CapturePerformerSnapshot(Performer performer)
+    {
+        return new PerformerSnapshot(
+            performer.Name,
+            performer.Disambiguation,
+            performer.Gender,
+            performer.Birthdate,
+            performer.DeathDate,
+            performer.Country,
+            performer.Ethnicity,
+            performer.EyeColor,
+            performer.HairColor,
+            performer.HeightCm,
+            performer.Measurements,
+            performer.FakeTits,
+            performer.CareerStart,
+            performer.CareerEnd,
+            performer.Tattoos,
+            performer.Piercings,
+            performer.ImageBlobId,
+            performer.Aliases.Select(alias => alias.Alias).ToList(),
+            performer.Urls.Select(url => url.Url).ToList()
+        );
+    }
+
+    private async Task RestoreExcludedPerformerFieldsAsync(Performer performer, PerformerSnapshot snapshot, IReadOnlySet<string> excludedFields, CancellationToken ct)
+    {
+        if (excludedFields.Count == 0)
+            return;
+
+        if (ShouldExclude(excludedFields, "name")) performer.Name = snapshot.Name;
+        if (ShouldExclude(excludedFields, "disambiguation")) performer.Disambiguation = snapshot.Disambiguation;
+        if (ShouldExclude(excludedFields, "gender")) performer.Gender = snapshot.Gender;
+        if (ShouldExclude(excludedFields, "birthdate", "birth")) performer.Birthdate = snapshot.Birthdate;
+        if (ShouldExclude(excludedFields, "deathdate", "death")) performer.DeathDate = snapshot.DeathDate;
+        if (ShouldExclude(excludedFields, "country")) performer.Country = snapshot.Country;
+        if (ShouldExclude(excludedFields, "ethnicity")) performer.Ethnicity = snapshot.Ethnicity;
+        if (ShouldExclude(excludedFields, "eyecolor")) performer.EyeColor = snapshot.EyeColor;
+        if (ShouldExclude(excludedFields, "haircolor")) performer.HairColor = snapshot.HairColor;
+        if (ShouldExclude(excludedFields, "height", "heightcm")) performer.HeightCm = snapshot.HeightCm;
+        if (ShouldExclude(excludedFields, "measurements")) performer.Measurements = snapshot.Measurements;
+        if (ShouldExclude(excludedFields, "faketits", "breasttype")) performer.FakeTits = snapshot.FakeTits;
+        if (ShouldExclude(excludedFields, "career", "careerstart")) performer.CareerStart = snapshot.CareerStart;
+        if (ShouldExclude(excludedFields, "career", "careerend")) performer.CareerEnd = snapshot.CareerEnd;
+        if (ShouldExclude(excludedFields, "tattoos")) performer.Tattoos = snapshot.Tattoos;
+        if (ShouldExclude(excludedFields, "piercings")) performer.Piercings = snapshot.Piercings;
+        if (ShouldExclude(excludedFields, "aliases")) ReplacePerformerAliases(performer, snapshot.Aliases);
+        if (ShouldExclude(excludedFields, "urls")) ReplacePerformerUrls(performer, snapshot.Urls);
+        if (ShouldExclude(excludedFields, "image", "images", "imageblobid"))
+            await RestoreBlobAsync(snapshot.ImageBlobId, performer.ImageBlobId, ct, blobId => performer.ImageBlobId = blobId);
+    }
+
+    private static StudioSnapshot CaptureStudioSnapshot(Studio studio)
+    {
+        return new StudioSnapshot(
+            studio.Name,
+            studio.ImageBlobId,
+            studio.ParentId,
+            studio.Parent,
+            studio.Aliases.Select(alias => alias.Alias).ToList(),
+            studio.Urls.Select(url => url.Url).ToList()
+        );
+    }
+
+    private async Task RestoreExcludedStudioFieldsAsync(Studio studio, StudioSnapshot snapshot, IReadOnlySet<string> excludedFields, CancellationToken ct)
+    {
+        if (excludedFields.Count == 0)
+            return;
+
+        if (ShouldExclude(excludedFields, "name")) studio.Name = snapshot.Name;
+        if (ShouldExclude(excludedFields, "aliases")) ReplaceStudioAliases(studio, snapshot.Aliases);
+        if (ShouldExclude(excludedFields, "urls")) ReplaceStudioUrls(studio, snapshot.Urls);
+        if (ShouldExclude(excludedFields, "parent", "parentstudio"))
+        {
+            studio.ParentId = snapshot.ParentId;
+            studio.Parent = snapshot.Parent;
+        }
+        if (ShouldExclude(excludedFields, "image", "images", "imageblobid"))
+            await RestoreBlobAsync(snapshot.ImageBlobId, studio.ImageBlobId, ct, blobId => studio.ImageBlobId = blobId);
+    }
+
+    private static TagSnapshot CaptureTagSnapshot(Tag tag)
+    {
+        return new TagSnapshot(
+            tag.Name,
+            tag.Description,
+            tag.Aliases.Select(alias => alias.Alias).ToList()
+        );
+    }
+
+    private Task RestoreExcludedTagFieldsAsync(Tag tag, TagSnapshot snapshot, IReadOnlySet<string> excludedFields)
+    {
+        if (excludedFields.Count == 0)
+            return Task.CompletedTask;
+
+        if (ShouldExclude(excludedFields, "name")) tag.Name = snapshot.Name;
+        if (ShouldExclude(excludedFields, "description", "details")) tag.Description = snapshot.Description;
+        if (ShouldExclude(excludedFields, "aliases")) ReplaceTagAliases(tag, snapshot.Aliases);
+        return Task.CompletedTask;
+    }
+
+    private async Task RestoreBlobAsync(string? originalBlobId, string? currentBlobId, CancellationToken ct, Action<string?> restore)
+    {
+        if (!string.Equals(originalBlobId, currentBlobId, StringComparison.Ordinal))
+        {
+            if (!string.IsNullOrWhiteSpace(currentBlobId))
+            {
+                try
+                {
+                    await _blobService.DeleteBlobAsync(currentBlobId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete replaced blob {BlobId}", currentBlobId);
+                }
+            }
+
+            restore(originalBlobId);
+        }
+    }
+
+    private static void ReplacePerformerAliases(Performer performer, IEnumerable<string> aliases)
+    {
+        performer.Aliases.Clear();
+        foreach (var alias in aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Distinct(StringComparer.OrdinalIgnoreCase))
+            performer.Aliases.Add(new PerformerAlias { Alias = alias.Trim(), PerformerId = performer.Id });
+    }
+
+    private static void ReplacePerformerUrls(Performer performer, IEnumerable<string> urls)
+    {
+        performer.Urls.Clear();
+        foreach (var url in urls.Where(url => !string.IsNullOrWhiteSpace(url)).Distinct(StringComparer.OrdinalIgnoreCase))
+            performer.Urls.Add(new PerformerUrl { Url = url.Trim(), PerformerId = performer.Id });
+    }
+
+    private static void ReplaceStudioAliases(Studio studio, IEnumerable<string> aliases)
+    {
+        studio.Aliases.Clear();
+        foreach (var alias in aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Distinct(StringComparer.OrdinalIgnoreCase))
+            studio.Aliases.Add(new StudioAlias { Alias = alias.Trim(), StudioId = studio.Id });
+    }
+
+    private static void ReplaceStudioUrls(Studio studio, IEnumerable<string> urls)
+    {
+        studio.Urls.Clear();
+        foreach (var url in urls.Where(url => !string.IsNullOrWhiteSpace(url)).Distinct(StringComparer.OrdinalIgnoreCase))
+            studio.Urls.Add(new StudioUrl { Url = url.Trim(), StudioId = studio.Id });
+    }
+
+    private static void ReplaceTagAliases(Tag tag, IEnumerable<string> aliases)
+    {
+        tag.Aliases.Clear();
+        foreach (var alias in aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Distinct(StringComparer.OrdinalIgnoreCase))
+            tag.Aliases.Add(new TagAlias { Alias = alias.Trim(), TagId = tag.Id });
+    }
+
+    private sealed record PerformerSnapshot(
+        string Name,
+        string? Disambiguation,
+        GenderEnum? Gender,
+        DateOnly? Birthdate,
+        DateOnly? DeathDate,
+        string? Country,
+        string? Ethnicity,
+        string? EyeColor,
+        string? HairColor,
+        int? HeightCm,
+        string? Measurements,
+        string? FakeTits,
+        DateOnly? CareerStart,
+        DateOnly? CareerEnd,
+        string? Tattoos,
+        string? Piercings,
+        string? ImageBlobId,
+        List<string> Aliases,
+        List<string> Urls
+    );
+
+    private sealed record StudioSnapshot(
+        string Name,
+        string? ImageBlobId,
+        int? ParentId,
+        Studio? Parent,
+        List<string> Aliases,
+        List<string> Urls
+    );
+
+    private sealed record TagSnapshot(
+        string Name,
+        string? Description,
+        List<string> Aliases
+    );
 
     public async Task<IReadOnlyList<MetadataServerSceneMatchDto>> SearchScenesAsync(Scene scene, string? term, string? endpoint, CancellationToken ct)
     {
@@ -647,6 +1181,18 @@ query Me {
         }
         """;
 
+        private const string SubmitStudioDraftMutation = """
+                mutation SubmitStudioDraft($input: StudioDraftInput!) {
+                    submitStudioDraft(input: $input) { id }
+                }
+                """;
+
+        private const string SubmitTagDraftMutation = """
+                mutation SubmitTagDraft($input: TagDraftInput!) {
+                    submitTagDraft(input: $input) { id }
+                }
+                """;
+
     public async Task SubmitFingerprintsAsync(Scene scene, string endpoint, CancellationToken ct)
     {
         var box = ResolveBox(endpoint);
@@ -784,9 +1330,58 @@ query Me {
         return response.SubmitPerformerDraft?.Id;
     }
 
+    public async Task<string?> SubmitStudioDraftAsync(Studio studio, string endpoint, CancellationToken ct)
+    {
+        var box = ResolveBox(endpoint);
+
+        var remoteId = studio.RemoteIds.FirstOrDefault(id =>
+            string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+
+        object? parent = null;
+        if (studio.Parent != null)
+        {
+            var parentRemoteId = studio.Parent.RemoteIds
+                .FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+            parent = new { name = studio.Parent.Name, id = parentRemoteId?.RemoteId };
+        }
+
+        var input = new
+        {
+            id = remoteId?.RemoteId,
+            name = studio.Name,
+            aliases = string.Join(", ", studio.Aliases.Select(alias => alias.Alias)),
+            urls = studio.Urls.Select(url => url.Url).ToList(),
+            parent,
+        };
+
+        var response = await SendQueryAsync<MetadataServerDraftSubmissionResponse>(box, SubmitStudioDraftMutation, new { input }, ct);
+        return response.SubmitStudioDraft?.Id;
+    }
+
+    public async Task<string?> SubmitTagDraftAsync(Tag tag, string endpoint, CancellationToken ct)
+    {
+        var box = ResolveBox(endpoint);
+
+        var remoteId = tag.RemoteIds.FirstOrDefault(id =>
+            string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+
+        var input = new
+        {
+            id = remoteId?.RemoteId,
+            name = tag.Name,
+            description = tag.Description,
+            aliases = string.Join(", ", tag.Aliases.Select(alias => alias.Alias)),
+        };
+
+        var response = await SendQueryAsync<MetadataServerDraftSubmissionResponse>(box, SubmitTagDraftMutation, new { input }, ct);
+        return response.SubmitTagDraft?.Id;
+    }
+
     private sealed record MetadataServerDraftSubmissionResponse(
         MetadataServerDraftIdResult? SubmitSceneDraft = null,
-        MetadataServerDraftIdResult? SubmitPerformerDraft = null
+        MetadataServerDraftIdResult? SubmitPerformerDraft = null,
+        MetadataServerDraftIdResult? SubmitStudioDraft = null,
+        MetadataServerDraftIdResult? SubmitTagDraft = null
     );
     private sealed record MetadataServerDraftIdResult(string? Id);
 
@@ -1205,7 +1800,7 @@ query Me {
                 try
                 {
                     var box = ResolveBox(endpoint);
-                    var parentRemote = await GetRemoteStudioAsync(box, remote.Parent.Id, ct);
+                    var parentRemote = await GetRemoteStudioAsync(box, studioId: remote.Parent.Id, studioName: null, ct);
                     if (parentRemote != null)
                         await DownloadStudioImageAsync(parent, parentRemote, ct);
                 }
@@ -1772,6 +2367,8 @@ query Me {
     private sealed record MetadataServerSearchStudioResponse(List<MetadataServerRemoteStudio> SearchStudio);
 
     private sealed record MetadataServerFindStudioResponse(MetadataServerRemoteStudio? FindStudio);
+
+    private sealed record MetadataServerFindTagResponse(MetadataServerRemoteTag? FindTag);
 
     private sealed record MetadataServerFindScenesByFingerprintsResponse(List<List<MetadataServerRemoteScene>> FindScenesBySceneFingerprints);
 

@@ -127,6 +127,69 @@ public class BackupService(
         var latest = Directory.EnumerateFiles(backupDir, "cove_backup_*")
             .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
             .FirstOrDefault();
+        return Task.FromResult(latest);
+    }
+
+    private static string ConfigSourcePath
+    {
+        get
+        {
+            var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return Path.Combine(baseDir, "cove", "cove-config.json");
+        }
+    }
+
+    public Task<ConfigBackupResultDto?> CreateConfigBackupAsync(string? reason = null, CancellationToken ct = default)
+    {
+        var source = ConfigSourcePath;
+        if (!File.Exists(source))
+        {
+            logger.LogInformation("Config backup skipped: no config file at {Path}", source);
+            return Task.FromResult<ConfigBackupResultDto?>(null);
+        }
+
+        var backupDir = BackupDir;
+        Directory.CreateDirectory(backupDir);
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        var suffix = ToFileSafeToken(reason);
+        var fileName = string.IsNullOrEmpty(suffix)
+            ? $"cove_config_{timestamp}.json"
+            : $"cove_config_{timestamp}_{suffix}.json";
+        var dest = Path.Combine(backupDir, fileName);
+
+        File.Copy(source, dest, overwrite: true);
+        var info = new FileInfo(dest);
+        logger.LogInformation("Config backup created at {Path}", dest);
+        return Task.FromResult<ConfigBackupResultDto?>(new ConfigBackupResultDto(dest, info.Length, timestamp));
+    }
+
+    public async Task RestoreConfigBackupAsync(string backupPath, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(backupPath))
+            throw new ArgumentException("Config backup path is required.", nameof(backupPath));
+        if (!File.Exists(backupPath))
+            throw new FileNotFoundException($"Config backup not found: {backupPath}", backupPath);
+
+        var dest = ConfigSourcePath;
+        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+
+        // Snapshot the current config (if any) before overwriting so the user can revert.
+        if (File.Exists(dest))
+            await CreateConfigBackupAsync("pre_restore", ct);
+
+        File.Copy(backupPath, dest, overwrite: true);
+        logger.LogInformation("Config restored from {Path}", backupPath);
+    }
+
+    public Task<string?> GetLatestConfigBackupPathAsync(CancellationToken ct = default)
+    {
+        var backupDir = BackupDir;
+        if (!Directory.Exists(backupDir))
+            return Task.FromResult<string?>(null);
+
+        var latest = Directory.EnumerateFiles(backupDir, "cove_config_*")
+            .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
+            .FirstOrDefault();
 
         return Task.FromResult(latest);
     }

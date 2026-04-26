@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { images } from "../api/client";
 import type { Image as ImageModel } from "../api/types";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, Pencil, Trash2, Link as LinkIcon, Heart, Check, Maximize, X } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Trash2, Link as LinkIcon, Heart, Check, Maximize, X } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ImageEditModal } from "./ImageEditModal";
@@ -11,6 +11,7 @@ import { InteractiveRating } from "../components/Rating";
 import { createRouteLinkProps } from "../components/cardNavigation";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { ImageDownloadDialog } from "../components/ImageDownloadDialog";
 
 interface Props {
   id: number;
@@ -25,6 +26,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "images" }, onNavigate);
   const deleteMut = useMutation({
@@ -78,6 +80,12 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   return (
     <div className="overflow-hidden">
       {image && <ImageEditModal image={image} open={editing} onClose={() => setEditing(false)} />}
+      <ImageDownloadDialog
+        open={showDownloadDialog}
+        image={image}
+        onClose={() => setShowDownloadDialog(false)}
+        onNavigate={onNavigate}
+      />
       <ConfirmDialog open={confirmDelete} title="Delete Image" message={`Delete "${displayTitle}"? This cannot be undone.`} onConfirm={() => deleteMut.mutate()} onCancel={() => setConfirmDelete(false)} />
 
       {/* Lightbox overlay */}
@@ -141,6 +149,14 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
               </div>
               <div className="flex items-center gap-2 mt-3">
                 <ExtensionSlot slot="image-detail-actions" context={{ image, onNavigate }} />
+                {image.files.length === 0 && (
+                  <button
+                    onClick={() => setShowDownloadDialog(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-card border border-border text-secondary hover:text-foreground rounded"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Download Media…
+                  </button>
+                )}
                 <button
                   onClick={() => setEditing(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-white hover:bg-accent-hover rounded"

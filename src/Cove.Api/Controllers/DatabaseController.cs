@@ -44,10 +44,11 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
     }
 
     [HttpPost("wipe")]
-    public async Task<IActionResult> WipeDatabase(CancellationToken ct)
+    public async Task<ActionResult<WipeResultDto>> WipeDatabase(CancellationToken ct)
     {
-        logger.LogWarning("Database wipe initiated");
+        logger.LogWarning("Database + config wipe initiated");
         var backup = await backupService.CreateBackupAsync("pre_wipe", ct);
+        var configBackup = await backupService.CreateConfigBackupAsync("pre_wipe", ct);
 
         var connStr = db.Database.GetConnectionString()!;
         await using var conn = new NpgsqlConnection(connStr);
@@ -61,7 +62,53 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
             RESTART IDENTITY CASCADE;";
         await cmd.ExecuteNonQueryAsync(ct);
 
-        logger.LogInformation("Database wiped successfully after backup {Path}", backup.BackupPath);
-        return Ok(new { message = "Database wiped successfully", backupPath = backup.BackupPath, backupTimestamp = backup.Timestamp });
+        // Remove the on-disk config so the setup wizard reappears on next launch.
+        try
+        {
+            var configPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "cove",
+                "cove-config.json");
+            if (System.IO.File.Exists(configPath))
+                System.IO.File.Delete(configPath);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to delete user config file during wipe");
+        }
+
+        logger.LogInformation("Database wiped successfully after backups DB={DbPath} Config={ConfigPath}", backup.BackupPath, configBackup?.BackupPath);
+        return Ok(new WipeResultDto(
+            "Database and config wiped successfully",
+            backup.BackupPath,
+            backup.Timestamp,
+            configBackup?.BackupPath));
+    }
+
+    [HttpPost("config/backup")]
+    public async Task<ActionResult<ConfigBackupResultDto>> BackupConfig(CancellationToken ct)
+    {
+        var result = await backupService.CreateConfigBackupAsync("manual", ct);
+        if (result == null)
+            return NotFound(new { message = "No saved config to back up." });
+        return Ok(result);
+    }
+
+    [HttpPost("config/restore")]
+    public async Task<IActionResult> RestoreConfig([FromBody] RestoreBackupRequestDto request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.BackupPath))
+            return BadRequest(new { message = "Config backup path is required." });
+
+        logger.LogWarning("Config restore initiated from {Path}", request.BackupPath);
+        await backupService.RestoreConfigBackupAsync(request.BackupPath, ct);
+        return Ok(new { message = "Config restored successfully. Restart Cove for changes to take effect.", backupPath = request.BackupPath });
+    }
+
+    [HttpGet("config/latest-backup")]
+    public async Task<ActionResult<object>> GetLatestConfigBackup(CancellationToken ct)
+    {
+        var path = await backupService.GetLatestConfigBackupPathAsync(ct);
+        return Ok(new { path });
     }
 }

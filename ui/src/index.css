@@ -323,44 +323,74 @@ html[data-component-style*="glass"] .bg-black * {
   }
 }
 
+.job-drawer {
+  --job-drawer-surface: color-mix(in srgb, var(--color-surface) 94%, var(--color-background) 6%);
+  --job-drawer-card-surface: color-mix(in srgb, var(--color-card) 92%, var(--color-surface) 8%);
+  --job-drawer-border: color-mix(in srgb, var(--color-border) 88%, transparent);
+  --job-drawer-text: var(--color-foreground);
+  --job-drawer-muted: var(--color-muted);
+  --job-drawer-secondary: var(--color-secondary);
+  background: var(--job-drawer-surface);
+  color: var(--job-drawer-text);
+  border-left-color: var(--job-drawer-border);
+  box-shadow: -24px 0 64px rgba(0, 0, 0, 0.38);
+  isolation: isolate;
+}
+
+html[data-color-scheme="light"] .job-drawer {
+  --job-drawer-surface: color-mix(in srgb, var(--color-surface) 97%, white 3%);
+  --job-drawer-card-surface: color-mix(in srgb, var(--color-card) 95%, white 5%);
+}
+
+.job-drawer-card {
+  background: var(--job-drawer-card-surface);
+  border-color: var(--job-drawer-border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+html[data-color-scheme="light"] .job-drawer-card {
+  background: var(--job-drawer-card-surface);
+}
+
+.job-drawer .text-foreground { color: var(--job-drawer-text) !important; }
+.job-drawer .text-muted { color: var(--job-drawer-muted) !important; }
+.job-drawer .text-secondary { color: var(--job-drawer-secondary) !important; }
+
 /* Job drawer: always readable with glass/animated themes — force opaque bg + contrasting text */
+html[data-component-style*="gradient"] .job-drawer,
+html[data-component-style*="animated"] .job-drawer,
 html[data-component-style*="glass"] .job-drawer,
 html[data-theme-bg-animation] .job-drawer {
-  background: rgba(20, 22, 28, 0.95) !important;
-  color: #f5f8fa !important;
+  --job-drawer-surface: color-mix(in srgb, var(--color-surface) 90%, #081018 10%);
+  --job-drawer-card-surface: color-mix(in srgb, var(--color-card) 88%, #0b1118 12%);
+  --job-drawer-border: rgba(255, 255, 255, 0.12);
+  --job-drawer-text: #f5f8fa;
+  --job-drawer-muted: #8a9ba8;
+  --job-drawer-secondary: #a0aab2;
+  background: var(--job-drawer-surface) !important;
+  color: var(--job-drawer-text) !important;
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
-  --color-card: #30404d;
-  --color-card-hover: #394b59;
-  --color-surface: #252a31;
-  --color-input: #1a1f25;
-  --color-border: rgba(255, 255, 255, 0.12);
-  --color-foreground: #f5f8fa;
-  --color-muted: #8a9ba8;
-  --color-secondary: #a0aab2;
-  --color-accent: var(--color-accent);
 }
-html[data-component-style*="glass"] .job-drawer .text-foreground,
-html[data-theme-bg-animation] .job-drawer .text-foreground { color: #f5f8fa !important; }
-html[data-component-style*="glass"] .job-drawer .text-muted,
-html[data-theme-bg-animation] .job-drawer .text-muted { color: #8a9ba8 !important; }
-html[data-component-style*="glass"] .job-drawer .text-secondary,
-html[data-theme-bg-animation] .job-drawer .text-secondary { color: #a0aab2 !important; }
-html[data-color-scheme="light"][data-component-style*="glass"] .job-drawer {
-  background: rgba(245, 248, 250, 0.95) !important;
-  color: #111827 !important;
-  --color-card: #e5e7eb;
-  --color-card-hover: #d1d5db;
-  --color-surface: #f3f4f6;
-  --color-input: #e5e7eb;
-  --color-border: rgba(0, 0, 0, 0.1);
-  --color-foreground: #111827;
-  --color-muted: #6b7280;
-  --color-secondary: #4b5563;
+html[data-color-scheme="light"][data-component-style*="gradient"] .job-drawer,
+html[data-color-scheme="light"][data-component-style*="animated"] .job-drawer,
+html[data-color-scheme="light"][data-component-style*="glass"] .job-drawer,
+html[data-color-scheme="light"][data-theme-bg-animation] .job-drawer {
+  --job-drawer-surface: color-mix(in srgb, var(--color-surface) 96%, white 4%);
+  --job-drawer-card-surface: color-mix(in srgb, var(--color-card) 94%, white 6%);
+  --job-drawer-border: rgba(0, 0, 0, 0.1);
+  --job-drawer-text: #111827;
+  --job-drawer-muted: #6b7280;
+  --job-drawer-secondary: #4b5563;
+  color: var(--job-drawer-text) !important;
 }
-html[data-color-scheme="light"][data-component-style*="glass"] .job-drawer .text-foreground { color: #111827 !important; }
-html[data-color-scheme="light"][data-component-style*="glass"] .job-drawer .text-muted { color: #6b7280 !important; }
-html[data-color-scheme="light"][data-component-style*="glass"] .job-drawer .text-secondary { color: #4b5563 !important; }
+html[data-component-style*="gradient"] .job-drawer-card,
+html[data-component-style*="animated"] .job-drawer-card,
+html[data-component-style*="glass"] .job-drawer-card,
+html[data-theme-bg-animation] .job-drawer-card {
+  background: var(--job-drawer-card-surface) !important;
+  border-color: var(--job-drawer-border) !important;
+}
 
 /* Keyboard shortcuts dialog */
 html[data-component-style*="glass"] .shortcuts-dialog {

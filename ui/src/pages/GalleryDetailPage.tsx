@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, images, scenes, entityImages } from "../api/client";
 import type { FindFilter, GalleryChapter } from "../api/types";
 import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, BookOpen, Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, UserRound, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
+import { ArrowLeft, BookOpen, Download, Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, UserRound, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GalleryEditModal } from "./GalleryEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -18,6 +18,7 @@ import { useExtensionTabs } from "../components/useExtensionTabs";
 import { createRouteLinkProps } from "../components/cardNavigation";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
 
 interface Props {
   id: number;
@@ -51,6 +52,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [showAddImages, setShowAddImages] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "galleries" }, onNavigate);
@@ -160,6 +162,12 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
 
   return (
     <div className="min-h-screen">
+      <GalleryDownloadDialog
+        open={showDownloadDialog}
+        gallery={gallery}
+        onClose={() => setShowDownloadDialog(false)}
+        onNavigate={onNavigate}
+      />
       <div className="relative overflow-hidden border-b border-border bg-surface">
         {coverImageUrl ? (
           <>
@@ -197,6 +205,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
                 {showOpsMenu && (
                   <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] bg-card border border-border rounded shadow-lg py-1">
                     <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Pencil className="w-3.5 h-3.5" /> Edit</button>
+                    {gallery.files.length === 0 && <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Download className="w-3.5 h-3.5" /> Download Media…</button>}
                     <button onClick={() => { setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5" /> Rescan</button>
                     <div className="border-t border-border my-1" />
                     <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
@@ -490,7 +499,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
         onSelectNone={selectNone}
         selectionActions={
           <>
-            <BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} />
+            <BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={galleryImages.items} />
             <button
               onClick={() => { if (confirm(`Remove ${selectedIds.size} image(s) from gallery?`)) removeImagesMut.mutate([...selectedIds]); }}
               disabled={removeImagesMut.isPending}

@@ -56,6 +56,15 @@ public class ConfigService
             Host = cfg.Host,
             Port = cfg.Port,
             MaxParallelTasks = cfg.MaxParallelTasks,
+            MaxConcurrentDownloads = cfg.MaxConcurrentDownloads,
+            DownloaderPathOverrides = cfg.DownloaderPathOverrides
+                .Select(overridePath => new DownloaderPathOverrideDto
+                {
+                    DownloaderId = overridePath.DownloaderId,
+                    Site = overridePath.Site,
+                    Path = overridePath.Path,
+                })
+                .ToList(),
             CalculateMd5 = cfg.CalculateMd5,
             EnableFfmpegHwAccel = cfg.EnableFfmpegHwAccel,
             VideoExtensions = cfg.VideoExtensions,
@@ -110,6 +119,13 @@ public class ConfigService
                         MaxRequestsPerMinute = box.MaxRequestsPerMinute,
                     })
                     .ToList(),
+                ScraperPreferences = cfg.Scraping.ScraperPreferences
+                    .Select(preference => new ScraperPreferenceDto
+                    {
+                        Site = preference.Site,
+                        ScraperId = preference.ScraperId,
+                    })
+                    .ToList(),
                 IdentifyDefaults = new IdentifyDefaultsConfigDto
                 {
                     CreateTags = cfg.Scraping.IdentifyDefaults.CreateTags,
@@ -117,6 +133,12 @@ public class ConfigService
                     CreateStudios = cfg.Scraping.IdentifyDefaults.CreateStudios,
                     AutoApplyMaxDurationDifferenceSeconds = cfg.Scraping.IdentifyDefaults.AutoApplyMaxDurationDifferenceSeconds,
                     AutoApplyMaxPhashDistance = cfg.Scraping.IdentifyDefaults.AutoApplyMaxPhashDistance,
+                },
+                MetadataBatchDefaults = new MetadataBatchDefaultsConfigDto
+                {
+                    RefreshAlreadyTagged = cfg.Scraping.MetadataBatchDefaults.RefreshAlreadyTagged,
+                    CreateParentStudios = cfg.Scraping.MetadataBatchDefaults.CreateParentStudios,
+                    ExcludeFields = [.. cfg.Scraping.MetadataBatchDefaults.ExcludeFields],
                 },
             },
             PluginConfigurations = cfg.PluginConfigurations,
@@ -202,6 +224,16 @@ public class ConfigService
             cfg.Host = dto.Host;
         cfg.Port = dto.Port;
         cfg.MaxParallelTasks = dto.MaxParallelTasks;
+        cfg.MaxConcurrentDownloads = dto.MaxConcurrentDownloads > 0 ? dto.MaxConcurrentDownloads : cfg.MaxConcurrentDownloads;
+        cfg.DownloaderPathOverrides = dto.DownloaderPathOverrides
+            .Where(overridePath => !string.IsNullOrWhiteSpace(overridePath.DownloaderId) && !string.IsNullOrWhiteSpace(overridePath.Path))
+            .Select(overridePath => new DownloaderPathOverride
+            {
+                DownloaderId = overridePath.DownloaderId.Trim(),
+                Site = string.IsNullOrWhiteSpace(overridePath.Site) ? null : overridePath.Site.Trim(),
+                Path = overridePath.Path.Trim(),
+            })
+            .ToList();
         cfg.CalculateMd5 = dto.CalculateMd5;
         cfg.EnableFfmpegHwAccel = dto.EnableFfmpegHwAccel;
 
@@ -270,6 +302,15 @@ public class ConfigService
             })
             .DistinctBy(box => box.Endpoint, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        cfg.Scraping.ScraperPreferences = dto.Scraping.ScraperPreferences
+            .Where(preference => !string.IsNullOrWhiteSpace(preference.Site) && !string.IsNullOrWhiteSpace(preference.ScraperId))
+            .Select(preference => new ScraperPreference
+            {
+                Site = preference.Site.Trim().ToLowerInvariant(),
+                ScraperId = preference.ScraperId.Trim(),
+            })
+            .DistinctBy(preference => preference.Site, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         cfg.Scraping.IdentifyDefaults = new IdentifyDefaultsConfig
         {
             CreateTags = dto.Scraping.IdentifyDefaults.CreateTags,
@@ -277,6 +318,16 @@ public class ConfigService
             CreateStudios = dto.Scraping.IdentifyDefaults.CreateStudios,
             AutoApplyMaxDurationDifferenceSeconds = dto.Scraping.IdentifyDefaults.AutoApplyMaxDurationDifferenceSeconds,
             AutoApplyMaxPhashDistance = dto.Scraping.IdentifyDefaults.AutoApplyMaxPhashDistance,
+        };
+        cfg.Scraping.MetadataBatchDefaults = new MetadataBatchDefaultsConfig
+        {
+            RefreshAlreadyTagged = dto.Scraping.MetadataBatchDefaults.RefreshAlreadyTagged,
+            CreateParentStudios = dto.Scraping.MetadataBatchDefaults.CreateParentStudios,
+            ExcludeFields = dto.Scraping.MetadataBatchDefaults.ExcludeFields
+                .Where(field => !string.IsNullOrWhiteSpace(field))
+                .Select(field => field.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
         };
 
         cfg.PluginConfigurations = dto.PluginConfigurations ?? [];

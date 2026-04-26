@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, groups, images, metadata, performers, scenes, studios, entityImages } from "../api/client";
-import type { FindFilter, Gallery, Group, Image, Performer, Scene, Studio } from "../api/types";
+import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerStudioMatch, Performer, Scene, Studio } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, Check, Building2, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link as LinkIcon, Link2, Loader2, MoreVertical, Music, Pencil, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Building2, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link as LinkIcon, Link2, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { StudioEditModal } from "./StudioEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -58,6 +58,7 @@ type TabKey = "scenes" | "performers" | "galleries" | "images" | "studios" | "gr
 
 export function StudioDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
+  const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: studio, isLoading } = useQuery({
     queryKey: ["studio", id],
     queryFn: () => studios.get(id),
@@ -301,6 +302,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
                 <span title={`Created ${formatDate(studio.createdAt)}`}>Updated {formatDate(studio.updatedAt)}</span>
               </div>
               <CustomFieldsDisplay customFields={studio.customFields} />
+              <StudioMetadataServerPanel studio={studio} metadataServers={metadataServers} onNavigate={onNavigate} />
               {autoTagMut.isSuccess && (
                 <p className="mt-3 text-sm text-emerald-300">Auto-tag job queued.</p>
               )}
@@ -385,6 +387,182 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   );
 }
 
+function StudioMetadataServerPanel({ studio, metadataServers, onNavigate }: { studio: Studio; metadataServers: MetadataServer[]; onNavigate: (r: any) => void }) {
+  const queryClient = useQueryClient();
+  const [term, setTerm] = useState(studio.name);
+  const [selectedEndpoint, setSelectedEndpoint] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    setTerm(studio.name);
+  }, [studio.id, studio.name]);
+
+  useEffect(() => {
+    if (selectedEndpoint && !metadataServers.some((box) => box.endpoint === selectedEndpoint)) {
+      setSelectedEndpoint("");
+    }
+  }, [selectedEndpoint, metadataServers]);
+
+  const searchMutation = useMutation({
+    mutationFn: (variables: { term?: string; endpoint?: string }) => studios.searchMetadataServer(studio.id, variables.term, variables.endpoint),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (match: MetadataServerStudioMatch) =>
+      studios.importFromMetadataServer(studio.id, { endpoint: match.endpoint, studioId: match.id }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["studio", studio.id] });
+      queryClient.invalidateQueries({ queryKey: ["studios"] });
+    },
+  });
+
+  const draftMutation = useMutation({
+    mutationFn: (endpoint: string) => studios.submitMetadataServerDraft(studio.id, endpoint),
+  });
+
+  const draftEndpoint = selectedEndpoint || metadataServers[0]?.endpoint;
+  const linkedNames = new Map(metadataServers.map((box) => [box.endpoint, box.name || box.endpoint]));
+
+  return (
+    <div className="mt-6 rounded-xl border border-border bg-card p-4">
+      <button onClick={() => setExpanded(!expanded)} className="flex w-full items-center justify-between text-left">
+        <div className="flex items-center gap-3">
+          <h2 className="text-base font-semibold text-foreground">MetadataServer</h2>
+          {studio.remoteIds.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {studio.remoteIds.map((remoteId) => (
+                <span key={`${remoteId.endpoint}:${remoteId.remoteId}`} className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-secondary">
+                  <Link2 className="h-3.5 w-3.5 text-accent" />
+                  {linkedNames.get(remoteId.endpoint) ?? remoteId.endpoint}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <ChevronDown className={`h-4 w-4 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
+      </button>
+
+      {expanded && (
+        <div className="mt-4">
+          {metadataServers.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
+              No MetadataServer endpoints are configured yet. Use Settings and open Metadata Providers to add one.
+              <button onClick={() => onNavigate({ page: "settings" })} className="ml-2 text-accent hover:text-accent-hover">
+                Open settings
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Search term</span>
+                  <input
+                    value={term}
+                    onChange={(event) => setTerm(event.target.value)}
+                    placeholder={studio.name}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Endpoint</span>
+                  <select
+                    value={selectedEndpoint}
+                    onChange={(event) => setSelectedEndpoint(event.target.value)}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                  >
+                    <option value="">All configured endpoints</option>
+                    {metadataServers.map((box) => (
+                      <option key={box.endpoint} value={box.endpoint}>
+                        {box.name || box.endpoint}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex flex-wrap items-end gap-2">
+                  <button
+                    onClick={() => searchMutation.mutate({ term: term.trim() || undefined, endpoint: selectedEndpoint || undefined })}
+                    disabled={searchMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
+                  >
+                    {searchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    Search MetadataServer
+                  </button>
+                  <button
+                    onClick={() => draftEndpoint && draftMutation.mutate(draftEndpoint)}
+                    disabled={!draftEndpoint || draftMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
+                  >
+                    {draftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                    Submit Draft
+                  </button>
+                </div>
+              </div>
+
+              {searchMutation.error && <p className="mt-3 text-sm text-red-300">{searchMutation.error.message}</p>}
+              {draftMutation.error && <p className="mt-3 text-sm text-red-300">{draftMutation.error.message}</p>}
+              {draftMutation.isSuccess && (
+                <p className="mt-3 text-sm text-emerald-300">
+                  Studio draft submitted to MetadataServer{draftMutation.data.draftId ? ` (${draftMutation.data.draftId})` : ""}.
+                </p>
+              )}
+              {importMutation.isSuccess && <p className="mt-3 text-sm text-emerald-300">Studio metadata imported from MetadataServer.</p>}
+
+              {searchMutation.data && (
+                <div className="mt-4 space-y-3">
+                  {searchMutation.data.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
+                      No MetadataServer studio matches were found.
+                    </div>
+                  ) : (
+                    searchMutation.data.map((match) => (
+                      <button
+                        key={`${match.endpoint}:${match.id}`}
+                        onClick={() => importMutation.mutate(match)}
+                        disabled={importMutation.isPending}
+                        className="flex w-full flex-col gap-4 rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:border-accent/60 disabled:opacity-60 md:flex-row"
+                      >
+                        <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-border bg-black/20">
+                          {match.imageUrl ? (
+                            <img src={match.imageUrl} alt={match.name} className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-b from-card to-surface">
+                              <Building2 className="h-10 w-10 text-muted/50" />
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-base font-semibold text-foreground">{match.name}</span>
+                            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-secondary">{match.serverName}</span>
+                          </div>
+                          {match.parentName && <p className="mt-1 text-sm text-secondary">Parent: {match.parentName}</p>}
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+                            <span>ID {match.id}</span>
+                            {match.urls[0] && <span className="truncate">{match.urls[0]}</span>}
+                          </div>
+                          {match.aliases.length > 0 && <p className="mt-2 text-xs text-secondary">Aliases: {match.aliases.join(", ")}</p>}
+                        </div>
+
+                        <div className="flex items-end">
+                          <span className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white">
+                            {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                            Import
+                          </span>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CountCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
@@ -450,7 +628,7 @@ function StudioGalleriesPanel({ studioId, filter, setFilter, onNavigate }: {
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} />} />
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
         {data.items.map((gallery) => (
           <GalleryTile key={gallery.id} gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
@@ -481,7 +659,7 @@ function StudioImagesPanel({ studioId, filter, setFilter, onNavigate }: {
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} />} />
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + zoomLevel * 50}px, 1fr))` }}>
         {data.items.map((image) => (
           <ImageTile key={image.id} image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />

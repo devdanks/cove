@@ -17,6 +17,7 @@ import { useRouteRegistry } from "../router/RouteRegistry";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { StringListEditor } from "../components/StringListEditor";
 import { TagGraphView } from "../components/TagGraphView";
+import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
 
 const GRAPH_VIEW_LIMIT = 5000;
 
@@ -56,6 +57,7 @@ export function TagsPage({ onNavigate }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
+  const [showMetadataBatch, setShowMetadataBatch] = useState(false);
   const queryClient = useQueryClient();
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
@@ -110,6 +112,13 @@ export function TagsPage({ onNavigate }: Props) {
   return (
     <>
       <TagCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "tag", id })} />
+      <MetadataServerBatchDialog
+        open={showMetadataBatch}
+        entityType="tag"
+        selectedIds={[...selectedIds]}
+        onClose={() => setShowMetadataBatch(false)}
+        onQueued={selectNone}
+      />
       <ListPage
       title="Tags"
       pageKey="tags"
@@ -132,6 +141,13 @@ export function TagsPage({ onNavigate }: Props) {
       onSelectNone={selectNone}
       selectionActions={(
         <>
+          <button
+            onClick={() => setShowMetadataBatch(true)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+          >
+            <TagIcon className="w-3 h-3" />
+            MetadataServer
+          </button>
           <button
             onClick={() => setShowBulkEdit(true)}
             className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"

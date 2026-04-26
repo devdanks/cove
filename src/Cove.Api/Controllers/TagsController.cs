@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using Cove.Api.Services;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -201,6 +202,97 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db) : Contr
         return Ok(MapToDetailDto(updated!));
     }
 
+    [HttpGet("{id:int}/metadata-server/search")]
+    [OutputCache(PolicyName = "ShortCache")]
+    public async Task<ActionResult<IReadOnlyList<MetadataServerTagMatchDto>>> SearchMetadataServer(int id, [FromServices] MetadataServerService metadataServerService, [FromQuery] string? term, [FromQuery] string? endpoint, CancellationToken ct)
+    {
+        var tag = await tagRepo.GetByIdWithRelationsAsync(id, ct);
+        if (tag == null)
+            return NotFound();
+
+        if (string.IsNullOrWhiteSpace(term))
+        {
+            var existingRemoteId = tag.RemoteIds.FirstOrDefault(remoteId => string.IsNullOrWhiteSpace(endpoint) || string.Equals(remoteId.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+            if (existingRemoteId != null)
+            {
+                var existing = await metadataServerService.GetTagMatchAsync(existingRemoteId.Endpoint, existingRemoteId.RemoteId, ct);
+                if (existing != null)
+                    return Ok(new[] { existing });
+            }
+
+            term = tag.Name;
+        }
+
+        return Ok(await metadataServerService.SearchTagsAsync(term, endpoint, ct));
+    }
+
+    [HttpPost("metadata-server/find-by-ids")]
+    public async Task<ActionResult<IReadOnlyList<MetadataServerTagMatchDto>>> FindMetadataServerTagsByIds([FromServices] MetadataServerService metadataServerService, [FromBody] MetadataServerFindByIdsRequestDto dto, CancellationToken ct)
+    {
+        if (dto.Ids.Count == 0)
+            return Ok(Array.Empty<MetadataServerTagMatchDto>());
+
+        var results = new List<MetadataServerTagMatchDto>();
+        foreach (var tagId in dto.Ids.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var match = await metadataServerService.GetTagMatchAsync(dto.Endpoint, tagId, ct);
+            if (match != null)
+                results.Add(match);
+        }
+
+        return Ok(results);
+    }
+
+    [HttpPost("{id:int}/metadata-server/import")]
+    public async Task<ActionResult<TagDetailDto>> ImportFromMetadataServer(int id, [FromServices] MetadataServerService metadataServerService, [FromBody] MetadataServerTagImportRequestDto dto, CancellationToken ct)
+    {
+        var tag = await tagRepo.GetByIdWithRelationsAsync(id, ct);
+        if (tag == null)
+            return NotFound();
+
+        var imported = await metadataServerService.MergeTagAsync(tag, dto.Endpoint, dto.TagId, ct);
+        if (!imported)
+            return NotFound();
+
+        await tagRepo.UpdateAsync(tag, ct);
+        var updated = await tagRepo.GetByIdWithRelationsAsync(id, ct);
+        return Ok(MapToDetailDto(updated!));
+    }
+
+    [HttpPost("{id:int}/metadata-server/submit-draft")]
+    public async Task<IActionResult> SubmitTagDraft(int id, [FromServices] MetadataServerService metadataServerService, [FromBody] MetadataServerEndpointDto dto, CancellationToken ct)
+    {
+        var tag = await tagRepo.GetByIdWithRelationsAsync(id, ct);
+        if (tag == null)
+            return NotFound();
+
+        var draftId = await metadataServerService.SubmitTagDraftAsync(tag, dto.Endpoint, ct);
+        return Ok(new { draftId });
+    }
+
+    [HttpPost("metadata-server/batch-tag")]
+    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerTagBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Endpoint))
+            return BadRequest(new { message = "Endpoint is required" });
+
+        var ids = await ResolveSelectedTagIdsAsync(dto, ct);
+        if (ids.Count == 0)
+            return BadRequest(new { message = "No tags selected for batch tagging" });
+
+        var jobId = jobService.Enqueue(
+            "metadata-server:tags",
+            $"Tagging {ids.Count} tags from {dto.Endpoint}",
+            async (progress, jobCt) =>
+            {
+                using var scope = scopeFactory.CreateScope();
+                var metadataServerService = scope.ServiceProvider.GetRequiredService<MetadataServerService>();
+                await metadataServerService.BatchTagTagsAsync(dto.Endpoint, ids, dto.RefreshAlreadyTagged, dto.ExcludeFields, progress, jobCt);
+            });
+
+        return Ok(new { jobId, itemCount = ids.Count });
+    }
+
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
@@ -208,6 +300,41 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db) : Contr
         if (tag == null) return NotFound();
         await tagRepo.DeleteAsync(id, ct);
         return NoContent();
+    }
+
+    private async Task<List<int>> ResolveSelectedTagIdsAsync(MetadataServerTagBatchTagRequestDto dto, CancellationToken ct)
+    {
+        if (dto.Ids?.Count > 0)
+            return dto.Ids.Distinct().ToList();
+
+        if (!dto.SelectAll && dto.Filter == null)
+            return [];
+
+        const int pageSize = 500;
+        var ids = new List<int>();
+        var page = 1;
+
+        while (true)
+        {
+            var (items, totalCount) = await tagRepo.FindAsync(dto.Filter, new FindFilter
+            {
+                Page = page,
+                PerPage = pageSize,
+                Sort = "id",
+                Direction = SortDirection.Asc,
+            }, ct);
+
+            if (items.Count == 0)
+                break;
+
+            ids.AddRange(items.Select(item => item.Id));
+            if (ids.Count >= totalCount)
+                break;
+
+            page++;
+        }
+
+        return ids.Distinct().ToList();
     }
 
     private static TagDetailDto MapToDetailDto(Tag t, int sceneCount = 0, int performerCount = 0, int imageCount = 0, int galleryCount = 0, int studioCount = 0, int groupCount = 0, int markerCount = 0) => new(

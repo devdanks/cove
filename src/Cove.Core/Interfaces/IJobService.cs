@@ -57,6 +57,9 @@ public sealed class ScanOperationOptions
 public interface IScanService
 {
     string StartScan(ScanOperationOptions? options = null);
+    Task<int> ImportDownloadedSceneAsync(string path, int? sceneId, CancellationToken ct = default);
+    Task<int> ImportDownloadedImageAsync(string path, int? imageId, CancellationToken ct = default);
+    Task<int> ImportDownloadedGalleryAsync(string path, int? galleryId, CancellationToken ct = default);
 }
 
 public interface IAutoTagService
@@ -75,6 +78,9 @@ public interface IBackupService
     string StartBackup();
     Task RestoreBackupAsync(string backupPath, CancellationToken ct = default);
     Task<string?> GetLatestBackupPathAsync(CancellationToken ct = default);
+    Task<ConfigBackupResultDto?> CreateConfigBackupAsync(string? reason = null, CancellationToken ct = default);
+    Task RestoreConfigBackupAsync(string backupPath, CancellationToken ct = default);
+    Task<string?> GetLatestConfigBackupPathAsync(CancellationToken ct = default);
 }
 
 public interface IStreamService

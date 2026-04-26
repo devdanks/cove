@@ -139,6 +139,41 @@ export interface PerformerCreate {
 
 export interface PerformerUpdate extends Partial<PerformerCreate> {}
 
+export interface PerformerScrapeRequest {
+  inputKind?: "url" | "name";
+  scraperId?: string;
+  url?: string;
+  name?: string;
+  createMissingTags?: boolean;
+}
+
+export interface ScrapedPerformer {
+  name?: string;
+  disambiguation?: string;
+  gender?: string;
+  birthdate?: string;
+  country?: string;
+  ethnicity?: string;
+  eyeColor?: string;
+  hairColor?: string;
+  heightCm?: number;
+  weight?: number;
+  measurements?: string;
+  tattoos?: string;
+  piercings?: string;
+  details?: string;
+  imageUrl?: string;
+  urls: string[];
+  aliases: string[];
+  tagNames: string[];
+}
+
+export interface PerformerScrapePreview {
+  scraped: ScrapedPerformer;
+  inputKind: "url" | "name";
+  sourceValue?: string;
+}
+
 export interface Tag {
   id: number;
   name: string;
@@ -618,20 +653,35 @@ export interface IdentifyDefaultsConfig {
   autoApplyMaxPhashDistance?: number;
 }
 
+export interface MetadataBatchDefaultsConfig {
+  refreshAlreadyTagged: boolean;
+  createParentStudios: boolean;
+  excludeFields: string[];
+}
+
+export interface ScraperPreference {
+  site: string;
+  scraperId: string;
+}
+
 export interface ScrapingConfig {
   scraperDirectories: string[];
   scraperPackageSources: PackageSource[];
   metadataServers: MetadataServer[];
+  scraperPreferences: ScraperPreference[];
   identifyDefaults: IdentifyDefaultsConfig;
+  metadataBatchDefaults: MetadataBatchDefaultsConfig;
 }
 
 export interface CoveConfig {
   covePaths: CovePathConfig[];
+  downloaderPathOverrides: DownloaderPathOverrideConfig[];
   generatedPath?: string;
   cachePath?: string;
   host: string;
   port: number;
   maxParallelTasks: number;
+  maxConcurrentDownloads: number;
   calculateMd5: boolean;
   enableFfmpegHwAccel: boolean;
   videoExtensions: string[];
@@ -672,6 +722,12 @@ export interface CovePathConfig {
   excludeVideo: boolean;
   excludeImage: boolean;
   excludeAudio: boolean;
+}
+
+export interface DownloaderPathOverrideConfig {
+  downloaderId: string;
+  site?: string;
+  path: string;
 }
 
 export interface JobInfo {
@@ -729,6 +785,145 @@ export interface ScraperSummary {
   sourcePath: string;
 }
 
+export interface ScrapeAttempt {
+  id: string;
+  scraperId: string;
+  entityType: string;
+  entityId?: number | null;
+  inputKind: string;
+  inputJson?: string | null;
+  resultJson?: string | null;
+  candidateResultsJson?: string | null;
+  entitySnapshotJson?: string | null;
+  status: string;
+  error?: string | null;
+  createdAt: string;
+  appliedAt?: string | null;
+}
+
+export interface CreateScrapeAttemptRequest {
+  scraperId: string;
+  entityType: string;
+  entityId?: number;
+  inputKind: string;
+  url?: string;
+  name?: string;
+  fragment?: Record<string, unknown>;
+}
+
+export interface ApplySceneScrapeAttemptRequest {
+  replaceFields?: string[];
+  collectionModes?: Record<string, string>;
+  createMissingTags?: boolean;
+  createMissingPerformers?: boolean;
+  createMissingStudio?: boolean;
+  markOrganized?: boolean;
+  hydratePerformers?: boolean;
+  selectedCandidateIndex?: number;
+}
+
+export interface BatchSceneScrapeStartRequest {
+  scraperId: string;
+  inputKind: "url" | "name";
+  sceneIds: number[];
+  autoApply?: boolean;
+  createMissingTags?: boolean;
+  createMissingPerformers?: boolean;
+  createMissingStudio?: boolean;
+  markOrganized?: boolean;
+  hydratePerformers?: boolean;
+}
+
+export interface DownloaderDescriptor {
+  id: string;
+  name: string;
+  supportedEntity: string;
+  supportedUrlPatterns: string[];
+  capabilities: string[];
+}
+
+export interface DownloaderQualityOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface DownloaderMatch {
+  downloaderId: string;
+  downloaderName: string;
+  supportedEntity: string;
+  normalizedUrl: string;
+  label?: string;
+  qualityOptions: DownloaderQualityOption[];
+}
+
+export interface DownloaderMatchRequest {
+  url: string;
+}
+
+export interface DownloaderPreflightRequest {
+  url: string;
+  entity: string;
+  entityId?: number;
+}
+
+export interface DownloaderPreflightResponse {
+  isDuplicate: boolean;
+  duplicateReason?: string;
+}
+
+export interface DownloaderStartRequest {
+  downloaderId: string;
+  url: string;
+  entity: string;
+  entityId?: number;
+  qualityId?: string;
+  autoApplyMetadata?: boolean;
+  allowDuplicateDownload?: boolean;
+}
+
+export interface DownloaderBatchGenerateOptions {
+  thumbnails?: boolean;
+  previews?: boolean;
+  sprites?: boolean;
+  markers?: boolean;
+  phashes?: boolean;
+  md5?: boolean;
+  imageThumbnails?: boolean;
+  imagePhashes?: boolean;
+  overwrite?: boolean;
+  sceneIds?: number[];
+  paths?: string[];
+}
+
+export interface DownloaderBatchItem {
+  downloaderId?: string;
+  url: string;
+  entity: string;
+  entityId?: number;
+  qualityId?: string;
+  label?: string;
+  title?: string;
+  createEntityIfMissing?: boolean;
+  autoApplyMetadata?: boolean;
+}
+
+export interface DownloaderBatchFollowUp {
+  scrapeScenes?: boolean;
+  allowDuplicateDownloads?: boolean;
+  generate?: DownloaderBatchGenerateOptions;
+}
+
+export interface DownloaderBatchStartRequest {
+  items: DownloaderBatchItem[];
+  followUp?: DownloaderBatchFollowUp;
+}
+
+export interface DownloaderBatchStartResponse {
+  jobId: string;
+  queuedCount: number;
+}
+
 export interface MetadataServerValidationResult {
   valid: boolean;
   status: string;
@@ -756,6 +951,20 @@ export interface MetadataServerPerformerImportRequest {
   performerId: string;
 }
 
+export interface MetadataServerFindByIdsRequest {
+  endpoint: string;
+  ids: string[];
+}
+
+export interface MetadataServerPerformerBatchTagRequest {
+  endpoint: string;
+  ids?: number[];
+  filter?: PerformerFilterCriteria;
+  selectAll?: boolean;
+  refreshAlreadyTagged?: boolean;
+  excludeFields?: string[];
+}
+
 export interface MetadataServerStudioMatch {
   endpoint: string;
   serverName: string;
@@ -770,6 +979,39 @@ export interface MetadataServerStudioMatch {
 export interface MetadataServerStudioImportRequest {
   endpoint: string;
   studioId: string;
+}
+
+export interface MetadataServerStudioBatchTagRequest {
+  endpoint: string;
+  ids?: number[];
+  filter?: StudioFilterCriteria;
+  selectAll?: boolean;
+  refreshAlreadyTagged?: boolean;
+  excludeFields?: string[];
+  createParentStudios?: boolean;
+}
+
+export interface MetadataServerTagMatch {
+  endpoint: string;
+  metadataServerName: string;
+  id: string;
+  name: string;
+  description?: string;
+  aliases: string[];
+}
+
+export interface MetadataServerTagImportRequest {
+  endpoint: string;
+  tagId: string;
+}
+
+export interface MetadataServerTagBatchTagRequest {
+  endpoint: string;
+  ids?: number[];
+  filter?: TagFilterCriteria;
+  selectAll?: boolean;
+  refreshAlreadyTagged?: boolean;
+  excludeFields?: string[];
 }
 
 export interface MetadataServerEntityCandidate {

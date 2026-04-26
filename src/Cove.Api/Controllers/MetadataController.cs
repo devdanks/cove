@@ -218,94 +218,9 @@ public class MetadataController(
     }
 
     [HttpPost("auto-tag")]
-    public ActionResult<object> StartAutoTag([FromBody] AutoTagOptionsDto? opts)
+    public ActionResult<object> StartAutoTag([FromBody] AutoTagOptionsDto? opts, [FromServices] IAutoTagService autoTagService)
     {
-        var jobId = jobService.Enqueue("auto-tag", "Auto-tagging content", async (progress, ct) =>
-        {
-            using var scope = scopeFactory.CreateScope();
-            var dbCtx = scope.ServiceProvider.GetRequiredService<CoveContext>();
-
-            // Load all performers, studios, tags for matching
-            var performers = await dbCtx.Performers.AsNoTracking().ToListAsync(ct);
-            var studios = await dbCtx.Studios.AsNoTracking().ToListAsync(ct);
-            var tags = await dbCtx.Tags.Include(t => t.Aliases).AsNoTracking().ToListAsync(ct);
-
-            // Filter to configured subsets if provided
-            if (opts?.Performers?.Count > 0)
-                performers = performers.Where(p => opts.Performers.Any(n => p.Name.Contains(n, StringComparison.OrdinalIgnoreCase))).ToList();
-            if (opts?.Studios?.Count > 0)
-                studios = studios.Where(s => opts.Studios.Any(n => s.Name.Contains(n, StringComparison.OrdinalIgnoreCase))).ToList();
-            if (opts?.Tags?.Count > 0)
-                tags = tags.Where(t => opts.Tags.Any(n => t.Name.Contains(n, StringComparison.OrdinalIgnoreCase))).ToList();
-
-            var scenes = await dbCtx.Scenes
-                .Include(s => s.Files).ThenInclude(f => f.ParentFolder)
-                .Include(s => s.SceneTags)
-                .Include(s => s.ScenePerformers)
-                .ToListAsync(ct);
-
-            var total = scenes.Count;
-            var tagged = 0;
-
-            for (var i = 0; i < scenes.Count; i++)
-            {
-                ct.ThrowIfCancellationRequested();
-                progress.Report((double)(i + 1) / total, $"Auto-tagging scenes ({i + 1}/{total})");
-
-                var scene = scenes[i];
-                var sceneFile = scene.Files.FirstOrDefault();
-                if (sceneFile == null) continue;
-
-                var path = Path.Combine(sceneFile.ParentFolder?.Path ?? "", sceneFile.Basename).ToLowerInvariant();
-                var title = (scene.Title ?? "").ToLowerInvariant();
-                var searchText = $"{path} {title}";
-
-                // Match performers by name in file path/title
-                var existingPerformerIds = scene.ScenePerformers.Select(sp => sp.PerformerId).ToHashSet();
-                foreach (var performer in performers)
-                {
-                    if (existingPerformerIds.Contains(performer.Id)) continue;
-                    if (searchText.Contains(performer.Name.ToLowerInvariant()))
-                    {
-                        scene.ScenePerformers.Add(new ScenePerformer { PerformerId = performer.Id, SceneId = scene.Id });
-                        tagged++;
-                    }
-                }
-
-                // Match studios by name in file path
-                if (scene.StudioId == null)
-                {
-                    foreach (var studio in studios)
-                    {
-                        if (searchText.Contains(studio.Name.ToLowerInvariant()))
-                        {
-                            scene.StudioId = studio.Id;
-                            tagged++;
-                            break;
-                        }
-                    }
-                }
-
-                // Match tags by name or alias in file path/title
-                var existingTagIds = scene.SceneTags.Select(st => st.TagId).ToHashSet();
-                foreach (var tag in tags)
-                {
-                    if (existingTagIds.Contains(tag.Id)) continue;
-                    var names = new List<string> { tag.Name.ToLowerInvariant() };
-                    names.AddRange(tag.Aliases.Select(a => a.Alias.ToLowerInvariant()));
-
-                    if (names.Any(n => searchText.Contains(n)))
-                    {
-                        scene.SceneTags.Add(new SceneTag { TagId = tag.Id, SceneId = scene.Id });
-                        tagged++;
-                    }
-                }
-            }
-
-            await dbCtx.SaveChangesAsync(ct);
-            logger.LogInformation("Auto-tag completed. {Tagged} associations created", tagged);
-        }, exclusive: false);
-
+        var jobId = autoTagService.StartAutoTag(opts?.Performers, opts?.Studios, opts?.Tags);
         return Ok(new { jobId });
     }
 

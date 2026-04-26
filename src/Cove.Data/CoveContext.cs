@@ -15,6 +15,8 @@ public class CoveContext : DbContext
 
     public CoveContext(DbContextOptions<CoveContext> options) : base(options) { }
 
+    protected CoveContext(DbContextOptions options) : base(options) { }
+
     // Core entities
     public DbSet<Scene> Scenes => Set<Scene>();
     public DbSet<Performer> Performers => Set<Performer>();
@@ -26,6 +28,7 @@ public class CoveContext : DbContext
     public DbSet<SceneMarker> SceneMarkers => Set<SceneMarker>();
     public DbSet<SavedFilter> SavedFilters => Set<SavedFilter>();
     public DbSet<GalleryChapter> GalleryChapters => Set<GalleryChapter>();
+    public DbSet<ScrapeAttempt> ScrapeAttempts => Set<ScrapeAttempt>();
 
     // Users
     public DbSet<User> Users => Set<User>();

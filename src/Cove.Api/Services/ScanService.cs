@@ -34,6 +34,70 @@ public class ScanService(
         return configured;
     }
 
+    public async Task<int> ImportDownloadedSceneAsync(string path, int? sceneId, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException("Downloaded scene file not found", path);
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var videoFile = await ProcessVideoFileAsync(db, path, sceneId, ct);
+        await db.SaveChangesAsync(ct);
+
+        var resolvedSceneId = videoFile.SceneId;
+        if (!resolvedSceneId.HasValue || resolvedSceneId.Value == 0)
+            throw new InvalidOperationException($"Imported video file {path} was not attached to a scene");
+
+        eventBus.Publish(new EntityEvent(
+            sceneId.HasValue ? EventType.SceneUpdated : EventType.SceneCreated,
+            "Scene",
+            resolvedSceneId.Value));
+
+        return resolvedSceneId.Value;
+    }
+
+    public async Task<int> ImportDownloadedImageAsync(string path, int? imageId, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException("Downloaded image file not found", path);
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var image = await ProcessImageFileAsync(db, path, imageId, ct);
+        await db.SaveChangesAsync(ct);
+
+        if (image.Id == 0)
+            throw new InvalidOperationException($"Imported image file {path} was not attached to an image");
+
+        eventBus.Publish(new EntityEvent(
+            imageId.HasValue ? EventType.ImageUpdated : EventType.ImageCreated,
+            "Image",
+            image.Id));
+
+        return image.Id;
+    }
+
+    public async Task<int> ImportDownloadedGalleryAsync(string path, int? galleryId, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException("Downloaded gallery file not found", path);
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var gallery = await ProcessGalleryFileAsync(db, path, galleryId, ct);
+        await db.SaveChangesAsync(ct);
+
+        if (gallery.Id == 0)
+            throw new InvalidOperationException($"Imported gallery file {path} was not attached to a gallery");
+
+        eventBus.Publish(new EntityEvent(
+            galleryId.HasValue ? EventType.GalleryUpdated : EventType.GalleryCreated,
+            "Gallery",
+            gallery.Id));
+
+        return gallery.Id;
+    }
+
     public string StartScan(ScanOperationOptions? options = null)
     {
         options ??= new ScanOperationOptions();
@@ -152,15 +216,15 @@ public class ScanService(
                         if (videoExts.Contains(file.Extension))
                         {
                             processedVideoPaths.Add(file.Path);
-                            await ProcessVideoFileAsync(db, file.Path, ct);
+                            await ProcessVideoFileAsync(db, file.Path, sceneId: null, ct);
                         }
                         else if (imageExts.Contains(file.Extension))
                         {
                             processedImagePaths.Add(file.Path);
-                            await ProcessImageFileAsync(db, file.Path, ct);
+                            await ProcessImageFileAsync(db, file.Path, imageId: null, ct);
                         }
                         else if (galleryExts.Contains(file.Extension))
-                            await ProcessGalleryFileAsync(db, file.Path, ct);
+                            await ProcessGalleryFileAsync(db, file.Path, galleryId: null, ct);
                     }
                     catch (Exception ex)
                     {
@@ -505,7 +569,7 @@ public class ScanService(
         return folder;
     }
 
-    private async Task ProcessVideoFileAsync(CoveContext db, string path, CancellationToken ct)
+    private async Task<VideoFile> ProcessVideoFileAsync(CoveContext db, string path, int? sceneId, CancellationToken ct)
     {
         var fileInfo = new FileInfo(path);
         var dirPath = Path.GetDirectoryName(path) ?? path;
@@ -515,17 +579,31 @@ public class ScanService(
         var existing = await db.VideoFiles
             .FirstOrDefaultAsync(f => f.ParentFolderId == folder.Id && f.Basename == basename, ct);
 
+        Scene? targetScene = null;
+        if (sceneId.HasValue)
+        {
+            targetScene = await db.Scenes.FirstOrDefaultAsync(s => s.Id == sceneId.Value, ct)
+                ?? throw new InvalidOperationException($"Scene {sceneId.Value} was not found for downloaded media import");
+
+            if (string.IsNullOrWhiteSpace(targetScene.Title))
+                targetScene.Title = Path.GetFileNameWithoutExtension(path);
+        }
+
         if (existing != null)
         {
             existing.Size = fileInfo.Length;
             existing.ModTime = fileInfo.LastWriteTimeUtc;
+
+            if (targetScene != null)
+                existing.SceneId = targetScene.Id;
 
             // Re-probe if metadata is missing (e.g., FFprobe wasn't available during initial scan)
             if (existing.Width == 0 && existing.Height == 0 && existing.Duration == 0)
             {
                 await ProbeVideoAsync(existing, path, ct);
             }
-            return;
+
+            return existing;
         }
 
         // Create video file entry
@@ -535,20 +613,35 @@ public class ScanService(
             ParentFolderId = folder.Id,
             Size = fileInfo.Length,
             ModTime = fileInfo.LastWriteTimeUtc,
-            Format = Path.GetExtension(path).TrimStart('.').ToLowerInvariant()
+            Format = Path.GetExtension(path).TrimStart('.').ToLowerInvariant(),
+            SceneId = targetScene?.Id
         };
 
+        if (targetScene == null)
+        {
+            var scene = new Scene
+            {
+                Title = Path.GetFileNameWithoutExtension(path),
+                Files = [videoFile]
+            };
+
+            db.Scenes.Add(scene);
+        }
+        else
+        {
+            db.VideoFiles.Add(videoFile);
+        }
+
+        await EnrichVideoFileAsync(videoFile, path, ct);
+
+        logger.LogDebug("Added scene file for: {Path}", path);
+        return videoFile;
+    }
+
+    private async Task EnrichVideoFileAsync(VideoFile videoFile, string path, CancellationToken ct)
+    {
         // Probe with FFprobe for metadata
         await ProbeVideoAsync(videoFile, path, ct);
-
-        // Create scene for the video file
-        var scene = new Scene
-        {
-            Title = Path.GetFileNameWithoutExtension(path),
-            Files = [videoFile]
-        };
-
-        db.Scenes.Add(scene);
 
         // Compute oshash fingerprint
         var oshash = await ComputeOshashAsync(path, ct);
@@ -574,7 +667,6 @@ public class ScanService(
             }
         }
 
-        // Detect sidecar caption files (.vtt, .srt) adjacent to the video file
         var videoDir = Path.GetDirectoryName(path);
         var videoBaseName = Path.GetFileNameWithoutExtension(path);
         if (videoDir != null)
@@ -602,12 +694,9 @@ public class ScanService(
                 });
             }
         }
-
-        logger.LogDebug("Added scene for: {Path}", path);
-        eventBus.Publish(new EntityEvent(EventType.SceneCreated, "Scene", 0, scene));
     }
 
-    private async Task ProcessImageFileAsync(CoveContext db, string path, CancellationToken ct)
+    private async Task<Image> ProcessImageFileAsync(CoveContext db, string path, int? imageId, CancellationToken ct)
     {
         var fileInfo = new FileInfo(path);
         var dirPath = Path.GetDirectoryName(path) ?? path;
@@ -615,13 +704,14 @@ public class ScanService(
 
         var basename = Path.GetFileName(path);
         var existing = await db.ImageFiles
+            .Include(f => f.Image)
             .FirstOrDefaultAsync(f => f.ParentFolderId == folder.Id && f.Basename == basename, ct);
 
         if (existing != null)
         {
             existing.Size = fileInfo.Length;
             existing.ModTime = fileInfo.LastWriteTimeUtc;
-            return;
+            return existing.Image ?? throw new InvalidOperationException($"Image file {path} is not attached to an image");
         }
 
         var imageFile = new ImageFile
@@ -633,11 +723,29 @@ public class ScanService(
             Format = Path.GetExtension(path).TrimStart('.').ToLowerInvariant()
         };
 
-        var image = new Image
+        Image image;
+        if (imageId.HasValue)
         {
-            Title = Path.GetFileNameWithoutExtension(path),
-            Files = [imageFile]
-        };
+            image = await db.Images
+                .Include(item => item.Files)
+                .FirstOrDefaultAsync(item => item.Id == imageId.Value, ct)
+                ?? throw new InvalidOperationException($"Image {imageId.Value} was not found for downloaded media import");
+
+            if (string.IsNullOrWhiteSpace(image.Title))
+                image.Title = Path.GetFileNameWithoutExtension(path);
+
+            image.Files.Add(imageFile);
+        }
+        else
+        {
+            image = new Image
+            {
+                Title = Path.GetFileNameWithoutExtension(path),
+                Files = [imageFile]
+            };
+
+            db.Images.Add(image);
+        }
 
         if (config.CalculateMd5)
         {
@@ -652,11 +760,11 @@ public class ScanService(
             }
         }
 
-        db.Images.Add(image);
         logger.LogDebug("Added image for: {Path}", path);
+        return image;
     }
 
-    private async Task ProcessGalleryFileAsync(CoveContext db, string path, CancellationToken ct)
+    private async Task<Gallery> ProcessGalleryFileAsync(CoveContext db, string path, int? galleryId, CancellationToken ct)
     {
         var fileInfo = new FileInfo(path);
         var dirPath = Path.GetDirectoryName(path) ?? path;
@@ -673,7 +781,7 @@ public class ScanService(
         {
             logger.LogDebug("Gallery already processed with {Count} images: {Path}",
                 existing.Gallery.ImageGalleries.Count, path);
-            return;
+            return existing.Gallery;
         }
 
         // Create or update the gallery file entry
@@ -690,7 +798,6 @@ public class ScanService(
         }
         else
         {
-            // Create new gallery file and gallery
             galleryFile = new GalleryFile
             {
                 Basename = basename,
@@ -699,13 +806,29 @@ public class ScanService(
                 ModTime = fileInfo.LastWriteTimeUtc
             };
 
-            gallery = new Gallery
+            if (galleryId.HasValue)
             {
-                Title = Path.GetFileNameWithoutExtension(path),
-                Files = [galleryFile]
-            };
+                gallery = await db.Galleries
+                    .Include(item => item.Files)
+                    .Include(item => item.ImageGalleries)
+                    .FirstOrDefaultAsync(item => item.Id == galleryId.Value, ct)
+                    ?? throw new InvalidOperationException($"Gallery {galleryId.Value} was not found for downloaded media import");
 
-            db.Galleries.Add(gallery);
+                if (string.IsNullOrWhiteSpace(gallery.Title))
+                    gallery.Title = Path.GetFileNameWithoutExtension(path);
+
+                gallery.Files.Add(galleryFile);
+            }
+            else
+            {
+                gallery = new Gallery
+                {
+                    Title = Path.GetFileNameWithoutExtension(path),
+                    Files = [galleryFile]
+                };
+
+                db.Galleries.Add(gallery);
+            }
         }
 
         // Save to get the GalleryFile ID (needed for ZipFileId on images)
@@ -720,7 +843,7 @@ public class ScanService(
             if (imageEntries.Count == 0)
             {
                 logger.LogWarning("No images found in gallery zip: {Path}", path);
-                return;
+                return gallery;
             }
 
             logger.LogDebug("Found {Count} images in gallery: {Path}", imageEntries.Count, path);
@@ -789,6 +912,8 @@ public class ScanService(
         {
             logger.LogError(ex, "Error processing gallery zip file: {Path}", path);
         }
+
+        return gallery;
     }
 
     /// <summary>

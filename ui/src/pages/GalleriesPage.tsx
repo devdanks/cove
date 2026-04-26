@@ -6,7 +6,7 @@ import { ListPage, type DisplayMode } from "../components/ListPage";
 import { InteractiveRatingField, RatingBanner } from "../components/Rating";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
-import { FolderOpen, Image, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check } from "lucide-react";
+import { FolderOpen, Image, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
 import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent } from "../components/EntityCards";
 import { GALLERY_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GALLERY_BULK_FIELDS } from "../components/BulkEditDialog";
@@ -17,6 +17,17 @@ import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCa
 import { useWallColumns } from "../hooks/useWallColumns";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDialog";
+import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
+import {
+  formatBatchDownloadSummary,
+  getBatchDownloadOptionsStorageKey,
+  getUndownloadedSelectionItems,
+  loadStoredBatchDownloadOptions,
+  queueBatchDownloads,
+  saveStoredBatchDownloadOptions,
+  type BatchDownloadOptions,
+} from "../utils/batchDownloads";
 
 interface Props {
   onNavigate: (r: any) => void;
@@ -41,6 +52,8 @@ export function GalleriesPage({ onNavigate }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [wallColumnCount, setWallColumnCount] = useState(5);
+  const [downloadTarget, setDownloadTarget] = useState<Gallery | "new" | null>(null);
+  const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const queryClient = useQueryClient();
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
@@ -56,6 +69,11 @@ export function GalleriesPage({ onNavigate }: Props) {
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
+  const selectedGallery = selectedIds.size === 1 ? items.find((gallery) => selectedIds.has(gallery.id)) : undefined;
+  const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
+  const canDownloadSelectedGallery = selectedDownloadTargets.length > 0;
+  const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-galleries");
+  const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
 
   const bulkDeleteMut = useMutation({
     mutationFn: () => galleries.bulkDelete([...selectedIds]),
@@ -72,9 +90,44 @@ export function GalleriesPage({ onNavigate }: Props) {
     },
   });
 
+  const batchDownloadMut = useMutation({
+    mutationFn: async (options: BatchDownloadOptions) => queueBatchDownloads("Gallery", selectedDownloadTargets, options),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs-active"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs-history"] });
+      queryClient.invalidateQueries({ queryKey: ["galleries"] });
+      window.alert(formatBatchDownloadSummary("gallery", result));
+      selectNone();
+    },
+    onError: (error: Error) => {
+      window.alert(error.message || "Failed to queue the selected downloads.");
+    },
+  });
+
   return (
     <>
     <GalleryCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "gallery", id })} />
+    <GalleryDownloadDialog
+      open={downloadTarget !== null}
+      gallery={downloadTarget && downloadTarget !== "new" ? downloadTarget : undefined}
+      onClose={() => setDownloadTarget(null)}
+      onNavigate={onNavigate}
+    />
+    <BatchDownloadOptionsDialog
+      open={showBatchDownloadOptions}
+      entity="Gallery"
+      itemCount={selectedDownloadTargets.length}
+      initialOptions={batchDownloadOptions}
+      isPending={batchDownloadMut.isPending}
+      onClose={() => setShowBatchDownloadOptions(false)}
+      onConfirm={(options) => {
+        setBatchDownloadOptions(options);
+        saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
+        setShowBatchDownloadOptions(false);
+        batchDownloadMut.mutate(options);
+      }}
+    />
     <ListPage
       title="Galleries"
       pageKey="galleries"
@@ -87,6 +140,14 @@ export function GalleriesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall"]}
+      renderOperations={() => (
+        <button
+          onClick={() => setDownloadTarget("new")}
+          className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
+        >
+          From URL
+        </button>
+      )}
       criteriaDefinitions={GALLERY_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
@@ -99,6 +160,23 @@ export function GalleriesPage({ onNavigate }: Props) {
       onSelectNone={selectNone}
       selectionActions={
         <>
+          {canDownloadSelectedGallery && (
+            <button
+              onClick={() => {
+                if (selectedDownloadTargets.length > 1 || !selectedGallery) {
+                  setShowBatchDownloadOptions(true);
+                  return;
+                }
+
+                setDownloadTarget(selectedGallery);
+              }}
+              disabled={batchDownloadMut.isPending}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-60"
+            >
+              {batchDownloadMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              Download
+            </button>
+          )}
           <button
             onClick={() => setShowBulkEdit(true)}
             className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"

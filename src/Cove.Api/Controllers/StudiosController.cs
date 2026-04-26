@@ -274,7 +274,10 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             var existingRemoteId = studio.RemoteIds?.FirstOrDefault(s => string.IsNullOrWhiteSpace(endpoint) || string.Equals(s.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
             if (existingRemoteId != null)
             {
-                // For studios, just re-search by name (no individual lookup like performers)
+                var existing = await metadataServerService.GetStudioMatchAsync(existingRemoteId.Endpoint, existingRemoteId.RemoteId, ct);
+                if (existing != null)
+                    return Ok(new[] { existing });
+
                 term = studio.Name;
             }
             else
@@ -284,6 +287,15 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         }
 
         return Ok(await metadataServerService.SearchStudiosAsync(term, endpoint, ct));
+    }
+
+    [HttpPost("metadata-server/find-by-ids")]
+    public async Task<ActionResult<IReadOnlyList<MetadataServerStudioMatchDto>>> FindMetadataServerStudiosByIds([FromBody] MetadataServerFindByIdsRequestDto dto, CancellationToken ct)
+    {
+        if (dto.Ids.Count == 0)
+            return Ok(Array.Empty<MetadataServerStudioMatchDto>());
+
+        return Ok(await metadataServerService.GetStudioMatchesAsync(dto.Endpoint, dto.Ids, ct));
     }
 
     [HttpPost("{id:int}/metadata-server/import")]
@@ -304,5 +316,78 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         await db.SaveChangesAsync(ct);
         var updated = await studioRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(MapToDto(updated!));
+    }
+
+    [HttpPost("{id:int}/metadata-server/submit-draft")]
+    public async Task<IActionResult> SubmitStudioDraft(int id, [FromBody] MetadataServerEndpointDto dto, CancellationToken ct)
+    {
+        var studio = await db.Studios
+            .Include(s => s.RemoteIds)
+            .Include(s => s.Aliases)
+            .Include(s => s.Urls)
+            .Include(s => s.Parent).ThenInclude(parent => parent!.RemoteIds)
+            .FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (studio == null) return NotFound();
+
+        var draftId = await metadataServerService.SubmitStudioDraftAsync(studio, dto.Endpoint, ct);
+        return Ok(new { draftId });
+    }
+
+    [HttpPost("metadata-server/batch-tag")]
+    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerStudioBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Endpoint))
+            return BadRequest(new { message = "Endpoint is required" });
+
+        var ids = await ResolveSelectedStudioIdsAsync(dto, ct);
+        if (ids.Count == 0)
+            return BadRequest(new { message = "No studios selected for batch tagging" });
+
+        var jobId = jobService.Enqueue(
+            "metadata-server:studios",
+            $"Tagging {ids.Count} studios from {dto.Endpoint}",
+            async (progress, jobCt) =>
+            {
+                using var scope = scopeFactory.CreateScope();
+                var metadataServerService = scope.ServiceProvider.GetRequiredService<MetadataServerService>();
+                await metadataServerService.BatchTagStudiosAsync(dto.Endpoint, ids, dto.RefreshAlreadyTagged, dto.ExcludeFields, dto.CreateParentStudios, progress, jobCt);
+            });
+
+        return Ok(new { jobId, itemCount = ids.Count });
+    }
+
+    private async Task<List<int>> ResolveSelectedStudioIdsAsync(MetadataServerStudioBatchTagRequestDto dto, CancellationToken ct)
+    {
+        if (dto.Ids?.Count > 0)
+            return dto.Ids.Distinct().ToList();
+
+        if (!dto.SelectAll && dto.Filter == null)
+            return [];
+
+        const int pageSize = 500;
+        var ids = new List<int>();
+        var page = 1;
+
+        while (true)
+        {
+            var (items, totalCount) = await studioRepo.FindAsync(dto.Filter, new FindFilter
+            {
+                Page = page,
+                PerPage = pageSize,
+                Sort = "id",
+                Direction = SortDirection.Asc,
+            }, ct);
+
+            if (items.Count == 0)
+                break;
+
+            ids.AddRange(items.Select(item => item.Id));
+            if (ids.Count >= totalCount)
+                break;
+
+            page++;
+        }
+
+        return ids.Distinct().ToList();
     }
 }

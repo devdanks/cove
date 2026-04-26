@@ -18,6 +18,7 @@ import { ExtensionSlot } from "../router/RouteRegistry";
 import { useRouteRegistry } from "../router/RouteRegistry";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
+import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
 
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
@@ -55,6 +56,7 @@ export function StudiosPage({ onNavigate }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
+  const [showMetadataBatch, setShowMetadataBatch] = useState(false);
   const queryClient = useQueryClient();
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
@@ -88,6 +90,13 @@ export function StudiosPage({ onNavigate }: Props) {
   return (
     <>
       <StudioCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "studio", id })} />
+      <MetadataServerBatchDialog
+        open={showMetadataBatch}
+        entityType="studio"
+        selectedIds={[...selectedIds]}
+        onClose={() => setShowMetadataBatch(false)}
+        onQueued={selectNone}
+      />
       <ListPage
         title="Studios"
         pageKey="studios"
@@ -109,6 +118,13 @@ export function StudiosPage({ onNavigate }: Props) {
         onSelectNone={selectNone}
         selectionActions={
           <>
+            <button
+              onClick={() => setShowMetadataBatch(true)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+            >
+              <Building2 className="w-3 h-3" />
+              MetadataServer
+            </button>
             <button
               onClick={() => setShowBulkEdit(true)}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"

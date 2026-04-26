@@ -225,6 +225,8 @@ public record CoveConfigDto
     public string Host { get; init; } = "0.0.0.0";
     public int Port { get; init; } = 9999;
     public int MaxParallelTasks { get; init; } = 1;
+    public int MaxConcurrentDownloads { get; init; } = 3;
+    public List<DownloaderPathOverrideDto> DownloaderPathOverrides { get; init; } = [];
     public bool CalculateMd5 { get; init; }
     public bool EnableFfmpegHwAccel { get; init; }
     public List<string> VideoExtensions { get; init; } = [];
@@ -252,6 +254,13 @@ public record CovePathDto
     public bool ExcludeVideo { get; init; }
     public bool ExcludeImage { get; init; }
     public bool ExcludeAudio { get; init; }
+}
+
+public record DownloaderPathOverrideDto
+{
+    public string DownloaderId { get; init; } = string.Empty;
+    public string? Site { get; init; }
+    public string Path { get; init; } = string.Empty;
 }
 
 public record InterfaceConfigDto
@@ -287,7 +296,15 @@ public record ScrapingConfigDto
     public List<string> ScraperDirectories { get; init; } = [];
     public List<PackageSourceDto> ScraperPackageSources { get; init; } = [];
     public List<MetadataServerDto> MetadataServers { get; init; } = [];
+    public List<ScraperPreferenceDto> ScraperPreferences { get; init; } = [];
     public IdentifyDefaultsConfigDto IdentifyDefaults { get; init; } = new();
+    public MetadataBatchDefaultsConfigDto MetadataBatchDefaults { get; init; } = new();
+}
+
+public record ScraperPreferenceDto
+{
+    public string Site { get; init; } = "";
+    public string ScraperId { get; init; } = "";
 }
 
 public record IdentifyDefaultsConfigDto
@@ -297,6 +314,13 @@ public record IdentifyDefaultsConfigDto
     public bool CreateStudios { get; init; } = true;
     public int? AutoApplyMaxDurationDifferenceSeconds { get; init; }
     public int? AutoApplyMaxPhashDistance { get; init; }
+}
+
+public record MetadataBatchDefaultsConfigDto
+{
+    public bool RefreshAlreadyTagged { get; init; }
+    public bool CreateParentStudios { get; init; } = true;
+    public List<string> ExcludeFields { get; init; } = [];
 }
 
 public record PackageSourceDto
@@ -345,6 +369,66 @@ public record MetadataServerStudioMatchDto(
 );
 
 public record MetadataServerStudioImportRequestDto(string Endpoint, string StudioId);
+
+public record MetadataServerTagMatchDto(
+    string Endpoint,
+    string MetadataServerName,
+    string Id,
+    string Name,
+    string? Description,
+    List<string> Aliases
+);
+
+public record MetadataServerTagImportRequestDto(string Endpoint, string TagId);
+
+public record MetadataServerFindByIdsRequestDto(string Endpoint, List<string> Ids);
+
+public record MetadataServerBatchTagItemResultDto(
+    int LocalId,
+    string LocalName,
+    string Outcome,
+    string? RemoteId = null,
+    string? Message = null
+);
+
+public record MetadataServerBatchTagResultDto(
+    int Processed,
+    int Updated,
+    int Skipped,
+    int Failed,
+    List<MetadataServerBatchTagItemResultDto> Items
+);
+
+public record MetadataServerPerformerBatchTagRequestDto
+{
+    public string Endpoint { get; init; } = string.Empty;
+    public List<int>? Ids { get; init; }
+    public PerformerFilter? Filter { get; init; }
+    public bool SelectAll { get; init; }
+    public bool RefreshAlreadyTagged { get; init; }
+    public List<string>? ExcludeFields { get; init; }
+}
+
+public record MetadataServerStudioBatchTagRequestDto
+{
+    public string Endpoint { get; init; } = string.Empty;
+    public List<int>? Ids { get; init; }
+    public StudioFilter? Filter { get; init; }
+    public bool SelectAll { get; init; }
+    public bool RefreshAlreadyTagged { get; init; }
+    public List<string>? ExcludeFields { get; init; }
+    public bool CreateParentStudios { get; init; } = true;
+}
+
+public record MetadataServerTagBatchTagRequestDto
+{
+    public string Endpoint { get; init; } = string.Empty;
+    public List<int>? Ids { get; init; }
+    public TagFilter? Filter { get; init; }
+    public bool SelectAll { get; init; }
+    public bool RefreshAlreadyTagged { get; init; }
+    public List<string>? ExcludeFields { get; init; }
+}
 
 public record MetadataServerEntityCandidateDto(
     string RemoteId,
@@ -415,6 +499,126 @@ public record ScraperSummaryDto(
     List<string> Urls,
     string SourcePath
 );
+
+public record CreateScrapeAttemptDto(
+    string ScraperId,
+    string EntityType,
+    int? EntityId,
+    string InputKind,
+    string? Url,
+    string? Name,
+    Dictionary<string, object>? Fragment);
+
+public record ScrapeAttemptDto(
+    Guid Id,
+    string ScraperId,
+    string EntityType,
+    int? EntityId,
+    string InputKind,
+    string? InputJson,
+    string? ResultJson,
+    string? CandidateResultsJson,
+    string? EntitySnapshotJson,
+    string Status,
+    string? Error,
+    string CreatedAt,
+    string? AppliedAt);
+
+public record ApplySceneScrapeAttemptDto(
+    List<string>? ReplaceFields,
+    Dictionary<string, string>? CollectionModes,
+    bool CreateMissingTags = true,
+    bool CreateMissingPerformers = true,
+    bool CreateMissingStudio = true,
+    bool MarkOrganized = false,
+    bool HydratePerformers = false,
+    int? SelectedCandidateIndex = null);
+
+public record BatchSceneScrapeStartRequestDto(
+    string ScraperId,
+    string InputKind,
+    List<int> SceneIds,
+    bool AutoApply = true,
+    bool CreateMissingTags = true,
+    bool CreateMissingPerformers = true,
+    bool CreateMissingStudio = true,
+    bool MarkOrganized = false,
+    bool HydratePerformers = false);
+
+public record PerformerScrapeUrlRequestDto(string? Url, bool CreateMissingTags = true);
+
+public record PerformerScrapeRequestDto(string? InputKind, string? ScraperId, string? Url, string? Name, bool CreateMissingTags = true);
+
+public record PerformerScrapePreviewDto(ScrapedPerformerDto Scraped, string InputKind, string? SourceValue);
+
+public record PerformerApplyScrapedRequestDto(ScrapedPerformerDto Scraped, bool CreateMissingTags = true);
+
+public record DownloaderDescriptorDto(
+    string Id,
+    string Name,
+    string SupportedEntity,
+    List<string> SupportedUrlPatterns,
+    List<string> Capabilities
+);
+
+public record DownloaderQualityOptionDto(string Id, string Label, string? Description = null);
+
+public record DownloaderMatchDto(
+    string DownloaderId,
+    string DownloaderName,
+    string SupportedEntity,
+    string NormalizedUrl,
+    string? Label,
+    List<DownloaderQualityOptionDto> QualityOptions
+);
+
+public record DownloaderMatchRequestDto(string Url);
+
+public record DownloaderPreflightRequestDto
+{
+    public string Url { get; init; } = string.Empty;
+    public string Entity { get; init; } = string.Empty;
+    public int? EntityId { get; init; }
+}
+
+public record DownloaderPreflightResponseDto(bool IsDuplicate, string? DuplicateReason);
+
+public record DownloaderStartRequestDto
+{
+    public string DownloaderId { get; init; } = string.Empty;
+    public string Url { get; init; } = string.Empty;
+    public string Entity { get; init; } = string.Empty;
+    public int? EntityId { get; init; }
+    public string? QualityId { get; init; }
+    public bool AutoApplyMetadata { get; init; }
+    public bool AllowDuplicateDownload { get; init; }
+}
+
+public record DownloaderBatchItemDto
+{
+    public string? DownloaderId { get; init; }
+    public string Url { get; init; } = string.Empty;
+    public string Entity { get; init; } = string.Empty;
+    public int? EntityId { get; init; }
+    public string? QualityId { get; init; }
+    public string? Label { get; init; }
+    public string? Title { get; init; }
+    public bool CreateEntityIfMissing { get; init; }
+    public bool AutoApplyMetadata { get; init; }
+}
+
+public record DownloaderBatchFollowUpDto
+{
+    public bool ScrapeScenes { get; init; }
+    public bool AllowDuplicateDownloads { get; init; }
+    public GenerateOptionsDto? Generate { get; init; }
+}
+
+public record DownloaderBatchStartRequestDto
+{
+    public List<DownloaderBatchItemDto> Items { get; init; } = [];
+    public DownloaderBatchFollowUpDto FollowUp { get; init; } = new();
+}
 
 // ===== ACTIVITY DTOs =====
 public record SceneActivityDto(double? ResumeTime, double? PlayDuration);
@@ -623,6 +827,10 @@ public record IdentifyOptionsDto
 
 // ===== DATABASE OPERATION DTOs =====
 public record BackupResultDto(string BackupPath, long SizeBytes, string Timestamp);
+
+public record ConfigBackupResultDto(string BackupPath, long SizeBytes, string Timestamp);
+
+public record WipeResultDto(string Message, string BackupPath, string Timestamp, string? ConfigBackupPath);
 public record RestoreBackupRequestDto(string BackupPath);
 
 // ===== SCRAPER DTOs =====
@@ -664,10 +872,133 @@ public record ScrapedPerformerDto
     public List<string> TagNames { get; init; } = [];
 }
 
+public record ScrapedGalleryDto
+{
+    public string? Title { get; init; }
+    public string? Code { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+    public string? Photographer { get; init; }
+    public string? ImageUrl { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? StudioName { get; init; }
+    public List<string> PerformerNames { get; init; } = [];
+    public List<string> TagNames { get; init; } = [];
+}
+
+public record ScrapedImageDto
+{
+    public string? Title { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+    public string? Photographer { get; init; }
+    public string? ImageUrl { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? StudioName { get; init; }
+    public List<string> PerformerNames { get; init; } = [];
+    public List<string> TagNames { get; init; } = [];
+    public string? GalleryTitle { get; init; }
+}
+
+public record ScrapedGroupDto
+{
+    public string? Name { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+    public string? ImageUrl { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? StudioName { get; init; }
+    public List<string> TagNames { get; init; } = [];
+}
+
+public record SceneScrapeFingerprint(string Type, string Value, double? Duration = null);
+
+public record SceneScrapeFile
+{
+    public string Path { get; init; } = string.Empty;
+    public string? Format { get; init; }
+    public int? Width { get; init; }
+    public int? Height { get; init; }
+    public double? DurationSeconds { get; init; }
+    public string? VideoCodec { get; init; }
+    public string? AudioCodec { get; init; }
+    public double? FrameRate { get; init; }
+    public long? BitRate { get; init; }
+    public long? SizeBytes { get; init; }
+    public List<SceneScrapeFingerprint> Fingerprints { get; init; } = [];
+}
+
+public record SceneScrapeInput
+{
+    public int? LocalSceneId { get; init; }
+    public string? Url { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? Title { get; init; }
+    public string? Code { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+    public string? Director { get; init; }
+    public List<SceneScrapeFile> Files { get; init; } = [];
+}
+
+public record PerformerScrapeInput
+{
+    public int? LocalPerformerId { get; init; }
+    public string? Url { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? Name { get; init; }
+    public string? Disambiguation { get; init; }
+    public string? Gender { get; init; }
+    public string? Birthdate { get; init; }
+    public string? Country { get; init; }
+    public string? Ethnicity { get; init; }
+    public string? EyeColor { get; init; }
+    public string? HairColor { get; init; }
+    public int? HeightCm { get; init; }
+    public int? Weight { get; init; }
+    public string? Measurements { get; init; }
+    public string? Details { get; init; }
+    public List<string> Aliases { get; init; } = [];
+}
+
+public record GalleryScrapeInput
+{
+    public int? LocalGalleryId { get; init; }
+    public string? Url { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? Title { get; init; }
+    public string? Code { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+    public string? Photographer { get; init; }
+}
+
+public record ImageScrapeInput
+{
+    public int? LocalImageId { get; init; }
+    public string? Url { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? Title { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+    public string? Photographer { get; init; }
+}
+
+public record GroupScrapeInput
+{
+    public int? LocalGroupId { get; init; }
+    public string? Url { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? Name { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+}
+
 // ===== SCRAPER EXECUTION REQUEST DTOs =====
 public record ScrapeUrlRequest(string ScraperId, string EntityType, string Url);
 public record ScrapeNameRequest(string ScraperId, string EntityType, string Name);
 public record ScrapeFragmentRequest(string ScraperId, string EntityType, Dictionary<string, object> Fragment);
+public record ScraperMatchUrlRequest(string Url, string? EntityType = null);
 
 // ===== PLUGIN DTOs =====
 public record PluginDto(string Id, string Name, string Description, string Version, bool Enabled, List<PluginTaskDto> Tasks, List<PluginSettingSchemaDto>? Settings = null, string? Url = null);

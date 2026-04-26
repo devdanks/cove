@@ -401,6 +401,25 @@ public class GalleryChapterConfiguration : IEntityTypeConfiguration<GalleryChapt
     }
 }
 
+public class ScrapeAttemptConfiguration : IEntityTypeConfiguration<ScrapeAttempt>
+{
+    public void Configure(EntityTypeBuilder<ScrapeAttempt> builder)
+    {
+        builder.ToTable("scrape_attempts");
+        builder.HasKey(a => a.Id);
+        builder.Property(a => a.ScraperId).IsRequired().HasMaxLength(500);
+        builder.Property(a => a.EntityType).IsRequired().HasMaxLength(100);
+        builder.Property(a => a.InputKind).IsRequired().HasMaxLength(50);
+        builder.Property(a => a.InputJson).IsRequired();
+        builder.Property(a => a.CandidateResultsJson);
+        builder.Property(a => a.Status).IsRequired().HasMaxLength(50);
+        builder.Property(a => a.AppliedByUser).HasMaxLength(200);
+        builder.HasIndex(a => a.CreatedAt);
+        builder.HasIndex(a => a.Status);
+        builder.HasIndex(a => new { a.EntityType, a.EntityId, a.CreatedAt });
+    }
+}
+
 public class UserConfiguration : IEntityTypeConfiguration<User>
 {
     public void Configure(EntityTypeBuilder<User> builder)

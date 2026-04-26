@@ -35,6 +35,11 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
 
   return {
     ...config,
+    downloaderPathOverrides: (config.downloaderPathOverrides ?? []).map((overridePath) => ({
+      downloaderId: overridePath.downloaderId?.trim() ?? "",
+      site: overridePath.site?.trim() || undefined,
+      path: overridePath.path?.trim() ?? "",
+    })),
     interface: {
       ...interfaceConfig,
       menuItems: interfaceConfig.menuItems.length > 0 ? interfaceConfig.menuItems : defaultMenuItems,
@@ -49,6 +54,12 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
     scraping: {
       ...config.scraping,
       metadataServers: config.scraping.metadataServers ?? [],
+      scraperPreferences: (config.scraping.scraperPreferences ?? [])
+        .map((preference) => ({
+          site: preference.site?.trim().toLowerCase() ?? "",
+          scraperId: preference.scraperId?.trim() ?? "",
+        }))
+        .filter((preference) => preference.site !== "" && preference.scraperId !== ""),
       identifyDefaults: {
         createTags: identifyDefaults.createTags ?? true,
         createPerformers: identifyDefaults.createPerformers ?? true,

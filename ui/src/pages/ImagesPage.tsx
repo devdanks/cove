@@ -5,7 +5,7 @@ import type { FindFilter, Image, ImageFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { RatingBanner } from "../components/Rating";
 import { useMultiSelect } from "../hooks/useMultiSelect";
-import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen } from "lucide-react";
+import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen, Search, Download } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { FavoriteCounter, GalleriesPopoverContent, PerformerPreviewGrid, PopoverButton } from "../components/EntityCards";
@@ -19,6 +19,17 @@ import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDialog";
+import { ImageDownloadDialog } from "../components/ImageDownloadDialog";
+import {
+  formatBatchDownloadSummary,
+  getBatchDownloadOptionsStorageKey,
+  getUndownloadedSelectionItems,
+  loadStoredBatchDownloadOptions,
+  queueBatchDownloads,
+  saveStoredBatchDownloadOptions,
+  type BatchDownloadOptions,
+} from "../utils/batchDownloads";
 
 const SORT_OPTIONS = [
   { value: "updated_at", label: "Updated At" },
@@ -61,6 +72,8 @@ export function ImagesPage({ onNavigate }: Props) {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [wallColumnCount, setWallColumnCount] = useState(6);
+  const [downloadTarget, setDownloadTarget] = useState<Image | "new" | null>(null);
+  const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const queryClient = useQueryClient();
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
@@ -76,6 +89,11 @@ export function ImagesPage({ onNavigate }: Props) {
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
+  const selectedImage = selectedIds.size === 1 ? items.find((image) => selectedIds.has(image.id)) : undefined;
+  const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
+  const canDownloadSelectedImage = selectedDownloadTargets.length > 0;
+  const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-images");
+  const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
 
   const lightboxImages: LightboxImage[] = useMemo(
     () => items.map((img) => ({ id: img.id, src: images.imageUrl(img.id), title: getImageDisplayTitle(img) })),
@@ -101,9 +119,44 @@ export function ImagesPage({ onNavigate }: Props) {
     },
   });
 
+  const batchDownloadMut = useMutation({
+    mutationFn: async (options: BatchDownloadOptions) => queueBatchDownloads("Image", selectedDownloadTargets, options),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs-active"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs-history"] });
+      queryClient.invalidateQueries({ queryKey: ["images"] });
+      window.alert(formatBatchDownloadSummary("image", result));
+      selectNone();
+    },
+    onError: (error: Error) => {
+      window.alert(error.message || "Failed to queue the selected downloads.");
+    },
+  });
+
   return (
     <>
     <ImageCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "image", id })} />
+    <ImageDownloadDialog
+      open={downloadTarget !== null}
+      image={downloadTarget && downloadTarget !== "new" ? downloadTarget : undefined}
+      onClose={() => setDownloadTarget(null)}
+      onNavigate={onNavigate}
+    />
+    <BatchDownloadOptionsDialog
+      open={showBatchDownloadOptions}
+      entity="Image"
+      itemCount={selectedDownloadTargets.length}
+      initialOptions={batchDownloadOptions}
+      isPending={batchDownloadMut.isPending}
+      onClose={() => setShowBatchDownloadOptions(false)}
+      onConfirm={(options) => {
+        setBatchDownloadOptions(options);
+        saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
+        setShowBatchDownloadOptions(false);
+        batchDownloadMut.mutate(options);
+      }}
+    />
     <ListPage
       title="Images"
       pageKey="images"
@@ -116,6 +169,14 @@ export function ImagesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "wall"]}
+      renderOperations={() => (
+        <button
+          onClick={() => setDownloadTarget("new")}
+          className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
+        >
+          From URL
+        </button>
+      )}
       onNew={() => setShowCreate(true)}
       criteriaDefinitions={IMAGE_CRITERIA}
       objectFilter={objectFilter}
@@ -128,6 +189,23 @@ export function ImagesPage({ onNavigate }: Props) {
       onSelectNone={selectNone}
       selectionActions={
         <>
+          {canDownloadSelectedImage && (
+            <button
+              onClick={() => {
+                if (selectedDownloadTargets.length > 1 || !selectedImage) {
+                  setShowBatchDownloadOptions(true);
+                  return;
+                }
+
+                setDownloadTarget(selectedImage);
+              }}
+              disabled={batchDownloadMut.isPending}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-60"
+            >
+              {batchDownloadMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              Download
+            </button>
+          )}
           <button
             onClick={() => setShowBulkEdit(true)}
             className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"

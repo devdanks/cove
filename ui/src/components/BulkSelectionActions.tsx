@@ -1,10 +1,24 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Edit, Loader2, Trash2, Search, Merge, Play } from "lucide-react";
+import { Download, Edit, Loader2, Trash2, Search, Merge, Play } from "lucide-react";
 import { scenes as scenesApi, images, galleries, performers, groups, studios, tags } from "../api/client";
+import type { Scene } from "../api/types";
 import { BulkEditDialog, SCENE_BULK_FIELDS, IMAGE_BULK_FIELDS, GALLERY_BULK_FIELDS, PERFORMER_BULK_FIELDS, GROUP_BULK_FIELDS, STUDIO_BULK_FIELDS, TAG_BULK_FIELDS } from "./BulkEditDialog";
+import { BatchDownloadOptionsDialog } from "./BatchDownloadOptionsDialog";
 import { IdentifyDialog } from "./IdentifyDialog";
 import { SceneQueue } from "./SceneQueue";
+import {
+  DEFAULT_BATCH_DOWNLOAD_OPTIONS,
+  formatBatchDownloadSummary,
+  getBatchDownloadOptionsStorageKey,
+  getUndownloadedSelectionItems,
+  loadStoredBatchDownloadOptions,
+  queueBatchDownloads,
+  saveStoredBatchDownloadOptions,
+  type BatchDownloadOptions,
+  type DownloadSelectionEntity,
+  type DownloadSelectionItem,
+} from "../utils/batchDownloads";
 
 const FIELDS_MAP = {
   scenes: SCENE_BULK_FIELDS,
@@ -23,15 +37,17 @@ interface Props {
   selectedIds: Set<number>;
   onDone: () => void;
   /** Raw scene items for Play/Identify (only needed when entityType is "scenes") */
-  sceneItems?: { id: number; title?: string; updatedAt?: string; files: { basename?: string; duration?: number }[] }[];
+  sceneItems?: Pick<Scene, "id" | "title" | "updatedAt" | "urls" | "files">[];
+  downloadItems?: DownloadSelectionItem[];
   /** Navigate callback for the scene queue player */
   onNavigate?: (route: any) => void;
 }
 
-export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneItems, onNavigate }: Props) {
+export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneItems, downloadItems, onNavigate }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showIdentify, setShowIdentify] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
+  const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const queryClient = useQueryClient();
   const api = API_MAP[entityType];
   const fields = FIELDS_MAP[entityType];
@@ -51,9 +67,68 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
   });
 
   const isScenes = entityType === "scenes";
+  const downloadEntity: DownloadSelectionEntity | null = entityType === "scenes"
+    ? "Scene"
+    : entityType === "images"
+      ? "Image"
+      : entityType === "galleries"
+        ? "Gallery"
+        : null;
+  const resolvedDownloadItems = useMemo(
+    () => downloadItems ?? (downloadEntity === "Scene" ? sceneItems ?? [] : []),
+    [downloadEntity, downloadItems, sceneItems],
+  );
+  const selectedDownloadItems = useMemo(
+    () => (downloadEntity ? getUndownloadedSelectionItems(resolvedDownloadItems, selectedIds) : []),
+    [downloadEntity, resolvedDownloadItems, selectedIds],
+  );
+  const batchDownloadStorageKey = useMemo(
+    () => (downloadEntity ? getBatchDownloadOptionsStorageKey(`bulk-${downloadEntity.toLowerCase()}`) : null),
+    [downloadEntity],
+  );
+  const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() =>
+    batchDownloadStorageKey ? loadStoredBatchDownloadOptions(batchDownloadStorageKey) : DEFAULT_BATCH_DOWNLOAD_OPTIONS,
+  );
+
+  useEffect(() => {
+    if (batchDownloadStorageKey) {
+      setBatchDownloadOptions(loadStoredBatchDownloadOptions(batchDownloadStorageKey));
+    }
+  }, [batchDownloadStorageKey]);
+
+  const batchDownloadMut = useMutation({
+    mutationFn: async (options: BatchDownloadOptions) => {
+      if (!downloadEntity) {
+        throw new Error("Bulk download is not available for this entity type.");
+      }
+
+      return queueBatchDownloads(downloadEntity, selectedDownloadItems, options);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs-active"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs-history"] });
+      queryClient.invalidateQueries();
+      window.alert(formatBatchDownloadSummary(downloadEntity!.toLowerCase(), result));
+      onDone();
+    },
+    onError: (error: Error) => {
+      window.alert(error.message || "Failed to queue the selected downloads.");
+    },
+  });
 
   return (
     <>
+      {downloadEntity && selectedDownloadItems.length > 0 && (
+        <button
+          onClick={() => setShowBatchDownloadOptions(true)}
+          disabled={batchDownloadMut.isPending}
+          className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-60"
+        >
+          {batchDownloadMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+          Download
+        </button>
+      )}
       {fields.length > 0 && (
         <button
           onClick={() => setShowBulkEdit(true)}
@@ -122,6 +197,24 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           }))}
           onClose={() => setShowQueue(false)}
           onNavigate={onNavigate}
+        />
+      )}
+      {downloadEntity && (
+        <BatchDownloadOptionsDialog
+          open={showBatchDownloadOptions}
+          entity={downloadEntity}
+          itemCount={selectedDownloadItems.length}
+          initialOptions={batchDownloadOptions}
+          isPending={batchDownloadMut.isPending}
+          onClose={() => setShowBatchDownloadOptions(false)}
+          onConfirm={(options) => {
+            setBatchDownloadOptions(options);
+            if (batchDownloadStorageKey) {
+              saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
+            }
+            setShowBatchDownloadOptions(false);
+            batchDownloadMut.mutate(options);
+          }}
         />
       )}
     </>

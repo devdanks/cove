@@ -76,6 +76,7 @@ public static class ExtensionCategories
     public const string Search = "search";
     public const string Import = "import";
     public const string Export = "export";
+    public const string Downloader = "downloader";
     public const string Notification = "notification";
     public const string Security = "security";
     public const string MediaPlayer = "media-player";
@@ -347,6 +348,8 @@ public class ExtensionManifestFile
     public string? CssBundle { get; set; }
     /// <summary>Categories/labels for filtering and sorting.</summary>
     public List<string> Categories { get; set; } = [];
+    /// <summary>Runtime permissions requested by the extension.</summary>
+    public ExtensionPermissionManifest Permissions { get; set; } = new();
     /// <summary>SHA-256 checksum of the extension package (set by registry).</summary>
     public string? Checksum { get; set; }
     /// <summary>Registry source URL (set when installed from remote registry).</summary>

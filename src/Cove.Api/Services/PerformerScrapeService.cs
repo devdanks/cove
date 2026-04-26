@@ -1,0 +1,506 @@
+using Cove.Core.DTOs;
+using Cove.Core.Entities;
+using Cove.Core.Enums;
+using Cove.Core.Interfaces;
+using Cove.Data;
+using Microsoft.EntityFrameworkCore;
+using System.Text;
+
+namespace Cove.Api.Services;
+
+public class PerformerScrapeService(
+    CoveContext db,
+    ScraperService scraperService,
+    IBlobService? blobService = null,
+    IHttpClientFactory? httpClientFactory = null,
+    ILogger<PerformerScrapeService>? logger = null)
+{
+    public async Task<ScrapedPerformerDto?> ScrapeByUrlAsync(string url, CancellationToken ct = default)
+    {
+        return await ScrapeByUrlAsync(url, scraperId: null, ct);
+    }
+
+    public async Task<ScrapedPerformerDto?> ScrapeByUrlAsync(string url, string? scraperId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        Dictionary<string, object>? result;
+        if (!string.IsNullOrWhiteSpace(scraperId))
+        {
+            result = await scraperService.ScrapeUrlAsync(scraperId, "performer", url, ct);
+        }
+        else
+        {
+            var hit = await scraperService.ScrapeUrlAutoAsync(url, "performer", ct);
+            result = hit?.Result;
+        }
+
+        return result == null ? null : ConvertScrapeResult(result, url);
+    }
+
+    public async Task<ScrapedPerformerDto?> ScrapeByNameAsync(string name, string? scraperId = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return null;
+
+        if (!string.IsNullOrWhiteSpace(scraperId))
+        {
+            return await TryScrapeByNameAsync(scraperId, name, ct)
+                ?? await TryScrapeGeneratedUrlsAsync(
+                    scraperService.GetScrapers().Where(candidate => string.Equals(candidate.Id, scraperId, StringComparison.OrdinalIgnoreCase)).ToList(),
+                    name,
+                    ct);
+        }
+
+        var performerScrapers = scraperService.GetScrapers()
+            .Where(candidate => string.Equals(candidate.EntityType, "performer", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        foreach (var scraper in performerScrapers.Where(candidate => candidate.SupportedScrapes.Any(kind => string.Equals(kind, "Name", StringComparison.OrdinalIgnoreCase))))
+        {
+            var scraped = await TryScrapeByNameAsync(scraper.Id, name, ct);
+            if (scraped != null)
+                return scraped;
+        }
+
+        return await TryScrapeGeneratedUrlsAsync(performerScrapers, name, ct);
+    }
+
+    public async Task ApplyAsync(Performer performer, ScrapedPerformerDto scraped, bool createMissingTags, CancellationToken ct = default)
+    {
+        if (!string.IsNullOrWhiteSpace(scraped.Name)) performer.Name = scraped.Name.Trim();
+        if (!string.IsNullOrWhiteSpace(scraped.Disambiguation)) performer.Disambiguation = scraped.Disambiguation.Trim();
+        if (!string.IsNullOrWhiteSpace(scraped.Gender) && TryParseEnum(scraped.Gender, out GenderEnum gender)) performer.Gender = gender;
+        if (!string.IsNullOrWhiteSpace(scraped.Birthdate) && TryParseDate(scraped.Birthdate, out var birthdate)) performer.Birthdate = birthdate;
+        if (!string.IsNullOrWhiteSpace(scraped.Country)) performer.Country = scraped.Country.Trim();
+        if (!string.IsNullOrWhiteSpace(scraped.Ethnicity)) performer.Ethnicity = scraped.Ethnicity.Trim();
+        if (!string.IsNullOrWhiteSpace(scraped.EyeColor)) performer.EyeColor = scraped.EyeColor.Trim();
+        if (!string.IsNullOrWhiteSpace(scraped.HairColor)) performer.HairColor = scraped.HairColor.Trim();
+        if (scraped.HeightCm.HasValue) performer.HeightCm = scraped.HeightCm.Value;
+        if (scraped.Weight.HasValue) performer.Weight = scraped.Weight.Value;
+        if (!string.IsNullOrWhiteSpace(scraped.Measurements)) performer.Measurements = scraped.Measurements.Trim();
+        if (!string.IsNullOrWhiteSpace(scraped.Tattoos)) performer.Tattoos = scraped.Tattoos.Trim();
+        if (!string.IsNullOrWhiteSpace(scraped.Piercings)) performer.Piercings = scraped.Piercings.Trim();
+        if (!string.IsNullOrWhiteSpace(scraped.Details)) performer.Details = scraped.Details.Trim();
+
+        MergeValues(performer.Urls, scraped.Urls, item => item.Url, value => new PerformerUrl { Url = value, Performer = performer }, NormalizeUrlKey);
+        MergeValues(performer.Aliases, scraped.Aliases, item => item.Alias, value => new PerformerAlias { Alias = value, Performer = performer });
+        await TryApplyImageAsync(performer, scraped.ImageUrl, ct);
+
+        if (scraped.TagNames.Count == 0)
+            return;
+
+        var normalizedTagNames = scraped.TagNames
+            .Where(tagName => !string.IsNullOrWhiteSpace(tagName))
+            .Select(tagName => tagName.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalizedTagNames.Count == 0)
+            return;
+
+        var normalizedKeys = normalizedTagNames
+            .Select(tagName => tagName.ToLowerInvariant())
+            .ToList();
+
+        var lookup = await db.Tags
+            .Where(tag => normalizedKeys.Contains(tag.Name.ToLower()))
+            .ToDictionaryAsync(tag => tag.Name, StringComparer.OrdinalIgnoreCase, ct);
+
+        var existingTagIds = performer.PerformerTags.Select(item => item.TagId).ToHashSet();
+        var existingTagNames = performer.PerformerTags
+            .Select(item => item.Tag?.Name)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var tagName in normalizedTagNames)
+        {
+            if (!lookup.TryGetValue(tagName, out var tag))
+            {
+                if (!createMissingTags)
+                    continue;
+
+                tag = new Tag { Name = tagName };
+                db.Tags.Add(tag);
+                lookup[tagName] = tag;
+            }
+
+            if (existingTagIds.Contains(tag.Id) || !existingTagNames.Add(tag.Name))
+                continue;
+
+            existingTagIds.Add(tag.Id);
+            performer.PerformerTags.Add(new PerformerTag { Performer = performer, Tag = tag, TagId = tag.Id });
+        }
+    }
+
+    internal static ScrapedPerformerDto? ConvertScrapeResult(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    {
+        if (result.Count == 0)
+            return null;
+
+        string? GetString(params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                foreach (var (entryKey, entryValue) in result)
+                {
+                    if (!string.Equals(entryKey, key, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (entryValue is string text && !string.IsNullOrWhiteSpace(text))
+                        return text.Trim();
+
+                    if (entryValue is not null && entryValue is not System.Collections.IEnumerable)
+                        return entryValue.ToString();
+                }
+            }
+
+            return null;
+        }
+
+        List<string> GetStringList(params string[] keys)
+        {
+            var values = new List<string>();
+            foreach (var key in keys)
+            {
+                foreach (var (entryKey, entryValue) in result)
+                {
+                    if (!string.Equals(entryKey, key, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    switch (entryValue)
+                    {
+                        case string text when !string.IsNullOrWhiteSpace(text):
+                            values.AddRange(text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                            break;
+                        case System.Collections.IEnumerable list:
+                            foreach (var item in list)
+                            {
+                                switch (item)
+                                {
+                                    case string stringItem when !string.IsNullOrWhiteSpace(stringItem):
+                                        values.Add(stringItem.Trim());
+                                        break;
+                                    case IDictionary<string, string> map:
+                                        if (map.TryGetValue("Name", out var namedValue) || map.TryGetValue("name", out namedValue))
+                                            values.Add(namedValue);
+                                        break;
+                                    case System.Collections.IDictionary genericMap:
+                                        var candidate = genericMap["Name"] ?? genericMap["name"] ?? genericMap["Title"] ?? genericMap["title"];
+                                        if (candidate is string namedText && !string.IsNullOrWhiteSpace(namedText))
+                                            values.Add(namedText.Trim());
+                                        break;
+                                }
+                            }
+                            break;
+                    }
+                }
+            }
+
+            return values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        var resolvedImageUrl = ResolveAbsoluteUrl(GetString("Image", "image", "ImageUrl", "imageUrl"), sourceUrl);
+        var dto = new ScrapedPerformerDto
+        {
+            Name = GetString("Name", "name", "Title", "title"),
+            Disambiguation = GetString("Disambiguation", "disambiguation"),
+            Gender = GetString("Gender", "gender"),
+            Birthdate = GetString("Birthdate", "birthdate", "Date", "date"),
+            Country = GetString("Country", "country"),
+            Ethnicity = GetString("Ethnicity", "ethnicity"),
+            EyeColor = GetString("EyeColor", "eyeColor", "Eye Colour"),
+            HairColor = GetString("HairColor", "hairColor", "Hair Colour"),
+            HeightCm = TryParseInt(GetString("HeightCm", "heightCm", "Height", "height")),
+            Weight = TryParseInt(GetString("Weight", "weight")),
+            Measurements = GetString("Measurements", "measurements"),
+            Tattoos = GetString("Tattoos", "tattoos"),
+            Piercings = GetString("Piercings", "piercings"),
+            Details = GetString("Details", "details", "Description", "description", "Bio", "bio"),
+            ImageUrl = resolvedImageUrl,
+            Urls = GetStringList("URLs", "urls", "URL", "url")
+                .Select(url => ResolveAbsoluteUrl(url, sourceUrl) ?? url)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            Aliases = GetStringList("Aliases", "aliases", "Alias", "alias"),
+            TagNames = GetStringList("Tags", "tags", "Tag", "tag", "TagNames", "tagNames"),
+        };
+
+        if (!string.IsNullOrWhiteSpace(sourceUrl) && !dto.Urls.Contains(sourceUrl, StringComparer.OrdinalIgnoreCase))
+            dto.Urls.Add(sourceUrl);
+
+        var hasContent = !string.IsNullOrWhiteSpace(dto.Name)
+            || !string.IsNullOrWhiteSpace(dto.Details)
+            || !string.IsNullOrWhiteSpace(dto.Country)
+            || !string.IsNullOrWhiteSpace(dto.Birthdate)
+            || dto.Aliases.Count > 0
+            || dto.TagNames.Count > 0;
+
+        return hasContent ? dto : null;
+    }
+
+    private static bool TryParseEnum<TEnum>(string value, out TEnum parsed) where TEnum : struct
+        => Enum.TryParse(value, true, out parsed);
+
+    private async Task<ScrapedPerformerDto?> TryScrapeByNameAsync(string scraperId, string name, CancellationToken ct)
+    {
+        var candidates = await scraperService.ScrapeNameAsync(scraperId, "performer", name, ct);
+        if (candidates == null || candidates.Count == 0)
+            return null;
+
+        return candidates
+            .Select(candidate => ConvertScrapeResult(candidate, ExtractCandidateUrl(candidate) ?? string.Empty))
+            .OfType<ScrapedPerformerDto>()
+            .OrderByDescending(candidate => ScoreCandidate(candidate, name))
+            .FirstOrDefault();
+    }
+
+    private async Task<ScrapedPerformerDto?> TryScrapeGeneratedUrlsAsync(IReadOnlyList<ScraperSummaryDto> scrapers, string name, CancellationToken ct)
+    {
+        foreach (var scraper in scrapers.Where(candidate => candidate.SupportedScrapes.Any(kind => string.Equals(kind, "URL", StringComparison.OrdinalIgnoreCase))))
+        {
+            foreach (var candidateUrl in BuildGeneratedProfileUrls(scraper, name))
+            {
+                var scraped = await ScrapeByUrlAsync(candidateUrl, scraper.Id, ct);
+                if (scraped != null)
+                    return scraped;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> BuildGeneratedProfileUrls(ScraperSummaryDto scraper, string name)
+    {
+        var slugs = BuildSlugCandidates(name);
+        var urls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pattern in scraper.Urls)
+        {
+            foreach (var baseUrl in NormalizePatternBases(pattern))
+            {
+                foreach (var slug in slugs)
+                {
+                    var candidate = $"{baseUrl}{slug}";
+                    if (urls.Add(candidate))
+                        yield return candidate;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> NormalizePatternBases(string pattern)
+    {
+        var trimmed = pattern.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed) || trimmed.Contains('*') || trimmed.Contains('?') || trimmed.Contains('='))
+            yield break;
+
+        var normalized = trimmed.TrimEnd('/');
+        var variants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            variants.Add($"{normalized}/");
+        }
+        else
+        {
+            variants.Add($"https://{normalized}/");
+            if (!normalized.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+                variants.Add($"https://www.{normalized}/");
+        }
+
+        foreach (var variant in variants)
+            yield return variant;
+    }
+
+    private static List<string> BuildSlugCandidates(string name)
+    {
+        var slugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var normalized = name.Trim().ToLowerInvariant();
+        var builder = new StringBuilder(normalized.Length);
+        var lastWasSeparator = false;
+
+        foreach (var character in normalized)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+                lastWasSeparator = false;
+                continue;
+            }
+
+            if (character == '&')
+            {
+                if (!lastWasSeparator && builder.Length > 0)
+                    builder.Append('-');
+                builder.Append("and");
+                lastWasSeparator = false;
+                continue;
+            }
+
+            if (lastWasSeparator || builder.Length == 0)
+                continue;
+
+            builder.Append('-');
+            lastWasSeparator = true;
+        }
+
+        var dashed = builder.ToString().Trim('-');
+        if (!string.IsNullOrWhiteSpace(dashed))
+            slugs.Add(dashed);
+
+        var compact = dashed.Replace("-", string.Empty, StringComparison.Ordinal);
+        if (!string.IsNullOrWhiteSpace(compact))
+            slugs.Add(compact);
+
+        return slugs.ToList();
+    }
+
+    private static int ScoreCandidate(ScrapedPerformerDto candidate, string searchTerm)
+    {
+        var normalizedSearchTerm = NormalizeSearchText(searchTerm);
+        var bestScore = 0;
+
+        foreach (var value in new[] { candidate.Name, candidate.Disambiguation, candidate.Urls.FirstOrDefault() })
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                continue;
+
+            if (string.Equals(value, searchTerm, StringComparison.OrdinalIgnoreCase))
+                bestScore = Math.Max(bestScore, 1000);
+            else if (string.Equals(NormalizeSearchText(value), normalizedSearchTerm, StringComparison.Ordinal))
+                bestScore = Math.Max(bestScore, 900);
+            else if (NormalizeSearchText(value).Contains(normalizedSearchTerm, StringComparison.Ordinal))
+                bestScore = Math.Max(bestScore, 400);
+        }
+
+        return bestScore;
+    }
+
+    private static string NormalizeSearchText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var builder = new StringBuilder(value.Length);
+        var lastWasSpace = false;
+        foreach (var character in value.Trim())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+                lastWasSpace = false;
+                continue;
+            }
+
+            if (lastWasSpace)
+                continue;
+
+            builder.Append(' ');
+            lastWasSpace = true;
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static string? ExtractCandidateUrl(IReadOnlyDictionary<string, object> candidate)
+    {
+        foreach (var field in new[] { "URL", "Url" })
+        {
+            if (candidate.TryGetValue(field, out var value) && value is string text && !string.IsNullOrWhiteSpace(text))
+                return text.Trim();
+        }
+
+        return null;
+    }
+
+    private async Task TryApplyImageAsync(Performer performer, string? imageUrl, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(imageUrl) || blobService == null || httpClientFactory == null)
+            return;
+
+        try
+        {
+            using var response = await httpClientFactory.CreateClient("scraper").GetAsync(imageUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+                return;
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+
+            if (!string.IsNullOrWhiteSpace(performer.ImageBlobId))
+                await blobService.DeleteBlobAsync(performer.ImageBlobId, ct);
+
+            performer.ImageBlobId = await blobService.StoreBlobAsync(stream, contentType, ct);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Failed to download scraped performer image for {Name}", performer.Name);
+        }
+    }
+
+    private static string? ResolveAbsoluteUrl(string? url, string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absoluteUri))
+            return absoluteUri.ToString();
+
+        if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) && Uri.TryCreate(baseUri, url, out var resolved))
+            return resolved.ToString();
+
+        return url;
+    }
+
+    private static bool TryParseDate(string value, out DateOnly parsed)
+    {
+        if (DateOnly.TryParseExact(value, ["yyyy-MM-dd", "yyyyMMdd", "MM/dd/yyyy"], out parsed))
+            return true;
+
+        if (DateTime.TryParse(value, out var dateTime))
+        {
+            parsed = DateOnly.FromDateTime(dateTime);
+            return true;
+        }
+
+        parsed = default;
+        return false;
+    }
+
+    private static int? TryParseInt(string? value)
+        => int.TryParse(value, out var parsed) ? parsed : null;
+
+    private static void MergeValues<TItem>(ICollection<TItem> current, IEnumerable<string> incoming, Func<TItem, string> selector, Func<string, TItem> factory, Func<string, string>? keySelector = null)
+    {
+        keySelector ??= static value => value;
+        var existing = current.Select(item => keySelector(selector(item))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in incoming.Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()))
+        {
+            if (existing.Add(keySelector(value)))
+                current.Add(factory(value));
+        }
+    }
+
+    internal static string NormalizeUrlKey(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return string.Empty;
+
+        var trimmed = url.Trim();
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            var host = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? uri.Host[4..] : uri.Host;
+            var path = uri.AbsolutePath.TrimEnd('/');
+            if (path.Length == 0)
+                path = "/";
+            var query = uri.Query;
+            return string.Concat(host.ToLowerInvariant(), path.ToLowerInvariant(), query.ToLowerInvariant());
+        }
+
+        return trimmed.TrimEnd('/').ToLowerInvariant();
+    }
+}

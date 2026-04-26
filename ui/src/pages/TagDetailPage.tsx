@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, groups, images, markers, metadata, performers, scenes, studios, tags, entityImages } from "../api/client";
-import type { FindFilter, Gallery, Group, Image, Performer, Scene, SceneMarkerWall, Studio } from "../api/types";
+import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerTagMatch, Performer, Scene, SceneMarkerWall, Studio, TagDetail as TagDetailModel } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, Bookmark, Building2, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowLeft, Bookmark, Building2, ChevronDown, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { TagEditModal } from "./TagEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -10,6 +10,7 @@ import { DetailMergeDialog } from "../components/DetailMergeDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { SceneCard, PerformerTile, ImageTile, GalleryTile, StudioTile, GroupTile } from "../components/EntityCards";
 import { QuickViewDialog } from "../components/QuickViewDialog";
+import { useAppConfig } from "../state/AppConfigContext";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
@@ -50,6 +51,8 @@ interface Props {
 type TabKey = "scenes" | "performers" | "images" | "galleries" | "markers" | "studios" | "groups" | (string & {});
 
 export function TagDetailPage({ id, onNavigate }: Props) {
+  const { config } = useAppConfig();
+  const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: tag, isLoading } = useQuery({
     queryKey: ["tag", id],
     queryFn: () => tags.get(id),
@@ -235,6 +238,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
                 <span title={`Created ${formatDate(tag.createdAt)}`}>Updated {formatDate(tag.updatedAt)}</span>
               </div>
               <CustomFieldsDisplay customFields={tag.customFields} />
+              <TagMetadataServerPanel tag={tag} metadataServers={metadataServers} onNavigate={onNavigate} />
             </div>
           </div>
         </div>
@@ -349,6 +353,162 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   );
 }
 
+function TagMetadataServerPanel({ tag, metadataServers, onNavigate }: { tag: TagDetailModel; metadataServers: MetadataServer[]; onNavigate: (r: any) => void }) {
+  const queryClient = useQueryClient();
+  const [term, setTerm] = useState(tag.name);
+  const [selectedEndpoint, setSelectedEndpoint] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    setTerm(tag.name);
+  }, [tag.id, tag.name]);
+
+  useEffect(() => {
+    if (selectedEndpoint && !metadataServers.some((box) => box.endpoint === selectedEndpoint)) {
+      setSelectedEndpoint("");
+    }
+  }, [selectedEndpoint, metadataServers]);
+
+  const searchMutation = useMutation({
+    mutationFn: (variables: { term?: string; endpoint?: string }) => tags.searchMetadataServer(tag.id, variables.term, variables.endpoint),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (match: MetadataServerTagMatch) =>
+      tags.importFromMetadataServer(tag.id, { endpoint: match.endpoint, tagId: match.id }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tag", tag.id] });
+      queryClient.invalidateQueries({ queryKey: ["tags"] });
+    },
+  });
+
+  const draftMutation = useMutation({
+    mutationFn: (endpoint: string) => tags.submitMetadataServerDraft(tag.id, endpoint),
+  });
+
+  const draftEndpoint = selectedEndpoint || metadataServers[0]?.endpoint;
+
+  return (
+    <div className="mt-6 rounded-xl border border-border bg-card p-4">
+      <button onClick={() => setExpanded(!expanded)} className="flex w-full items-center justify-between text-left">
+        <h2 className="text-base font-semibold text-foreground">MetadataServer</h2>
+        <ChevronDown className={`h-4 w-4 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
+      </button>
+
+      {expanded && (
+        <div className="mt-4">
+          {metadataServers.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
+              No MetadataServer endpoints are configured yet. Use Settings and open Metadata Providers to add one.
+              <button onClick={() => onNavigate({ page: "settings" })} className="ml-2 text-accent hover:text-accent-hover">
+                Open settings
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Search term</span>
+                  <input
+                    value={term}
+                    onChange={(event) => setTerm(event.target.value)}
+                    placeholder={tag.name}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Endpoint</span>
+                  <select
+                    value={selectedEndpoint}
+                    onChange={(event) => setSelectedEndpoint(event.target.value)}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                  >
+                    <option value="">All configured endpoints</option>
+                    {metadataServers.map((box) => (
+                      <option key={box.endpoint} value={box.endpoint}>
+                        {box.name || box.endpoint}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex flex-wrap items-end gap-2">
+                  <button
+                    onClick={() => searchMutation.mutate({ term: term.trim() || undefined, endpoint: selectedEndpoint || undefined })}
+                    disabled={searchMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
+                  >
+                    {searchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    Search MetadataServer
+                  </button>
+                  <button
+                    onClick={() => draftEndpoint && draftMutation.mutate(draftEndpoint)}
+                    disabled={!draftEndpoint || draftMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
+                  >
+                    {draftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                    Submit Draft
+                  </button>
+                </div>
+              </div>
+
+              {searchMutation.error && <p className="mt-3 text-sm text-red-300">{searchMutation.error.message}</p>}
+              {draftMutation.error && <p className="mt-3 text-sm text-red-300">{draftMutation.error.message}</p>}
+              {draftMutation.isSuccess && (
+                <p className="mt-3 text-sm text-emerald-300">
+                  Tag draft submitted to MetadataServer{draftMutation.data.draftId ? ` (${draftMutation.data.draftId})` : ""}.
+                </p>
+              )}
+              {importMutation.isSuccess && <p className="mt-3 text-sm text-emerald-300">Tag metadata imported from MetadataServer.</p>}
+
+              {searchMutation.data && (
+                <div className="mt-4 space-y-3">
+                  {searchMutation.data.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
+                      No MetadataServer tag matches were found.
+                    </div>
+                  ) : (
+                    searchMutation.data.map((match) => (
+                      <button
+                        key={`${match.endpoint}:${match.id}`}
+                        onClick={() => importMutation.mutate(match)}
+                        disabled={importMutation.isPending}
+                        className="flex w-full flex-col gap-4 rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:border-accent/60 disabled:opacity-60 md:flex-row md:items-center"
+                      >
+                        <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-card">
+                          <TagIcon className="h-7 w-7 text-accent" />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-base font-semibold text-foreground">{match.name}</span>
+                            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-secondary">{match.metadataServerName}</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+                            <span>ID {match.id}</span>
+                          </div>
+                          {match.description && <p className="mt-2 text-sm text-secondary">{match.description}</p>}
+                          {match.aliases.length > 0 && <p className="mt-2 text-xs text-secondary">Aliases: {match.aliases.join(", ")}</p>}
+                        </div>
+
+                        <div className="flex items-end">
+                          <span className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white">
+                            {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                            Import
+                          </span>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CountCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
@@ -381,7 +541,7 @@ function TagScenesPanel({ tagId, filter, setFilter, onNavigate }: {
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} />} />
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={data.items} onNavigate={onNavigate} />} />
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
         {data.items.map((scene) => (
           <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
@@ -445,7 +605,7 @@ function TagImagesPanel({ tagId, filter, setFilter, onNavigate }: {
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} />} />
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + zoomLevel * 50}px, 1fr))` }}>
         {data.items.map((image) => (
           <ImageTile key={image.id} image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
@@ -478,7 +638,7 @@ function TagGalleriesPanel({ tagId, filter, setFilter, onNavigate }: {
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} />} />
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
         {data.items.map((gallery) => (
           <GalleryTile key={gallery.id} gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />

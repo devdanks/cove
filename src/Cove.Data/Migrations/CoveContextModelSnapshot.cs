@@ -798,6 +798,9 @@ namespace Cove.Data.Migrations
                     b.Property<string>("Director")
                         .HasColumnType("text");
 
+                    b.Property<string>("ImageBlobId")
+                        .HasColumnType("text");
+
                     b.Property<int?>("InteractiveSpeed")
                         .HasColumnType("integer");
 
@@ -1056,6 +1059,69 @@ namespace Cove.Data.Migrations
                     b.HasIndex("SceneId");
 
                     b.ToTable("SceneUrl");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.ScrapeAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AppliedByUser")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("EntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EntitySnapshotJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<string>("InputJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("InputKind")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ScraperId")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("EntityType", "EntityId", "CreatedAt");
+
+                    b.ToTable("scrape_attempts", (string)null);
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.Studio", b =>

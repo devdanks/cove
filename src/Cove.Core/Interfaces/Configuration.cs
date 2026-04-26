@@ -11,6 +11,8 @@ public class CoveConfiguration
     public string Host { get; set; } = "0.0.0.0";
     public int Port { get; set; } = 9999;
     public int MaxParallelTasks { get; set; } = 1;
+    public int MaxConcurrentDownloads { get; set; } = 3;
+    public List<DownloaderPathOverride> DownloaderPathOverrides { get; set; } = [];
     public bool CalculateMd5 { get; set; }
     public bool EnableFfmpegHwAccel { get; set; } // Default false to prevent instability during native probes
     public List<string> VideoExtensions { get; set; } = [".m4v", ".mp4", ".mov", ".wmv", ".avi", ".mpg", ".mpeg", ".rmvb", ".rm", ".flv", ".asf", ".mkv", ".webm", ".f4v"];
@@ -57,6 +59,13 @@ public class CovePath
     public bool ExcludeVideo { get; set; }
     public bool ExcludeImage { get; set; }
     public bool ExcludeAudio { get; set; }
+}
+
+public class DownloaderPathOverride
+{
+    public string DownloaderId { get; set; } = string.Empty;
+    public string? Site { get; set; }
+    public string Path { get; set; } = string.Empty;
 }
 
 public class AuthConfig
@@ -160,7 +169,15 @@ public class ScrapingConfig
     public List<string> ScraperDirectories { get; set; } = [CoveDefaultPaths.GetDataSubdirectory("scrapers")];
     public List<PackageSource> ScraperPackageSources { get; set; } = [];
     public List<MetadataServerInstance> MetadataServers { get; set; } = [];
+    public List<ScraperPreference> ScraperPreferences { get; set; } = [];
     public IdentifyDefaultsConfig IdentifyDefaults { get; set; } = new();
+    public MetadataBatchDefaultsConfig MetadataBatchDefaults { get; set; } = new();
+}
+
+public class ScraperPreference
+{
+    public string Site { get; set; } = string.Empty;
+    public string ScraperId { get; set; } = string.Empty;
 }
 
 public class IdentifyDefaultsConfig
@@ -170,6 +187,13 @@ public class IdentifyDefaultsConfig
     public bool CreateStudios { get; set; } = true;
     public int? AutoApplyMaxDurationDifferenceSeconds { get; set; }
     public int? AutoApplyMaxPhashDistance { get; set; }
+}
+
+public class MetadataBatchDefaultsConfig
+{
+    public bool RefreshAlreadyTagged { get; set; }
+    public bool CreateParentStudios { get; set; } = true;
+    public List<string> ExcludeFields { get; set; } = [];
 }
 
 public class PackageSource

@@ -82,9 +82,29 @@ try
     builder.Services.AddSingleton<IBlobService, BlobService>();
     builder.Services.AddSingleton<ConfigService>();
     builder.Services.AddSingleton<ScraperService>();
+    builder.Services.AddSingleton<ISceneCoverService, SceneCoverService>();
+    builder.Services.AddScoped<ISceneMetadataApplyService, SceneMetadataApplyService>();
+    builder.Services.AddScoped<PerformerScrapeService>();
+    builder.Services.AddScoped<ScrapeAttemptService>();
+    builder.Services.AddScoped<SceneBatchScrapeService>();
+    builder.Services.AddSingleton<DownloaderService>();
     builder.Services.AddSingleton<ITranscodeService, TranscodeService>();
     builder.Services.AddScoped<StashMigrationService>();
-    builder.Services.AddHttpClient("scraper");
+    builder.Services.AddHttpClient("scraper", client =>
+    {
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+        client.Timeout = TimeSpan.FromSeconds(45);
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 10,
+        UseCookies = true,
+        CookieContainer = new System.Net.CookieContainer(),
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+    });
     builder.Services.AddHttpClient<MetadataServerService>();
 
     // Extension system
@@ -104,6 +124,7 @@ try
     // Register built-in extensions
     extensionManager.Register(new Cove.Api.Extensions.ThemeCollectionExtension());
     extensionManager.Register(new Cove.Api.Extensions.AuditLogExtension());
+    extensionManager.Register(new Cove.Api.Extensions.DirectFileDownloaderExtension());
     CoveContext.SetDataExtensions(extensionManager.Extensions.OfType<IDataExtension>());
     builder.Services.AddSingleton(extensionManager);
     builder.Services.AddSingleton<IExtensionStoreFactory>(sp => new Cove.Data.Repositories.EfExtensionStoreFactory(sp));
@@ -387,6 +408,7 @@ try
         // Pre-warm: compile EF Core query cache, prime connection pool, JIT hot paths
         _ = await db.Scenes.CountAsync();
         _ = await db.Scenes.AsNoTracking()
+            .OrderBy(s => s.Id)
             .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
@@ -446,6 +468,7 @@ static async Task EnsureColumnsAsync(CoveContext db)
     await AddColumnIfMissing("scenes", "ImageBlobId", "text");
     await AddColumnIfMissing("galleries", "ImageBlobId", "text");
     await AddColumnIfMissing("galleries", "CoverImageId", "integer");
+    await AddColumnIfMissing("scrape_attempts", "CandidateResultsJson", "text");
 
     // Remote ID support added after the initial database schema.
     await EnsureTableExists("SceneRemoteId", """

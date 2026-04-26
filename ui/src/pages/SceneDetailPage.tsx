@@ -6,7 +6,7 @@ import {
   Check, ChevronLeft, ChevronRight, MoreVertical, PanelLeftClose, PanelLeft,
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipBack, SkipForward, Gauge, Clapperboard, Monitor, FolderOpen, Layers,
-  RefreshCw, Camera, Image, Merge, Upload, ExternalLink,
+  RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download,
   PictureInPicture2, Repeat, Repeat1, Subtitles
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo } from "react";
@@ -25,6 +25,8 @@ import { createRouteLinkProps } from "../components/cardNavigation";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { SceneDownloadDialog } from "../components/SceneDownloadDialog";
+import { SceneScrapeDialog } from "../components/SceneScrapeDialog";
 
 interface Props {
   id: number;
@@ -49,6 +51,8 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showIdentify, setShowIdentify] = useState(false);
+  const [showScrapeDialog, setShowScrapeDialog] = useState(false);
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("details");
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "scenes" }, onNavigate);
@@ -253,6 +257,17 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
         sceneIds={[id]}
         title={`Generate for "${scene.title || "Untitled"}"`}
       />
+      <SceneDownloadDialog
+        open={showDownloadDialog}
+        scene={scene}
+        onClose={() => setShowDownloadDialog(false)}
+        onNavigate={onNavigate}
+      />
+      <SceneScrapeDialog
+        open={showScrapeDialog}
+        scene={scene}
+        onClose={() => setShowScrapeDialog(false)}
+      />
       <DetailMergeDialog
         open={showMerge}
         onClose={() => setShowMerge(false)}
@@ -385,9 +400,13 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
                     {showOpsMenu && (
                       <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] bg-card border border-border rounded shadow-lg py-1">
                         <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Pencil className="w-3.5 h-3.5" /> Edit</button>
+                        {!file && (
+                          <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Download className="w-3.5 h-3.5" /> Download Media…</button>
+                        )}
                         {file && (
                           <button onClick={() => { rescanMut.mutate(); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5" /> Rescan</button>
                         )}
+                        <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Scrape…</button>
                         <button onClick={() => { setShowIdentify(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Search className="w-3.5 h-3.5" /> Identify…</button>
                         <div className="border-t border-border my-1" />
                         <button onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Clapperboard className="w-3.5 h-3.5" /> Generate…</button>
@@ -1960,9 +1979,15 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   const filteredGalleries = allGalleries?.items.filter((g) => !selectedGalleryIds.includes(g.id) && (g.title || "").toLowerCase().includes(gallerySearch.toLowerCase())) ?? [];
   const selectedGroupIds = selectedGroups.map((g) => g.groupId);
   const filteredGroupsList = allGroups?.items.filter((g) => !selectedGroupIds.includes(g.id) && g.name.toLowerCase().includes(groupSearch.toLowerCase())) ?? [];
-  const selectedTags = allTags?.items.filter((t) => selectedTagIds.includes(t.id)) ?? scene.tags;
-  const selectedPerformers = allPerformers?.items.filter((p) => selectedPerformerIds.includes(p.id)) ?? scene.performers.map((p) => ({ ...p }));
-  const selectedGalleries = allGalleries?.items.filter((g) => selectedGalleryIds.includes(g.id)) ?? scene.galleries;
+  const selectedTags = selectedTagIds
+    .map((id) => allTags?.items.find((tag) => tag.id === id) ?? scene.tags.find((tag) => tag.id === id))
+    .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag));
+  const selectedPerformers = selectedPerformerIds
+    .map((id) => allPerformers?.items.find((performer) => performer.id === id) ?? scene.performers.find((performer) => performer.id === id))
+    .filter((performer): performer is NonNullable<typeof performer> => Boolean(performer));
+  const selectedGalleries = selectedGalleryIds
+    .map((id) => allGalleries?.items.find((gallery) => gallery.id === id) ?? scene.galleries.find((gallery) => gallery.id === id))
+    .filter((gallery): gallery is NonNullable<typeof gallery> => Boolean(gallery));
 
   const inputCls = "w-full bg-input border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent";
 

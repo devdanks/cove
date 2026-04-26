@@ -5,6 +5,7 @@ using Cove.Api.Services;
 using Cove.Core.DTOs;
 using Cove.Core.Interfaces;
 using Cove.Data;
+using Cove.Plugins;
 
 namespace Cove.Api.Controllers;
 
@@ -105,6 +106,116 @@ public class SystemController(
         return Ok(result);
     }
 
+    [HttpPost("scrapers/match-url")]
+    public ActionResult<IReadOnlyList<ScraperSummaryDto>> MatchScrapersForUrl([FromBody] ScraperMatchUrlRequest req)
+    {
+        return Ok(scraperService.FindScrapersForUrl(req.Url, req.EntityType));
+    }
+
+    [HttpPost("scrapers/scrape-url-auto")]
+    public async Task<ActionResult<object?>> ScrapeUrlAuto([FromBody] ScraperMatchUrlRequest req, CancellationToken ct)
+    {
+        var hit = await scraperService.ScrapeUrlAutoAsync(req.Url, req.EntityType ?? "scene", ct);
+        if (hit == null) return NotFound(new { error = "No scraper matched this URL or all matches returned no results" });
+        return Ok(new { scraperId = hit.Value.ScraperId, result = hit.Value.Result });
+    }
+
+    [HttpGet("downloaders")]
+    public ActionResult<IReadOnlyList<DownloaderDescriptorDto>> GetDownloaders([FromServices] DownloaderService downloaderService)
+    {
+        return Ok(downloaderService.GetDownloaders());
+    }
+
+    [HttpPost("downloaders/match")]
+    public async Task<ActionResult<IReadOnlyList<DownloaderMatchDto>>> MatchDownloader([FromServices] DownloaderService downloaderService, [FromBody] DownloaderMatchRequestDto dto, CancellationToken ct)
+    {
+        return Ok(await downloaderService.MatchUrlAsync(dto.Url, ct));
+    }
+
+    [HttpPost("downloaders/preflight")]
+    public async Task<ActionResult<DownloaderPreflightResponseDto>> PreflightDownload([FromServices] DownloaderService downloaderService, [FromBody] DownloaderPreflightRequestDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Url))
+            return BadRequest(new { error = "A URL is required." });
+
+        if (!Enum.TryParse<DownloaderEntity>(dto.Entity, true, out var entity))
+            return BadRequest(new { error = $"Unsupported downloader entity type: {dto.Entity}" });
+
+        var duplicateReason = await downloaderService.GetDuplicateDownloadReasonAsync(entity, dto.EntityId, dto.Url, ct);
+        return Ok(new DownloaderPreflightResponseDto(!string.IsNullOrWhiteSpace(duplicateReason), duplicateReason));
+    }
+
+    [HttpPost("downloaders/download")]
+    public async Task<ActionResult<object>> StartDownloaderJob([FromServices] DownloaderService downloaderService, [FromServices] IJobService jobService, [FromBody] DownloaderStartRequestDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.DownloaderId) || string.IsNullOrWhiteSpace(dto.Url))
+            return BadRequest(new { error = "DownloaderId and Url are required" });
+
+        if (!Enum.TryParse<DownloaderEntity>(dto.Entity, true, out var entity))
+            return BadRequest(new { error = $"Unsupported downloader entity type: {dto.Entity}" });
+
+        if (!dto.AllowDuplicateDownload)
+        {
+            var duplicateReason = await downloaderService.GetDuplicateDownloadReasonAsync(entity, dto.EntityId, dto.Url, ct);
+            if (!string.IsNullOrWhiteSpace(duplicateReason))
+                return Conflict(new { error = duplicateReason });
+        }
+
+        var permissions = BuildDownloaderPermissions(dto.Url);
+        var jobId = jobService.Enqueue(
+            "download",
+            $"Downloading {dto.Url}",
+            async (progress, ct) =>
+            {
+                var (result, importedEntityId) = await downloaderService.DownloadAndIngestAsync(
+                    new DownloaderRequest(dto.DownloaderId, dto.Url, entity, permissions, dto.QualityId),
+                    dto.EntityId,
+                    progress,
+                    ct,
+                    autoApplyMetadata: dto.AutoApplyMetadata,
+                    allowDuplicateDownload: dto.AllowDuplicateDownload);
+
+                var completionMessage = result == null
+                    ? "Downloader returned no result"
+                    : importedEntityId.HasValue && entity is DownloaderEntity.Scene or DownloaderEntity.Image or DownloaderEntity.Gallery
+                        ? $"Imported into {entity.ToString().ToLowerInvariant()} {importedEntityId.Value}"
+                        : $"Downloaded to {result.LocalPath}";
+
+                progress.Report(1d, completionMessage);
+            },
+            exclusive: false);
+
+        return Accepted(new { jobId });
+    }
+
+    [HttpPost("downloaders/download-batch")]
+    public ActionResult<object> StartDownloaderBatchJob([FromServices] DownloaderService downloaderService, [FromServices] IJobService jobService, [FromBody] DownloaderBatchStartRequestDto dto)
+    {
+        if (dto.Items.Count == 0)
+            return BadRequest(new { error = "At least one batch download item is required." });
+
+        foreach (var item in dto.Items)
+        {
+            if (string.IsNullOrWhiteSpace(item.Url))
+                return BadRequest(new { error = "Every batch download item requires a URL." });
+
+            if (!Enum.TryParse<DownloaderEntity>(item.Entity, true, out _))
+                return BadRequest(new { error = $"Unsupported downloader entity type: {item.Entity}" });
+        }
+
+        var jobId = jobService.Enqueue(
+            "download-batch",
+            $"Downloading {dto.Items.Count} item{(dto.Items.Count == 1 ? string.Empty : "s")}",
+            async (progress, ct) =>
+            {
+                var summary = await downloaderService.DownloadAndIngestBatchAsync(dto.Items, dto.FollowUp, progress, ct);
+                progress.Report(1d, BuildBatchDownloadCompletionMessage(summary));
+            },
+            exclusive: false);
+
+        return Accepted(new { jobId, queuedCount = dto.Items.Count });
+    }
+
     [HttpPost("metadata-servers/validate")]
     public async Task<ActionResult<MetadataServerValidationResultDto>> ValidateMetadataServer([FromBody] MetadataServerDto metadataServer, CancellationToken ct)
     {
@@ -127,5 +238,39 @@ public class SystemController(
         // Set individual UI key - the key is dot-separated (e.g. "showAbLoopControls")
         await configService.SaveConfigAsync(currentConfig);
         return Ok(new { key, value, success = true });
+    }
+
+    private static DownloaderPermissions BuildDownloaderPermissions(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
+            return new DownloaderPermissions([uri.Host]);
+
+        return new DownloaderPermissions();
+    }
+
+    private static string BuildBatchDownloadCompletionMessage(DownloaderBatchExecutionSummary summary)
+    {
+        var parts = new List<string>
+        {
+            $"Downloaded {summary.SucceededCount} of {summary.TotalCount} item{(summary.TotalCount == 1 ? string.Empty : "s")}."
+        };
+
+        if (summary.SkippedCount > 0)
+            parts.Add($"Skipped {summary.SkippedCount}.");
+
+        if (summary.FailedCount > 0)
+            parts.Add($"Failed {summary.FailedCount}.");
+
+        if (!string.IsNullOrWhiteSpace(summary.FollowUpJobId))
+            parts.Add($"Queued follow-up generate job {summary.FollowUpJobId}.");
+
+        if (summary.Issues.Count > 0)
+        {
+            parts.Add(string.Join(' ', summary.Issues.Take(2)));
+            if (summary.Issues.Count > 2)
+                parts.Add($"+{summary.Issues.Count - 2} more issue(s).");
+        }
+
+        return string.Join(' ', parts);
     }
 }

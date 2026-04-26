@@ -11,7 +11,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, Data.CoveContext db) : ControllerBase
+public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -153,6 +153,97 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         return Ok(MapToDto(updated!));
     }
 
+    [HttpPost("{id:int}/scrape-url")]
+    public async Task<ActionResult<PerformerDto>> ScrapeUrl(int id, [FromBody] PerformerScrapeUrlRequestDto dto, CancellationToken ct)
+    {
+        return await Scrape(id, new PerformerScrapeRequestDto("url", null, dto.Url, null, dto.CreateMissingTags), ct);
+    }
+
+    [HttpPost("{id:int}/scrape")]
+    public async Task<ActionResult<PerformerDto>> Scrape(int id, [FromBody] PerformerScrapeRequestDto dto, CancellationToken ct)
+    {
+        var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
+        if (performer == null)
+            return NotFound();
+
+        var resolvedScrape = await ResolveScrapeAsync(performer, dto, ct);
+        if (resolvedScrape.ErrorResult != null)
+            return resolvedScrape.ErrorResult;
+
+        await performerScrapeService.ApplyAsync(performer, resolvedScrape.Scraped!, dto.CreateMissingTags, ct);
+        await performerRepo.UpdateAsync(performer, ct);
+
+        var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
+        return Ok(MapToDto(updated!));
+    }
+
+    [HttpPost("{id:int}/scrape-preview")]
+    public async Task<ActionResult<PerformerScrapePreviewDto>> PreviewScrape(int id, [FromBody] PerformerScrapeRequestDto dto, CancellationToken ct)
+    {
+        var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
+        if (performer == null)
+            return NotFound();
+
+        var resolvedScrape = await ResolveScrapeAsync(performer, dto, ct);
+        if (resolvedScrape.ErrorResult != null)
+            return resolvedScrape.ErrorResult;
+
+        return Ok(new PerformerScrapePreviewDto(resolvedScrape.Scraped!, resolvedScrape.InputKind!, resolvedScrape.SourceValue));
+    }
+
+    [HttpPost("{id:int}/apply-scraped")]
+    public async Task<ActionResult<PerformerDto>> ApplyScraped(int id, [FromBody] PerformerApplyScrapedRequestDto dto, CancellationToken ct)
+    {
+        var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
+        if (performer == null)
+            return NotFound();
+
+        await performerScrapeService.ApplyAsync(performer, dto.Scraped, dto.CreateMissingTags, ct);
+        await performerRepo.UpdateAsync(performer, ct);
+
+        var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
+        return Ok(MapToDto(updated!));
+    }
+
+    private async Task<ResolvedPerformerScrape> ResolveScrapeAsync(Performer performer, PerformerScrapeRequestDto dto, CancellationToken ct)
+    {
+
+        var inputKind = dto.InputKind?.Trim().ToLowerInvariant();
+        if (inputKind is not ("url" or "name"))
+            inputKind = !string.IsNullOrWhiteSpace(dto.Name) ? "name" : "url";
+
+        ScrapedPerformerDto? scraped;
+        string? sourceValue;
+        if (inputKind == "name")
+        {
+            var name = string.IsNullOrWhiteSpace(dto.Name) ? performer.Name : dto.Name.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+                return new ResolvedPerformerScrape(BadRequest(new { error = "A performer name is required before scraping." }), null, null, null);
+
+            scraped = await performerScrapeService.ScrapeByNameAsync(name, dto.ScraperId, ct);
+            sourceValue = name;
+        }
+        else
+        {
+            var url = string.IsNullOrWhiteSpace(dto.Url)
+                ? performer.Urls.Select(item => item.Url).FirstOrDefault()
+                : dto.Url.Trim();
+
+            if (string.IsNullOrWhiteSpace(url))
+                return new ResolvedPerformerScrape(BadRequest(new { error = "A performer URL is required before scraping." }), null, null, null);
+
+            scraped = await performerScrapeService.ScrapeByUrlAsync(url, dto.ScraperId, ct);
+            sourceValue = url;
+        }
+
+        if (scraped == null)
+            return new ResolvedPerformerScrape(NotFound(new { error = "Scrape returned no performer metadata." }), null, null, null);
+
+        return new ResolvedPerformerScrape(null, scraped, inputKind, sourceValue);
+    }
+
+    private sealed record ResolvedPerformerScrape(ActionResult? ErrorResult, ScrapedPerformerDto? Scraped, string? InputKind, string? SourceValue);
+
     [HttpGet("{id:int}/metadata-server/search")]
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<IReadOnlyList<MetadataServerPerformerMatchDto>>> SearchMetadataServer(int id, [FromQuery] string? term, [FromQuery] string? endpoint, CancellationToken ct)
@@ -175,6 +266,15 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         }
 
         return Ok(await metadataServerService.SearchPerformersAsync(term, endpoint, ct));
+    }
+
+    [HttpPost("metadata-server/find-by-ids")]
+    public async Task<ActionResult<IReadOnlyList<MetadataServerPerformerMatchDto>>> FindMetadataServerPerformersByIds([FromBody] MetadataServerFindByIdsRequestDto dto, CancellationToken ct)
+    {
+        if (dto.Ids.Count == 0)
+            return Ok(Array.Empty<MetadataServerPerformerMatchDto>());
+
+        return Ok(await metadataServerService.GetPerformerMatchesAsync(dto.Endpoint, dto.Ids, ct));
     }
 
     [HttpPost("{id:int}/metadata-server/import")]
@@ -201,6 +301,29 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
 
         var draftId = await metadataServerService.SubmitPerformerDraftAsync(performer, dto.Endpoint, ct);
         return Ok(new { draftId });
+    }
+
+    [HttpPost("metadata-server/batch-tag")]
+    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerPerformerBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Endpoint))
+            return BadRequest(new { message = "Endpoint is required" });
+
+        var ids = await ResolveSelectedPerformerIdsAsync(dto, ct);
+        if (ids.Count == 0)
+            return BadRequest(new { message = "No performers selected for batch tagging" });
+
+        var jobId = jobService.Enqueue(
+            "metadata-server:performers",
+            $"Tagging {ids.Count} performers from {dto.Endpoint}",
+            async (progress, jobCt) =>
+            {
+                using var scope = scopeFactory.CreateScope();
+                var metadataServerService = scope.ServiceProvider.GetRequiredService<MetadataServerService>();
+                await metadataServerService.BatchTagPerformersAsync(dto.Endpoint, ids, dto.RefreshAlreadyTagged, dto.ExcludeFields, progress, jobCt);
+            });
+
+        return Ok(new { jobId, itemCount = ids.Count });
     }
 
     [HttpDelete("{id:int}")]
@@ -232,6 +355,41 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
     private static T? ParseEnum<T>(string? value) where T : struct, Enum => Enum.TryParse<T>(value, true, out var e) ? e : null;
     private static List<int>? ParseIntList(string? csv) => string.IsNullOrEmpty(csv) ? null : csv.Split(',').Select(int.Parse).ToList();
+
+    private async Task<List<int>> ResolveSelectedPerformerIdsAsync(MetadataServerPerformerBatchTagRequestDto dto, CancellationToken ct)
+    {
+        if (dto.Ids?.Count > 0)
+            return dto.Ids.Distinct().ToList();
+
+        if (!dto.SelectAll && dto.Filter == null)
+            return [];
+
+        const int pageSize = 500;
+        var ids = new List<int>();
+        var page = 1;
+
+        while (true)
+        {
+            var (items, totalCount) = await performerRepo.FindAsync(dto.Filter, new FindFilter
+            {
+                Page = page,
+                PerPage = pageSize,
+                Sort = "id",
+                Direction = SortDirection.Asc,
+            }, ct);
+
+            if (items.Count == 0)
+                break;
+
+            ids.AddRange(items.Select(item => item.Id));
+            if (ids.Count >= totalCount)
+                break;
+
+            page++;
+        }
+
+        return ids.Distinct().ToList();
+    }
 
     // ===== Bulk Operations =====
 

@@ -11,9 +11,10 @@ import { formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from 
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { EditModal, Field, TextArea, TextInput, SaveButton } from "../components/EditModal";
-import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play } from "lucide-react";
+import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Download } from "lucide-react";
 import { MergeDialog } from "../components/MergeDialog";
 import { useSceneQueue } from "../state/SceneQueueContext";
+import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDialog";
 import { IdentifyDialog } from "../components/IdentifyDialog";
 import { SceneQueue } from "../components/SceneQueue";
 import { SceneCard } from "../components/EntityCards";
@@ -25,6 +26,17 @@ import { useWallColumns } from "../hooks/useWallColumns";
 import { StudioSelector } from "../components/StudioSelector";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { SceneDownloadDialog } from "../components/SceneDownloadDialog";
+import { SceneBatchScrapeDialog } from "../components/SceneBatchScrapeDialog";
+import {
+  formatBatchDownloadSummary,
+  getBatchDownloadOptionsStorageKey,
+  getUndownloadedSelectionItems,
+  loadStoredBatchDownloadOptions,
+  queueBatchDownloads,
+  saveStoredBatchDownloadOptions,
+  type BatchDownloadOptions,
+} from "../utils/batchDownloads";
 
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 
@@ -52,9 +64,12 @@ export function ScenesPage({ onNavigate }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showIdentify, setShowIdentify] = useState(false);
+  const [showBatchScrape, setShowBatchScrape] = useState(false);
+  const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [wallColumnCount, setWallColumnCount] = useState(5);
+  const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
   const queryClient = useQueryClient();
   const { setQueue } = useSceneQueue();
 
@@ -72,6 +87,15 @@ export function ScenesPage({ onNavigate }: Props) {
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
+  const selectedScene = selectedIds.size === 1 ? items.find((scene) => selectedIds.has(scene.id)) : undefined;
+  const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
+  const canDownloadSelectedScene = selectedDownloadTargets.length > 0;
+  const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-scenes");
+  const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
+
+  useEffect(() => {
+    setBatchDownloadOptions(loadStoredBatchDownloadOptions(batchDownloadStorageKey));
+  }, [batchDownloadStorageKey]);
 
   const navigateToScene = useCallback((sceneId: number) => {
     const ids = items.map((s) => s.id);
@@ -107,6 +131,21 @@ export function ScenesPage({ onNavigate }: Props) {
     },
   });
 
+  const batchDownloadMut = useMutation({
+    mutationFn: async (options: BatchDownloadOptions) => queueBatchDownloads("Scene", selectedDownloadTargets, options),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs-active"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs-history"] });
+      queryClient.invalidateQueries({ queryKey: ["scenes"] });
+      window.alert(formatBatchDownloadSummary("scene", result));
+      selectNone();
+    },
+    onError: (error: Error) => {
+      window.alert(error.message || "Failed to queue the selected downloads.");
+    },
+  });
+
   // Metadata byline standard layout: (1:23:45 - 2.5 GB)
   const byline = useMemo(() => {
     const items = data?.items ?? [];
@@ -122,6 +161,31 @@ export function ScenesPage({ onNavigate }: Props) {
   return (
     <>
     <SceneCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "scene", id })} />
+    <SceneDownloadDialog
+      open={downloadTarget !== null}
+      scene={downloadTarget && downloadTarget !== "new" ? downloadTarget : undefined}
+      onClose={() => setDownloadTarget(null)}
+      onNavigate={onNavigate}
+    />
+    <SceneBatchScrapeDialog
+      open={showBatchScrape}
+      onClose={() => setShowBatchScrape(false)}
+      scenes={items.filter((scene) => selectedIds.has(scene.id))}
+    />
+    <BatchDownloadOptionsDialog
+      open={showBatchDownloadOptions}
+      entity="Scene"
+      itemCount={selectedDownloadTargets.length}
+      initialOptions={batchDownloadOptions}
+      isPending={batchDownloadMut.isPending}
+      onClose={() => setShowBatchDownloadOptions(false)}
+      onConfirm={(options) => {
+        setBatchDownloadOptions(options);
+        saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
+        setShowBatchDownloadOptions(false);
+        batchDownloadMut.mutate(options);
+      }}
+    />
     <ListPage
       title="Scenes"
       pageKey="scenes"
@@ -134,6 +198,14 @@ export function ScenesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall", "tagger"]}
+      renderOperations={() => (
+        <button
+          onClick={() => setDownloadTarget("new")}
+          className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
+        >
+          From URL
+        </button>
+      )}
       metadataByline={byline}
       criteriaDefinitions={SCENE_CRITERIA}
       objectFilter={objectFilter}
@@ -146,6 +218,23 @@ export function ScenesPage({ onNavigate }: Props) {
       onSelectNone={selectNone}
       selectionActions={
         <>
+          {canDownloadSelectedScene && (
+            <button
+              onClick={() => {
+                if (selectedDownloadTargets.length > 1 || !selectedScene) {
+                  setShowBatchDownloadOptions(true);
+                  return;
+                }
+
+                setDownloadTarget(selectedScene);
+              }}
+              disabled={batchDownloadMut.isPending}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-60"
+            >
+              {batchDownloadMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              Download
+            </button>
+          )}
           <button
             onClick={() => setShowBulkEdit(true)}
             className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
@@ -159,6 +248,13 @@ export function ScenesPage({ onNavigate }: Props) {
           >
             <Search className="w-3 h-3" />
             Identify
+          </button>
+          <button
+            onClick={() => setShowBatchScrape(true)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+          >
+            <Search className="w-3 h-3" />
+            Scrape
           </button>
           {selectedIds.size >= 2 && (
             <button

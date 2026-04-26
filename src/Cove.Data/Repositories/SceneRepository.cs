@@ -115,6 +115,7 @@ public class SceneRepository : ISceneRepository
         // Load full entities only for the paged IDs
         var items = await _db.Scenes
             .Include(s => s.Studio)
+            .Include(s => s.Urls)
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
             .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)

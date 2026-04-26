@@ -20,6 +20,7 @@ import { createRouteLinkProps } from "../components/cardNavigation";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
+import { PerformerScrapeDialog } from "../components/PerformerScrapeDialog";
 
 interface Props {
   id: number;
@@ -45,6 +46,7 @@ const GROUP_SORT = [
 
 export function PerformerDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
+  const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: performer, isLoading } = useQuery({
     queryKey: ["performer", id],
     queryFn: () => performers.get(id),
@@ -52,6 +54,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [scrapeOpen, setScrapeOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("scenes");
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [galleryFilter, setGalleryFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
@@ -172,6 +175,9 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                     </button>
                     <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">
                       {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
+                    </button>
+                    <button onClick={() => { setScrapeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
+                      <Search className="h-3.5 w-3.5" /> Scrape...
                     </button>
                     <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
                       <GitMerge className="h-3.5 w-3.5" /> Merge...
@@ -295,6 +301,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                 <p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{performer.details}</p>
               )}
               <CustomFieldsDisplay customFields={performer.customFields} />
+              <PerformerMetadataServerPanel performer={performer} metadataServers={metadataServers} onNavigate={onNavigate} />
             </div>
           </div>
         </div>
@@ -368,6 +375,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
 
         <ExtensionSlot slot="performer-detail-bottom" context={{ performer, onNavigate }} />
       </div>
+      <PerformerScrapeDialog open={scrapeOpen} onClose={() => setScrapeOpen(false)} performer={performer} />
     </div>
   );
 }
@@ -401,6 +409,11 @@ function PerformerMetadataServerPanel({ performer, metadataServers, onNavigate }
     },
   });
 
+  const draftMutation = useMutation({
+    mutationFn: (endpoint: string) => performers.submitMetadataServerDraft(performer.id, endpoint),
+  });
+
+  const draftEndpoint = selectedEndpoint || metadataServers[0]?.endpoint;
   const linkedNames = new Map(metadataServers.map((box) => [box.endpoint, box.name || box.endpoint]));
 
   return (
@@ -464,7 +477,7 @@ function PerformerMetadataServerPanel({ performer, metadataServers, onNavigate }
                     ))}
                   </select>
                 </label>
-                <div className="flex items-end">
+                <div className="flex flex-wrap items-end gap-2">
                   <button
                     onClick={() => searchMutation.mutate({ term: term.trim() || undefined, endpoint: selectedEndpoint || undefined })}
                     disabled={searchMutation.isPending}
@@ -473,11 +486,29 @@ function PerformerMetadataServerPanel({ performer, metadataServers, onNavigate }
                     {searchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                     Search MetadataServer
                   </button>
+                  <button
+                    onClick={() => draftEndpoint && draftMutation.mutate(draftEndpoint)}
+                    disabled={!draftEndpoint || draftMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
+                  >
+                    {draftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                    Submit Draft
+                  </button>
                 </div>
               </div>
 
               {searchMutation.error && (
                 <p className="mt-3 text-sm text-red-300">{searchMutation.error.message}</p>
+              )}
+
+              {draftMutation.error && (
+                <p className="mt-3 text-sm text-red-300">{draftMutation.error.message}</p>
+              )}
+
+              {draftMutation.isSuccess && (
+                <p className="mt-3 text-sm text-emerald-300">
+                  Performer draft submitted to MetadataServer{draftMutation.data.draftId ? ` (${draftMutation.data.draftId})` : ""}.
+                </p>
               )}
 
               {importMutation.isSuccess && (
@@ -623,7 +654,7 @@ function PerformerGalleriesPanel({ performerId, filter, setFilter, onNavigate }:
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} />} />
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
       <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
         {data.items.map((gallery) => (
           <GalleryTile key={gallery.id} gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
@@ -654,7 +685,7 @@ function PerformerImagesPanel({ performerId, filter, setFilter, onNavigate }: {
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} />} />
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + zoomLevel * 50}px, 1fr))` }}>
         {data.items.map((image) => (
           <ImageTile key={image.id} image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />

@@ -599,6 +599,34 @@ public class ExtensionManager
             .ToList();
     }
 
+    /// <summary>Get all enabled scraper providers.</summary>
+    public IReadOnlyList<IScraperProvider> GetScraperProviders()
+    {
+        return GetInitializationOrder()
+            .OfType<IScraperProvider>()
+            .Where(ext => IsEnabled(ext.Id))
+            .ToList();
+    }
+
+    /// <summary>Get all enabled downloader providers.</summary>
+    public IReadOnlyList<IDownloaderProvider> GetDownloaderProviders()
+    {
+        return GetInitializationOrder()
+            .OfType<IDownloaderProvider>()
+            .Where(ext => IsEnabled(ext.Id))
+            .ToList();
+    }
+
+    /// <summary>Get all enabled auto-tag matchers exposed by extensions.</summary>
+    public IReadOnlyList<IAutoTagMatcher> GetAutoTagMatchers()
+    {
+        return GetInitializationOrder()
+            .OfType<IAutoTagMatcherExtension>()
+            .Where(ext => IsEnabled(ext.Id))
+            .SelectMany(ext => ext.GetMatchers())
+            .ToList();
+    }
+
     // ========================================================================
     // JOBS
     // ========================================================================

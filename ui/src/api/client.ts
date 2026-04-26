@@ -11,11 +11,23 @@ import type {
   SceneMarkerWall,
   PaginatedResponse, Stats, SystemStatus, CoveConfig, JobInfo,
   ScraperSummary,
+  DownloaderDescriptor,
+  DownloaderBatchStartRequest,
+  DownloaderBatchStartResponse,
+  DownloaderMatch,
+  DownloaderMatchRequest,
+  DownloaderStartRequest,
   MetadataServer,
+  MetadataServerFindByIdsRequest,
+  MetadataServerPerformerBatchTagRequest,
   MetadataServerPerformerImportRequest,
   MetadataServerPerformerMatch,
   MetadataServerSceneImportRequest,
   MetadataServerSceneMatch,
+  MetadataServerTagBatchTagRequest,
+  MetadataServerTagImportRequest,
+  MetadataServerTagMatch,
+  MetadataServerStudioBatchTagRequest,
   MetadataServerStudioMatch,
   MetadataServerStudioImportRequest,
   MetadataServerValidationResult,
@@ -23,6 +35,7 @@ import type {
   SavedFilter,
   SavedFilterCreate,
   SavedFilterUpdate,
+  PerformerScrapeRequest,
   FilteredQueryRequest,
   SceneFilterCriteria,
   PerformerFilterCriteria,
@@ -31,6 +44,10 @@ import type {
   GalleryFilterCriteria,
   ImageFilterCriteria,
   GroupFilterCriteria,
+  ScrapeAttempt,
+  CreateScrapeAttemptRequest,
+  ApplySceneScrapeAttemptRequest,
+  BatchSceneScrapeStartRequest,
   BulkSceneUpdate,
   BulkPerformerUpdate,
   BulkTagUpdate,
@@ -50,6 +67,8 @@ import type {
   RegistryExtensionDetail,
   RegistryUpdateInfo,
   DependencyInfo,
+  DownloaderPreflightRequest,
+  DownloaderPreflightResponse,
 } from "./types";
 
 const API_BASE = "/api";
@@ -235,6 +254,11 @@ export const performers = {
   get: (id: number) => request<Performer>(`/performers/${id}`),
   create: (data: PerformerCreate) => request<Performer>("/performers", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: PerformerUpdate) => request<Performer>(`/performers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  scrape: (id: number, data: PerformerScrapeRequest) => request<Performer>(`/performers/${id}/scrape`, { method: "POST", body: JSON.stringify(data) }),
+  scrapeUrl: (id: number, data?: { url?: string; createMissingTags?: boolean }) =>
+    request<Performer>(`/performers/${id}/scrape-url`, { method: "POST", body: JSON.stringify(data ?? {}) }),
+  previewScrape: (id: number, data: PerformerScrapeRequest) => request<import("./types").PerformerScrapePreview>(`/performers/${id}/scrape-preview`, { method: "POST", body: JSON.stringify(data) }),
+  applyScraped: (id: number, data: { scraped: import("./types").ScrapedPerformer; createMissingTags?: boolean }) => request<Performer>(`/performers/${id}/apply-scraped`, { method: "POST", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkPerformerUpdate) => request<void>("/performers/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/performers/${id}`, { method: "DELETE" }),
   bulkDelete: (ids: number[]) => request<void>("/performers/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),
@@ -242,8 +266,14 @@ export const performers = {
     request<Performer>("/performers/merge", { method: "POST", body: JSON.stringify({ targetId, sourceIds }) }),
   searchMetadataServer: (id: number, term?: string, endpoint?: string) =>
     request<MetadataServerPerformerMatch[]>(`/performers/${id}/metadata-server/search${buildQuery(undefined, { term, endpoint })}`),
+  findMetadataServerByIds: (data: MetadataServerFindByIdsRequest) =>
+    request<MetadataServerPerformerMatch[]>("/performers/metadata-server/find-by-ids", { method: "POST", body: JSON.stringify(data) }),
   importFromMetadataServer: (id: number, data: MetadataServerPerformerImportRequest) =>
     request<Performer>(`/performers/${id}/metadata-server/import`, { method: "POST", body: JSON.stringify(data) }),
+  submitMetadataServerDraft: (id: number, endpoint: string) =>
+    request<{ draftId: string | null }>(`/performers/${id}/metadata-server/submit-draft`, { method: "POST", body: JSON.stringify({ endpoint }) }),
+  batchTagMetadataServer: (data: MetadataServerPerformerBatchTagRequest) =>
+    request<{ jobId: string; itemCount: number }>("/performers/metadata-server/batch-tag", { method: "POST", body: JSON.stringify(data) }),
 };
 
 // ===== Tags =====
@@ -262,6 +292,16 @@ export const tags = {
   bulkDelete: (ids: number[]) => request<void>("/tags/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),
   merge: (targetId: number, sourceIds: number[]) =>
     request<TagDetail>("/tags/merge", { method: "POST", body: JSON.stringify({ targetId, sourceIds }) }),
+  searchMetadataServer: (id: number, term?: string, endpoint?: string) =>
+    request<MetadataServerTagMatch[]>(`/tags/${id}/metadata-server/search${buildQuery(undefined, { term, endpoint })}`),
+  findMetadataServerByIds: (data: MetadataServerFindByIdsRequest) =>
+    request<MetadataServerTagMatch[]>("/tags/metadata-server/find-by-ids", { method: "POST", body: JSON.stringify(data) }),
+  importFromMetadataServer: (id: number, data: MetadataServerTagImportRequest) =>
+    request<TagDetail>(`/tags/${id}/metadata-server/import`, { method: "POST", body: JSON.stringify(data) }),
+  submitMetadataServerDraft: (id: number, endpoint: string) =>
+    request<{ draftId: string | null }>(`/tags/${id}/metadata-server/submit-draft`, { method: "POST", body: JSON.stringify({ endpoint }) }),
+  batchTagMetadataServer: (data: MetadataServerTagBatchTagRequest) =>
+    request<{ jobId: string; itemCount: number }>("/tags/metadata-server/batch-tag", { method: "POST", body: JSON.stringify(data) }),
 };
 
 // ===== Studios =====
@@ -285,8 +325,14 @@ export const studios = {
     const qs = params.toString();
     return request<MetadataServerStudioMatch[]>(`/studios/${id}/metadata-server/search${qs ? `?${qs}` : ""}`);
   },
+  findMetadataServerByIds: (data: MetadataServerFindByIdsRequest) =>
+    request<MetadataServerStudioMatch[]>("/studios/metadata-server/find-by-ids", { method: "POST", body: JSON.stringify(data) }),
   importFromMetadataServer: (id: number, data: MetadataServerStudioImportRequest) =>
     request<Studio>(`/studios/${id}/metadata-server/import`, { method: "POST", body: JSON.stringify(data) }),
+  submitMetadataServerDraft: (id: number, endpoint: string) =>
+    request<{ draftId: string | null }>(`/studios/${id}/metadata-server/submit-draft`, { method: "POST", body: JSON.stringify({ endpoint }) }),
+  batchTagMetadataServer: (data: MetadataServerStudioBatchTagRequest) =>
+    request<{ jobId: string; itemCount: number }>("/studios/metadata-server/batch-tag", { method: "POST", body: JSON.stringify(data) }),
 };
 
 // ===== Galleries =====
@@ -421,12 +467,35 @@ export const system = {
     request<Record<string, unknown>[]>("/system/scrapers/scrape-name", { method: "POST", body: JSON.stringify({ scraperId, entityType, name }) }),
   scrapeFragment: (scraperId: string, entityType: string, fragment: Record<string, unknown>) =>
     request<Record<string, unknown>>("/system/scrapers/scrape-fragment", { method: "POST", body: JSON.stringify({ scraperId, entityType, fragment }) }),
+  listDownloaders: () => request<DownloaderDescriptor[]>("/system/downloaders"),
+  matchDownloaders: (data: DownloaderMatchRequest) => request<DownloaderMatch[]>("/system/downloaders/match", { method: "POST", body: JSON.stringify(data) }),
+  startDownload: (data: DownloaderStartRequest) => request<{ jobId: string }>("/system/downloaders/download", { method: "POST", body: JSON.stringify(data) }),
+  startBatchDownload: (data: DownloaderBatchStartRequest) => request<DownloaderBatchStartResponse>("/system/downloaders/download-batch", { method: "POST", body: JSON.stringify(data) }),
+  preflightDownload: (data: DownloaderPreflightRequest) => request<DownloaderPreflightResponse>("/system/downloaders/preflight", { method: "POST", body: JSON.stringify(data) }),
   validateMetadataServer: (metadataServer: MetadataServer) =>
     request<MetadataServerValidationResult>("/system/metadata-servers/validate", { method: "POST", body: JSON.stringify(metadataServer) }),
   configureUI: (input: Record<string, unknown>) =>
     request<{ success: boolean }>("/system/config/ui", { method: "POST", body: JSON.stringify(input) }),
   configureUISetting: (key: string, value: unknown) =>
     request<{ key: string; value: unknown; success: boolean }>(`/system/config/ui/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify(value) }),
+};
+
+export const scrapeAttempts = {
+  list: (params?: { entityType?: string; entityId?: number; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.entityType) query.set("entityType", params.entityType);
+    if (params?.entityId != null) query.set("entityId", String(params.entityId));
+    if (params?.limit != null) query.set("limit", String(params.limit));
+    const suffix = query.toString();
+    return request<ScrapeAttempt[]>(`/scrape-attempts${suffix ? `?${suffix}` : ""}`);
+  },
+  get: (id: string) => request<ScrapeAttempt>(`/scrape-attempts/${id}`),
+  create: (data: CreateScrapeAttemptRequest) =>
+    request<ScrapeAttempt>("/scrape-attempts", { method: "POST", body: JSON.stringify(data) }),
+  applyScene: (id: string, data: ApplySceneScrapeAttemptRequest) =>
+    request<ScrapeAttempt>(`/scrape-attempts/${id}/apply`, { method: "POST", body: JSON.stringify(data) }),
+  startSceneBatch: (data: BatchSceneScrapeStartRequest) =>
+    request<{ jobId: string; queuedCount: number }>("/scrape-attempts/batch-scenes", { method: "POST", body: JSON.stringify(data) }),
 };
 
 // ===== Jobs =====
@@ -532,7 +601,22 @@ export const database = {
     return result?.path ?? null;
   },
   optimize: () => request<void>("/database/optimize", { method: "POST" }),
-  wipe: () => request<{ message: string }>("/database/wipe", { method: "POST" }),
+  wipe: () =>
+    request<{ message: string; backupPath: string; timestamp: string; configBackupPath: string | null }>(
+      "/database/wipe",
+      { method: "POST" },
+    ),
+  backupConfig: () =>
+    request<{ backupPath: string; sizeBytes: number; timestamp: string }>("/database/config/backup", { method: "POST" }),
+  restoreConfig: (backupPath: string) =>
+    request<{ message: string; backupPath: string }>("/database/config/restore", {
+      method: "POST",
+      body: JSON.stringify({ backupPath }),
+    }),
+  latestConfigBackup: async () => {
+    const result = await requestOptional<{ path: string | null }>("/database/config/latest-backup");
+    return result?.path ?? null;
+  },
 };
 
 // ===== Stash Migration =====
