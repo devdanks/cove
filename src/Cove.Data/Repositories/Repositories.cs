@@ -1463,17 +1463,16 @@ public class GalleryRepository : IGalleryRepository
 
     private static IQueryable<Gallery> ApplyGalleryPathSort(IQueryable<Gallery> query, bool desc)
     {
+        // Both folders.Path and files.Path are stored in forward-slash form (normalized
+        // by CoveContext.SaveChanges). files.Path is btree-indexed.
         if (desc)
         {
             var descendingQuery = query.Select(gallery => new
             {
                 Gallery = gallery,
                 Path = gallery.Folder != null
-                    ? gallery.Folder.Path.Replace("\\", "/")
-                    : gallery.Files
-                        .Select(file => file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename)
-                        .OrderByDescending(path => path)
-                        .FirstOrDefault(),
+                    ? gallery.Folder.Path
+                    : gallery.Files.Select(file => file.Path).OrderByDescending(path => path).FirstOrDefault(),
             });
 
             return descendingQuery
@@ -1486,11 +1485,8 @@ public class GalleryRepository : IGalleryRepository
         {
             Gallery = gallery,
             Path = gallery.Folder != null
-                ? gallery.Folder.Path.Replace("\\", "/")
-                : gallery.Files
-                    .Select(file => file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename)
-                    .OrderBy(path => path)
-                    .FirstOrDefault(),
+                ? gallery.Folder.Path
+                : gallery.Files.Select(file => file.Path).OrderBy(path => path).FirstOrDefault(),
         });
 
         return ascendingQuery
@@ -1522,29 +1518,29 @@ public class GalleryRepository : IGalleryRepository
         return criterion.Modifier switch
         {
             CriterionModifier.Equals => query.Where(gallery =>
-                (gallery.Folder != null && gallery.Folder.Path.Replace("\\", "/") == value)
-                || gallery.Files.Any(file => (file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename) == value)),
+                (gallery.Folder != null && gallery.Folder.Path == value)
+                || gallery.Files.Any(file => file.Path == value)),
             CriterionModifier.NotEquals => query.Where(gallery =>
-                (gallery.Folder == null || gallery.Folder.Path.Replace("\\", "/") != value)
-                && !gallery.Files.Any(file => (file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename) == value)),
+                (gallery.Folder == null || gallery.Folder.Path != value)
+                && !gallery.Files.Any(file => file.Path == value)),
             CriterionModifier.Includes => query.Where(gallery =>
-                (gallery.Folder != null && gallery.Folder.Path.Replace("\\", "/").ToLower().Contains(normalizedValue))
-                || gallery.Files.Any(file => (file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename).ToLower().Contains(normalizedValue))),
+                (gallery.Folder != null && gallery.Folder.Path.ToLower().Contains(normalizedValue))
+                || gallery.Files.Any(file => file.Path.ToLower().Contains(normalizedValue))),
             CriterionModifier.Excludes => query.Where(gallery =>
-                (gallery.Folder == null || !gallery.Folder.Path.Replace("\\", "/").ToLower().Contains(normalizedValue))
-                && !gallery.Files.Any(file => (file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename).ToLower().Contains(normalizedValue))),
+                (gallery.Folder == null || !gallery.Folder.Path.ToLower().Contains(normalizedValue))
+                && !gallery.Files.Any(file => file.Path.ToLower().Contains(normalizedValue))),
             CriterionModifier.MatchesRegex => query.Where(gallery =>
-                (gallery.Folder != null && Regex.IsMatch(gallery.Folder.Path.Replace("\\", "/"), value, RegexOptions.IgnoreCase))
-                || gallery.Files.Any(file => Regex.IsMatch(file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename, value, RegexOptions.IgnoreCase))),
+                (gallery.Folder != null && Regex.IsMatch(gallery.Folder.Path, value, RegexOptions.IgnoreCase))
+                || gallery.Files.Any(file => Regex.IsMatch(file.Path, value, RegexOptions.IgnoreCase))),
             CriterionModifier.NotMatchesRegex => query.Where(gallery =>
-                (gallery.Folder == null || !Regex.IsMatch(gallery.Folder.Path.Replace("\\", "/"), value, RegexOptions.IgnoreCase))
-                && !gallery.Files.Any(file => Regex.IsMatch(file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename, value, RegexOptions.IgnoreCase))),
+                (gallery.Folder == null || !Regex.IsMatch(gallery.Folder.Path, value, RegexOptions.IgnoreCase))
+                && !gallery.Files.Any(file => Regex.IsMatch(file.Path, value, RegexOptions.IgnoreCase))),
             CriterionModifier.IsNull => query.Where(gallery =>
                 (gallery.Folder == null || gallery.Folder.Path == "")
-                && !gallery.Files.Any(file => (file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename) != "")),
+                && !gallery.Files.Any(file => file.Path != "")),
             CriterionModifier.NotNull => query.Where(gallery =>
                 (gallery.Folder != null && gallery.Folder.Path != "")
-                || gallery.Files.Any(file => (file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename) != "")),
+                || gallery.Files.Any(file => file.Path != "")),
             _ => query,
         };
     }
@@ -1741,7 +1737,7 @@ public class ImageRepository : IImageRepository
                 (i.Photographer != null && i.Photographer.ToLower().Contains(searchTerm)) ||
                 i.Files.Any(f =>
                     f.Basename.ToLower().Contains(searchTerm) ||
-                    (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename).ToLower().Contains(searchTerm)));
+                    f.Path.ToLower().Contains(searchTerm)));
         }
 
         var perPage = findFilter?.PerPage ?? 25;
@@ -1969,15 +1965,15 @@ public class ImageRepository : IImageRepository
 
     private static IQueryable<Image> ApplyPathSort(IQueryable<Image> query, bool desc)
     {
+        // Sort by the indexed denormalized files.Path column. This collapses what was a
+        // 308 ms correlated subquery (folders JOIN + REPLACE + concat per row) into an
+        // index-only ORDER BY scan.
         if (desc)
         {
             var descendingQuery = query.Select(image => new
             {
                 Image = image,
-                Path = image.Files
-                    .Select(file => file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename)
-                    .OrderByDescending(path => path)
-                    .FirstOrDefault(),
+                Path = image.Files.Select(file => file.Path).OrderByDescending(path => path).FirstOrDefault(),
             });
 
             return descendingQuery
@@ -1989,10 +1985,7 @@ public class ImageRepository : IImageRepository
         var ascendingQuery = query.Select(image => new
         {
             Image = image,
-            Path = image.Files
-                .Select(file => file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename)
-                .OrderBy(path => path)
-                .FirstOrDefault(),
+            Path = image.Files.Select(file => file.Path).OrderBy(path => path).FirstOrDefault(),
         });
 
         return ascendingQuery

@@ -102,13 +102,101 @@ public class CoveContext : DbContext
     public override int SaveChanges()
     {
         UpdateTimestamps();
+        ComputeFilePaths();
         return base.SaveChanges();
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         UpdateTimestamps();
+        ComputeFilePaths();
         return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void ComputeFilePaths()
+    {
+        // Normalize any Added/Modified Folder.Path to forward-slash form so callers can
+        // compare/sort/filter on the column directly without per-row REPLACE.
+        foreach (var folderEntry in ChangeTracker.Entries<Folder>())
+        {
+            if (folderEntry.State != EntityState.Added && folderEntry.State != EntityState.Modified)
+                continue;
+            var folder = folderEntry.Entity;
+            if (string.IsNullOrEmpty(folder.Path)) continue;
+            var normalized = folder.Path.Replace('\\', '/');
+            if (!ReferenceEquals(normalized, folder.Path) && normalized != folder.Path)
+                folder.Path = normalized;
+        }
+
+        // Collect Added/Modified files whose denormalized Path needs to be (re)computed.
+        var fileEntries = ChangeTracker.Entries<BaseFileEntity>()
+            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
+            .ToList();
+
+        if (fileEntries.Count == 0)
+        {
+            CascadeFolderPathChanges();
+            return;
+        }
+
+        // Build folder-path lookup. Prefer the in-memory navigation; for any file whose
+        // ParentFolder navigation is null, batch-load just the folder paths we need.
+        var folderPaths = new Dictionary<int, string>();
+        var missingFolderIds = new HashSet<int>();
+        foreach (var entry in fileEntries)
+        {
+            var file = entry.Entity;
+            if (file.ParentFolder != null)
+                folderPaths[file.ParentFolderId] = file.ParentFolder.Path;
+            else if (file.ParentFolderId != 0 && !folderPaths.ContainsKey(file.ParentFolderId))
+                missingFolderIds.Add(file.ParentFolderId);
+        }
+
+        if (missingFolderIds.Count > 0)
+        {
+            var ids = missingFolderIds.ToArray();
+            var loaded = Folders
+                .Where(f => ids.Contains(f.Id))
+                .Select(f => new { f.Id, f.Path })
+                .ToList();
+            foreach (var f in loaded)
+                folderPaths[f.Id] = f.Path;
+        }
+
+        foreach (var entry in fileEntries)
+        {
+            var file = entry.Entity;
+            folderPaths.TryGetValue(file.ParentFolderId, out var folderPath);
+            file.Path = BaseFileEntity.ComputePath(folderPath, file.Basename);
+        }
+
+        CascadeFolderPathChanges();
+    }
+
+    private void CascadeFolderPathChanges()
+    {
+        // When a Folder.Path is renamed, every child file's denormalized Path needs to
+        // be refreshed. We update any tracked child files; folder renames at runtime
+        // are rare today and untracked children should be migrated by an explicit job
+        // when that feature is added.
+        var folderEntries = ChangeTracker.Entries<Folder>()
+            .Where(e => e.State == EntityState.Modified
+                && e.Property(nameof(Folder.Path)).IsModified)
+            .ToList();
+        if (folderEntries.Count == 0) return;
+
+        foreach (var entry in folderEntries)
+        {
+            var folder = entry.Entity;
+            foreach (var fileEntry in ChangeTracker.Entries<BaseFileEntity>())
+            {
+                var file = fileEntry.Entity;
+                if (file.ParentFolderId != folder.Id) continue;
+                file.Path = BaseFileEntity.ComputePath(folder.Path, file.Basename);
+                if (fileEntry.State == EntityState.Unchanged)
+                    fileEntry.State = EntityState.Modified;
+            }
+        }
     }
 
     private void UpdateTimestamps()

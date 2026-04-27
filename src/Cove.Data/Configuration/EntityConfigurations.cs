@@ -443,7 +443,9 @@ public class BaseFileEntityConfiguration : IEntityTypeConfiguration<BaseFileEnti
         builder.ToTable("files");
         builder.HasKey(f => f.Id);
         builder.Property(f => f.Basename).IsRequired();
+        builder.Property(f => f.Path).IsRequired();
         builder.HasIndex(f => new { f.ParentFolderId, f.Basename }).IsUnique();
+        builder.HasIndex(f => f.Path);
     }
 }
 
@@ -451,7 +453,9 @@ public class VideoFileConfiguration : IEntityTypeConfiguration<VideoFile>
 {
     public void Configure(EntityTypeBuilder<VideoFile> builder)
     {
-        builder.HasIndex(v => v.SceneId);
+        // Composite (SceneId, Path) lets MIN(Path) WHERE SceneId = ? be answered
+        // by an Index Only Scan, which is what the scene-list "path" sort relies on.
+        builder.HasIndex(v => new { v.SceneId, v.Path });
     }
 }
 
@@ -459,7 +463,15 @@ public class ImageFileConfiguration : IEntityTypeConfiguration<ImageFile>
 {
     public void Configure(EntityTypeBuilder<ImageFile> builder)
     {
-        builder.HasIndex(i => i.ImageId);
+        builder.HasIndex(i => new { i.ImageId, i.Path });
+    }
+}
+
+public class GalleryFileConfiguration : IEntityTypeConfiguration<GalleryFile>
+{
+    public void Configure(EntityTypeBuilder<GalleryFile> builder)
+    {
+        builder.HasIndex(g => new { g.GalleryId, g.Path });
     }
 }
 

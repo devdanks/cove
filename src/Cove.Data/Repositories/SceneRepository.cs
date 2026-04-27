@@ -426,15 +426,14 @@ public class SceneRepository : ISceneRepository
 
     private static IQueryable<Scene> ApplyPathSort(IQueryable<Scene> query, bool desc)
     {
+        // Sort by indexed denormalized files.Path (forward-slash form maintained by
+        // CoveContext.SaveChanges).
         if (desc)
         {
             var descendingQuery = query.Select(scene => new
             {
                 Scene = scene,
-                Path = scene.Files
-                    .Select(file => file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename)
-                    .OrderByDescending(path => path)
-                    .FirstOrDefault(),
+                Path = scene.Files.Select(file => file.Path).OrderByDescending(path => path).FirstOrDefault(),
             });
 
             return descendingQuery
@@ -446,10 +445,7 @@ public class SceneRepository : ISceneRepository
         var ascendingQuery = query.Select(scene => new
         {
             Scene = scene,
-            Path = scene.Files
-                .Select(file => file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename)
-                .OrderBy(path => path)
-                .FirstOrDefault(),
+            Path = scene.Files.Select(file => file.Path).OrderBy(path => path).FirstOrDefault(),
         });
 
         return ascendingQuery
@@ -571,32 +567,14 @@ public class SceneRepository : ISceneRepository
 
         return criterion.Modifier switch
         {
-            CriterionModifier.Equals => query.Where(s => s.Files.Any(f =>
-                (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename) == value)),
-            CriterionModifier.NotEquals => query.Where(s => !s.Files.Any(f =>
-                (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename) == value)),
-            CriterionModifier.Includes => query.Where(s => s.Files.Any(f =>
-                EF.Functions.ILike(
-                    f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename,
-                    pattern))),
-            CriterionModifier.Excludes => query.Where(s => !s.Files.Any(f =>
-                EF.Functions.ILike(
-                    f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename,
-                    pattern))),
-            CriterionModifier.MatchesRegex => query.Where(s => s.Files.Any(f =>
-                Regex.IsMatch(
-                    f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename,
-                    value,
-                    RegexOptions.IgnoreCase))),
-            CriterionModifier.NotMatchesRegex => query.Where(s => !s.Files.Any(f =>
-                Regex.IsMatch(
-                    f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename,
-                    value,
-                    RegexOptions.IgnoreCase))),
-            CriterionModifier.IsNull => query.Where(s => !s.Files.Any(f =>
-                (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename) != "")),
-            CriterionModifier.NotNull => query.Where(s => s.Files.Any(f =>
-                (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename) != "")),
+            CriterionModifier.Equals => query.Where(s => s.Files.Any(f => f.Path == value)),
+            CriterionModifier.NotEquals => query.Where(s => !s.Files.Any(f => f.Path == value)),
+            CriterionModifier.Includes => query.Where(s => s.Files.Any(f => EF.Functions.ILike(f.Path, pattern))),
+            CriterionModifier.Excludes => query.Where(s => !s.Files.Any(f => EF.Functions.ILike(f.Path, pattern))),
+            CriterionModifier.MatchesRegex => query.Where(s => s.Files.Any(f => Regex.IsMatch(f.Path, value, RegexOptions.IgnoreCase))),
+            CriterionModifier.NotMatchesRegex => query.Where(s => !s.Files.Any(f => Regex.IsMatch(f.Path, value, RegexOptions.IgnoreCase))),
+            CriterionModifier.IsNull => query.Where(s => !s.Files.Any(f => f.Path != "")),
+            CriterionModifier.NotNull => query.Where(s => s.Files.Any(f => f.Path != "")),
             _ => query,
         };
     }

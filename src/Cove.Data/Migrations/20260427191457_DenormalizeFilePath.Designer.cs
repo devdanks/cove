@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Cove.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cove.Data.Migrations
 {
     [DbContext(typeof(CoveContext))]
-    partial class CoveContextModelSnapshot : ModelSnapshot
+    [Migration("20260427191457_DenormalizeFilePath")]
+    partial class DenormalizeFilePath
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1966,7 +1969,7 @@ namespace Cove.Data.Migrations
                     b.Property<int?>("GalleryId")
                         .HasColumnType("integer");
 
-                    b.HasIndex("GalleryId", "Path");
+                    b.HasIndex("GalleryId");
 
                     b.HasDiscriminator().HasValue("Gallery");
                 });
@@ -1988,7 +1991,7 @@ namespace Cove.Data.Migrations
                     b.Property<int>("Width")
                         .HasColumnType("integer");
 
-                    b.HasIndex("ImageId", "Path");
+                    b.HasIndex("ImageId");
 
                     b.HasDiscriminator().HasValue("Image");
                 });
@@ -2033,7 +2036,7 @@ namespace Cove.Data.Migrations
                     b.Property<int>("Width")
                         .HasColumnType("integer");
 
-                    b.HasIndex("SceneId", "Path");
+                    b.HasIndex("SceneId");
 
                     b.ToTable("files", t =>
                         {
