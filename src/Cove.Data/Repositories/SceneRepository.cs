@@ -151,9 +151,9 @@ public class SceneRepository : ISceneRepository
             if (filter.GalleryId.HasValue)
                 query = query.Where(s => s.SceneGalleries.Any(sg => sg.GalleryId == filter.GalleryId.Value));
             if (filter.TagIds?.Count > 0)
-                query = query.Where(s => s.SceneTags.Any(st => filter.TagIds.Contains(st.TagId)));
+                query = query.Where(s => s.TagIds.Any(id => filter.TagIds.Contains(id)));
             if (filter.PerformerIds?.Count > 0)
-                query = query.Where(s => s.ScenePerformers.Any(sp => filter.PerformerIds.Contains(sp.PerformerId)));
+                query = query.Where(s => s.PerformerIds.Any(id => filter.PerformerIds.Contains(id)));
 
             // Advanced criteria
             query = ApplyIntCriterion(query, filter.RatingCriterion, s => s.Rating ?? 0);
@@ -178,8 +178,8 @@ public class SceneRepository : ISceneRepository
             if (filter.FileCountCriterion != null)
                 query = ApplyIntCriterion(query, filter.FileCountCriterion, s => s.Files.Count);
 
-            query = ApplyMultiIdCriterion(query, filter.TagsCriterion, s => s.SceneTags.Select(st => st.TagId), hierarchicalTagGroups);
-            query = ApplyMultiIdCriterion(query, filter.PerformersCriterion, s => s.ScenePerformers.Select(sp => sp.PerformerId));
+            query = ApplyMultiIdCriterion(query, filter.TagsCriterion, s => s.TagIds, hierarchicalTagGroups);
+            query = ApplyMultiIdCriterion(query, filter.PerformersCriterion, s => s.PerformerIds);
 
             if (filter.StudiosCriterion != null)
             {

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Cove.Core.Entities;
 using Cove.Core.Entities.Auth;
 using Cove.Plugins;
+using System.Linq.Expressions;
 
 namespace Cove.Data;
 
@@ -103,6 +104,7 @@ public class CoveContext : DbContext
     {
         UpdateTimestamps();
         ComputeFilePaths();
+        MaintainDenormalizedIdArrays();
         return base.SaveChanges();
     }
 
@@ -110,7 +112,168 @@ public class CoveContext : DbContext
     {
         UpdateTimestamps();
         ComputeFilePaths();
+        MaintainDenormalizedIdArrays();
         return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void MaintainDenormalizedIdArrays()
+    {
+        // Refresh GIN-indexed Scene/Image/Gallery TagIds/PerformerIds arrays whenever
+        // the corresponding join tables change. The arrays let combo filters like
+        // "scenes with tags A AND B AND performer C" run as a single index-only
+        // array-containment scan instead of N joins per filter term.
+        //
+        // Strategy: collect parent ids whose link rows changed in this unit of work,
+        // then for each parent rebuild the array from the join table in one query per
+        // (parent type, link type). This is O(changed parents) round-trips, not O(rows).
+
+        var sceneTagParents = CollectChangedParentIds<SceneTag>(e => e.SceneId);
+        var scenePerformerParents = CollectChangedParentIds<ScenePerformer>(e => e.SceneId);
+        var imageTagParents = CollectChangedParentIds<ImageTag>(e => e.ImageId);
+        var imagePerformerParents = CollectChangedParentIds<ImagePerformer>(e => e.ImageId);
+        var galleryTagParents = CollectChangedParentIds<GalleryTag>(e => e.GalleryId);
+        var galleryPerformerParents = CollectChangedParentIds<GalleryPerformer>(e => e.GalleryId);
+
+        // Also handle Added Scene/Image/Gallery rows whose join collections were set
+        // through the navigation property: in that case the link entries are Added too
+        // and will already be picked up above. But a freshly-Added parent with no links
+        // still needs its arrays initialized to an empty array (the default), so nothing
+        // extra is needed here.
+
+        if (sceneTagParents.Count > 0)
+            RebuildArray<Scene, SceneTag>(sceneTagParents, s => s.TagIds, e => e.SceneId, e => e.TagId);
+        if (scenePerformerParents.Count > 0)
+            RebuildArray<Scene, ScenePerformer>(scenePerformerParents, s => s.PerformerIds, e => e.SceneId, e => e.PerformerId);
+        if (imageTagParents.Count > 0)
+            RebuildArray<Image, ImageTag>(imageTagParents, i => i.TagIds, e => e.ImageId, e => e.TagId);
+        if (imagePerformerParents.Count > 0)
+            RebuildArray<Image, ImagePerformer>(imagePerformerParents, i => i.PerformerIds, e => e.ImageId, e => e.PerformerId);
+        if (galleryTagParents.Count > 0)
+            RebuildArray<Gallery, GalleryTag>(galleryTagParents, g => g.TagIds, e => e.GalleryId, e => e.TagId);
+        if (galleryPerformerParents.Count > 0)
+            RebuildArray<Gallery, GalleryPerformer>(galleryPerformerParents, g => g.PerformerIds, e => e.GalleryId, e => e.PerformerId);
+    }
+
+    private HashSet<int> CollectChangedParentIds<TLink>(Func<TLink, int> parentId) where TLink : class
+    {
+        var ids = new HashSet<int>();
+        foreach (var entry in ChangeTracker.Entries<TLink>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Deleted or EntityState.Modified)
+                ids.Add(parentId(entry.Entity));
+        }
+        return ids;
+    }
+
+    private void RebuildArray<TParent, TLink>(
+        HashSet<int> parentIds,
+        System.Linq.Expressions.Expression<Func<TParent, int[]>> arrayProp,
+        Expression<Func<TLink, int>> linkParentId,
+        Expression<Func<TLink, int>> linkChildId)
+        where TParent : class
+        where TLink : class
+    {
+        // Build the new id-set per parent from the post-save state of the join table.
+        // Use the change tracker to overlay pending Added/Deleted link rows on top of
+        // whatever's in the database, so the array reflects the unit of work being saved
+        // (NOT the pre-save DB state) and SaveChanges only does one INSERT/UPDATE pass.
+        var ids = parentIds.ToArray();
+        var linkParentFn = linkParentId.Compile();
+        var linkChildFn = linkChildId.Compile();
+
+        // Start from the DB rows for these parents.
+        var dbLinks = Set<TLink>().AsNoTracking()
+            .Where(BuildContainsPredicate(linkParentId, ids))
+            .Select(link => new { Parent = linkParentFn(link), Child = linkChildFn(link) })
+            .ToList();
+
+        var byParent = new Dictionary<int, HashSet<int>>(parentIds.Count);
+        foreach (var pid in parentIds)
+            byParent[pid] = new HashSet<int>();
+        foreach (var row in dbLinks)
+        {
+            if (byParent.TryGetValue(row.Parent, out var set))
+                set.Add(row.Child);
+        }
+
+        // Overlay change tracker mutations on top of the DB snapshot.
+        foreach (var entry in ChangeTracker.Entries<TLink>())
+        {
+            var pid = linkParentFn(entry.Entity);
+            if (!byParent.TryGetValue(pid, out var set)) continue;
+            var cid = linkChildFn(entry.Entity);
+            switch (entry.State)
+            {
+                case EntityState.Added: set.Add(cid); break;
+                case EntityState.Deleted: set.Remove(cid); break;
+                // Modified on a composite-key link table is rare; treat as add.
+                case EntityState.Modified: set.Add(cid); break;
+            }
+        }
+
+        // Locate or load each parent and assign the new array.
+        var arraySetter = BuildArraySetter(arrayProp);
+        var trackedParents = ChangeTracker.Entries<TParent>()
+            .Where(e => e.State != EntityState.Deleted)
+            .ToDictionary(e => GetEntityId(e.Entity), e => e.Entity);
+
+        var missingParentIds = parentIds.Where(pid => !trackedParents.ContainsKey(pid)).ToArray();
+        var loadedParents = missingParentIds.Length > 0
+            ? Set<TParent>().Where(BuildIdContainsPredicate<TParent>(missingParentIds)).ToList()
+            : new List<TParent>();
+
+        foreach (var parent in loadedParents)
+            trackedParents[GetEntityId(parent)] = parent;
+
+        foreach (var (pid, set) in byParent)
+        {
+            if (!trackedParents.TryGetValue(pid, out var parent)) continue;
+            // Order for stable diffs and predictable serialization.
+            var newArray = set.OrderBy(x => x).ToArray();
+            arraySetter(parent, newArray);
+        }
+    }
+
+    private static Expression<Func<TLink, bool>> BuildContainsPredicate<TLink>(
+        Expression<Func<TLink, int>> selector, int[] ids)
+    {
+        var param = selector.Parameters[0];
+        var contains = Expression.Call(
+            typeof(System.Linq.Enumerable),
+            nameof(System.Linq.Enumerable.Contains),
+            new[] { typeof(int) },
+            Expression.Constant(ids),
+            selector.Body);
+        return Expression.Lambda<Func<TLink, bool>>(contains, param);
+    }
+
+    private static Expression<Func<TParent, bool>> BuildIdContainsPredicate<TParent>(int[] ids) where TParent : class
+    {
+        var param = Expression.Parameter(typeof(TParent), "p");
+        var idProperty = Expression.Property(param, nameof(BaseEntity.Id));
+        var contains = Expression.Call(
+            typeof(System.Linq.Enumerable),
+            nameof(System.Linq.Enumerable.Contains),
+            new[] { typeof(int) },
+            Expression.Constant(ids),
+            idProperty);
+        return Expression.Lambda<Func<TParent, bool>>(contains, param);
+    }
+
+    private static int GetEntityId(object entity)
+    {
+        return entity switch
+        {
+            BaseEntity be => be.Id,
+            _ => (int)(entity.GetType().GetProperty("Id")?.GetValue(entity) ?? 0)
+        };
+    }
+
+    private static Action<TParent, int[]> BuildArraySetter<TParent>(Expression<Func<TParent, int[]>> arrayProp)
+    {
+        var memberExpr = (MemberExpression)arrayProp.Body;
+        var prop = (System.Reflection.PropertyInfo)memberExpr.Member;
+        return (parent, value) => prop.SetValue(parent, value);
     }
 
     private void ComputeFilePaths()

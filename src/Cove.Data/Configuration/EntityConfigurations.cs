@@ -32,6 +32,12 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
         builder.HasIndex(s => s.CreatedAt);
         builder.HasIndex(s => s.UpdatedAt);
         builder.HasIndex(s => s.Organized);
+
+        // GIN-indexed denormalized id sets for tag/performer combo filters.
+        builder.Property(s => s.TagIds).HasColumnType("integer[]");
+        builder.Property(s => s.PerformerIds).HasColumnType("integer[]");
+        builder.HasIndex(s => s.TagIds).HasMethod("gin");
+        builder.HasIndex(s => s.PerformerIds).HasMethod("gin");
     }
 }
 
@@ -234,6 +240,11 @@ public class GalleryConfiguration : IEntityTypeConfiguration<Gallery>
 
         builder.HasIndex(g => g.Title);
         builder.HasIndex(g => g.StudioId);
+
+        builder.Property(g => g.TagIds).HasColumnType("integer[]");
+        builder.Property(g => g.PerformerIds).HasColumnType("integer[]");
+        builder.HasIndex(g => g.TagIds).HasMethod("gin");
+        builder.HasIndex(g => g.PerformerIds).HasMethod("gin");
     }
 }
 
@@ -279,6 +290,11 @@ public class ImageConfiguration : IEntityTypeConfiguration<Image>
         builder.HasIndex(i => i.Organized);
         builder.HasIndex(i => i.CreatedAt);
         builder.HasIndex(i => i.UpdatedAt);
+
+        builder.Property(i => i.TagIds).HasColumnType("integer[]");
+        builder.Property(i => i.PerformerIds).HasColumnType("integer[]");
+        builder.HasIndex(i => i.TagIds).HasMethod("gin");
+        builder.HasIndex(i => i.PerformerIds).HasMethod("gin");
     }
 }
 

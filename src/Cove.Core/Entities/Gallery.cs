@@ -14,6 +14,10 @@ public class Gallery : BaseEntity
     public string? ImageBlobId { get; set; }
     public int? CoverImageId { get; set; }
 
+    // Denormalized M2M id sets, GIN-indexed. See Scene.TagIds for rationale.
+    public int[] TagIds { get; set; } = [];
+    public int[] PerformerIds { get; set; } = [];
+
     // Navigation properties
     public Studio? Studio { get; set; }
     public Folder? Folder { get; set; }

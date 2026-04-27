@@ -12,6 +12,10 @@ public class Image : BaseEntity
     public int? StudioId { get; set; }
     public DateOnly? Date { get; set; }
 
+    // Denormalized M2M id sets, GIN-indexed. See Scene.TagIds for rationale.
+    public int[] TagIds { get; set; } = [];
+    public int[] PerformerIds { get; set; } = [];
+
     // Navigation properties
     public Studio? Studio { get; set; }
     public ICollection<ImageUrl> Urls { get; set; } = [];

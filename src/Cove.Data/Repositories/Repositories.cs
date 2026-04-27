@@ -1342,8 +1342,8 @@ public class GalleryRepository : IGalleryRepository
             if (filter.Organized.HasValue) query = query.Where(g => g.Organized == filter.Organized.Value);
             if (filter.StudioId.HasValue) query = query.Where(g => g.StudioId == filter.StudioId.Value);
             if (filter.ImageId.HasValue) query = query.Where(g => g.ImageGalleries.Any(ig => ig.ImageId == filter.ImageId.Value));
-            if (filter.TagIds?.Count > 0) query = query.Where(g => g.GalleryTags.Any(gt => filter.TagIds.Contains(gt.TagId)));
-            if (filter.PerformerIds?.Count > 0) query = query.Where(g => g.GalleryPerformers.Any(gp => filter.PerformerIds.Contains(gp.PerformerId)));
+            if (filter.TagIds?.Count > 0) query = query.Where(g => g.TagIds.Any(id => filter.TagIds.Contains(id)));
+            if (filter.PerformerIds?.Count > 0) query = query.Where(g => g.PerformerIds.Any(id => filter.PerformerIds.Contains(id)));
 
             // Advanced criteria
             query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, g => g.Rating ?? 0);
@@ -1358,8 +1358,8 @@ public class GalleryRepository : IGalleryRepository
                     : query.Where(g => !g.GalleryPerformers.Any(gp => gp.Performer!.Favorite));
 
             // Multi-ID criteria
-            query = FilterHelpers.ApplyMultiId(query, filter.TagsCriterion, g => g.GalleryTags.Select(gt => gt.TagId));
-            query = FilterHelpers.ApplyMultiId(query, filter.PerformersCriterion, g => g.GalleryPerformers.Select(gp => gp.PerformerId));
+            query = FilterHelpers.ApplyMultiId(query, filter.TagsCriterion, g => g.TagIds);
+            query = FilterHelpers.ApplyMultiId(query, filter.PerformersCriterion, g => g.PerformerIds);
 
             query = FilterHelpers.ApplyStudioCriterion(query, filter.StudiosCriterion, g => g.StudioId);
 
@@ -1794,8 +1794,8 @@ public class ImageRepository : IImageRepository
         if (filter.Organized.HasValue) query = query.Where(i => i.Organized == filter.Organized.Value);
         if (filter.StudioId.HasValue) query = query.Where(i => i.StudioId == filter.StudioId.Value);
         if (filter.GalleryId.HasValue) query = query.Where(i => i.ImageGalleries.Any(ig => ig.GalleryId == filter.GalleryId.Value));
-        if (filter.TagIds?.Count > 0) query = query.Where(i => i.ImageTags.Any(it => filter.TagIds.Contains(it.TagId)));
-        if (filter.PerformerIds?.Count > 0) query = query.Where(i => i.ImagePerformers.Any(ip => filter.PerformerIds.Contains(ip.PerformerId)));
+        if (filter.TagIds?.Count > 0) query = query.Where(i => i.TagIds.Any(id => filter.TagIds.Contains(id)));
+        if (filter.PerformerIds?.Count > 0) query = query.Where(i => i.PerformerIds.Any(id => filter.PerformerIds.Contains(id)));
 
         // Advanced criteria
         if (filter.RatingCriterion != null)
@@ -1809,9 +1809,9 @@ public class ImageRepository : IImageRepository
 
         // Multi-ID criteria
         if (filter.TagsCriterion != null)
-            query = FilterHelpers.ApplyMultiId(query, filter.TagsCriterion, i => i.ImageTags.Select(it => it.TagId), hierarchicalTagGroups);
+            query = FilterHelpers.ApplyMultiId(query, filter.TagsCriterion, i => i.TagIds, hierarchicalTagGroups);
         if (filter.PerformersCriterion != null)
-            query = FilterHelpers.ApplyMultiId(query, filter.PerformersCriterion, i => i.ImagePerformers.Select(ip => ip.PerformerId));
+            query = FilterHelpers.ApplyMultiId(query, filter.PerformersCriterion, i => i.PerformerIds);
 
         query = FilterHelpers.ApplyStudioCriterion(query, filter.StudiosCriterion, i => i.StudioId);
 

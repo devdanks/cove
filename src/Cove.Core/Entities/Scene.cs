@@ -19,6 +19,12 @@ public class Scene : BaseEntity
     public int? InteractiveSpeed { get; set; }
     public string? ImageBlobId { get; set; }
 
+    // Denormalized M2M id sets, GIN-indexed. Maintained from SceneTags/ScenePerformers
+    // by CoveContext on save. Lets tag/performer combo filters use a single index-only
+    // array containment scan (e.g. WHERE tag_ids @> ARRAY[1,2,3]) instead of N joins.
+    public int[] TagIds { get; set; } = [];
+    public int[] PerformerIds { get; set; } = [];
+
     // Navigation properties
     public Studio? Studio { get; set; }
     public ICollection<SceneUrl> Urls { get; set; } = [];
