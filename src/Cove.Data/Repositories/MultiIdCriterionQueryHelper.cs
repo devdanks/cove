@@ -91,16 +91,28 @@ internal static class MultiIdCriterionQueryHelper
                 continue;
             }
 
-            var groupIds = Expression.Constant(group);
-            var entityIdParam = Expression.Parameter(typeof(int), "entityId");
-            var anyGroupInEntity = Expression.Call(
-                typeof(Enumerable),
-                nameof(Enumerable.Any),
-                [typeof(int)],
-                entityIds,
-                Expression.Lambda<Func<int, bool>>(
-                    Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), [typeof(int)], groupIds, entityIdParam),
-                    entityIdParam));
+            Expression? anyGroupInEntity = null;
+            foreach (var groupId in group.Distinct())
+            {
+                var entityIdParam = Expression.Parameter(typeof(int), "entityId");
+                var entityHasGroupId = Expression.Call(
+                    typeof(Enumerable),
+                    nameof(Enumerable.Any),
+                    [typeof(int)],
+                    entityIds,
+                    Expression.Lambda<Func<int, bool>>(
+                        Expression.Equal(entityIdParam, Expression.Constant(groupId)),
+                        entityIdParam));
+
+                anyGroupInEntity = anyGroupInEntity == null
+                    ? entityHasGroupId
+                    : Expression.OrElse(anyGroupInEntity, entityHasGroupId);
+            }
+
+            if (anyGroupInEntity == null)
+            {
+                continue;
+            }
 
             allGroupsMatched = allGroupsMatched == null
                 ? anyGroupInEntity

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Interfaces;
 using Cove.Data;
@@ -9,9 +10,11 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.SystemRead)]
 public class DatabaseController(CoveContext db, IBackupService backupService, ILogger<DatabaseController> logger) : ControllerBase
 {
     [HttpPost("backup")]
+    [RequiresPermission(Permissions.SystemBackup)]
     public async Task<ActionResult<BackupResultDto>> BackupDatabase(CancellationToken ct)
     {
         var backup = await backupService.CreateBackupAsync("manual", ct);
@@ -19,6 +22,7 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
     }
 
     [HttpPost("restore")]
+    [RequiresPermission(Permissions.SystemRestore)]
     public async Task<IActionResult> RestoreDatabase([FromBody] RestoreBackupRequestDto request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.BackupPath))
@@ -30,6 +34,7 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
     }
 
     [HttpPost("optimize")]
+    [RequiresPermission(Permissions.SystemSettingsWrite)]
     public async Task<IActionResult> OptimizeDatabase(CancellationToken ct)
     {
         // VACUUM cannot run inside a transaction — use a raw connection
@@ -44,6 +49,7 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
     }
 
     [HttpPost("wipe")]
+    [RequiresPermission(Permissions.SystemWipe)]
     public async Task<ActionResult<WipeResultDto>> WipeDatabase(CancellationToken ct)
     {
         logger.LogWarning("Database + config wipe initiated");
@@ -86,6 +92,7 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
     }
 
     [HttpPost("config/backup")]
+    [RequiresPermission(Permissions.SystemBackup)]
     public async Task<ActionResult<ConfigBackupResultDto>> BackupConfig(CancellationToken ct)
     {
         var result = await backupService.CreateConfigBackupAsync("manual", ct);
@@ -95,6 +102,7 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
     }
 
     [HttpPost("config/restore")]
+    [RequiresPermission(Permissions.SystemRestore)]
     public async Task<IActionResult> RestoreConfig([FromBody] RestoreBackupRequestDto request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.BackupPath))
@@ -106,6 +114,7 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
     }
 
     [HttpGet("config/latest-backup")]
+    [RequiresPermission(Permissions.SystemRead)]
     public async Task<ActionResult<object>> GetLatestConfigBackup(CancellationToken ct)
     {
         var path = await backupService.GetLatestConfigBackupPathAsync(ct);

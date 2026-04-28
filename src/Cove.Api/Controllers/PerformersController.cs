@@ -2,16 +2,19 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
 using Cove.Core.Interfaces;
+using IAuthorizationService = Cove.Core.Auth.IAuthorizationService;
 
 namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db) : ControllerBase
+[RequiresPermission(Permissions.PerformersRead)]
+public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -33,15 +36,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         };
 
         var (items, totalCount) = await performerRepo.FindAsync(filter, findFilter, ct);
-        var ids = items.Select(p => p.Id).ToList();
-        var sceneCounts = await db.Set<ScenePerformer>().Where(sp => ids.Contains(sp.PerformerId)).GroupBy(sp => sp.PerformerId).ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
-        var imageCounts = await db.Set<ImagePerformer>().Where(ip => ids.Contains(ip.PerformerId)).GroupBy(ip => ip.PerformerId).ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
-        var galleryCounts = await db.Set<GalleryPerformer>().Where(gp => ids.Contains(gp.PerformerId)).GroupBy(gp => gp.PerformerId).ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
-        var dtos = items.Select(p => MapToDto(p,
-            sceneCounts.GetValueOrDefault(p.Id),
-            imageCounts.GetValueOrDefault(p.Id),
-            galleryCounts.GetValueOrDefault(p.Id)
-        )).ToList();
+        var dtos = items.Select(p => MapToDto(p)).ToList();
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, page, perPage));
     }
 
@@ -51,15 +46,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new PerformerFilter();
         var (items, totalCount) = await performerRepo.FindAsync(filter, findFilter, ct);
-        var ids = items.Select(p => p.Id).ToList();
-        var sceneCounts = await db.Set<ScenePerformer>().Where(sp => ids.Contains(sp.PerformerId)).GroupBy(sp => sp.PerformerId).ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
-        var imageCounts = await db.Set<ImagePerformer>().Where(ip => ids.Contains(ip.PerformerId)).GroupBy(ip => ip.PerformerId).ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
-        var galleryCounts = await db.Set<GalleryPerformer>().Where(gp => ids.Contains(gp.PerformerId)).GroupBy(gp => gp.PerformerId).ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
-        var dtos = items.Select(p => MapToDto(p,
-            sceneCounts.GetValueOrDefault(p.Id),
-            imageCounts.GetValueOrDefault(p.Id),
-            galleryCounts.GetValueOrDefault(p.Id)
-        )).ToList();
+        var dtos = items.Select(p => MapToDto(p)).ToList();
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -69,14 +56,11 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     {
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
         if (performer == null) return NotFound();
-        // Use explicit COUNT queries â€” navigation properties for join tables aren't loaded
-        var sceneCount = await db.Set<ScenePerformer>().CountAsync(sp => sp.PerformerId == id, ct);
-        var imageCount = await db.Set<ImagePerformer>().CountAsync(ip => ip.PerformerId == id, ct);
-        var galleryCount = await db.Set<GalleryPerformer>().CountAsync(gp => gp.PerformerId == id, ct);
-        return Ok(MapToDto(performer, sceneCount, imageCount, galleryCount));
+        return Ok(MapToDto(performer));
     }
 
     [HttpPost]
+    [RequiresPermission(Permissions.PerformersWrite)]
     public async Task<ActionResult<PerformerDto>> Create([FromBody] PerformerCreateDto dto, CancellationToken ct)
     {
         var performer = new Performer
@@ -97,11 +81,17 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.TagIds?.Count > 0) performer.PerformerTags = dto.TagIds.Select(id => new PerformerTag { TagId = id }).ToList();
 
         performer = await performerRepo.AddAsync(performer, ct);
+        if (dto.Urls?.Count > 0)
+            await entityIdentifiers.SyncAsync(EntityKinds.Performer, performer.Id, IdentifierSchemes.Url, dto.Urls, null, ct);
+        if (dto.Aliases?.Count > 0)
+            await entityIdentifiers.SyncAsync(EntityKinds.Performer, performer.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await performerRepo.GetByIdWithRelationsAsync(performer.Id, ct);
         return CreatedAtAction(nameof(GetById), new { id = performer.Id }, MapToDto(result!));
     }
 
     [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite)]
     public async Task<ActionResult<PerformerDto>> Update(int id, [FromBody] PerformerUpdateDto dto, CancellationToken ct)
     {
         var p = await performerRepo.GetByIdWithRelationsAsync(id, ct);
@@ -149,17 +139,25 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.CustomFields != null) p.CustomFields = dto.CustomFields;
 
         await performerRepo.UpdateAsync(p, ct);
+        if (dto.Urls != null)
+            await entityIdentifiers.SyncAsync(EntityKinds.Performer, id, IdentifierSchemes.Url, dto.Urls, null, ct);
+        if (dto.Aliases != null)
+            await entityIdentifiers.SyncAsync(EntityKinds.Performer, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(MapToDto(updated!));
     }
 
     [HttpPost("{id:int}/scrape-url")]
+    [RequiresPermission(Permissions.PerformersScrape, Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite)]
     public async Task<ActionResult<PerformerDto>> ScrapeUrl(int id, [FromBody] PerformerScrapeUrlRequestDto dto, CancellationToken ct)
     {
         return await Scrape(id, new PerformerScrapeRequestDto("url", null, dto.Url, null, dto.CreateMissingTags), ct);
     }
 
     [HttpPost("{id:int}/scrape")]
+    [RequiresPermission(Permissions.PerformersScrape, Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite)]
     public async Task<ActionResult<PerformerDto>> Scrape(int id, [FromBody] PerformerScrapeRequestDto dto, CancellationToken ct)
     {
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
@@ -178,6 +176,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     }
 
     [HttpPost("{id:int}/scrape-preview")]
+    [RequiresPermission(Permissions.PerformersScrape)]
     public async Task<ActionResult<PerformerScrapePreviewDto>> PreviewScrape(int id, [FromBody] PerformerScrapeRequestDto dto, CancellationToken ct)
     {
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
@@ -192,6 +191,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     }
 
     [HttpPost("{id:int}/apply-scraped")]
+    [RequiresPermission(Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite)]
     public async Task<ActionResult<PerformerDto>> ApplyScraped(int id, [FromBody] PerformerApplyScrapedRequestDto dto, CancellationToken ct)
     {
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
@@ -278,6 +279,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     }
 
     [HttpPost("{id:int}/metadata-server/import")]
+    [RequiresPermission(Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite)]
     public async Task<ActionResult<PerformerDto>> ImportFromMetadataServer(int id, [FromBody] MetadataServerPerformerImportRequestDto dto, CancellationToken ct)
     {
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
@@ -294,6 +297,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]
+    [RequiresPermission(Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite)]
     public async Task<IActionResult> SubmitPerformerDraft(int id, [FromBody] MetadataServerEndpointDto dto, CancellationToken ct)
     {
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
@@ -304,7 +309,9 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     }
 
     [HttpPost("metadata-server/batch-tag")]
-    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerPerformerBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, CancellationToken ct)
+    [RequiresPermission(Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
+    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerPerformerBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, [FromServices] IAuthorizationService authorizationService, [FromServices] ICurrentPrincipalAccessor principalAccessor, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Endpoint))
             return BadRequest(new { message = "Endpoint is required" });
@@ -312,6 +319,22 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         var ids = await ResolveSelectedPerformerIdsAsync(dto, ct);
         if (ids.Count == 0)
             return BadRequest(new { message = "No performers selected for batch tagging" });
+
+        var principal = principalAccessor.Current;
+        if (principal == null)
+            return Forbid();
+
+        foreach (var id in ids)
+        {
+            var result = await authorizationService.AuthorizeAsync(
+                principal,
+                Permissions.PerformersWrite,
+                new EntityRef(EntityKinds.Performer, id.ToString()),
+                ct);
+
+            if (!result.Allowed)
+                return Forbid();
+        }
 
         var jobId = jobService.Enqueue(
             "metadata-server:performers",
@@ -327,6 +350,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.PerformersDelete)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var p = await performerRepo.GetByIdAsync(id, ct);
@@ -346,7 +371,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         p.Aliases.Select(a => a.Alias).ToList(),
         p.PerformerTags.Where(pt => pt.Tag != null).Select(pt => new TagDto(pt.Tag!.Id, pt.Tag.Name, pt.Tag.Description, pt.Tag.Favorite, pt.Tag.IgnoreAutoTag, [])).ToList(),
         p.RemoteIds.Select(remoteId => new PerformerRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
-        sceneCount ?? p.ScenePerformers?.Count ?? 0, imageCount ?? p.ImagePerformers?.Count ?? 0, galleryCount ?? p.GalleryPerformers?.Count ?? 0, groupCount ?? 0,
+        sceneCount ?? p.SceneCount, imageCount ?? p.ImageCount, galleryCount ?? p.GalleryCount, groupCount ?? 0,
         p.ImageBlobId != null ? EntityImageUrls.Performer(p.Id, p.UpdatedAt) : null,
         p.CustomFields,
         p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o")
@@ -394,6 +419,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     // ===== Bulk Operations =====
 
     [HttpPost("bulk")]
+    [RequiresPermission(Permissions.PerformersWrite)]
     public async Task<IActionResult> BulkUpdate([FromBody] BulkPerformerUpdateDto dto, CancellationToken ct)
     {
         var performers = await db.Performers
@@ -430,6 +456,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     // ===== Merge =====
 
     [HttpPost("merge")]
+    [RequiresPermission(Permissions.PerformersWrite)]
     public async Task<ActionResult<PerformerDto>> MergePerformers([FromBody] PerformerMergeDto dto, CancellationToken ct)
     {
         var target = await performerRepo.GetByIdWithRelationsAsync(dto.TargetId, ct);

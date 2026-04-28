@@ -14,6 +14,8 @@
 import { useEffect, useState, createContext, useContext, useCallback, type ReactNode, type FC } from "react";
 import { useRouteRegistry } from "../router/RouteRegistry";
 import { extensions } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 import { Music, Puzzle, type LucideIcon } from "lucide-react";
 import type {
   ExtensionManifest,
@@ -123,6 +125,7 @@ const THEME_STORAGE_KEY = "cove-active-theme";
 const COMPONENT_STYLE_STORAGE_KEY = "cove-component-style";
 const LAYOUT_STYLE_STORAGE_KEY = "cove-layout-style";
 const CUSTOM_THEME_STORAGE_KEY = "cove-custom-theme-colors";
+const STYLE_OPTIONS_STORAGE_KEY = "cove-style-options";
 
 function parseStyleSet(raw: string | null): Set<string> {
   if (!raw) return new Set(["default"]);
@@ -130,24 +133,41 @@ function parseStyleSet(raw: string | null): Set<string> {
   return items.length > 0 ? new Set(items) : new Set(["default"]);
 }
 
+function readStoredThemeColors(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(CUSTOM_THEME_STORAGE_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function readStoredStyleOptions(): Record<string, Record<string, string>> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STYLE_OPTIONS_STORAGE_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed as Record<string, Record<string, string>> : {};
+  } catch {
+    return {};
+  }
+}
+
 export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
   const { register, registerSlot } = useRouteRegistry();
+  const { user } = useAuth();
+  const userThemePreferences = supportsServerBackedUiPreferences(user) ? user.uiPreferences?.theme ?? null : null;
   const [manifest, setManifest] = useState<ExtensionManifest | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [activeThemeId, setActiveThemeIdState] = useState<string | null>(
-    () => localStorage.getItem(THEME_STORAGE_KEY) ?? "default"
+    () => userThemePreferences?.activeThemeId ?? localStorage.getItem(THEME_STORAGE_KEY) ?? "default"
   );
   const [activeComponentStyles, setActiveComponentStylesState] = useState<Set<string>>(
-    () => parseStyleSet(localStorage.getItem(COMPONENT_STYLE_STORAGE_KEY))
+    () => parseStyleSet(userThemePreferences?.activeComponentStyles?.join(" ") ?? localStorage.getItem(COMPONENT_STYLE_STORAGE_KEY))
   );
   const [activeLayoutStyle, setActiveLayoutStyleState] = useState<string>(
-    () => localStorage.getItem(LAYOUT_STYLE_STORAGE_KEY) ?? "default"
+    () => userThemePreferences?.activeLayoutStyle ?? localStorage.getItem(LAYOUT_STYLE_STORAGE_KEY) ?? "default"
   );
   const [customThemeColors, setCustomThemeColorsState] = useState<Record<string, string>>(
-    () => {
-      try { return JSON.parse(localStorage.getItem(CUSTOM_THEME_STORAGE_KEY) ?? "{}"); } catch { return {}; }
-    }
+    () => userThemePreferences?.customThemeColors ?? readStoredThemeColors()
   );
 
   const setActiveTheme = useCallback((id: string | null) => {
@@ -157,6 +177,13 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
     } else {
       localStorage.removeItem(THEME_STORAGE_KEY);
     }
+    updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      theme: {
+        ...(current?.theme ?? {}),
+        activeThemeId: id,
+      },
+    }));
   }, []);
 
   const toggleComponentStyle = useCallback((id: string) => {
@@ -183,6 +210,13 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         next.add(id);
       }
       localStorage.setItem(COMPONENT_STYLE_STORAGE_KEY, [...next].join(" "));
+      updateAuthenticatedUserUiPreferences((current) => ({
+        ...(current ?? {}),
+        theme: {
+          ...(current?.theme ?? {}),
+          activeComponentStyles: [...next],
+        },
+      }));
       return next;
     });
   }, []);
@@ -190,12 +224,42 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
   const setActiveLayoutStyle = useCallback((id: string) => {
     setActiveLayoutStyleState(id);
     localStorage.setItem(LAYOUT_STYLE_STORAGE_KEY, id);
+    updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      theme: {
+        ...(current?.theme ?? {}),
+        activeLayoutStyle: id,
+      },
+    }));
   }, []);
 
   const setCustomThemeColors = useCallback((colors: Record<string, string>) => {
     setCustomThemeColorsState(colors);
     localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify(colors));
+    updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      theme: {
+        ...(current?.theme ?? {}),
+        customThemeColors: colors,
+      },
+    }));
   }, []);
+
+  useEffect(() => {
+    if (!supportsServerBackedUiPreferences(user)) {
+      return;
+    }
+
+    const nextTheme = userThemePreferences;
+    if (!nextTheme) {
+      return;
+    }
+
+    setActiveThemeIdState(nextTheme.activeThemeId ?? "default");
+    setActiveComponentStylesState(parseStyleSet(nextTheme.activeComponentStyles?.join(" ") ?? null));
+    setActiveLayoutStyleState(nextTheme.activeLayoutStyle ?? "default");
+    setCustomThemeColorsState(nextTheme.customThemeColors ?? {});
+  }, [user, userThemePreferences]);
 
   // Fetch manifest on mount
   useEffect(() => {
@@ -380,16 +444,24 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
     return () => { document.documentElement.removeAttribute("data-component-style"); };
   }, [activeComponentStyles]);
 
-  // Apply style options (data attributes + CSS custom properties) at startup
+  // Apply style options (data attributes + CSS custom properties) for the current session
   useEffect(() => {
     try {
-      const raw = JSON.parse(localStorage.getItem("cove-style-options") ?? "{}");
+      const raw = userThemePreferences?.styleOptions ?? readStoredStyleOptions();
       // CSS custom property mapping for range-type style configs
       const cssVarMap: Record<string, Record<string, string>> = {
         gradient: { animated: "--sv-anim-speed", background: "--sv-bg-intensity", cards: "--sv-card-gradient" },
         glass: { cardblur: "--sv-card-blur", surfaceblur: "--sv-surface-blur", opacity: "--sv-surface-opacity" },
         animated: { hover: "--sv-hover-glow" },
       };
+      delete document.documentElement.dataset.styleGradientSpeed;
+      delete document.documentElement.dataset.styleGradientCardstrength;
+      delete document.documentElement.dataset.styleGradientBgstrength;
+      for (const key of Object.keys(document.documentElement.dataset)) {
+        if (key.startsWith("style")) {
+          delete document.documentElement.dataset[key];
+        }
+      }
       for (const [styleId, opts] of Object.entries(raw)) {
         for (const [key, val] of Object.entries(opts as Record<string, string>)) {
           document.documentElement.dataset[`style${styleId.charAt(0).toUpperCase()}${styleId.slice(1)}${key.charAt(0).toUpperCase()}${key.slice(1)}`] = val;
@@ -400,7 +472,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch { /* ignore parse errors */ }
-  }, []);
+  }, [userThemePreferences]);
 
   // Apply layout style data attribute
   useEffect(() => {

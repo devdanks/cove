@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Data;
@@ -10,9 +11,12 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/files")]
+[RequiresPermission(Permissions.FilesRead)]
 public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger) : ControllerBase
 {
     [HttpPost("move")]
+    [RequiresPermission(Permissions.FilesWrite)]
+    [RequiresEntityAccess(EntityKinds.File, Permissions.FilesWrite, ActionArgumentName = "dto", PropertyName = "FileIds")]
     public async Task<IActionResult> MoveFiles([FromBody] MoveFilesDto dto, CancellationToken ct)
     {
         if (!Directory.Exists(dto.DestinationPath))
@@ -60,6 +64,8 @@ public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger
     }
 
     [HttpPost("delete")]
+    [RequiresPermission(Permissions.FilesDelete)]
+    [RequiresEntityAccess(EntityKinds.File, Permissions.FilesDelete, ActionArgumentName = "dto", PropertyName = "FileIds")]
     public async Task<IActionResult> DeleteFiles([FromBody] DeleteFilesDto dto, CancellationToken ct)
     {
         var files = await db.Set<BaseFileEntity>()
@@ -112,6 +118,8 @@ public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger
     }
 
     [HttpPost("{id:int}/reveal")]
+    [RequiresPermission(Permissions.FilesRead)]
+    [RequiresEntityAccess(EntityKinds.File, Permissions.FilesRead)]
     public async Task<IActionResult> RevealInFileManager(int id, CancellationToken ct)
     {
         var file = await db.Set<BaseFileEntity>()
@@ -142,6 +150,7 @@ public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger
     }
 
     [HttpPost("folders/{id:int}/reveal")]
+    [RequiresPermission(Permissions.FilesRead)]
     public async Task<IActionResult> RevealFolderInFileManager(int id, CancellationToken ct)
     {
         var folder = await db.Folders.FirstOrDefaultAsync(f => f.Id == id, ct);
@@ -169,6 +178,8 @@ public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger
     }
 
     [HttpPost("fingerprints")]
+    [RequiresPermission(Permissions.FilesWrite)]
+    [RequiresEntityAccess(EntityKinds.File, Permissions.FilesWrite, ActionArgumentName = "dto", PropertyName = "FileId")]
     public async Task<IActionResult> SetFingerprints([FromBody] FileSetFingerprintsDto dto, CancellationToken ct)
     {
         var file = await db.Set<BaseFileEntity>()

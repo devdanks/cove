@@ -32,6 +32,41 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
         builder.HasIndex(s => s.CreatedAt);
         builder.HasIndex(s => s.UpdatedAt);
         builder.HasIndex(s => s.Organized);
+        builder.Property(s => s.FileCount).HasDefaultValue(0);
+        builder.Property(s => s.MaxDuration).HasDefaultValue(0d);
+        builder.Property(s => s.MaxResolution).HasDefaultValue(0);
+        builder.Property(s => s.MaxHeight).HasDefaultValue(0);
+        builder.Property(s => s.MaxFrameRate).HasDefaultValue(0d);
+        builder.Property(s => s.MaxBitRate).HasDefaultValue(0L);
+        builder.Property(s => s.MaxFileSize).HasDefaultValue(0L);
+        builder.Property(s => s.HasDimensionData).HasDefaultValue(false);
+        builder.Property(s => s.HasLandscapeFiles).HasDefaultValue(false);
+        builder.Property(s => s.HasPortraitFiles).HasDefaultValue(false);
+        builder.Property(s => s.HasSquareFiles).HasDefaultValue(false);
+        builder.Property(s => s.HasInteractiveFiles).HasDefaultValue(false);
+        builder.Property(s => s.HasNonInteractiveFiles).HasDefaultValue(false);
+        builder.HasIndex(s => s.FileCount);
+        builder.HasIndex(s => s.MaxDuration);
+        builder.HasIndex(s => s.MaxResolution);
+        builder.HasIndex(s => s.MaxHeight);
+        builder.HasIndex(s => s.MaxFrameRate);
+        builder.HasIndex(s => s.MaxBitRate);
+        builder.HasIndex(s => s.MaxFileSize);
+        builder.HasIndex(s => s.MaxFileModTime);
+        builder.HasIndex(s => s.MinPath);
+        builder.HasIndex(s => s.MaxPath);
+        builder.HasIndex(s => s.HasDimensionData);
+        builder.HasIndex(s => s.HasLandscapeFiles);
+        builder.HasIndex(s => s.HasPortraitFiles);
+        builder.HasIndex(s => s.HasSquareFiles);
+        builder.HasIndex(s => s.HasInteractiveFiles);
+        builder.HasIndex(s => s.HasNonInteractiveFiles);
+
+        // GIN-indexed denormalized id sets for tag/performer combo filters.
+        builder.Property(s => s.TagIds).HasColumnType("integer[]");
+        builder.Property(s => s.PerformerIds).HasColumnType("integer[]");
+        builder.HasIndex(s => s.TagIds).HasMethod("gin");
+        builder.HasIndex(s => s.PerformerIds).HasMethod("gin");
     }
 }
 
@@ -101,6 +136,10 @@ public class PerformerConfiguration : IEntityTypeConfiguration<Performer>
         builder.HasKey(p => p.Id);
         builder.Property(p => p.Name).IsRequired().HasMaxLength(500);
         builder.Property(p => p.CustomFields).HasColumnType("jsonb");
+        builder.Property(p => p.SceneCount).HasDefaultValue(0);
+        builder.Property(p => p.ImageCount).HasDefaultValue(0);
+        builder.Property(p => p.GalleryCount).HasDefaultValue(0);
+        builder.Property(p => p.TagCount).HasDefaultValue(0);
 
         builder.HasMany(p => p.Urls).WithOne(u => u.Performer).HasForeignKey(u => u.PerformerId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(p => p.Aliases).WithOne(a => a.Performer).HasForeignKey(a => a.PerformerId).OnDelete(DeleteBehavior.Cascade);
@@ -109,6 +148,10 @@ public class PerformerConfiguration : IEntityTypeConfiguration<Performer>
         builder.HasIndex(p => p.Name);
         builder.HasIndex(p => p.Favorite);
         builder.HasIndex(p => p.Rating);
+        builder.HasIndex(p => p.SceneCount);
+        builder.HasIndex(p => p.ImageCount);
+        builder.HasIndex(p => p.GalleryCount);
+        builder.HasIndex(p => p.TagCount);
     }
 }
 
@@ -144,12 +187,26 @@ public class TagConfiguration : IEntityTypeConfiguration<Tag>
         builder.HasKey(t => t.Id);
         builder.Property(t => t.Name).IsRequired().HasMaxLength(500);
         builder.Property(t => t.CustomFields).HasColumnType("jsonb");
+        builder.Property(t => t.SceneCount).HasDefaultValue(0);
+        builder.Property(t => t.SceneMarkerCount).HasDefaultValue(0);
+        builder.Property(t => t.ImageCount).HasDefaultValue(0);
+        builder.Property(t => t.GalleryCount).HasDefaultValue(0);
+        builder.Property(t => t.GroupCount).HasDefaultValue(0);
+        builder.Property(t => t.PerformerCount).HasDefaultValue(0);
+        builder.Property(t => t.StudioCount).HasDefaultValue(0);
 
         builder.HasMany(t => t.Aliases).WithOne(a => a.Tag).HasForeignKey(a => a.TagId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(t => t.RemoteIds).WithOne(si => si.Tag).HasForeignKey(si => si.TagId).OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(t => t.Name).IsUnique();
         builder.HasIndex(t => t.Favorite);
+        builder.HasIndex(t => t.SceneCount);
+        builder.HasIndex(t => t.SceneMarkerCount);
+        builder.HasIndex(t => t.ImageCount);
+        builder.HasIndex(t => t.GalleryCount);
+        builder.HasIndex(t => t.GroupCount);
+        builder.HasIndex(t => t.PerformerCount);
+        builder.HasIndex(t => t.StudioCount);
     }
 }
 
@@ -184,6 +241,13 @@ public class StudioConfiguration : IEntityTypeConfiguration<Studio>
         builder.HasKey(s => s.Id);
         builder.Property(s => s.Name).IsRequired().HasMaxLength(500);
         builder.Property(s => s.CustomFields).HasColumnType("jsonb");
+        builder.Property(s => s.SceneCount).HasDefaultValue(0);
+        builder.Property(s => s.ImageCount).HasDefaultValue(0);
+        builder.Property(s => s.GalleryCount).HasDefaultValue(0);
+        builder.Property(s => s.GroupCount).HasDefaultValue(0);
+        builder.Property(s => s.PerformerCount).HasDefaultValue(0);
+        builder.Property(s => s.ChildStudioCount).HasDefaultValue(0);
+        builder.Property(s => s.TagCount).HasDefaultValue(0);
 
         builder.HasOne(s => s.Parent).WithMany(s => s.Children).HasForeignKey(s => s.ParentId).OnDelete(DeleteBehavior.SetNull);
         builder.HasMany(s => s.Urls).WithOne(u => u.Studio).HasForeignKey(u => u.StudioId).OnDelete(DeleteBehavior.Cascade);
@@ -192,6 +256,16 @@ public class StudioConfiguration : IEntityTypeConfiguration<Studio>
 
         builder.HasIndex(s => s.Name);
         builder.HasIndex(s => s.ParentId);
+        builder.HasIndex(s => s.Rating);
+        builder.HasIndex(s => s.Favorite);
+        builder.HasIndex(s => s.Organized);
+        builder.HasIndex(s => s.SceneCount);
+        builder.HasIndex(s => s.ImageCount);
+        builder.HasIndex(s => s.GalleryCount);
+        builder.HasIndex(s => s.GroupCount);
+        builder.HasIndex(s => s.PerformerCount);
+        builder.HasIndex(s => s.ChildStudioCount);
+        builder.HasIndex(s => s.TagCount);
     }
 }
 
@@ -225,6 +299,10 @@ public class GalleryConfiguration : IEntityTypeConfiguration<Gallery>
         builder.ToTable("galleries");
         builder.HasKey(g => g.Id);
         builder.Property(g => g.CustomFields).HasColumnType("jsonb");
+        builder.Property(g => g.ImageCount).HasDefaultValue(0);
+        builder.Property(g => g.SceneCount).HasDefaultValue(0);
+        builder.Property(g => g.PerformerCount).HasDefaultValue(0);
+        builder.Property(g => g.TagCount).HasDefaultValue(0);
 
         builder.HasOne(g => g.Studio).WithMany(s => s.Galleries).HasForeignKey(g => g.StudioId).OnDelete(DeleteBehavior.SetNull);
         builder.HasOne(g => g.Folder).WithMany().HasForeignKey(g => g.FolderId).OnDelete(DeleteBehavior.SetNull);
@@ -234,6 +312,20 @@ public class GalleryConfiguration : IEntityTypeConfiguration<Gallery>
 
         builder.HasIndex(g => g.Title);
         builder.HasIndex(g => g.StudioId);
+        builder.HasIndex(g => g.Date);
+        builder.HasIndex(g => g.Rating);
+        builder.HasIndex(g => g.Organized);
+        builder.HasIndex(g => g.CreatedAt);
+        builder.HasIndex(g => g.UpdatedAt);
+        builder.HasIndex(g => g.ImageCount);
+        builder.HasIndex(g => g.SceneCount);
+        builder.HasIndex(g => g.PerformerCount);
+        builder.HasIndex(g => g.TagCount);
+
+        builder.Property(g => g.TagIds).HasColumnType("integer[]");
+        builder.Property(g => g.PerformerIds).HasColumnType("integer[]");
+        builder.HasIndex(g => g.TagIds).HasMethod("gin");
+        builder.HasIndex(g => g.PerformerIds).HasMethod("gin");
     }
 }
 
@@ -279,6 +371,34 @@ public class ImageConfiguration : IEntityTypeConfiguration<Image>
         builder.HasIndex(i => i.Organized);
         builder.HasIndex(i => i.CreatedAt);
         builder.HasIndex(i => i.UpdatedAt);
+        builder.Property(i => i.TagCount).HasDefaultValue(0);
+        builder.Property(i => i.PerformerCount).HasDefaultValue(0);
+        builder.Property(i => i.GalleryCount).HasDefaultValue(0);
+        builder.Property(i => i.FileCount).HasDefaultValue(0);
+        builder.Property(i => i.MaxResolution).HasDefaultValue(0);
+        builder.Property(i => i.MaxFileSize).HasDefaultValue(0L);
+        builder.Property(i => i.HasDimensionData).HasDefaultValue(false);
+        builder.Property(i => i.HasLandscapeFiles).HasDefaultValue(false);
+        builder.Property(i => i.HasPortraitFiles).HasDefaultValue(false);
+        builder.Property(i => i.HasSquareFiles).HasDefaultValue(false);
+        builder.HasIndex(i => i.TagCount);
+        builder.HasIndex(i => i.PerformerCount);
+        builder.HasIndex(i => i.GalleryCount);
+        builder.HasIndex(i => i.FileCount);
+        builder.HasIndex(i => i.MaxResolution);
+        builder.HasIndex(i => i.MaxFileSize);
+        builder.HasIndex(i => i.MaxFileModTime);
+        builder.HasIndex(i => i.MinPath);
+        builder.HasIndex(i => i.MaxPath);
+        builder.HasIndex(i => i.HasDimensionData);
+        builder.HasIndex(i => i.HasLandscapeFiles);
+        builder.HasIndex(i => i.HasPortraitFiles);
+        builder.HasIndex(i => i.HasSquareFiles);
+
+        builder.Property(i => i.TagIds).HasColumnType("integer[]");
+        builder.Property(i => i.PerformerIds).HasColumnType("integer[]");
+        builder.HasIndex(i => i.TagIds).HasMethod("gin");
+        builder.HasIndex(i => i.PerformerIds).HasMethod("gin");
     }
 }
 
@@ -420,33 +540,7 @@ public class ScrapeAttemptConfiguration : IEntityTypeConfiguration<ScrapeAttempt
     }
 }
 
-public class UserConfiguration : IEntityTypeConfiguration<User>
-{
-    public void Configure(EntityTypeBuilder<User> builder)
-    {
-        builder.ToTable("users");
-        builder.HasKey(u => u.Id);
-        builder.Property(u => u.Username).IsRequired().HasMaxLength(200);
-        builder.Property(u => u.PasswordHash).IsRequired().HasMaxLength(500);
-        builder.Property(u => u.ApiKey).HasMaxLength(200);
-
-        builder.HasIndex(u => u.Username).IsUnique();
-        builder.HasIndex(u => u.ApiKey).IsUnique().HasFilter("\"ApiKey\" IS NOT NULL");
-
-        builder.HasMany(u => u.Roles).WithOne(r => r.User).HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
-public class UserRoleConfiguration : IEntityTypeConfiguration<UserRole>
-{
-    public void Configure(EntityTypeBuilder<UserRole> builder)
-    {
-        builder.ToTable("user_roles");
-        builder.HasKey(r => r.Id);
-        builder.Property(r => r.Role).IsRequired().HasMaxLength(100);
-        builder.HasIndex(r => new { r.UserId, r.Role }).IsUnique();
-    }
-}
+// User/Role/Permission configurations live in AuthConfigurations.cs (Cove.Data.Configuration).
 
 public class FolderConfiguration : IEntityTypeConfiguration<Folder>
 {
@@ -469,7 +563,9 @@ public class BaseFileEntityConfiguration : IEntityTypeConfiguration<BaseFileEnti
         builder.ToTable("files");
         builder.HasKey(f => f.Id);
         builder.Property(f => f.Basename).IsRequired();
+        builder.Property(f => f.Path).IsRequired();
         builder.HasIndex(f => new { f.ParentFolderId, f.Basename }).IsUnique();
+        builder.HasIndex(f => f.Path);
     }
 }
 
@@ -477,7 +573,9 @@ public class VideoFileConfiguration : IEntityTypeConfiguration<VideoFile>
 {
     public void Configure(EntityTypeBuilder<VideoFile> builder)
     {
-        builder.HasIndex(v => v.SceneId);
+        // Composite (SceneId, Path) lets MIN(Path) WHERE SceneId = ? be answered
+        // by an Index Only Scan, which is what the scene-list "path" sort relies on.
+        builder.HasIndex(v => new { v.SceneId, v.Path });
     }
 }
 
@@ -485,7 +583,15 @@ public class ImageFileConfiguration : IEntityTypeConfiguration<ImageFile>
 {
     public void Configure(EntityTypeBuilder<ImageFile> builder)
     {
-        builder.HasIndex(i => i.ImageId);
+        builder.HasIndex(i => new { i.ImageId, i.Path });
+    }
+}
+
+public class GalleryFileConfiguration : IEntityTypeConfiguration<GalleryFile>
+{
+    public void Configure(EntityTypeBuilder<GalleryFile> builder)
+    {
+        builder.HasIndex(g => new { g.GalleryId, g.Path });
     }
 }
 

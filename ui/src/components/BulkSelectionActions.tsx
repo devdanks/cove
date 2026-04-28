@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Edit, Loader2, Trash2, Search, Merge, Play } from "lucide-react";
 import { scenes as scenesApi, images, galleries, performers, groups, studios, tags } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import type { Scene } from "../api/types";
 import { BulkEditDialog, SCENE_BULK_FIELDS, IMAGE_BULK_FIELDS, GALLERY_BULK_FIELDS, PERFORMER_BULK_FIELDS, GROUP_BULK_FIELDS, STUDIO_BULK_FIELDS, TAG_BULK_FIELDS } from "./BulkEditDialog";
 import { BatchDownloadOptionsDialog } from "./BatchDownloadOptionsDialog";
@@ -32,6 +34,16 @@ const FIELDS_MAP = {
 
 const API_MAP = { scenes: scenesApi, images, galleries, performers, groups, studios, tags } as const;
 
+const ENTITY_RESOURCE_MAP = {
+  scenes: "scene",
+  images: "image",
+  galleries: "gallery",
+  performers: "performer",
+  groups: "group",
+  studios: "studio",
+  tags: "tag",
+} as const;
+
 interface Props {
   entityType: keyof typeof FIELDS_MAP;
   selectedIds: Set<number>;
@@ -48,9 +60,13 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
   const [showIdentify, setShowIdentify] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
+  const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
   const api = API_MAP[entityType];
   const fields = FIELDS_MAP[entityType];
+  const resource = ENTITY_RESOURCE_MAP[entityType];
+  const canWrite = canWriteEntity(resource, hasPermission);
+  const canDelete = canDeleteEntity(resource, hasPermission);
 
   const bulkDeleteMut = useMutation<void, Error, void>({
     mutationFn: async () => {
@@ -67,6 +83,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
   });
 
   const isScenes = entityType === "scenes";
+  const canIdentify = isScenes && hasPermission("library.autotag") && canWrite;
   const downloadEntity: DownloadSelectionEntity | null = entityType === "scenes"
     ? "Scene"
     : entityType === "images"
@@ -89,6 +106,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
   const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() =>
     batchDownloadStorageKey ? loadStoredBatchDownloadOptions(batchDownloadStorageKey) : DEFAULT_BATCH_DOWNLOAD_OPTIONS,
   );
+  const canDownload = !!downloadEntity && hasPermission("jobs.run") && canWrite;
 
   useEffect(() => {
     if (batchDownloadStorageKey) {
@@ -119,7 +137,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
 
   return (
     <>
-      {downloadEntity && selectedDownloadItems.length > 0 && (
+      {canDownload && downloadEntity && selectedDownloadItems.length > 0 && (
         <button
           onClick={() => setShowBatchDownloadOptions(true)}
           disabled={batchDownloadMut.isPending}
@@ -129,7 +147,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           Download
         </button>
       )}
-      {fields.length > 0 && (
+      {canWrite && fields.length > 0 && (
         <button
           onClick={() => setShowBulkEdit(true)}
           className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
@@ -138,7 +156,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           Edit
         </button>
       )}
-      {isScenes && (
+      {canIdentify && (
         <button
           onClick={() => setShowIdentify(true)}
           className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
@@ -147,7 +165,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           Identify
         </button>
       )}
-      {isScenes && selectedIds.size >= 2 && (
+      {isScenes && canWrite && selectedIds.size >= 2 && (
         <button
           onClick={() => {/* TODO: merge dialog */}}
           className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/20"
@@ -165,14 +183,16 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           Play
         </button>
       )}
-      <button
-        onClick={() => { if (confirm(`Delete ${selectedIds.size} item(s)?`)) bulkDeleteMut.mutate(); }}
-        disabled={bulkDeleteMut.isPending}
-        className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-      >
-        {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-        Delete
-      </button>
+      {canDelete && (
+        <button
+          onClick={() => { if (confirm(`Delete ${selectedIds.size} item(s)?`)) bulkDeleteMut.mutate(); }}
+          disabled={bulkDeleteMut.isPending}
+          className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
+        >
+          {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+          Delete
+        </button>
+      )}
       {showBulkEdit && (
         <BulkEditDialog
           open
@@ -184,7 +204,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           isPending={bulkEditMut.isPending}
         />
       )}
-      {showIdentify && isScenes && (
+      {showIdentify && canIdentify && (
         <IdentifyDialog open onClose={() => setShowIdentify(false)} sceneIds={[...selectedIds]} />
       )}
       {showQueue && isScenes && sceneItems && onNavigate && (
@@ -199,7 +219,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           onNavigate={onNavigate}
         />
       )}
-      {downloadEntity && (
+      {canDownload && downloadEntity && (
         <BatchDownloadOptionsDialog
           open={showBatchDownloadOptions}
           entity={downloadEntity}

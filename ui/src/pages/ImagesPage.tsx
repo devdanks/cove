@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { images } from "../api/client";
 import type { FindFilter, Image, ImageFilterCriteria } from "../api/types";
@@ -9,18 +9,16 @@ import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen, S
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { FavoriteCounter, GalleriesPopoverContent, PerformerPreviewGrid, PopoverButton } from "../components/EntityCards";
-import { Lightbox, type LightboxImage } from "../components/Lightbox";
-import { ImageCreateModal } from "./ImageEditModal";
+import type { LightboxImage } from "../components/Lightbox";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
-import { QuickViewDialog } from "../components/QuickViewDialog";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
-import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDialog";
-import { ImageDownloadDialog } from "../components/ImageDownloadDialog";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -30,6 +28,12 @@ import {
   saveStoredBatchDownloadOptions,
   type BatchDownloadOptions,
 } from "../utils/batchDownloads";
+
+const Lightbox = lazy(() => import("../components/Lightbox").then((module) => ({ default: module.Lightbox })));
+const ImageCreateModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageCreateModal })));
+const QuickViewDialog = lazy(() => import("../components/QuickViewDialog").then((module) => ({ default: module.QuickViewDialog })));
+const BatchDownloadOptionsDialog = lazy(() => import("../components/BatchDownloadOptionsDialog").then((module) => ({ default: module.BatchDownloadOptionsDialog })));
+const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
 
 const SORT_OPTIONS = [
   { value: "updated_at", label: "Updated At" },
@@ -75,6 +79,10 @@ export function ImagesPage({ onNavigate }: Props) {
   const [downloadTarget, setDownloadTarget] = useState<Image | "new" | null>(null);
   const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canWriteImage = canWriteEntity("image", hasPermission);
+  const canDeleteImage = canDeleteEntity("image", hasPermission);
+  const canDownloadImage = hasPermission("jobs.run") && canWriteImage;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const { data, isLoading } = useQuery({
@@ -91,7 +99,7 @@ export function ImagesPage({ onNavigate }: Props) {
   const selecting = selectedIds.size > 0;
   const selectedImage = selectedIds.size === 1 ? items.find((image) => selectedIds.has(image.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
-  const canDownloadSelectedImage = selectedDownloadTargets.length > 0;
+  const canDownloadSelectedImage = canDownloadImage && selectedDownloadTargets.length > 0;
   const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-images");
   const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
 
@@ -136,27 +144,33 @@ export function ImagesPage({ onNavigate }: Props) {
 
   return (
     <>
-    <ImageCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "image", id })} />
-    <ImageDownloadDialog
-      open={downloadTarget !== null}
-      image={downloadTarget && downloadTarget !== "new" ? downloadTarget : undefined}
-      onClose={() => setDownloadTarget(null)}
-      onNavigate={onNavigate}
-    />
-    <BatchDownloadOptionsDialog
-      open={showBatchDownloadOptions}
-      entity="Image"
-      itemCount={selectedDownloadTargets.length}
-      initialOptions={batchDownloadOptions}
-      isPending={batchDownloadMut.isPending}
-      onClose={() => setShowBatchDownloadOptions(false)}
-      onConfirm={(options) => {
-        setBatchDownloadOptions(options);
-        saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
-        setShowBatchDownloadOptions(false);
-        batchDownloadMut.mutate(options);
-      }}
-    />
+    <Suspense fallback={null}>
+      {showCreate ? <ImageCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "image", id })} /> : null}
+      {downloadTarget !== null ? (
+        <ImageDownloadDialog
+          open={downloadTarget !== null}
+          image={downloadTarget !== "new" ? downloadTarget : undefined}
+          onClose={() => setDownloadTarget(null)}
+          onNavigate={onNavigate}
+        />
+      ) : null}
+      {showBatchDownloadOptions ? (
+        <BatchDownloadOptionsDialog
+          open={showBatchDownloadOptions}
+          entity="Image"
+          itemCount={selectedDownloadTargets.length}
+          initialOptions={batchDownloadOptions}
+          isPending={batchDownloadMut.isPending}
+          onClose={() => setShowBatchDownloadOptions(false)}
+          onConfirm={(options) => {
+            setBatchDownloadOptions(options);
+            saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
+            setShowBatchDownloadOptions(false);
+            batchDownloadMut.mutate(options);
+          }}
+        />
+      ) : null}
+    </Suspense>
     <ListPage
       title="Images"
       pageKey="images"
@@ -169,15 +183,15 @@ export function ImagesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "wall"]}
-      renderOperations={() => (
+      renderOperations={canDownloadImage ? () => (
         <button
           onClick={() => setDownloadTarget("new")}
           className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
         >
           From URL
         </button>
-      )}
-      onNew={() => setShowCreate(true)}
+      ) : undefined}
+      onNew={canWriteImage ? () => setShowCreate(true) : undefined}
       criteriaDefinitions={IMAGE_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
@@ -206,21 +220,25 @@ export function ImagesPage({ onNavigate }: Props) {
               Download
             </button>
           )}
-          <button
-            onClick={() => setShowBulkEdit(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-          >
-            <Edit className="w-3 h-3" />
-            Edit
-          </button>
-          <button
-            onClick={() => { if (confirm(`Delete ${selectedIds.size} image(s)?`)) bulkDeleteMut.mutate(); }}
-            disabled={bulkDeleteMut.isPending}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-          >
-            {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-            Delete
-          </button>
+          {canWriteImage && (
+            <button
+              onClick={() => setShowBulkEdit(true)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
+            >
+              <Edit className="w-3 h-3" />
+              Edit
+            </button>
+          )}
+          {canDeleteImage && (
+            <button
+              onClick={() => { if (confirm(`Delete ${selectedIds.size} image(s)?`)) bulkDeleteMut.mutate(); }}
+              disabled={bulkDeleteMut.isPending}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
+            >
+              {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+              Delete
+            </button>
+          )}
         </>
       }
     >
@@ -274,15 +292,19 @@ export function ImagesPage({ onNavigate }: Props) {
       onApply={(values) => bulkEditMut.mutate(values)}
       isPending={bulkEditMut.isPending}
     />
-    <Lightbox
-      images={lightboxImages}
-      initialIndex={lightboxIndex}
-      open={lightboxOpen}
-      onClose={() => setLightboxOpen(false)}
-    />
-    {quickViewId !== null && (
-      <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
-    )}
+    <Suspense fallback={null}>
+      {lightboxOpen ? (
+        <Lightbox
+          images={lightboxImages}
+          initialIndex={lightboxIndex}
+          open={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+        />
+      ) : null}
+      {quickViewId !== null ? (
+        <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+      ) : null}
+    </Suspense>
     </>
   );
 }

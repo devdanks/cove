@@ -11,6 +11,15 @@ public class Tag : BaseEntity
     // Image stored as blob reference
     public string? ImageBlobId { get; set; }
 
+    // Denormalized usage counters for hot list/detail reads.
+    public int SceneCount { get; set; }
+    public int SceneMarkerCount { get; set; }
+    public int ImageCount { get; set; }
+    public int GalleryCount { get; set; }
+    public int GroupCount { get; set; }
+    public int PerformerCount { get; set; }
+    public int StudioCount { get; set; }
+
     // Navigation properties
     public ICollection<TagAlias> Aliases { get; set; } = [];
     public ICollection<TagParent> ParentRelations { get; set; } = [];

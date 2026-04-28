@@ -1,0 +1,275 @@
+using Cove.Core.Auth;
+using Cove.Core.Entities.Auth;
+using Cove.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace Cove.Data.Auth;
+
+/// <summary>
+/// Bootstraps the auth system on startup:
+///   1. Upserts the permission catalog from <see cref="IPermissionRegistry"/>.
+///   2. Seeds the built-in roles (Owner / Admin / Member / Viewer / Guest).
+///   3. Creates the Owner user from <see cref="AuthConfig"/> if no users exist.
+///
+/// Runs after the DB has been migrated by Program.cs (we register it as a hosted
+/// service that executes once at startup).
+/// </summary>
+public sealed class BootstrapAuthService : IHostedService
+{
+    private readonly IServiceProvider _services;
+    private readonly IPermissionRegistry _registry;
+    private readonly CoveConfiguration _config;
+    private readonly ILogger<BootstrapAuthService> _log;
+
+    public BootstrapAuthService(
+        IServiceProvider services,
+        IPermissionRegistry registry,
+        CoveConfiguration config,
+        ILogger<BootstrapAuthService> log)
+    {
+        _services = services;
+        _registry = registry;
+        _config = config;
+        _log = log;
+    }
+
+    public async Task StartAsync(CancellationToken ct)
+    {
+        // Run after the DB migration step in Program.Main; small delay loop to avoid races.
+        for (var i = 0; i < 30; i++)
+        {
+            try
+            {
+                using var scope = _services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+                if (await db.Database.CanConnectAsync(ct))
+                {
+                    var hasMigrationsTable = false;
+                    var conn = db.Database.GetDbConnection();
+                    await conn.OpenAsync(ct);
+                    await using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='roles'";
+                        hasMigrationsTable = await cmd.ExecuteScalarAsync(ct) != null;
+                    }
+                    await conn.CloseAsync();
+                    if (hasMigrationsTable) break;
+                }
+            }
+            catch { /* still spinning up */ }
+            await Task.Delay(1000, ct);
+        }
+
+        try
+        {
+            using var scope = _services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+
+            await AuthorizationSqlBootstrap.EnsureAsync(db, ct);
+            await UpsertPermissionsAsync(db, ct);
+            await SeedBuiltinRolesAsync(db, ct);
+            await EnsureOwnerUserAsync(db, ct);
+
+            _log.LogInformation("Auth bootstrap complete (permissions={PermCount}, roles={RoleCount}, users={UserCount})",
+                await db.Permissions.CountAsync(ct),
+                await db.Roles.CountAsync(ct),
+                await db.Users.CountAsync(ct));
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Auth bootstrap failed");
+        }
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private async Task UpsertPermissionsAsync(CoveContext db, CancellationToken ct)
+    {
+        var existing = await db.Permissions.ToDictionaryAsync(p => p.Key, ct);
+        var live = _registry.All.ToDictionary(p => p.Key);
+
+        foreach (var def in live.Values)
+        {
+            if (existing.TryGetValue(def.Key, out var row))
+            {
+                row.Category = def.Category;
+                row.Description = def.Description;
+                row.Source = def.Source;
+                row.Dangerous = def.Dangerous;
+                row.Implies = System.Text.Json.JsonSerializer.Serialize(def.Implies ?? []);
+                row.IsOrphaned = false;
+            }
+            else
+            {
+                db.Permissions.Add(new Permission
+                {
+                    Key = def.Key,
+                    Category = def.Category,
+                    Description = def.Description,
+                    Source = def.Source,
+                    Dangerous = def.Dangerous,
+                    Implies = System.Text.Json.JsonSerializer.Serialize(def.Implies ?? []),
+                    IsOrphaned = false,
+                    RegisteredAt = DateTime.UtcNow,
+                });
+            }
+        }
+
+        // Mark orphans (keys present in DB but not declared in code anymore).
+        foreach (var (key, row) in existing)
+        {
+            if (!live.ContainsKey(key))
+                row.IsOrphaned = true;
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task SeedBuiltinRolesAsync(CoveContext db, CancellationToken ct)
+    {
+        var byName = await db.Roles.Include(r => r.Permissions).ToDictionaryAsync(r => r.Name, ct);
+
+        Role EnsureRole(string name, string desc, bool isSystem)
+        {
+            if (byName.TryGetValue(name, out var existing))
+            {
+                existing.IsBuiltin = true;
+                existing.IsSystem = isSystem;
+                existing.Description ??= desc;
+                return existing;
+            }
+            var role = new Role
+            {
+                Name = name,
+                Description = desc,
+                IsBuiltin = true,
+                IsSystem = isSystem,
+                Source = "core",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.Roles.Add(role);
+            byName[name] = role;
+            return role;
+        }
+
+        var owner = EnsureRole(BuiltinRoles.Owner, "Superuser; bypasses all checks.", isSystem: true);
+        var admin = EnsureRole(BuiltinRoles.Admin, "Full operational control.", isSystem: false);
+        var member = EnsureRole(BuiltinRoles.Member, "Day-to-day editor.", isSystem: false);
+        var viewer = EnsureRole(BuiltinRoles.Viewer, "Read-only access.", isSystem: false);
+        var guest = EnsureRole(BuiltinRoles.Guest, "Public/share-link target.", isSystem: false);
+
+        await db.SaveChangesAsync(ct);
+
+        // Owner: always has *, even after upgrades.
+        EnsurePermissions(db, owner, ["*"]);
+        EnsurePermissions(db, admin, [Permissions.ApiTokensWrite, Permissions.ShareLinksWrite]);
+
+        // For Admin/Member/Viewer/Guest, only seed if currently empty (we don't want to
+        // stomp admin customizations on every boot).
+        if (admin.Permissions.Count == 0)
+            EnsurePermissions(db, admin, Permissions.AdminDefaults().ToArray());
+        if (member.Permissions.Count == 0)
+            EnsurePermissions(db, member, Permissions.MemberDefaults);
+        if (viewer.Permissions.Count == 0)
+            EnsurePermissions(db, viewer, Permissions.ViewerDefaults);
+        if (guest.Permissions.Count == 0)
+            EnsurePermissions(db, guest, Permissions.GuestDefaults);
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static void EnsurePermissions(CoveContext db, Role role, string[] permissions)
+    {
+        var have = role.Permissions.Select(p => p.PermissionKey).ToHashSet();
+        foreach (var key in permissions.Distinct())
+        {
+            if (have.Contains(key)) continue;
+            db.RolePermissions.Add(new RolePermission { RoleId = role.Id, PermissionKey = key });
+            have.Add(key);
+        }
+    }
+
+    private async Task EnsureOwnerUserAsync(CoveContext db, CancellationToken ct)
+    {
+        var hasUsers = await db.Users.AnyAsync(ct);
+        if (hasUsers)
+        {
+            // Backfill: if an "owner" user exists but has no Owner role, assign it.
+            var ownerRole = await db.Roles.FirstAsync(r => r.Name == BuiltinRoles.Owner, ct);
+            var systemUsers = await db.Users.Include(u => u.Roles).Where(u => u.IsSystem).ToListAsync(ct);
+            foreach (var su in systemUsers)
+            {
+                if (!su.Roles.Any(r => r.RoleId == ownerRole.Id))
+                {
+                    db.UserRoleAssignments.Add(new UserRoleAssignment
+                    {
+                        UserId = su.Id, RoleId = ownerRole.Id, GrantedAt = DateTime.UtcNow,
+                    });
+                }
+            }
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        var auth = _config.Auth;
+        var username = string.IsNullOrWhiteSpace(auth.Username) ? "owner" : auth.Username;
+        string passwordHash;
+        if (!string.IsNullOrEmpty(auth.HashedPassword))
+        {
+            passwordHash = auth.HashedPassword;
+        }
+        else
+        {
+            // Generate a random initial password and surface it in the log + a sentinel file.
+            var seed = TokenService.NewOpaqueToken();
+            var plain = seed.plain[..16];
+            passwordHash = PasswordHasher.HashPassword(plain);
+            try
+            {
+                var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "cove");
+                Directory.CreateDirectory(dataDir);
+                var sentinel = Path.Combine(dataDir, "owner_password.txt");
+                await File.WriteAllTextAsync(sentinel,
+                    $"Cove generated an initial Owner password on first start.\n" +
+                    $"Username: {username}\nPassword: {plain}\n" +
+                    $"Change it via the UI then delete this file.\n",
+                    ct);
+                _log.LogWarning("Owner account created with generated password. See {Path}", sentinel);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Failed to write owner_password sentinel; password is: {Password}", plain);
+            }
+        }
+
+        var owner = new User
+        {
+            Username = username,
+            DisplayName = "Owner",
+            PasswordHash = passwordHash,
+            PasswordAlgo = PasswordHasher.DetectAlgorithm(passwordHash),
+            IsActive = true,
+            IsLocked = false,
+            IsSystem = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(owner);
+        await db.SaveChangesAsync(ct);
+
+        var ownerRoleEntity = await db.Roles.FirstAsync(r => r.Name == BuiltinRoles.Owner, ct);
+        db.UserRoleAssignments.Add(new UserRoleAssignment
+        {
+            UserId = owner.Id,
+            RoleId = ownerRoleEntity.Id,
+            GrantedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync(ct);
+
+        _log.LogInformation("Bootstrapped Owner user '{Username}'", username);
+    }
+}

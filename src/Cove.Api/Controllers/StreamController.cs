@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.Interfaces;
 using Cove.Data;
 
@@ -8,6 +9,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.StreamRead)]
 public class StreamController(IStreamService streamService, IThumbnailService thumbnailService, ITranscodeService transcodeService, CoveContext db) : ControllerBase
 {
     [HttpGet("scene/{sceneId:int}")]

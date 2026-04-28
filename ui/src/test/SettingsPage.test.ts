@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeTaskSelectablePaths } from "../pages/SettingsPage";
+import { mergeTaskSelectablePaths, resolveVisibleSettingsTab } from "../pages/SettingsPage";
 
 describe("mergeTaskSelectablePaths", () => {
   it("defaults to all selectable paths when there is no stored selection", () => {
@@ -24,5 +24,26 @@ describe("mergeTaskSelectablePaths", () => {
     ).toEqual([
       "/library/b",
     ]);
+  });
+});
+
+describe("resolveVisibleSettingsTab", () => {
+  it("falls back to the first visible tab when the requested tab is hidden", () => {
+    expect(
+      resolveVisibleSettingsTab("library", [
+        { key: "interface" },
+        { key: "changelog" },
+        { key: "about" },
+      ])
+    ).toBe("interface");
+  });
+
+  it("keeps the requested tab when it is visible", () => {
+    expect(
+      resolveVisibleSettingsTab("about", [
+        { key: "interface" },
+        { key: "about" },
+      ])
+    ).toBe("about");
   });
 });

@@ -18,11 +18,12 @@ public class PerformerFilterBehaviorTests
         var alphaStudio = new Studio { Name = "Alpha" };
         var betaStudio = new Studio { Name = "Beta" };
 
-        context.Performers.AddRange(
-            CreatePerformer("both-studios", alphaStudio, betaStudio),
-            CreatePerformer("alpha-only", alphaStudio),
-            CreatePerformer("beta-only", betaStudio));
+        context.Studios.AddRange(alphaStudio, betaStudio);
         await context.SaveChangesAsync();
+
+        await SeedPerformerAsync(context, "both-studios", alphaStudio, betaStudio);
+        await SeedPerformerAsync(context, "alpha-only", alphaStudio);
+        await SeedPerformerAsync(context, "beta-only", betaStudio);
 
         var repository = new PerformerRepository(context);
         var filter = new PerformerFilter
@@ -49,11 +50,12 @@ public class PerformerFilterBehaviorTests
         var alphaStudio = new Studio { Name = "Alpha" };
         var betaStudio = new Studio { Name = "Beta" };
 
-        context.Performers.AddRange(
-            CreatePerformer("alpha-only", alphaStudio),
-            CreatePerformer("alpha-and-beta", alphaStudio, betaStudio),
-            CreatePerformer("beta-only", betaStudio));
+        context.Studios.AddRange(alphaStudio, betaStudio);
         await context.SaveChangesAsync();
+
+        await SeedPerformerAsync(context, "alpha-only", alphaStudio);
+        await SeedPerformerAsync(context, "alpha-and-beta", alphaStudio, betaStudio);
+        await SeedPerformerAsync(context, "beta-only", betaStudio);
 
         var repository = new PerformerRepository(context);
         var filter = new PerformerFilter
@@ -82,10 +84,11 @@ public class PerformerFilterBehaviorTests
         var childStudio = new Studio { Name = "Child", Parent = parentStudio };
         var otherStudio = new Studio { Name = "Other" };
 
-        context.Performers.AddRange(
-            CreatePerformer("child-performer", childStudio),
-            CreatePerformer("other-performer", otherStudio));
+        context.Studios.AddRange(parentStudio, childStudio, otherStudio);
         await context.SaveChangesAsync();
+
+        await SeedPerformerAsync(context, "child-performer", childStudio);
+        await SeedPerformerAsync(context, "other-performer", otherStudio);
 
         var repository = new PerformerRepository(context);
         var filter = new PerformerFilter
@@ -115,11 +118,12 @@ public class PerformerFilterBehaviorTests
         var parentB = new Studio { Name = "Parent B" };
         var childB = new Studio { Name = "Child B", Parent = parentB };
 
-        context.Performers.AddRange(
-            CreatePerformer("both-groups", childA, childB),
-            CreatePerformer("only-first-group", childA),
-            CreatePerformer("only-second-group", childB));
+        context.Studios.AddRange(parentA, childA, parentB, childB);
         await context.SaveChangesAsync();
+
+        await SeedPerformerAsync(context, "both-groups", childA, childB);
+        await SeedPerformerAsync(context, "only-first-group", childA);
+        await SeedPerformerAsync(context, "only-second-group", childB);
 
         var repository = new PerformerRepository(context);
         var filter = new PerformerFilter
@@ -172,10 +176,12 @@ public class PerformerFilterBehaviorTests
         var context = scope.Context;
 
         var alphaStudio = new Studio { Name = "Alpha" };
-        context.Performers.AddRange(
-            new Performer { Name = "No Scenes" },
-            CreatePerformer("Has Scene", alphaStudio));
+        context.Studios.Add(alphaStudio);
         await context.SaveChangesAsync();
+
+        context.Performers.Add(new Performer { Name = "No Scenes" });
+        await context.SaveChangesAsync();
+        await SeedPerformerAsync(context, "Has Scene", alphaStudio);
 
         var repository = new PerformerRepository(context);
 
@@ -200,11 +206,12 @@ public class PerformerFilterBehaviorTests
 
         var alphaStudio = new Studio { Name = "Alpha" };
         var betaStudio = new Studio { Name = "Beta" };
-        context.Performers.AddRange(
-            CreatePerformer("one-studio", alphaStudio),
-            CreatePerformer("two-studios", alphaStudio, betaStudio, alphaStudio),
-            CreatePerformerWithScene("no-studio", null));
+        context.Studios.AddRange(alphaStudio, betaStudio);
         await context.SaveChangesAsync();
+
+        await SeedPerformerAsync(context, "one-studio", alphaStudio);
+        await SeedPerformerAsync(context, "two-studios", alphaStudio, betaStudio, alphaStudio);
+        await SeedPerformerWithSceneAsync(context, "no-studio", null);
 
         var repository = new PerformerRepository(context);
         var filter = new PerformerFilter
@@ -346,49 +353,53 @@ public class PerformerFilterBehaviorTests
         Assert.Equal(["Long Career"], items.Select(performer => performer.Name ?? string.Empty).ToArray());
     }
 
-    private static Performer CreatePerformer(string name, params Studio[] studios)
+    private static async Task SeedPerformerAsync(CoveContext context, string name, params Studio[] studios)
     {
         var performer = new Performer { Name = name };
+        context.Performers.Add(performer);
+        await context.SaveChangesAsync();
 
         foreach (var studio in studios)
         {
             var scene = new Scene
             {
                 Title = $"{name}-{studio.Name}",
-                Studio = studio,
+                StudioId = studio.Id,
             };
 
-            var link = new ScenePerformer
+            context.Scenes.Add(scene);
+            await context.SaveChangesAsync();
+
+            context.Set<ScenePerformer>().Add(new ScenePerformer
             {
-                Scene = scene,
-                Performer = performer,
-            };
-
-            scene.ScenePerformers.Add(link);
-            performer.ScenePerformers.Add(link);
+                SceneId = scene.Id,
+                PerformerId = performer.Id,
+            });
+            await context.SaveChangesAsync();
         }
-
-        return performer;
     }
 
-    private static Performer CreatePerformerWithScene(string name, Studio? studio)
+    private static async Task SeedPerformerWithSceneAsync(CoveContext context, string name, Studio? studio)
     {
         var performer = new Performer { Name = name };
+        context.Performers.Add(performer);
+        await context.SaveChangesAsync();
+
         var scene = new Scene
         {
             Title = $"{name}-scene",
-            Studio = studio,
+            StudioId = studio?.Id,
         };
 
-        var link = new ScenePerformer
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        context.Set<ScenePerformer>().Add(new ScenePerformer
         {
-            Scene = scene,
-            Performer = performer,
-        };
-
-        scene.ScenePerformers.Add(link);
-        performer.ScenePerformers.Add(link);
-        return performer;
+            SceneId = scene.Id,
+            PerformerId = performer.Id,
+        });
+        await context.SaveChangesAsync();
     }
 
     private static async Task<TestContextScope> CreateContextAsync()

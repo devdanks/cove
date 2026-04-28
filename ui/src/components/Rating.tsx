@@ -1,8 +1,10 @@
 import { Star } from "lucide-react";
-import { useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Field } from "./EditModal";
 import type { RatingStarPrecision, RatingSystemOptions } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
+import { authStore } from "../auth/authStore";
+import { RATING_OPTIONS_CHANGE_EVENT, readStoredRatingOptionsOverride } from "../utils/ratingPreferences";
 
 export const defaultRatingSystemOptions: RatingSystemOptions = {
   type: "stars",
@@ -111,9 +113,32 @@ export function getRatingInputLabel(options?: RatingSystemOptions) {
   return step === 1 ? `Rating (0-${maxValue} stars)` : `Rating (0-${maxValue} stars, step ${step})`;
 }
 
-function useRatingOptions() {
+export function useRatingOptions() {
   const { config } = useAppConfig();
-  return normalizeRatingOptions(config?.ui.ratingSystemOptions ?? defaultRatingSystemOptions);
+  const [overrideVersion, setOverrideVersion] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const handleOverrideChange = () => setOverrideVersion((current) => current + 1);
+
+    window.addEventListener(RATING_OPTIONS_CHANGE_EVENT, handleOverrideChange);
+    window.addEventListener("storage", handleOverrideChange);
+    const unsubscribe = authStore.subscribe(handleOverrideChange);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener(RATING_OPTIONS_CHANGE_EVENT, handleOverrideChange);
+      window.removeEventListener("storage", handleOverrideChange);
+    };
+  }, []);
+
+  return useMemo(() => {
+    const override = readStoredRatingOptionsOverride();
+    return normalizeRatingOptions(override ?? config?.ui.ratingSystemOptions ?? defaultRatingSystemOptions);
+  }, [config?.ui.ratingSystemOptions, overrideVersion]);
 }
 
 function StaticStars({ value, sizeClass }: { value: number; sizeClass: string }) {
@@ -297,7 +322,7 @@ export function InteractiveRatingField({
   );
 }
 
-export function InteractiveRating({ value, onChange }: { value?: number; onChange: (value: number | undefined) => void }) {
+export function InteractiveRating({ value, onChange, readOnly = false }: { value?: number; onChange?: (value: number | undefined) => void; readOnly?: boolean }) {
   const options = useRatingOptions();
   const displayValue = convertToRatingFormat(value, options) ?? 0;
   const label = formatDisplayRating(value, options);
@@ -305,6 +330,15 @@ export function InteractiveRating({ value, onChange }: { value?: number; onChang
 
   if (options.type === "stars") {
     const step = getRatingStep(options);
+
+    if (readOnly) {
+      return (
+        <div className="flex items-center gap-2">
+          <StaticStars value={displayValue} sizeClass="h-5 w-5" />
+          {label ? <span className="text-sm text-secondary">{label}</span> : <span className="text-sm text-secondary">Unrated</span>}
+        </div>
+      );
+    }
     const activeValue = hoverValue ?? displayValue;
 
     const getValueFromPointer = (event: MouseEvent<HTMLButtonElement>, star: number) => {
@@ -328,7 +362,7 @@ export function InteractiveRating({ value, onChange }: { value?: number; onChang
               onBlur={() => setHoverValue(null)}
               onClick={(event) => {
                 const nextDisplayValue = getValueFromPointer(event, star);
-                onChange(nextDisplayValue === displayValue ? undefined : convertFromRatingFormat(nextDisplayValue, options));
+                onChange?.(nextDisplayValue === displayValue ? undefined : convertFromRatingFormat(nextDisplayValue, options));
               }}
               className="relative text-accent transition-transform hover:scale-110"
               title="Set rating"
@@ -348,11 +382,15 @@ export function InteractiveRating({ value, onChange }: { value?: number; onChang
     );
   }
 
+  if (readOnly) {
+    return <span className="text-sm text-secondary">{label ?? "Unrated"}</span>;
+  }
+
   return (
     <div className="w-24">
       <RatingNumberInput
         value={value}
-        onChange={onChange}
+        onChange={onChange ?? (() => {})}
         options={options}
         inputClassName="w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
       />

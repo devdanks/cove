@@ -8,8 +8,31 @@ import { AppConfigProvider, useAppConfig } from "./state/AppConfigContext";
 import { ExtensionLoaderProvider, useExtensions } from "./extensions/ExtensionLoader";
 import { SceneQueueProvider } from "./state/SceneQueueContext";
 import { SetupWizardPage } from "./pages/SetupWizardPage";
+import { LoginPage } from "./pages/LoginPage";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { useKeySequence } from "./hooks/useKeySequence";
 import { LOCATION_CHANGE_EVENT, Route, buildCurrentUrl, buildRoutePath, navigateToUrl, parseCurrentRoute, parseLegacyHashRoute, syncRouteHistory } from "./router/location";
+
+const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
+  scenes: "scenes.read",
+  scene: "scenes.read",
+  performers: "performers.read",
+  performer: "performers.read",
+  studios: "studios.read",
+  studio: "studios.read",
+  tags: "tags.read",
+  tag: "tags.read",
+  galleries: "galleries.read",
+  gallery: "galleries.read",
+  groups: "groups.read",
+  group: "groups.read",
+  images: "images.read",
+  image: "images.read",
+  markers: "markers.read",
+  sceneparser: "scenes.read",
+  logs: "system.read",
+  stats: "system.read",
+};
 
 // Lazy-loaded page components for code splitting
 const ScenesPage = lazy(() => import("./pages/ScenesPage").then(m => ({ default: m.ScenesPage })));
@@ -115,15 +138,55 @@ export default function App() {
   return (
     <RouteRegistryProvider>
       <AppConfigProvider>
-        <ExtensionLoaderProvider>
-          <SceneQueueProvider>
-            <AppShell route={route} navigate={navigate} />
-            <KeyboardShortcutsDialog open={showShortcuts} onClose={() => setShowShortcuts(false)} />
-          </SceneQueueProvider>
-        </ExtensionLoaderProvider>
+        <AuthGate>
+          <ExtensionLoaderProvider>
+            <SceneQueueProvider>
+              <AppShell route={route} navigate={navigate} />
+              <KeyboardShortcutsDialog open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+            </SceneQueueProvider>
+          </ExtensionLoaderProvider>
+        </AuthGate>
       </AppConfigProvider>
     </RouteRegistryProvider>
   );
+}
+
+/**
+ * Wraps the app with AuthProvider once we know whether auth is enabled (from /api/system/status),
+ * and renders the LoginPage when auth is required but the user is not yet signed in.
+ */
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { status, statusLoading } = useAppConfig();
+  const authEnabled = !!status?.authEnabled;
+
+  if (statusLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" />
+      </div>
+    );
+  }
+
+  return (
+    <AuthProvider authEnabled={authEnabled}>
+      <AuthGateInner>{children}</AuthGateInner>
+    </AuthProvider>
+  );
+}
+
+function AuthGateInner({ children }: { children: React.ReactNode }) {
+  const { authEnabled, user, loading } = useAuth();
+  if (authEnabled && loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" />
+      </div>
+    );
+  }
+  if (authEnabled && !user) {
+    return <LoginPage />;
+  }
+  return <>{children}</>;
 }
 
 function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => void }) {
@@ -196,6 +259,12 @@ function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => v
 function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => void }) {
   const { routes } = useRouteRegistry();
   const { getPageOverride, resolveComponent, manifest } = useExtensions();
+  const { hasPermission } = useAuth();
+
+  const requiredPermission = BUILTIN_ROUTE_PERMISSIONS[route.page];
+  if (requiredPermission && !hasPermission(requiredPermission)) {
+    return <AccessDeniedPage navigate={navigate} />;
+  }
 
   // 1. Check for page overrides (extension replaces a built-in page)
   const override = getPageOverride(route.page);
@@ -258,5 +327,20 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
       {route.page === "markers" && <SceneMarkersPage onNavigate={navigate} />}
       {route.page === "sceneparser" && <SceneFilenameParserPage onNavigate={navigate} />}
     </>
+  );
+}
+
+function AccessDeniedPage({ navigate }: { navigate: (r: Route) => void }) {
+  return (
+    <div className="mx-auto flex min-h-[40vh] max-w-xl flex-col items-center justify-center gap-4 text-center">
+      <h1 className="text-2xl font-semibold text-foreground">Access denied</h1>
+      <p className="text-sm text-secondary">Your account does not have permission to view this page.</p>
+      <button
+        onClick={() => navigate({ page: "home" })}
+        className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-accent hover:text-accent"
+      >
+        Go home
+      </button>
+    </div>
   );
 }

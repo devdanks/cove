@@ -572,11 +572,12 @@ export interface Stats {
 
 export interface SystemStatus {
   version: string;
-  appDir: string;
-  configFile: string;
+  appDir: string | null;
+  configFile: string | null;
   databasePath: string;
   migrationRequired: boolean;
   pendingMigrations: string[] | null;
+  authEnabled?: boolean;
 }
 
 export type RatingSystemType = "stars" | "decimal";
@@ -585,6 +586,33 @@ export type RatingStarPrecision = "full" | "half" | "quarter" | "tenth";
 export interface RatingSystemOptions {
   type: RatingSystemType;
   starPrecision: RatingStarPrecision;
+}
+
+export type AuthUserKind = "user" | "shareLink" | "apiToken" | "system" | "anonymous";
+
+export interface UserThemePreferences {
+  activeThemeId?: string | null;
+  activeComponentStyles?: string[] | null;
+  activeLayoutStyle?: string | null;
+  customThemeColors?: Record<string, string> | null;
+  styleOptions?: Record<string, Record<string, string>> | null;
+}
+
+export interface UserUiPreferences {
+  theme?: UserThemePreferences | null;
+  ratingSystemOptions?: RatingSystemOptions | null;
+}
+
+export interface MeResponse {
+  user: {
+    id: string;
+    username: string;
+    roles?: string[];
+    kind?: AuthUserKind;
+    uiPreferences?: UserUiPreferences | null;
+  };
+  permissions: string[];
+  readGrantedEntityKinds?: string[];
 }
 
 export interface InterfaceConfig {

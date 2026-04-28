@@ -2,6 +2,8 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, Film, FolderOpen, ImageIcon, Layers, Loader2, Search, Tag, Users } from "lucide-react";
 import { galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { canReadEntity } from "../auth/visibility";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 
 interface Props {
@@ -15,11 +17,50 @@ type SearchGroup = {
   items: { id: number; title: string; subtitle?: string; route: any }[];
 };
 
+type SceneSearchItems = Awaited<ReturnType<typeof scenes.find>>["items"];
+type PerformerSearchItems = Awaited<ReturnType<typeof performers.find>>["items"];
+type StudioSearchItems = Awaited<ReturnType<typeof studios.find>>["items"];
+type TagSearchItems = Awaited<ReturnType<typeof tags.find>>["items"];
+type GallerySearchItems = Awaited<ReturnType<typeof galleries.find>>["items"];
+type ImageSearchItems = Awaited<ReturnType<typeof images.find>>["items"];
+type GroupSearchItems = Awaited<ReturnType<typeof groups.find>>["items"];
+
+type SearchDefinition = {
+  key: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  load: () => Promise<{ items: unknown[] }>;
+  mapItems: (items: unknown[]) => SearchGroup["items"];
+};
+
 export function GlobalSearch({ navigate }: Props) {
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState(false);
   const deferredTerm = useDeferredValue(term.trim());
   const containerRef = useRef<HTMLDivElement>(null);
+  const { hasPermission, permissions } = useAuth();
+
+  const readableEntities = useMemo(() => ({
+    scenes: canReadEntity("scene", hasPermission),
+    performers: canReadEntity("performer", hasPermission),
+    studios: canReadEntity("studio", hasPermission),
+    tags: canReadEntity("tag", hasPermission),
+    galleries: canReadEntity("gallery", hasPermission),
+    images: canReadEntity("image", hasPermission),
+    groups: canReadEntity("group", hasPermission),
+  }), [hasPermission, permissions]);
+
+  const searchableLabels = useMemo(() => {
+    const labels: string[] = [];
+    if (readableEntities.scenes) labels.push("scenes");
+    if (readableEntities.performers) labels.push("performers");
+    if (readableEntities.studios) labels.push("studios");
+    if (readableEntities.tags) labels.push("tags");
+    if (readableEntities.galleries) labels.push("galleries");
+    if (readableEntities.images) labels.push("images");
+    if (readableEntities.groups) labels.push("groups");
+    return labels;
+  }, [readableEntities]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -32,101 +73,109 @@ export function GlobalSearch({ navigate }: Props) {
   }, []);
 
   const { data, isFetching } = useQuery({
-    queryKey: ["global-search", deferredTerm],
-    enabled: deferredTerm.length >= 2,
+    queryKey: ["global-search", deferredTerm, searchableLabels.join(",")],
+    enabled: deferredTerm.length >= 2 && searchableLabels.length > 0,
     queryFn: async () => {
       const query = { q: deferredTerm, perPage: 5, direction: "desc" as const };
-      const [sceneRes, performerRes, studioRes, tagRes, galleryRes, imageRes, groupRes] = await Promise.all([
-        scenes.find(query),
-        performers.find({ ...query, sort: "name", direction: "asc" }),
-        studios.find({ ...query, sort: "name", direction: "asc" }),
-        tags.find({ ...query, sort: "name", direction: "asc" }),
-        galleries.find({ ...query, sort: "title", direction: "asc" }),
-        images.find({ ...query, sort: "title", direction: "asc" }),
-        groups.find({ ...query, sort: "name", direction: "asc" }),
-      ]);
-
-      const groupsData: SearchGroup[] = [
-        {
+      const searches: SearchDefinition[] = [
+        ...(readableEntities.scenes ? [{
           key: "scenes",
           label: "Scenes",
           icon: Film,
-          items: sceneRes.items.map((item) => ({
+          load: () => scenes.find(query),
+          mapItems: (items: unknown[]) => (items as SceneSearchItems).map((item) => ({
             id: item.id,
             title: item.title || item.files[0]?.basename || `Scene ${item.id}`,
             subtitle: item.studioName || item.date || undefined,
             route: { page: "scene", id: item.id },
           })),
-        },
-        {
+        }] : []),
+        ...(readableEntities.performers ? [{
           key: "performers",
           label: "Performers",
           icon: Users,
-          items: performerRes.items.map((item) => ({
+          load: () => performers.find({ ...query, sort: "name", direction: "asc" }),
+          mapItems: (items: unknown[]) => (items as PerformerSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
             subtitle: item.disambiguation || undefined,
             route: { page: "performer", id: item.id },
           })),
-        },
-        {
+        }] : []),
+        ...(readableEntities.studios ? [{
           key: "studios",
           label: "Studios",
           icon: Building2,
-          items: studioRes.items.map((item) => ({
+          load: () => studios.find({ ...query, sort: "name", direction: "asc" }),
+          mapItems: (items: unknown[]) => (items as StudioSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
             subtitle: item.parentName || undefined,
             route: { page: "studio", id: item.id },
           })),
-        },
-        {
+        }] : []),
+        ...(readableEntities.tags ? [{
           key: "tags",
           label: "Tags",
           icon: Tag,
-          items: tagRes.items.map((item) => ({
+          load: () => tags.find({ ...query, sort: "name", direction: "asc" }),
+          mapItems: (items: unknown[]) => (items as TagSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
             subtitle: item.description || undefined,
             route: { page: "tag", id: item.id },
           })),
-        },
-        {
+        }] : []),
+        ...(readableEntities.galleries ? [{
           key: "galleries",
           label: "Galleries",
           icon: FolderOpen,
-          items: galleryRes.items.map((item) => ({
+          load: () => galleries.find({ ...query, sort: "title", direction: "asc" }),
+          mapItems: (items: unknown[]) => (items as GallerySearchItems).map((item) => ({
             id: item.id,
             title: item.title || `Gallery ${item.id}`,
             subtitle: item.studioName || item.date || undefined,
             route: { page: "gallery", id: item.id },
           })),
-        },
-        {
+        }] : []),
+        ...(readableEntities.images ? [{
           key: "images",
           label: "Images",
           icon: ImageIcon,
-          items: imageRes.items.map((item) => ({
+          load: () => images.find({ ...query, sort: "title", direction: "asc" }),
+          mapItems: (items: unknown[]) => (items as ImageSearchItems).map((item) => ({
             id: item.id,
             title: getImageDisplayTitle(item),
             subtitle: item.studioName || item.date || undefined,
             route: { page: "image", id: item.id },
           })),
-        },
-        {
+        }] : []),
+        ...(readableEntities.groups ? [{
           key: "groups",
           label: "Groups",
           icon: Layers,
-          items: groupRes.items.map((item) => ({
+          load: () => groups.find({ ...query, sort: "name", direction: "asc" }),
+          mapItems: (items: unknown[]) => (items as GroupSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
             subtitle: item.studioName || item.date || undefined,
             route: { page: "group", id: item.id },
           })),
-        },
+        }] : []),
       ];
 
-      return groupsData.filter((group) => group.items.length > 0);
+      const results = await Promise.allSettled(searches.map((search) => search.load()));
+      return searches.flatMap((search, index) => {
+        const result = results[index];
+        if (result?.status !== "fulfilled") {
+          return [];
+        }
+
+        const items = search.mapItems(result.value.items);
+        return items.length > 0
+          ? [{ key: search.key, label: search.label, icon: search.icon, items }]
+          : [];
+      });
     },
   });
 
@@ -143,8 +192,10 @@ export function GlobalSearch({ navigate }: Props) {
       <div className="border-b border-border px-3 py-2 text-[11px] uppercase tracking-wider text-muted">
         Global Search
       </div>
-      {deferredTerm.length < 2 ? (
-        <div className="px-4 py-6 text-sm text-secondary">Type at least 2 characters to search scenes, performers, studios, tags, galleries, images, and groups.</div>
+      {searchableLabels.length === 0 ? (
+        <div className="px-4 py-6 text-sm text-secondary">No searchable libraries are available for this account.</div>
+      ) : deferredTerm.length < 2 ? (
+        <div className="px-4 py-6 text-sm text-secondary">Type at least 2 characters to search {searchableLabels.join(", ")}.</div>
       ) : isFetching ? (
         <div className="flex items-center gap-2 px-4 py-6 text-sm text-secondary">
           <Loader2 className="h-4 w-4 animate-spin" /> Searching...

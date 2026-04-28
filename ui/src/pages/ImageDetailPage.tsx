@@ -3,15 +3,18 @@ import { images } from "../api/client";
 import type { Image as ImageModel } from "../api/types";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
 import { ArrowLeft, Download, Pencil, Trash2, Link as LinkIcon, Heart, Check, Maximize, X } from "lucide-react";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { ImageEditModal } from "./ImageEditModal";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { InteractiveRating } from "../components/Rating";
 import { createRouteLinkProps } from "../components/cardNavigation";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useBackNavigation } from "../hooks/useBackNavigation";
-import { ImageDownloadDialog } from "../components/ImageDownloadDialog";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
+
+const ImageEditModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageEditModal })));
+const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
 
 interface Props {
   id: number;
@@ -23,12 +26,20 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     queryKey: ["image", id],
     queryFn: () => images.get(id),
   });
+  const { hasPermission } = useAuth();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "images" }, onNavigate);
+  const canWriteImage = canWriteEntity("image", hasPermission);
+  const canDeleteImage = canDeleteEntity("image", hasPermission);
+  const canDownloadImage = hasPermission("jobs.run") && canWriteImage;
+  const canReadFiles = hasPermission("files.read");
+  const canReadStudios = canReadEntity("studio", hasPermission);
+  const canReadPerformers = canReadEntity("performer", hasPermission);
+  const canReadTags = canReadEntity("tag", hasPermission);
   const deleteMut = useMutation({
     mutationFn: () => images.delete(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["images"] }); goBack(); },
@@ -57,15 +68,15 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       const el = (e.target as HTMLElement).tagName;
       if (el === "INPUT" || el === "TEXTAREA" || el === "SELECT") return;
       switch (e.key) {
-        case "e": setEditing((v) => !v); break;
-        case "o": incrementOMut.mutate(); break;
+        case "e": if (canWriteImage) setEditing((v) => !v); break;
+        case "o": if (canWriteImage) incrementOMut.mutate(); break;
         case "f": setLightboxOpen((v) => !v); break;
         case "Escape": setLightboxOpen(false); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [canWriteImage]);
 
   if (isLoading) {
     return (
@@ -79,13 +90,17 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
 
   return (
     <div className="overflow-hidden">
-      {image && <ImageEditModal image={image} open={editing} onClose={() => setEditing(false)} />}
-      <ImageDownloadDialog
-        open={showDownloadDialog}
-        image={image}
-        onClose={() => setShowDownloadDialog(false)}
-        onNavigate={onNavigate}
-      />
+      <Suspense fallback={null}>
+        {editing ? <ImageEditModal image={image} open={editing} onClose={() => setEditing(false)} /> : null}
+        {showDownloadDialog ? (
+          <ImageDownloadDialog
+            open={showDownloadDialog}
+            image={image}
+            onClose={() => setShowDownloadDialog(false)}
+            onNavigate={onNavigate}
+          />
+        ) : null}
+      </Suspense>
       <ConfirmDialog open={confirmDelete} title="Delete Image" message={`Delete "${displayTitle}"? This cannot be undone.`} onConfirm={() => deleteMut.mutate()} onCancel={() => setConfirmDelete(false)} />
 
       {/* Lightbox overlay */}
@@ -144,12 +159,12 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
               <h1 className="text-lg font-bold text-foreground break-words">{displayTitle}</h1>
               <div className="flex flex-wrap items-center gap-2 text-sm text-secondary mt-1">
                 {image.date && <span>{formatDate(image.date)}</span>}
-                {image.studioName && image.studioId && <button onClick={() => onNavigate({ page: "studio", id: image.studioId })} className="text-accent hover:underline">{image.studioName}</button>}
+                {image.studioName && image.studioId && (canReadStudios ? <button onClick={() => onNavigate({ page: "studio", id: image.studioId })} className="text-accent hover:underline">{image.studioName}</button> : <span>{image.studioName}</span>)}
                 {image.photographer && <span>Photo: {image.photographer}</span>}
               </div>
               <div className="flex items-center gap-2 mt-3">
                 <ExtensionSlot slot="image-detail-actions" context={{ image, onNavigate }} />
-                {image.files.length === 0 && (
+                {image.files.length === 0 && canDownloadImage && (
                   <button
                     onClick={() => setShowDownloadDialog(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-card border border-border text-secondary hover:text-foreground rounded"
@@ -157,40 +172,40 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                     <Download className="w-3.5 h-3.5" /> Download Media…
                   </button>
                 )}
-                <button
+                {canWriteImage ? <button
                   onClick={() => setEditing(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-white hover:bg-accent-hover rounded"
                 >
                   <Pencil className="w-3.5 h-3.5" /> Edit
-                </button>
-                <button
+                </button> : null}
+                {canDeleteImage ? <button
                   onClick={() => setConfirmDelete(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-card border border-border text-secondary hover:text-red-300 hover:border-red-500 rounded"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Delete
-                </button>
+                </button> : null}
               </div>
             </div>
 
             {/* Rating + Favorites + Organized */}
             <div className="space-y-2">
-              <InteractiveRating value={image.rating} onChange={(value) => updateMut.mutate({ rating: value })} />
+              <InteractiveRating value={image.rating} onChange={(value) => updateMut.mutate({ rating: value })} readOnly={!canWriteImage} />
               <div className="flex items-center gap-3">
-                <button
+                {canWriteImage ? <button
                   onClick={() => incrementOMut.mutate()}
                   className="flex items-center gap-1 text-sm text-secondary hover:text-accent"
                   title="Add favorite"
                 >
                   <Heart className={`w-4 h-4 ${image.oCounter > 0 ? "fill-accent text-accent" : ""}`} />
                   <span>{image.oCounter}</span>
-                </button>
-                <button
+                </button> : <span className="flex items-center gap-1 text-sm text-secondary"><Heart className={`w-4 h-4 ${image.oCounter > 0 ? "fill-accent text-accent" : ""}`} /><span>{image.oCounter}</span></span>}
+                {canWriteImage ? <button
                   onClick={() => updateMut.mutate({ organized: !image.organized })}
                   className={`p-1.5 rounded transition-colors ${image.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground border border-border"}`}
                   title={image.organized ? "Organized" : "Not organized"}
                 >
                   <Check className="w-4 h-4" />
-                </button>
+                </button> : image.organized ? <span className="rounded bg-green-600 p-1.5 text-white" title="Organized image"><Check className="w-4 h-4" /></span> : null}
               </div>
             </div>
 
@@ -200,7 +215,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             )}
 
             {/* Performers */}
-            {image.performers.length > 0 && (
+            {canReadPerformers && image.performers.length > 0 && (
               <div>
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Performers</h3>
                 <div className="flex flex-wrap gap-2">
@@ -229,7 +244,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             )}
 
             {/* Tags */}
-            {image.tags.length > 0 && (
+            {canReadTags && image.tags.length > 0 && (
               <div>
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Tags</h3>
                 <div className="flex flex-wrap gap-1.5">
@@ -241,7 +256,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             )}
 
             {/* File Info */}
-            {image.files && image.files.length > 0 && (
+            {canReadFiles && image.files && image.files.length > 0 && (
               <div>
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">File Info</h3>
                 {image.files.map((f) => (

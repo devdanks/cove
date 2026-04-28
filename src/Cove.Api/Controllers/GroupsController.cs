@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -10,6 +11,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.GroupsRead)]
 public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) : ControllerBase
 {
     [HttpGet]
@@ -55,6 +57,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     }
 
     [HttpPost]
+    [RequiresPermission(Permissions.GroupsWrite)]
     public async Task<ActionResult<GroupDto>> Create([FromBody] GroupCreateDto dto, CancellationToken ct)
     {
         var group = new Group
@@ -72,6 +75,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     }
 
     [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite)]
     public async Task<ActionResult<GroupDto>> Update(int id, [FromBody] GroupUpdateDto dto, CancellationToken ct)
     {
         var group = await groupRepo.GetByIdWithRelationsAsync(id, ct);
@@ -104,6 +109,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.GroupsDelete)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var g = await groupRepo.GetByIdAsync(id, ct);
@@ -115,6 +122,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     // ===== Bulk Update =====
 
     [HttpPost("bulk")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
     public async Task<IActionResult> BulkUpdate([FromBody] BulkGroupUpdateDto dto, CancellationToken ct)
     {
         var groups = await db.Groups
@@ -177,6 +186,9 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     }
 
     [HttpPost("{id:int}/subgroups")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite, ActionArgumentName = "dto", PropertyName = "SubGroupId")]
     public async Task<IActionResult> AddSubGroup(int id, [FromBody] AddSubGroupDto dto, CancellationToken ct)
     {
         var group = await groupRepo.GetByIdAsync(id, ct);
@@ -202,6 +214,9 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     }
 
     [HttpDelete("{id:int}/subgroups/{subGroupId:int}")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite, RouteValueName = "subGroupId")]
     public async Task<IActionResult> RemoveSubGroup(int id, int subGroupId, CancellationToken ct)
     {
         var relation = await db.Set<GroupRelation>()
@@ -213,6 +228,9 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     }
 
     [HttpPut("{id:int}/subgroups/reorder")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite, ActionArgumentName = "dto", PropertyName = "SubGroupIds")]
     public async Task<IActionResult> ReorderSubGroups(int id, [FromBody] ReorderSubGroupsDto dto, CancellationToken ct)
     {
         var relations = await db.Set<GroupRelation>()

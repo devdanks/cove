@@ -31,6 +31,12 @@ public class Performer : BaseEntity
     // Image stored as blob reference
     public string? ImageBlobId { get; set; }
 
+    // Denormalized relationship counters for hot list/detail reads.
+    public int SceneCount { get; set; }
+    public int ImageCount { get; set; }
+    public int GalleryCount { get; set; }
+    public int TagCount { get; set; }
+
     // Navigation properties
     public ICollection<PerformerUrl> Urls { get; set; } = [];
     public ICollection<PerformerAlias> Aliases { get; set; } = [];

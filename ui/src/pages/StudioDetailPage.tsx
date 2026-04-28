@@ -20,6 +20,8 @@ import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 
 const PERFORMER_SORT = PERFORMER_SORT_OPTIONS;
 const IMAGE_SORT = [
@@ -58,6 +60,7 @@ type TabKey = "scenes" | "performers" | "galleries" | "images" | "studios" | "gr
 
 export function StudioDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
+  const { hasPermission } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: studio, isLoading } = useQuery({
     queryKey: ["studio", id],
@@ -85,6 +88,19 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   const [groupFilter, setGroupFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "studios" }, onNavigate);
+  const canWriteStudio = canWriteEntity("studio", hasPermission);
+  const canDeleteStudio = canDeleteEntity("studio", hasPermission);
+  const canReadTags = canReadEntity("tag", hasPermission);
+  const canAutoTagStudio = hasPermission("library.autotag") && canWriteStudio;
+  const showStudioOpsMenu = canWriteStudio || canAutoTagStudio || canDeleteStudio;
+  const visibleStudioTabs = filterItemsByPermission(studioTabs, {
+    scenes: "scenes.read",
+    performers: "performers.read",
+    galleries: "galleries.read",
+    images: "images.read",
+    studios: "studios.read",
+    groups: "groups.read",
+  }, hasPermission);
 
   useEffect(() => {
     if (studio) document.title = `${studio.name} | Cove`;
@@ -108,13 +124,19 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       switch (e.key) {
-        case "e": setEditing((v) => !v); break;
-        case "f": if (studio) updateMut.mutate({ favorite: !studio.favorite }); break;
+        case "e": if (canWriteStudio) setEditing((v) => !v); break;
+        case "f": if (studio && canWriteStudio) updateMut.mutate({ favorite: !studio.favorite }); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [studio]);
+  }, [canWriteStudio, studio]);
+
+  useEffect(() => {
+    if (visibleStudioTabs.length > 0 && !visibleStudioTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(visibleStudioTabs[0].key as TabKey);
+    }
+  }, [activeTab, visibleStudioTabs]);
 
   const deleteMut = useMutation({
     mutationFn: () => studios.delete(id),
@@ -174,32 +196,34 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
             </button>
             <div className="flex items-center gap-2">
               <ExtensionSlot slot="studio-detail-actions" context={{ studio, onNavigate }} />
-              <div className="relative" ref={opsMenuRef}>
-                <button
-                  onClick={() => setShowOpsMenu(!showOpsMenu)}
-                  className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground"
-                  title="Actions"
-                >
-                  <MoreVertical className="h-4 w-4" />
-                </button>
-                {showOpsMenu && (
-                  <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
-                    <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                      <Pencil className="h-3.5 w-3.5" /> Edit
-                    </button>
-                    <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">
-                      {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
-                    </button>
-                    <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                      <GitMerge className="h-3.5 w-3.5" /> Merge...
-                    </button>
-                    <div className="my-1 border-t border-border" />
-                    <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface">
-                      <Trash2 className="h-3.5 w-3.5" /> Delete
-                    </button>
-                  </div>
-                )}
-              </div>
+              {showStudioOpsMenu ? (
+                <div className="relative" ref={opsMenuRef}>
+                  <button
+                    onClick={() => setShowOpsMenu(!showOpsMenu)}
+                    className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground"
+                    title="Actions"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                  {showOpsMenu && (
+                    <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
+                      {canWriteStudio ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </button> : null}
+                      {canAutoTagStudio ? <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">
+                        {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
+                      </button> : null}
+                      {canWriteStudio ? <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
+                        <GitMerge className="h-3.5 w-3.5" /> Merge...
+                      </button> : null}
+                      {canDeleteStudio ? <div className="my-1 border-t border-border" /> : null}
+                      {canDeleteStudio ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface">
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </button> : null}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -224,42 +248,56 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
                 <div className="min-w-0 flex-1">
                   <h1 className="truncate text-2xl sm:text-3xl md:text-4xl font-bold text-foreground">{studio.name}</h1>
                   {studio.parentName && studio.parentId && (
-                    <button
-                      onClick={() => onNavigate({ page: "studio", id: studio.parentId })}
-                      className="mt-1 text-sm text-accent hover:underline"
-                    >
-                      Part of {studio.parentName}
-                    </button>
+                    canReadEntity("studio", hasPermission) ? (
+                      <button
+                        onClick={() => onNavigate({ page: "studio", id: studio.parentId })}
+                        className="mt-1 text-sm text-accent hover:underline"
+                      >
+                        Part of {studio.parentName}
+                      </button>
+                    ) : <span className="mt-1 block text-sm text-secondary">Part of {studio.parentName}</span>
                   )}
                   {studio.aliases.length > 0 && (
                     <p className="mt-1 text-sm text-secondary">Also known as: {studio.aliases.join(", ")}</p>
                   )}
                 </div>
-                <button
-                  onClick={() => updateMut.mutate({ favorite: !studio.favorite })}
-                  className={`rounded-full p-2 transition-colors ${
-                    studio.favorite
-                      ? "bg-red-500/15 text-red-500"
-                      : "bg-card text-muted hover:text-red-400"
-                  }`}
-                  title={studio.favorite ? "Remove from favorites" : "Add to favorites"}
-                >
-                  <Heart className={`h-6 w-6 ${studio.favorite ? "fill-current" : ""}`} />
-                </button>
-                <button
-                  onClick={() => updateMut.mutate({ organized: !studio.organized })}
-                  className={`rounded-full p-2 transition-colors ${
-                    studio.organized
-                      ? "bg-green-500/15 text-green-500"
-                      : "bg-card text-muted hover:text-green-400"
-                  }`}
-                  title={studio.organized ? "Mark as unorganized" : "Mark as organized"}
-                >
-                  <Check className="h-6 w-6" />
-                </button>
+                {canWriteStudio ? (
+                  <button
+                    onClick={() => updateMut.mutate({ favorite: !studio.favorite })}
+                    className={`rounded-full p-2 transition-colors ${
+                      studio.favorite
+                        ? "bg-red-500/15 text-red-500"
+                        : "bg-card text-muted hover:text-red-400"
+                    }`}
+                    title={studio.favorite ? "Remove from favorites" : "Add to favorites"}
+                  >
+                    <Heart className={`h-6 w-6 ${studio.favorite ? "fill-current" : ""}`} />
+                  </button>
+                ) : studio.favorite ? (
+                  <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite studio">
+                    <Heart className="h-6 w-6 fill-current" />
+                  </span>
+                ) : null}
+                {canWriteStudio ? (
+                  <button
+                    onClick={() => updateMut.mutate({ organized: !studio.organized })}
+                    className={`rounded-full p-2 transition-colors ${
+                      studio.organized
+                        ? "bg-green-500/15 text-green-500"
+                        : "bg-card text-muted hover:text-green-400"
+                    }`}
+                    title={studio.organized ? "Mark as unorganized" : "Mark as organized"}
+                  >
+                    <Check className="h-6 w-6" />
+                  </button>
+                ) : studio.organized ? (
+                  <span className="rounded-full bg-green-500/15 p-2 text-green-500" title="Organized studio">
+                    <Check className="h-6 w-6" />
+                  </span>
+                ) : null}
               </div>
 
-              <InteractiveRating value={studio.rating} onChange={(value) => updateMut.mutate({ rating: value })} />
+              <InteractiveRating value={studio.rating} onChange={(value) => updateMut.mutate({ rating: value })} readOnly={!canWriteStudio} />
 
               <div className="mt-4 flex flex-wrap gap-3">
                 <CountCard label="Scenes" value={studio.sceneCount} icon={<Film className="h-4 w-4" />} />
@@ -276,7 +314,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
               {studio.details && (
                 <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{studio.details}</p>
               )}
-              {studio.tags.length > 0 && (
+              {canReadTags && studio.tags.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   {studio.tags.map((tag) => (
                     <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
@@ -342,7 +380,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
 
         <div className="mx-auto max-w-7xl border-b border-border mt-6">
           <div className="flex gap-1 overflow-x-auto">
-            {studioTabs.map((tab) => (
+            {visibleStudioTabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key as TabKey)}

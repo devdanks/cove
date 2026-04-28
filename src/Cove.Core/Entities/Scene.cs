@@ -19,6 +19,31 @@ public class Scene : BaseEntity
     public int? InteractiveSpeed { get; set; }
     public string? ImageBlobId { get; set; }
 
+    // Denormalized M2M id sets, GIN-indexed. Maintained from SceneTags/ScenePerformers
+    // by CoveContext on save. Lets tag/performer combo filters use a single index-only
+    // array containment scan (e.g. WHERE tag_ids @> ARRAY[1,2,3]) instead of N joins.
+    public int[] TagIds { get; set; } = [];
+    public int[] PerformerIds { get; set; } = [];
+
+    // Denormalized file summaries for hot list filters and sorts.
+    public int FileCount { get; set; }
+    public double MaxDuration { get; set; }
+    public int MaxResolution { get; set; }
+    public int MaxHeight { get; set; }
+    public double MaxFrameRate { get; set; }
+    public long MaxBitRate { get; set; }
+    public long MaxFileSize { get; set; }
+    public DateTime? MaxFileModTime { get; set; }
+    public string? MinPath { get; set; }
+    public string? MaxPath { get; set; }
+    public string? FileSearchText { get; set; }
+    public bool HasDimensionData { get; set; }
+    public bool HasLandscapeFiles { get; set; }
+    public bool HasPortraitFiles { get; set; }
+    public bool HasSquareFiles { get; set; }
+    public bool HasInteractiveFiles { get; set; }
+    public bool HasNonInteractiveFiles { get; set; }
+
     // Navigation properties
     public Studio? Studio { get; set; }
     public ICollection<SceneUrl> Urls { get; set; } = [];

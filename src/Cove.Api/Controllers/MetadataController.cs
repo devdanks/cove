@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
@@ -23,6 +24,7 @@ public class MetadataController(
     ILogger<MetadataController> logger) : ControllerBase
 {
     [HttpPost("scan")]
+    [RequiresPermission(Permissions.LibraryScan)]
     public ActionResult<object> StartScan([FromBody] ScanOptionsDto? opts)
     {
         var enableAllGenerators = opts?.ScanGenerators == true;
@@ -42,6 +44,8 @@ public class MetadataController(
     }
 
     [HttpPost("generate")]
+    [RequiresPermission(Permissions.JobsRun)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite, ActionArgumentName = "opts", PropertyName = "SceneIds")]
     public ActionResult<object> StartGenerate([FromBody] GenerateOptionsDto? opts)
     {
         var jobId = jobService.Enqueue("generate", "Generating content", async (progress, ct) =>
@@ -218,6 +222,10 @@ public class MetadataController(
     }
 
     [HttpPost("auto-tag")]
+    [RequiresPermission(Permissions.LibraryAutoTag)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite, ActionArgumentName = "opts", PropertyName = "Performers")]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite, ActionArgumentName = "opts", PropertyName = "Studios")]
+    [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsWrite, ActionArgumentName = "opts", PropertyName = "Tags")]
     public ActionResult<object> StartAutoTag([FromBody] AutoTagOptionsDto? opts, [FromServices] IAutoTagService autoTagService)
     {
         var jobId = autoTagService.StartAutoTag(opts?.Performers, opts?.Studios, opts?.Tags);
@@ -225,6 +233,7 @@ public class MetadataController(
     }
 
     [HttpPost("clean")]
+    [RequiresPermission(Permissions.LibraryClean)]
     public ActionResult<object> StartClean([FromBody] CleanOptionsDto? opts)
     {
         var jobId = jobService.Enqueue("clean", "Cleaning library", async (progress, ct) =>
@@ -275,6 +284,7 @@ public class MetadataController(
     }
 
     [HttpPost("export")]
+    [RequiresPermission(Permissions.SystemBackup)]
     public ActionResult<object> StartExport([FromBody] ExportOptionsDto? opts)
     {
         var jobId = jobService.Enqueue("export", "Exporting metadata", async (progress, ct) =>
@@ -343,6 +353,7 @@ public class MetadataController(
     }
 
     [HttpPost("import")]
+    [RequiresPermission(Permissions.SystemRestore)]
     public ActionResult<object> StartImport([FromBody] ImportOptionsDto? opts)
     {
         var filePath = opts?.FilePath;
@@ -466,6 +477,7 @@ public class MetadataController(
     }
 
     [HttpPost("clean-generated")]
+    [RequiresPermission(Permissions.SystemSettingsWrite)]
     public ActionResult<object> CleanGenerated()
     {
         var jobId = jobService.Enqueue("clean-generated", "Cleaning generated files", async (progress, ct) =>
@@ -503,6 +515,8 @@ public class MetadataController(
     }
 
     [HttpPost("identify")]
+    [RequiresPermission(Permissions.LibraryAutoTag)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite, ActionArgumentName = "opts", PropertyName = "SceneIds")]
     public ActionResult<object> StartIdentify([FromBody] IdentifyOptionsDto? opts)
     {
         var jobId = jobService.Enqueue("identify", "Identifying scenes", async (progress, ct) =>
@@ -657,6 +671,7 @@ public class MetadataController(
     }
 
     [HttpPost("sync-fingerprints")]
+    [RequiresPermission(Permissions.LibraryScan)]
     public ActionResult<object> SyncFingerprints([FromBody] SyncFingerprintsOptionsDto? opts)
     {
         var sourceUrl = opts?.SourceUrl ?? "http://localhost:3000/graphql";

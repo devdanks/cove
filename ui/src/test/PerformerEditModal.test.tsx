@@ -100,4 +100,53 @@ describe("PerformerEditModal", () => {
     await waitFor(() => expect(mocks.performersUpdate).toHaveBeenCalledWith(1, expect.any(Object)));
     expect(mocks.performersUpdate.mock.calls[0][1]).not.toHaveProperty("favorite");
   });
+
+  it("searches tags remotely and adds selected tags to the payload", async () => {
+    const user = userEvent.setup();
+    const performer: Performer = {
+      id: 1,
+      name: "Sample Performer",
+      favorite: false,
+      ignoreAutoTag: false,
+      urls: [],
+      aliases: [],
+      tags: [],
+      remoteIds: [],
+      sceneCount: 0,
+      imageCount: 0,
+      galleryCount: 0,
+      groupCount: 0,
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-02T00:00:00Z",
+      rating: undefined,
+    };
+
+    mocks.tagsFind.mockImplementation(async ({ q }: { q?: string }) => ({
+      items: q === "sha"
+        ? [
+          { id: 7, name: "Shaved Pussy" },
+          { id: 8, name: "Shared Scene" },
+        ]
+        : [],
+    }));
+
+    renderModal(performer);
+
+    await user.type(screen.getByPlaceholderText("Search tags..."), "sha");
+
+    await waitFor(() => {
+      expect(mocks.tagsFind).toHaveBeenLastCalledWith({
+        q: "sha",
+        perPage: 20,
+        sort: "name",
+        direction: "asc",
+      });
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Shaved Pussy" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.performersUpdate).toHaveBeenCalledWith(1, expect.objectContaining({ tagIds: [7] })));
+    expect(screen.getByText("Shaved Pussy")).toBeInTheDocument();
+  });
 });

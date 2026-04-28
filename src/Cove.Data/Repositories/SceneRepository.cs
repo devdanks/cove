@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
+using PermissionKeys = Cove.Core.Auth.Permissions;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 
@@ -67,8 +68,16 @@ public class SceneRepository : ISceneRepository
             filter.TagsCriterion = expandedTags.Criterion;
         }
 
+        var currentPrincipal = _db.CurrentPrincipalForReadOptimization;
+        var readScopePlan = await ReadScopeListOptimization.TryBuildPlanAsync<Scene>(
+            _db,
+            EntityKinds.Scene,
+            currentPrincipal?.Has(PermissionKeys.ScenesRead) == true,
+            currentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Scene) == true,
+            ct);
+
         // Build a lightweight filter-only query (no Includes) for COUNT and filter predicates
-        var filterQuery = _db.Scenes.AsQueryable();
+        var filterQuery = (readScopePlan ?? new ReadScopeRootPlan<Scene>(false, null)).Apply(_db.Scenes.AsQueryable());
 
         // Apply all filters to the lightweight query
         filterQuery = ApplyFilters(filterQuery, filter, expandedTags?.ValueGroups);
@@ -77,11 +86,12 @@ public class SceneRepository : ISceneRepository
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
         {
             var q = findFilter.Q;
+            var pattern = $"%{q}%";
             filterQuery = filterQuery.Where(s =>
-                (s.Title != null && EF.Functions.ILike(s.Title, $"%{q}%")) ||
-                (s.Details != null && EF.Functions.ILike(s.Details, $"%{q}%")) ||
-                (s.Code != null && EF.Functions.ILike(s.Code, $"%{q}%")) ||
-                s.Files.Any(f => EF.Functions.ILike(f.Basename, $"%{q}%")));
+                (s.Title != null && EF.Functions.ILike(s.Title, pattern)) ||
+                (s.Details != null && EF.Functions.ILike(s.Details, pattern)) ||
+                (s.Code != null && EF.Functions.ILike(s.Code, pattern)) ||
+                (s.FileSearchText != null && EF.Functions.ILike(s.FileSearchText, pattern)));
         }
 
         // COUNT runs on the lightweight query â€” no JOINs from Includes
@@ -119,9 +129,7 @@ public class SceneRepository : ISceneRepository
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
             .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
-            .Include(s => s.Files).ThenInclude(file => file.Fingerprints)
-            .Include(s => s.Files).ThenInclude(file => file.Captions)
-            .Include(s => s.Files).ThenInclude(file => file.ParentFolder)
+            .Include(s => s.Files)
             .Include(s => s.SceneMarkers)
             .AsSplitQuery()
             .Where(s => pagedIds.Contains(s.Id))
@@ -151,9 +159,9 @@ public class SceneRepository : ISceneRepository
             if (filter.GalleryId.HasValue)
                 query = query.Where(s => s.SceneGalleries.Any(sg => sg.GalleryId == filter.GalleryId.Value));
             if (filter.TagIds?.Count > 0)
-                query = query.Where(s => s.SceneTags.Any(st => filter.TagIds.Contains(st.TagId)));
+                query = query.Where(s => s.TagIds.Any(id => filter.TagIds.Contains(id)));
             if (filter.PerformerIds?.Count > 0)
-                query = query.Where(s => s.ScenePerformers.Any(sp => filter.PerformerIds.Contains(sp.PerformerId)));
+                query = query.Where(s => s.PerformerIds.Any(id => filter.PerformerIds.Contains(id)));
 
             // Advanced criteria
             query = ApplyIntCriterion(query, filter.RatingCriterion, s => s.Rating ?? 0);
@@ -164,22 +172,22 @@ public class SceneRepository : ISceneRepository
                 query = ApplyIntCriterion(query, filter.PerformerCountCriterion, s => s.ScenePerformers.Count);
 
             if (filter.DurationCriterion != null)
-                query = ApplyIntCriterion(query, filter.DurationCriterion, s => (int)(s.Files.Select(f => (double?)f.Duration).Max() ?? 0));
+                query = ApplyIntCriterion(query, filter.DurationCriterion, s => (int)s.MaxDuration);
 
             if (filter.ResolutionCriterion != null)
-                query = FilterHelpers.ApplyResolution(query, filter.ResolutionCriterion, s => s.Files.Select(f => (int?)Math.Max(f.Width, f.Height)).Max() ?? 0);
+                query = FilterHelpers.ApplyResolution(query, filter.ResolutionCriterion, s => s.MaxResolution);
 
             if (filter.FrameRateCriterion != null)
-                query = ApplyIntCriterion(query, filter.FrameRateCriterion, s => (int)(s.Files.Select(f => (double?)f.FrameRate).Max() ?? 0));
+                query = ApplyIntCriterion(query, filter.FrameRateCriterion, s => (int)s.MaxFrameRate);
 
             if (filter.BitrateInterval != null)
-                query = ApplyIntCriterion(query, filter.BitrateInterval, s => (int)((s.Files.Select(f => (long?)f.BitRate).Max() ?? 0) / 1000));
+                query = ApplyIntCriterion(query, filter.BitrateInterval, s => (int)(s.MaxBitRate / 1000));
 
             if (filter.FileCountCriterion != null)
-                query = ApplyIntCriterion(query, filter.FileCountCriterion, s => s.Files.Count);
+                query = ApplyIntCriterion(query, filter.FileCountCriterion, s => s.FileCount);
 
-            query = ApplyMultiIdCriterion(query, filter.TagsCriterion, s => s.SceneTags.Select(st => st.TagId), hierarchicalTagGroups);
-            query = ApplyMultiIdCriterion(query, filter.PerformersCriterion, s => s.ScenePerformers.Select(sp => sp.PerformerId));
+            query = ApplyMultiIdCriterion(query, filter.TagsCriterion, s => s.TagIds, hierarchicalTagGroups);
+            query = ApplyMultiIdCriterion(query, filter.PerformersCriterion, s => s.PerformerIds);
 
             if (filter.StudiosCriterion != null)
             {
@@ -203,7 +211,9 @@ public class SceneRepository : ISceneRepository
                     : query.Where(s => s.SceneMarkers.Count == 0);
 
             if (filter.InteractiveCriterion != null)
-                query = query.Where(s => s.Files.Any(f => f.Interactive == filter.InteractiveCriterion.Value));
+                query = filter.InteractiveCriterion.Value
+                    ? query.Where(s => s.HasInteractiveFiles)
+                    : query.Where(s => s.HasNonInteractiveFiles);
 
             query = ApplyFingerprintCriterion(query, filter.FingerprintCriterion);
             query = ApplyFingerprintCriterion(query, filter.HashCriterion, "oshash");
@@ -326,9 +336,9 @@ public class SceneRepository : ISceneRepository
                 var orientation = filter.OrientationCriterion.Value.ToLower();
                 query = orientation switch
                 {
-                    "landscape" => query.Where(s => s.Files.Any(f => f.Width > f.Height)),
-                    "portrait" => query.Where(s => s.Files.Any(f => f.Height > f.Width)),
-                    "square" => query.Where(s => s.Files.Any(f => f.Width == f.Height)),
+                    "landscape" => query.Where(s => s.HasLandscapeFiles),
+                    "portrait" => query.Where(s => s.HasPortraitFiles),
+                    "square" => query.Where(s => s.HasSquareFiles),
                     _ => query,
                 };
             }
@@ -362,26 +372,14 @@ public class SceneRepository : ISceneRepository
         "play_duration" => desc ? query.OrderByDescending(s => s.PlayDuration) : query.OrderBy(s => s.PlayDuration),
         "resume_time" => desc ? query.OrderByDescending(s => s.ResumeTime) : query.OrderBy(s => s.ResumeTime),
         "random" => query.OrderBy(s => s.Id),
-        "duration" => desc
-            ? query.OrderByDescending(s => s.Files.Select(file => (double?)file.Duration).Max() ?? 0)
-            : query.OrderBy(s => s.Files.Select(file => (double?)file.Duration).Max() ?? 0),
-        "file_size" => desc
-            ? query.OrderByDescending(s => s.Files.Select(file => (long?)file.Size).Max() ?? 0)
-            : query.OrderBy(s => s.Files.Select(file => (long?)file.Size).Max() ?? 0),
+        "duration" => desc ? query.OrderByDescending(s => s.MaxDuration) : query.OrderBy(s => s.MaxDuration),
+        "file_size" => desc ? query.OrderByDescending(s => s.MaxFileSize) : query.OrderBy(s => s.MaxFileSize),
         "file_mod_time" => ApplyFileModTimeSort(query, desc),
-        "file_count" => desc
-            ? query.OrderByDescending(s => s.Files.Count)
-            : query.OrderBy(s => s.Files.Count),
+        "file_count" => desc ? query.OrderByDescending(s => s.FileCount) : query.OrderBy(s => s.FileCount),
         "path" => ApplyPathSort(query, desc),
-        "resolution" => desc
-            ? query.OrderByDescending(s => s.Files.Select(file => file.Height).Max())
-            : query.OrderBy(s => s.Files.Select(file => file.Height).Max()),
-        "framerate" => desc
-            ? query.OrderByDescending(s => s.Files.Select(file => file.FrameRate).Max())
-            : query.OrderBy(s => s.Files.Select(file => file.FrameRate).Max()),
-        "bitrate" => desc
-            ? query.OrderByDescending(s => s.Files.Select(file => file.BitRate).Max())
-            : query.OrderBy(s => s.Files.Select(file => file.BitRate).Max()),
+        "resolution" => desc ? query.OrderByDescending(s => s.MaxHeight) : query.OrderBy(s => s.MaxHeight),
+        "framerate" => desc ? query.OrderByDescending(s => s.MaxFrameRate) : query.OrderBy(s => s.MaxFrameRate),
+        "bitrate" => desc ? query.OrderByDescending(s => s.MaxBitRate) : query.OrderBy(s => s.MaxBitRate),
         "phash" => ApplyPhashSort(query, desc),
         "perceptual_similarity" => ApplyPhashSort(query, desc),
         "tag_count" => desc
@@ -413,49 +411,16 @@ public class SceneRepository : ISceneRepository
 
     private static IQueryable<Scene> ApplyFileModTimeSort(IQueryable<Scene> query, bool desc)
     {
-        var sortQuery = query.Select(scene => new
-        {
-            Scene = scene,
-            FileModTime = scene.Files.Select(file => (DateTime?)file.ModTime).Max(),
-        });
-
         return desc
-            ? sortQuery.OrderBy(item => item.FileModTime == null ? 1 : 0).ThenByDescending(item => item.FileModTime).Select(item => item.Scene)
-            : sortQuery.OrderBy(item => item.FileModTime == null ? 1 : 0).ThenBy(item => item.FileModTime).Select(item => item.Scene);
+            ? query.OrderBy(scene => scene.MaxFileModTime == null ? 1 : 0).ThenByDescending(scene => scene.MaxFileModTime)
+            : query.OrderBy(scene => scene.MaxFileModTime == null ? 1 : 0).ThenBy(scene => scene.MaxFileModTime);
     }
 
     private static IQueryable<Scene> ApplyPathSort(IQueryable<Scene> query, bool desc)
     {
-        if (desc)
-        {
-            var descendingQuery = query.Select(scene => new
-            {
-                Scene = scene,
-                Path = scene.Files
-                    .Select(file => file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename)
-                    .OrderByDescending(path => path)
-                    .FirstOrDefault(),
-            });
-
-            return descendingQuery
-                .OrderBy(item => item.Path == null ? 1 : 0)
-                .ThenByDescending(item => item.Path)
-                .Select(item => item.Scene);
-        }
-
-        var ascendingQuery = query.Select(scene => new
-        {
-            Scene = scene,
-            Path = scene.Files
-                .Select(file => file.ParentFolder != null ? file.ParentFolder.Path.Replace("\\", "/") + "/" + file.Basename : file.Basename)
-                .OrderBy(path => path)
-                .FirstOrDefault(),
-        });
-
-        return ascendingQuery
-            .OrderBy(item => item.Path == null ? 1 : 0)
-            .ThenBy(item => item.Path)
-            .Select(item => item.Scene);
+        return desc
+            ? query.OrderBy(scene => scene.MaxPath == null ? 1 : 0).ThenByDescending(scene => scene.MaxPath)
+            : query.OrderBy(scene => scene.MinPath == null ? 1 : 0).ThenBy(scene => scene.MinPath);
     }
 
     private static IQueryable<Scene> ApplyPhashSort(IQueryable<Scene> query, bool desc)
@@ -568,35 +533,18 @@ public class SceneRepository : ISceneRepository
 
         var value = NormalizePathValue(criterion.Value);
         var pattern = $"%{value}%";
+        var exactPattern = $"%\n{value}\n%";
 
         return criterion.Modifier switch
         {
-            CriterionModifier.Equals => query.Where(s => s.Files.Any(f =>
-                (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename) == value)),
-            CriterionModifier.NotEquals => query.Where(s => !s.Files.Any(f =>
-                (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename) == value)),
-            CriterionModifier.Includes => query.Where(s => s.Files.Any(f =>
-                EF.Functions.ILike(
-                    f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename,
-                    pattern))),
-            CriterionModifier.Excludes => query.Where(s => !s.Files.Any(f =>
-                EF.Functions.ILike(
-                    f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename,
-                    pattern))),
-            CriterionModifier.MatchesRegex => query.Where(s => s.Files.Any(f =>
-                Regex.IsMatch(
-                    f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename,
-                    value,
-                    RegexOptions.IgnoreCase))),
-            CriterionModifier.NotMatchesRegex => query.Where(s => !s.Files.Any(f =>
-                Regex.IsMatch(
-                    f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename,
-                    value,
-                    RegexOptions.IgnoreCase))),
-            CriterionModifier.IsNull => query.Where(s => !s.Files.Any(f =>
-                (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename) != "")),
-            CriterionModifier.NotNull => query.Where(s => s.Files.Any(f =>
-                (f.ParentFolder != null ? f.ParentFolder.Path.Replace("\\", "/") + "/" + f.Basename : f.Basename) != "")),
+            CriterionModifier.Equals => query.Where(s => s.FileSearchText != null && EF.Functions.Like(s.FileSearchText, exactPattern)),
+            CriterionModifier.NotEquals => query.Where(s => s.FileSearchText == null || !EF.Functions.Like(s.FileSearchText, exactPattern)),
+            CriterionModifier.Includes => query.Where(s => s.FileSearchText != null && EF.Functions.ILike(s.FileSearchText, pattern)),
+            CriterionModifier.Excludes => query.Where(s => s.FileSearchText == null || !EF.Functions.ILike(s.FileSearchText, pattern)),
+            CriterionModifier.MatchesRegex => query.Where(s => s.FileSearchText != null && Regex.IsMatch(s.FileSearchText, value, RegexOptions.IgnoreCase)),
+            CriterionModifier.NotMatchesRegex => query.Where(s => s.FileSearchText == null || !Regex.IsMatch(s.FileSearchText, value, RegexOptions.IgnoreCase)),
+            CriterionModifier.IsNull => query.Where(s => s.FileCount == 0 || s.FileSearchText == null || s.FileSearchText == ""),
+            CriterionModifier.NotNull => query.Where(s => s.FileCount > 0 && s.FileSearchText != null && s.FileSearchText != ""),
             _ => query,
         };
     }

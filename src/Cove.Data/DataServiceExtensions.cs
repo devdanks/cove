@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Cove.Core.Auth;
 using Cove.Core.Interfaces;
+using Cove.Data.Auth;
 using Cove.Data.Repositories;
 
 namespace Cove.Data;
@@ -36,6 +39,26 @@ public static class DataServiceExtensions
         services.AddScoped<IGroupRepository, GroupRepository>();
         services.AddScoped<ISavedFilterRepository, SavedFilterRepository>();
         services.AddScoped<ISceneMarkerRepository, SceneMarkerRepository>();
+
+        // Schema C Stage 1 dual-write
+        services.AddScoped<IEntityIdentifierService, EntityIdentifierService>();
+
+        // Auth / RBAC services
+        services.AddSingleton<IPermissionRegistry, PermissionRegistry>();
+        services.AddSingleton<ICurrentPrincipalAccessor, CurrentPrincipalAccessor>();
+        services.AddScoped<IAuthorizationService, AuthorizationService>();
+        services.AddScoped<ITokenService, TokenService>();
+        services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IRoleService, RoleService>();
+        services.AddScoped<IContentRuleService, ContentRuleService>();
+        services.AddScoped<IShareLinkService, ShareLinkService>();
+        services.AddSingleton<AuditService>();
+        services.AddSingleton<IAuditService>(sp => sp.GetRequiredService<AuditService>());
+        services.AddHostedService(sp => sp.GetRequiredService<AuditService>());
+        // NOTE: BootstrapAuthService is registered explicitly in Program.cs *after*
+        // PostgresManagerService so the managed PostgreSQL instance is up before we
+        // try to seed permissions/roles/owner. (Hosted services run sequentially in
+        // registration order.)
 
         return services;
     }

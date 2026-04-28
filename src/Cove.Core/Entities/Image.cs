@@ -12,6 +12,28 @@ public class Image : BaseEntity
     public int? StudioId { get; set; }
     public DateOnly? Date { get; set; }
 
+    // Denormalized M2M id sets, GIN-indexed. See Scene.TagIds for rationale.
+    public int[] TagIds { get; set; } = [];
+    public int[] PerformerIds { get; set; } = [];
+
+    // Denormalized relationship counters for hot list/detail reads.
+    public int TagCount { get; set; }
+    public int PerformerCount { get; set; }
+    public int GalleryCount { get; set; }
+
+    // Denormalized file summaries for hot list filters and sorts.
+    public int FileCount { get; set; }
+    public int MaxResolution { get; set; }
+    public long MaxFileSize { get; set; }
+    public DateTime? MaxFileModTime { get; set; }
+    public string? MinPath { get; set; }
+    public string? MaxPath { get; set; }
+    public string? FileSearchText { get; set; }
+    public bool HasDimensionData { get; set; }
+    public bool HasLandscapeFiles { get; set; }
+    public bool HasPortraitFiles { get; set; }
+    public bool HasSquareFiles { get; set; }
+
     // Navigation properties
     public Studio? Studio { get; set; }
     public ICollection<ImageUrl> Urls { get; set; } = [];

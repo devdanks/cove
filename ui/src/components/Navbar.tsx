@@ -6,13 +6,15 @@ import { useRouteRegistry } from "../router/RouteRegistry";
 import { useAppConfig } from "../state/AppConfigContext";
 import { useExtensions } from "../extensions/ExtensionLoader";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
+import { useAuth } from "../auth/AuthContext";
+import { canShowNavPage, type NavPage } from "../auth/visibility";
 
 interface NavbarProps {
   currentPage: string;
   navigate: (r: any) => void;
 }
 
-const navItems = [
+const navItems: { page: NavPage; label: string; icon: typeof Film }[] = [
   { page: "scenes", label: "Scenes", icon: Film },
   { page: "images", label: "Images", icon: ImageIcon },
   { page: "markers", label: "Markers", icon: Bookmark },
@@ -41,6 +43,7 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
   const { routes } = useRouteRegistry();
   const { config } = useAppConfig();
   const { manifest } = useExtensions();
+  const { authEnabled, user, hasPermission } = useAuth();
 
   // Derive parent page: built-in detail pages use static map, extension detail
   // pages (showInNav=false) resolve to their extension's nav page (showInNav=true)
@@ -63,15 +66,17 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
     .filter((r) => r.navItem)
     .map((r) => ({ page: r.navItem!.page, label: r.navItem!.label, icon: r.navItem!.icon, order: r.navItem!.order ?? 99 }))
     .sort((a, b) => a.order - b.order);
+  const canViewStats = hasPermission("system.read");
+  const canViewSettings = !authEnabled || !!user;
 
   // Build ordered nav: if menuItems specifies order, use it; otherwise fall back to default
   const allItemsMap = new Map<string, typeof navItems[number] | typeof extensionNavItems[number]>();
-  for (const item of navItems) allItemsMap.set(item.page, item);
+  for (const item of navItems.filter((navItem) => canShowNavPage(navItem.page, hasPermission, user))) allItemsMap.set(item.page, item);
   for (const item of extensionNavItems) allItemsMap.set(item.page, item);
 
   const allNavItems = enabledMenuItems
     ? enabledMenuItems.map((page) => allItemsMap.get(page)).filter(Boolean) as (typeof navItems[number] | typeof extensionNavItems[number])[]
-    : [...navItems, ...extensionNavItems];
+    : Array.from(allItemsMap.values());
 
   return (
     <nav className="cove-navbar bg-nav sticky top-0 z-50 shadow-lg shadow-black/30" role="navigation" aria-label="Main navigation">
@@ -139,16 +144,18 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
                 </span>
               </button>
             )}
-            <a
-              href="#/stats"
-              onClick={(e) => { e.preventDefault(); navigate({ page: "stats" }); }}
-              className={`p-2 rounded cursor-pointer ${
-                currentPage === "stats" ? "text-accent" : "text-secondary hover:text-foreground"
-              }`}
-              title="Statistics"
-            >
-              <BarChart3 className="w-[18px] h-[18px]" />
-            </a>
+            {canViewStats ? (
+              <a
+                href="#/stats"
+                onClick={(e) => { e.preventDefault(); navigate({ page: "stats" }); }}
+                className={`p-2 rounded cursor-pointer ${
+                  currentPage === "stats" ? "text-accent" : "text-secondary hover:text-foreground"
+                }`}
+                title="Statistics"
+              >
+                <BarChart3 className="w-[18px] h-[18px]" />
+              </a>
+            ) : null}
             <button
               onClick={() => setHelpOpen(true)}
               className="p-2 rounded text-secondary hover:text-foreground"
@@ -156,16 +163,18 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
             >
               <HelpCircle className="w-[18px] h-[18px]" />
             </button>
-            <a
-              href="#/settings"
-              onClick={(e) => { e.preventDefault(); navigate({ page: "settings" }); }}
-              className={`p-2 rounded cursor-pointer ${
-                currentPage === "settings" ? "text-accent" : "text-secondary hover:text-foreground"
-              }`}
-              title="Settings"
-            >
-              <Settings className="w-[18px] h-[18px]" />
-            </a>
+            {canViewSettings ? (
+              <a
+                href="#/settings"
+                onClick={(e) => { e.preventDefault(); navigate({ page: "settings" }); }}
+                className={`p-2 rounded cursor-pointer ${
+                  currentPage === "settings" ? "text-accent" : "text-secondary hover:text-foreground"
+                }`}
+                title="Settings"
+              >
+                <Settings className="w-[18px] h-[18px]" />
+              </a>
+            ) : null}
           </div>
         </div>
       </div>

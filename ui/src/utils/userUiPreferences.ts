@@ -1,0 +1,153 @@
+import { auth } from "../api/client";
+import { authStore } from "../auth/authStore";
+import type { AuthUser } from "../auth/authStore";
+import type { RatingSystemOptions, UserThemePreferences, UserUiPreferences } from "../api/types";
+
+const SAVE_DEBOUNCE_MS = 250;
+
+let pendingSaveTimer: number | null = null;
+let pendingPreferences: UserUiPreferences | null = null;
+let pendingUserId: string | null = null;
+
+function normalizeThemePreferences(theme: UserThemePreferences | null | undefined): UserThemePreferences | null {
+  if (!theme) {
+    return null;
+  }
+
+  const activeThemeId = theme.activeThemeId?.trim() || null;
+  const activeComponentStyles = theme.activeComponentStyles?.map((style) => style.trim()).filter(Boolean) ?? null;
+  const activeLayoutStyle = theme.activeLayoutStyle?.trim() || null;
+  const customThemeColors = theme.customThemeColors
+    ? Object.fromEntries(Object.entries(theme.customThemeColors).filter(([key, value]) => key.trim() && value.trim()))
+    : null;
+  const styleOptions = theme.styleOptions
+    ? Object.fromEntries(
+      Object.entries(theme.styleOptions)
+        .map(([styleId, options]): [string, Record<string, string>] => [
+          styleId,
+          Object.fromEntries(Object.entries(options).filter(([key, value]) => key.trim() && value.trim())),
+        ])
+        .filter(([styleId, options]) => styleId.length > 0 && Object.keys(options).length > 0),
+    )
+    : null;
+
+  if (!activeThemeId
+    && (!activeComponentStyles || activeComponentStyles.length === 0)
+    && !activeLayoutStyle
+    && (!customThemeColors || Object.keys(customThemeColors).length === 0)
+    && (!styleOptions || Object.keys(styleOptions).length === 0)) {
+    return null;
+  }
+
+  return {
+    activeThemeId,
+    activeComponentStyles,
+    activeLayoutStyle,
+    customThemeColors,
+    styleOptions,
+  };
+}
+
+function normalizeRatingSystemOptions(options: RatingSystemOptions | null | undefined): RatingSystemOptions | null {
+  if (!options) {
+    return null;
+  }
+
+  const type = options.type === "decimal" ? "decimal" : options.type === "stars" ? "stars" : null;
+  if (!type) {
+    return null;
+  }
+
+  const starPrecision = options.starPrecision === "half"
+    || options.starPrecision === "quarter"
+    || options.starPrecision === "tenth"
+    || options.starPrecision === "full"
+    ? options.starPrecision
+    : "full";
+
+  return { type, starPrecision };
+}
+
+function normalizeUiPreferences(preferences: UserUiPreferences | null | undefined): UserUiPreferences | null {
+  const theme = normalizeThemePreferences(preferences?.theme);
+  const ratingSystemOptions = normalizeRatingSystemOptions(preferences?.ratingSystemOptions);
+  if (!theme && !ratingSystemOptions) {
+    return null;
+  }
+
+  return {
+    theme,
+    ratingSystemOptions,
+  };
+}
+
+export function supportsServerBackedUiPreferences(user: AuthUser | null | undefined): user is AuthUser & { kind: "user" | "system" } {
+  return user?.kind === "user" || user?.kind === "system";
+}
+
+export function readAuthenticatedUserThemePreferences(): UserThemePreferences | null {
+  const user = authStore.getUser();
+  if (!supportsServerBackedUiPreferences(user)) {
+    return null;
+  }
+
+  return normalizeThemePreferences(user.uiPreferences?.theme);
+}
+
+export function readAuthenticatedUserRatingOptions(): RatingSystemOptions | null {
+  const user = authStore.getUser();
+  if (!supportsServerBackedUiPreferences(user)) {
+    return null;
+  }
+
+  return normalizeRatingSystemOptions(user.uiPreferences?.ratingSystemOptions);
+}
+
+export function updateAuthenticatedUserUiPreferences(
+  updater: (current: UserUiPreferences | null) => UserUiPreferences | null,
+): boolean {
+  const user = authStore.getUser();
+  if (!supportsServerBackedUiPreferences(user)) {
+    return false;
+  }
+
+  const nextPreferences = normalizeUiPreferences(updater(normalizeUiPreferences(user.uiPreferences)));
+  authStore.setUser({
+    ...user,
+    uiPreferences: nextPreferences,
+  });
+
+  pendingPreferences = nextPreferences;
+  pendingUserId = user.id;
+  if (pendingSaveTimer != null) {
+    window.clearTimeout(pendingSaveTimer);
+  }
+
+  pendingSaveTimer = window.setTimeout(async () => {
+    const targetUserId = pendingUserId;
+    const snapshot = pendingPreferences;
+    pendingSaveTimer = null;
+    pendingPreferences = null;
+    pendingUserId = null;
+
+    const currentUser = authStore.getUser();
+    if (!targetUserId || !supportsServerBackedUiPreferences(currentUser) || currentUser.id !== targetUserId) {
+      return;
+    }
+
+    try {
+      const savedPreferences = await auth.updateUiPreferences(snapshot);
+      const refreshedUser = authStore.getUser();
+      if (supportsServerBackedUiPreferences(refreshedUser) && refreshedUser.id === targetUserId) {
+        authStore.setUser({
+          ...refreshedUser,
+          uiPreferences: normalizeUiPreferences(savedPreferences),
+        });
+      }
+    } catch (error) {
+      console.warn("Failed to persist user UI preferences", error);
+    }
+  }, SAVE_DEBOUNCE_MS);
+
+  return true;
+}

@@ -20,6 +20,8 @@ import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 
 const PERFORMER_SORT = PERFORMER_SORT_OPTIONS;
 const IMAGE_SORT = [
@@ -52,6 +54,7 @@ type TabKey = "scenes" | "performers" | "images" | "galleries" | "markers" | "st
 
 export function TagDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
+  const { hasPermission } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: tag, isLoading } = useQuery({
     queryKey: ["tag", id],
@@ -78,6 +81,18 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const [groupFilter, setGroupFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "tags" }, onNavigate);
+  const canWriteTag = canWriteEntity("tag", hasPermission);
+  const canDeleteTag = canDeleteEntity("tag", hasPermission);
+  const canAutoTagTag = hasPermission("library.autotag") && canWriteTag;
+  const visibleTagTabs = filterItemsByPermission(tagTabs, {
+    scenes: "scenes.read",
+    performers: "performers.read",
+    images: "images.read",
+    galleries: "galleries.read",
+    markers: "markers.read",
+    studios: "studios.read",
+    groups: "groups.read",
+  }, hasPermission);
 
   useEffect(() => {
     if (tag) document.title = `${tag.name} | Cove`;
@@ -90,13 +105,19 @@ export function TagDetailPage({ id, onNavigate }: Props) {
       const el = (e.target as HTMLElement).tagName;
       if (el === "INPUT" || el === "TEXTAREA" || el === "SELECT") return;
       switch (e.key) {
-        case "e": setEditing((v) => !v); break;
-        case "f": if (tag) updateMut.mutate({ favorite: !tag.favorite }); break;
+        case "e": if (canWriteTag) setEditing((v) => !v); break;
+        case "f": if (tag && canWriteTag) updateMut.mutate({ favorite: !tag.favorite }); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [tag]);
+  }, [canWriteTag, tag]);
+
+  useEffect(() => {
+    if (visibleTagTabs.length > 0 && !visibleTagTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(visibleTagTabs[0].key as TabKey);
+    }
+  }, [activeTab, visibleTagTabs]);
 
   const deleteMut = useMutation({
     mutationFn: () => tags.delete(id),
@@ -145,31 +166,31 @@ export function TagDetailPage({ id, onNavigate }: Props) {
             </button>
             <div className="flex items-center gap-2">
               <ExtensionSlot slot="tag-detail-actions" context={{ tag, onNavigate }} />
-              <button
+              {canWriteTag ? <button
                 onClick={() => setEditing(true)}
                 className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
-              </button>
-              <button
+              </button> : null}
+              {canAutoTagTag ? <button
                 onClick={() => autoTagMut.mutate()}
                 className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground"
                 disabled={tag.ignoreAutoTag || autoTagMut.isPending}
               >
                 {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
-              </button>
-              <button
+              </button> : null}
+              {canWriteTag ? <button
                 onClick={() => setMergeOpen(true)}
                 className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground"
               >
                 <GitMerge className="h-3.5 w-3.5" /> Merge...
-              </button>
-              <button
+              </button> : null}
+              {canDeleteTag ? <button
                 onClick={() => setConfirmDelete(true)}
                 className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:border-red-500 hover:text-red-300"
               >
                 <Trash2 className="h-3.5 w-3.5" /> Delete
-              </button>
+              </button> : null}
             </div>
           </div>
 
@@ -200,17 +221,23 @@ export function TagDetailPage({ id, onNavigate }: Props) {
                     <p className="mt-1 text-sm text-secondary">Also known as: {tag.aliases.join(", ")}</p>
                   )}
                 </div>
-                <button
-                  onClick={() => updateMut.mutate({ favorite: !tag.favorite })}
-                  className={`rounded-full p-2 transition-colors ${
-                    tag.favorite
-                      ? "bg-red-500/15 text-red-500"
-                      : "bg-card text-muted hover:text-red-400"
-                  }`}
-                  title={tag.favorite ? "Remove from favorites" : "Add to favorites"}
-                >
-                  <Heart className={`h-6 w-6 ${tag.favorite ? "fill-current" : ""}`} />
-                </button>
+                {canWriteTag ? (
+                  <button
+                    onClick={() => updateMut.mutate({ favorite: !tag.favorite })}
+                    className={`rounded-full p-2 transition-colors ${
+                      tag.favorite
+                        ? "bg-red-500/15 text-red-500"
+                        : "bg-card text-muted hover:text-red-400"
+                    }`}
+                    title={tag.favorite ? "Remove from favorites" : "Add to favorites"}
+                  >
+                    <Heart className={`h-6 w-6 ${tag.favorite ? "fill-current" : ""}`} />
+                  </button>
+                ) : tag.favorite ? (
+                  <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite tag">
+                    <Heart className="h-6 w-6 fill-current" />
+                  </span>
+                ) : null}
               </div>
 
               {tag.description && (
@@ -305,7 +332,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
 
         <div className="mx-auto max-w-7xl border-b border-border">
           <div className="flex gap-1 overflow-x-auto">
-            {tagTabs.map((tab) => (
+            {visibleTagTabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key as TabKey)}

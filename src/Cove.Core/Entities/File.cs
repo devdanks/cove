@@ -27,14 +27,24 @@ public abstract class BaseFileEntity
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    // Denormalized full path (forward-slash form). Populated by CoveContext.SaveChanges
+    // from ParentFolder.Path + "/" + Basename. Stored + btree-indexed so list endpoints
+    // can sort/filter on path with an index instead of a per-row correlated subquery.
+    public string Path { get; set; } = string.Empty;
+
     // Navigation
     public Folder? ParentFolder { get; set; }
     public ICollection<FileFingerprint> Fingerprints { get; set; } = [];
 
-    // Computed (not stored)
-    public string Path => ParentFolder != null
-        ? System.IO.Path.Combine(ParentFolder.Path, Basename)
-        : Basename;
+    public static string ComputePath(string? folderPath, string basename)
+    {
+        if (string.IsNullOrEmpty(folderPath))
+            return basename;
+        var normalized = folderPath.Replace('\\', '/');
+        if (normalized.EndsWith('/'))
+            return normalized + basename;
+        return normalized + "/" + basename;
+    }
 }
 
 public class VideoFile : BaseFileEntity

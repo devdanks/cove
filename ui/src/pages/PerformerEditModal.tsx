@@ -28,6 +28,15 @@ const CIRCUMCISED_OPTIONS = [
   { value: "Uncut", label: "Uncut" },
 ];
 
+type SelectedTagOption = {
+  id: number;
+  name: string;
+};
+
+function buildSelectedTagLookup(tags: Performer["tags"]): Record<number, SelectedTagOption> {
+  return Object.fromEntries(tags.map((tag) => [tag.id, { id: tag.id, name: tag.name }])) as Record<number, SelectedTagOption>;
+}
+
 export function PerformerEditModal({ performer, open, onClose }: Props) {
   const queryClient = useQueryClient();
 
@@ -56,14 +65,18 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
   const [urls, setUrls] = useState(performer.urls.length > 0 ? performer.urls : [""]);
   const [aliases, setAliases] = useState(performer.aliases.join(", "));
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(performer.tags.map((t) => t.id));
+  const [selectedTagsById, setSelectedTagsById] = useState<Record<number, SelectedTagOption>>(() => buildSelectedTagLookup(performer.tags));
   const [tagSearch, setTagSearch] = useState("");
   const [customFields, setCustomFields] = useState<Record<string, string>>(
     Object.fromEntries(Object.entries(performer.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")]))
   );
+  const trimmedTagSearch = tagSearch.trim();
 
-  const { data: allTags } = useQuery({
-    queryKey: ["tags-all"],
-    queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
+  const { data: tagResults, isLoading: tagResultsLoading } = useQuery({
+    queryKey: ["performer-tags-search", trimmedTagSearch],
+    queryFn: () => tagsApi.find({ q: trimmedTagSearch, perPage: 20, sort: "name", direction: "asc" }),
+    enabled: trimmedTagSearch.length > 0,
+    staleTime: 60000,
   });
 
   useEffect(() => {
@@ -92,6 +105,8 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
     setUrls(performer.urls.length > 0 ? performer.urls : [""]);
     setAliases(performer.aliases.join(", "));
     setSelectedTagIds(performer.tags.map((t) => t.id));
+    setSelectedTagsById(buildSelectedTagLookup(performer.tags));
+    setTagSearch("");
     setCustomFields(Object.fromEntries(Object.entries(performer.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")])));
   }, [performer]);
 
@@ -137,10 +152,16 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
     });
   };
 
-  const filteredTags = allTags?.items.filter(
-    (t) => !selectedTagIds.includes(t.id) && t.name.toLowerCase().includes(tagSearch.toLowerCase())
-  ) ?? [];
-  const selectedTags = allTags?.items.filter((t) => selectedTagIds.includes(t.id)) ?? performer.tags;
+  const filteredTags = tagResults?.items.filter((tag) => !selectedTagIds.includes(tag.id)) ?? [];
+  const selectedTags = selectedTagIds
+    .map((tagId) => selectedTagsById[tagId])
+    .filter((tag): tag is SelectedTagOption => Boolean(tag));
+
+  const addTag = (tag: SelectedTagOption) => {
+    setSelectedTagIds((current) => current.includes(tag.id) ? current : [...current, tag.id]);
+    setSelectedTagsById((current) => ({ ...current, [tag.id]: tag }));
+    setTagSearch("");
+  };
 
   return (
     <EditModal title="Edit Performer" open={open} onClose={onClose}>
@@ -291,7 +312,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
           {selectedTags.map((t) => (
             <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/20 text-accent">
               {t.name}
-              <button onClick={() => setSelectedTagIds(selectedTagIds.filter((id) => id !== t.id))} className="hover:text-white">×</button>
+              <button onClick={() => setSelectedTagIds((current) => current.filter((id) => id !== t.id))} className="hover:text-white">×</button>
             </span>
           ))}
         </div>
@@ -302,15 +323,21 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
           placeholder="Search tags..."
           className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
         />
-        {tagSearch && filteredTags.length > 0 && (
+        {trimmedTagSearch && (
           <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredTags.slice(0, 10).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { setSelectedTagIds([...selectedTagIds, t.id]); setTagSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >{t.name}</button>
-            ))}
+            {tagResultsLoading ? (
+              <div className="px-3 py-1.5 text-sm text-secondary">Loading...</div>
+            ) : filteredTags.length === 0 ? (
+              <div className="px-3 py-1.5 text-sm text-secondary">No tags found</div>
+            ) : (
+              filteredTags.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => addTag(t)}
+                  className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
+                >{t.name}</button>
+              ))
+            )}
           </div>
         )}
       </Field>

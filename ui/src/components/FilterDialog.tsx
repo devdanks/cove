@@ -2,15 +2,13 @@ import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } fro
 import { useQuery } from "@tanstack/react-query";
 import { X, ChevronDown, ChevronRight, Search, Pin, PinOff, Plus, Minus, Star } from "lucide-react";
 import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi, scenes as scenesApi } from "../api/client";
-import { useAppConfig } from "../state/AppConfigContext";
 import {
-  normalizeRatingOptions,
-  defaultRatingSystemOptions,
   convertToRatingFormat,
   convertFromRatingFormat,
   getRatingMax,
   getRatingStep,
   getRatingPrecision,
+  useRatingOptions,
 } from "./Rating";
 import type {
   CriterionModifier,
@@ -987,8 +985,7 @@ function RatingFilterInput({
   rawValue: number;
   onChangeRaw: (v: number) => void;
 }) {
-  const { config } = useAppConfig();
-  const options = normalizeRatingOptions(config?.ui.ratingSystemOptions ?? defaultRatingSystemOptions);
+  const options = useRatingOptions();
   const displayValue = convertToRatingFormat(rawValue || undefined, options) ?? 0;
   const max = getRatingMax(options);
   const step = getRatingStep(options);

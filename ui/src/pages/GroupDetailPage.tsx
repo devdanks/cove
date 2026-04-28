@@ -14,6 +14,8 @@ import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 
 interface Props {
   id: number;
@@ -27,6 +29,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     queryKey: ["group", id],
     queryFn: () => groups.get(id),
   });
+  const { hasPermission } = useAuth();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("scenes");
@@ -38,6 +41,10 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "asc", sort: "date" });
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "groups" }, onNavigate);
+  const canWriteGroup = canWriteEntity("group", hasPermission);
+  const canDeleteGroup = canDeleteEntity("group", hasPermission);
+  const canReadStudios = canReadEntity("studio", hasPermission);
+  const canReadTags = canReadEntity("tag", hasPermission);
 
   useEffect(() => {
     if (group) document.title = `${group.name} | Cove`;
@@ -50,12 +57,12 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       const el = (e.target as HTMLElement).tagName;
       if (el === "INPUT" || el === "TEXTAREA" || el === "SELECT") return;
       switch (e.key) {
-        case "e": setEditing((v) => !v); break;
+        case "e": if (canWriteGroup) setEditing((v) => !v); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [canWriteGroup]);
 
   const deleteMut = useMutation({
     mutationFn: () => groups.delete(id),
@@ -65,13 +72,23 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  const tabs = groupTabs.map(t => ({
+  const tabs = filterItemsByPermission(groupTabs.map(t => ({
     ...t,
     count: t.key === "scenes" ? group?.sceneCount
       : t.key === "subGroups" ? group?.subGroupCount
       : t.key === "containingGroups" ? group?.containingGroupCount
       : undefined,
-  }));
+  })), {
+    scenes: "scenes.read",
+    subGroups: "groups.read",
+    containingGroups: "groups.read",
+  }, hasPermission);
+
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(tabs[0].key as TabKey);
+    }
+  }, [activeTab, tabs]);
 
   if (isLoading) {
     return (
@@ -98,18 +115,18 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
             </button>
             <div className="flex items-center gap-2">
               <ExtensionSlot slot="group-detail-actions" context={{ group, onNavigate }} />
-              <button
+              {canWriteGroup ? <button
                 onClick={() => setEditing(true)}
                 className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
-              </button>
-              <button
+              </button> : null}
+              {canDeleteGroup ? <button
                 onClick={() => setConfirmDelete(true)}
                 className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:border-red-500 hover:text-red-300"
               >
                 <Trash2 className="h-3.5 w-3.5" /> Delete
-              </button>
+              </button> : null}
             </div>
           </div>
 
@@ -141,16 +158,16 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
                 {group.date && <span>{formatDate(group.date)}</span>}
                 {group.director && <span>Director: {group.director}</span>}
                 {group.duration && <span className="flex items-center gap-1"><Clapperboard className="h-4 w-4" /> {formatDuration(group.duration)}</span>}
-                {group.studioName && group.studioId && (
+                {group.studioName && group.studioId && (canReadStudios ? (
                   <button onClick={() => onNavigate({ page: "studio", id: group.studioId })} className="text-accent hover:underline">
                     {group.studioName}
                   </button>
-                )}
+                ) : <span>{group.studioName}</span>)}
               </div>
               {group.synopsis && (
                 <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{group.synopsis}</p>
               )}
-              {group.tags.length > 0 && (
+              {canReadTags && group.tags.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   {group.tags.map((tag) => (
                     <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
@@ -200,7 +217,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
               <GroupScenesPanel groupId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
             )}
             {activeTab === "subGroups" && (
-              <GroupSubGroupsPanel groupId={id} onNavigate={onNavigate} />
+              <GroupSubGroupsPanel groupId={id} onNavigate={onNavigate} canWriteGroup={canWriteGroup} />
             )}
             {activeTab === "containingGroups" && (
               <GroupContainingGroupsPanel groupId={id} onNavigate={onNavigate} />
@@ -305,7 +322,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate }: {
   );
 }
 
-function GroupSubGroupsPanel({ groupId, onNavigate }: { groupId: number; onNavigate: (r: any) => void }) {
+function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: number; onNavigate: (r: any) => void; canWriteGroup: boolean }) {
   const queryClient = useQueryClient();
   const { data: subGroups, isLoading } = useQuery({
     queryKey: ["group-subgroups", groupId],
@@ -358,17 +375,17 @@ function GroupSubGroupsPanel({ groupId, onNavigate }: { groupId: number; onNavig
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-muted uppercase tracking-wider">Sub-Groups</h3>
-        <button
+        {canWriteGroup ? <button
           onClick={() => setShowAddDialog(!showAddDialog)}
           className="flex items-center gap-1 px-2 py-1 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10 border border-border"
         >
           <Plus className="w-3 h-3" />
           Add Sub-Group
-        </button>
+        </button> : null}
       </div>
 
       {/* Add sub-group search */}
-      {showAddDialog && (
+      {showAddDialog && canWriteGroup && (
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <input
@@ -407,19 +424,19 @@ function GroupSubGroupsPanel({ groupId, onNavigate }: { groupId: number; onNavig
         <div className="space-y-2">
           {subGroups.map((g, idx) => (
             <div key={g.id} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 group">
-              <div className="flex flex-col gap-0.5">
+              {canWriteGroup ? <div className="flex flex-col gap-0.5">
                 <button onClick={() => moveUp(idx)} disabled={idx === 0} className="p-0.5 rounded hover:bg-surface disabled:opacity-20 text-muted"><ChevronUp className="w-3.5 h-3.5" /></button>
                 <button onClick={() => moveDown(idx)} disabled={idx === subGroups.length - 1} className="p-0.5 rounded hover:bg-surface disabled:opacity-20 text-muted"><ChevronDown className="w-3.5 h-3.5" /></button>
-              </div>
+              </div> : null}
               <span className="text-xs text-muted w-6 text-center">{idx + 1}</span>
               <button onClick={() => onNavigate({ page: "group", id: g.id })} className="flex-1 text-left text-sm font-medium text-foreground hover:text-accent">{g.name}</button>
               <span className="text-xs text-muted">{g.sceneCount} scenes</span>
-              <button
+              {canWriteGroup ? <button
                 onClick={() => { if (confirm(`Remove "${g.name}" from sub-groups?`)) removeMut.mutate(g.id); }}
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-900/20 text-muted hover:text-red-400"
               >
                 <X className="w-3.5 h-3.5" />
-              </button>
+              </button> : null}
             </div>
           ))}
         </div>

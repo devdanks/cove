@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Exclude nested output and temporary artifact folders from default item globbing. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**;**/gitignored/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>
