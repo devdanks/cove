@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -8,6 +9,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.SavedFiltersRead)]
 public class SavedFiltersController(ISavedFilterRepository filterRepo) : ControllerBase
 {
     [HttpGet]
@@ -31,6 +33,7 @@ public class SavedFiltersController(ISavedFilterRepository filterRepo) : Control
     }
 
     [HttpPost]
+    [RequiresPermission(Permissions.SavedFiltersWrite)]
     public async Task<ActionResult<SavedFilterDto>> Create([FromBody] SavedFilterCreateDto dto, CancellationToken ct)
     {
         if (!Enum.TryParse<FilterMode>(dto.Mode, true, out var filterMode))
@@ -47,6 +50,7 @@ public class SavedFiltersController(ISavedFilterRepository filterRepo) : Control
     }
 
     [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.SavedFiltersWrite)]
     public async Task<ActionResult<SavedFilterDto>> Update(int id, [FromBody] SavedFilterUpdateDto dto, CancellationToken ct)
     {
         var filter = await filterRepo.GetByIdAsync(id, ct);
@@ -63,6 +67,7 @@ public class SavedFiltersController(ISavedFilterRepository filterRepo) : Control
     }
 
     [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.SavedFiltersDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var f = await filterRepo.GetByIdAsync(id, ct);
@@ -85,6 +90,7 @@ public class SavedFiltersController(ISavedFilterRepository filterRepo) : Control
     }
 
     [HttpPut("default/{mode}")]
+    [RequiresPermission(Permissions.SavedFiltersWrite)]
     public async Task<ActionResult<SavedFilterDto>> SetDefault(string mode, [FromBody] SetDefaultFilterDto dto, CancellationToken ct)
     {
         if (!Enum.TryParse<FilterMode>(mode, true, out var filterMode))

@@ -1,4 +1,5 @@
 import type {
+  MeResponse,
   Scene, SceneCreate, SceneUpdate,
   Performer, PerformerCreate, PerformerUpdate,
   Tag, TagDetail, TagCreate, TagUpdate,
@@ -69,6 +70,7 @@ import type {
   DependencyInfo,
   DownloaderPreflightRequest,
   DownloaderPreflightResponse,
+  UserUiPreferences,
 } from "./types";
 
 const API_BASE = "/api";
@@ -110,12 +112,20 @@ async function tryRefresh(): Promise<boolean> {
 
 async function authedFetch(input: string, init?: RequestInit): Promise<Response> {
   const token = authStore.getAccessToken();
+  const shareToken = authStore.getShareToken();
+  const sharePassword = authStore.getSharePassword();
   const headers = new Headers(init?.headers ?? {});
-  if (token && !headers.has("Authorization")) {
+  const authMode = shareToken ? "share" : token ? "bearer" : "none";
+  if (shareToken) {
+    headers.set("X-Share-Token", shareToken);
+    if (sharePassword) {
+      headers.set("X-Share-Password", sharePassword);
+    }
+  } else if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
   let res = await fetch(input, { ...init, headers });
-  if (res.status === 401 && token && authStore.getRefreshToken()) {
+  if (res.status === 401 && authMode === "bearer" && token && authStore.getRefreshToken()) {
     const ok = await tryRefresh();
     if (ok) {
       const retryToken = authStore.getAccessToken();
@@ -126,7 +136,7 @@ async function authedFetch(input: string, init?: RequestInit): Promise<Response>
       // refresh failed: emit a global event so UI can react
       window.dispatchEvent(new CustomEvent("cove-auth-required"));
     }
-  } else if (res.status === 401 && !token) {
+  } else if (res.status === 401 && authMode === "none") {
     window.dispatchEvent(new CustomEvent("cove-auth-required"));
   }
   return res;
@@ -884,9 +894,64 @@ export interface AuditEventRow {
   outcome: string;
   detail?: string | null;
 }
+export interface ContentRuleRow {
+  id: number;
+  roleId: number;
+  roleName: string;
+  entityKind: string;
+  effect: "allow" | "deny";
+  scopeKind: "all" | "tag" | "studio" | "identifier" | "attribute" | "expression";
+  scopeValue: string;
+  appliesTo: "read" | "write" | "delete" | "all";
+  createdAt: string;
+  updatedAt: string;
+}
+export interface EntityOverrideRow {
+  id: number;
+  roleId: number;
+  roleName: string;
+  entityKind: string;
+  entityId: string;
+  effect: "allow" | "deny";
+  appliesTo: "read" | "write" | "delete" | "all";
+  createdAt: string;
+}
+export interface ApiTokenRow {
+  id: string;
+  name: string;
+  prefix: string;
+  scope: string[] | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+}
+export interface ApiTokenIssuedRow extends ApiTokenRow {
+  plaintextToken: string;
+}
+export interface ShareLinkRow {
+  id: string;
+  createdByUserId: number | null;
+  createdByUsername: string | null;
+  entityKind: string;
+  entityIds: string[];
+  createdAt: string;
+  expiresAt: string | null;
+  viewCount: number;
+  hasPassword: boolean;
+  revoked: boolean;
+}
+export interface ShareLinkIssuedRow {
+  id: string;
+  plaintextToken: string;
+  entityKind: string;
+  entityIds: string[];
+  createdAt: string;
+  expiresAt: string | null;
+  hasPassword: boolean;
+}
 
 export const auth = {
-  me: () => request<{ user: { id: string; username: string; roles?: string[] }; permissions: string[] }>("/auth/me"),
+  me: () => request<MeResponse>("/auth/me"),
   login: (username: string, password: string) =>
     request<{ token: string; refreshToken: string; user: unknown; username: string }>("/auth/login", {
       method: "POST",
@@ -899,6 +964,11 @@ export const auth = {
       method: "POST",
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
+  updateUiPreferences: (preferences: UserUiPreferences | null) =>
+    request<UserUiPreferences | null>("/auth/me/ui-preferences", {
+      method: "PUT",
+      body: JSON.stringify(preferences ?? {}),
+    }),
 };
 
 export const usersApi = {
@@ -910,7 +980,7 @@ export const usersApi = {
     request<UserRow>(`/users/${id}`, { method: "PUT", body: JSON.stringify(req) }),
   remove: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
   setRoles: (id: number, roles: string[]) =>
-    request<UserRow>(`/users/${id}/roles`, { method: "PUT", body: JSON.stringify({ roles }) }),
+    request<UserRow>(`/users/${id}/roles`, { method: "POST", body: JSON.stringify({ roles }) }),
   adminChangePassword: (id: number, newPassword: string) =>
     request<void>(`/users/${id}/password`, { method: "POST", body: JSON.stringify({ newPassword }) }),
   unlock: (id: number) => request<void>(`/users/${id}/unlock`, { method: "POST" }),
@@ -940,4 +1010,40 @@ export const auditApi = {
       `/audit${qs ? "?" + qs : ""}`
     );
   },
+};
+
+export const contentRulesApi = {
+  list: (roleId?: number) => {
+    const qs = roleId ? `?roleId=${roleId}` : "";
+    return request<ContentRuleRow[]>(`/content-rules${qs}`);
+  },
+  create: (req: { roleId: number; entityKind: string; effect: string; scopeKind: string; scopeValue: string; appliesTo: string }) =>
+    request<ContentRuleRow>("/content-rules", { method: "POST", body: JSON.stringify(req) }),
+  update: (id: number, req: Partial<Pick<ContentRuleRow, "effect" | "scopeKind" | "scopeValue" | "appliesTo">>) =>
+    request<ContentRuleRow>(`/content-rules/${id}`, { method: "PUT", body: JSON.stringify(req) }),
+  remove: (id: number) => request<void>(`/content-rules/${id}`, { method: "DELETE" }),
+  listOverrides: (roleId?: number, entityKind?: string) => {
+    const params = new URLSearchParams();
+    if (roleId) params.set("roleId", String(roleId));
+    if (entityKind) params.set("entityKind", entityKind);
+    const qs = params.toString();
+    return request<EntityOverrideRow[]>(`/content-rules/overrides${qs ? `?${qs}` : ""}`);
+  },
+  createOverride: (req: { roleId: number; entityKind: string; entityId: string; effect: string; appliesTo: string }) =>
+    request<EntityOverrideRow>("/content-rules/overrides", { method: "POST", body: JSON.stringify(req) }),
+  removeOverride: (id: number) => request<void>(`/content-rules/overrides/${id}`, { method: "DELETE" }),
+};
+
+export const apiTokensApi = {
+  list: () => request<ApiTokenRow[]>("/apitokens"),
+  create: (req: { name: string; scope?: string[]; expiresAt?: string }) =>
+    request<ApiTokenIssuedRow>("/apitokens", { method: "POST", body: JSON.stringify(req) }),
+  revoke: (id: string) => request<void>(`/apitokens/${id}`, { method: "DELETE" }),
+};
+
+export const shareLinksApi = {
+  list: () => request<ShareLinkRow[]>("/share-links"),
+  create: (req: { entityKind: string; entityIds: string[]; expiresAt?: string; password?: string }) =>
+    request<ShareLinkIssuedRow>("/share-links", { method: "POST", body: JSON.stringify(req) }),
+  revoke: (id: string) => request<void>(`/share-links/${id}`, { method: "DELETE" }),
 };

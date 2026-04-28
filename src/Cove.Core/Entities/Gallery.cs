@@ -18,6 +18,12 @@ public class Gallery : BaseEntity
     public int[] TagIds { get; set; } = [];
     public int[] PerformerIds { get; set; } = [];
 
+    // Denormalized relationship counters for hot list/detail reads.
+    public int ImageCount { get; set; }
+    public int SceneCount { get; set; }
+    public int PerformerCount { get; set; }
+    public int TagCount { get; set; }
+
     // Navigation properties
     public Studio? Studio { get; set; }
     public Folder? Folder { get; set; }

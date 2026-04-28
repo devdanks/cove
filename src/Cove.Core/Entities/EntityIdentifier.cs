@@ -42,6 +42,8 @@ public static class EntityKinds
     public const string Gallery = "gallery";
     public const string Image = "image";
     public const string Group = "group";
+    public const string Marker = "marker";
+    public const string File = "file";
 }
 
 public static class IdentifierSchemes

@@ -19,6 +19,8 @@ import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDialog";
 import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -55,6 +57,10 @@ export function GalleriesPage({ onNavigate }: Props) {
   const [downloadTarget, setDownloadTarget] = useState<Gallery | "new" | null>(null);
   const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canWriteGallery = canWriteEntity("gallery", hasPermission);
+  const canDeleteGallery = canDeleteEntity("gallery", hasPermission);
+  const canDownloadGallery = hasPermission("jobs.run") && canWriteGallery;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const { data, isLoading } = useQuery({
@@ -71,7 +77,7 @@ export function GalleriesPage({ onNavigate }: Props) {
   const selecting = selectedIds.size > 0;
   const selectedGallery = selectedIds.size === 1 ? items.find((gallery) => selectedIds.has(gallery.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
-  const canDownloadSelectedGallery = selectedDownloadTargets.length > 0;
+  const canDownloadSelectedGallery = canDownloadGallery && selectedDownloadTargets.length > 0;
   const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-galleries");
   const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
 
@@ -140,18 +146,18 @@ export function GalleriesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall"]}
-      renderOperations={() => (
+      renderOperations={canDownloadGallery ? () => (
         <button
           onClick={() => setDownloadTarget("new")}
           className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
         >
           From URL
         </button>
-      )}
+      ) : undefined}
       criteriaDefinitions={GALLERY_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
-      onNew={() => setShowCreate(true)}
+      onNew={canWriteGallery ? () => setShowCreate(true) : undefined}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
 
@@ -177,21 +183,25 @@ export function GalleriesPage({ onNavigate }: Props) {
               Download
             </button>
           )}
-          <button
-            onClick={() => setShowBulkEdit(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-          >
-            <Edit className="w-3 h-3" />
-            Edit
-          </button>
-          <button
-            onClick={() => { if (confirm(`Delete ${selectedIds.size} gallery(s)?`)) bulkDeleteMut.mutate(); }}
-            disabled={bulkDeleteMut.isPending}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-          >
-            {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-            Delete
-          </button>
+          {canWriteGallery && (
+            <button
+              onClick={() => setShowBulkEdit(true)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
+            >
+              <Edit className="w-3 h-3" />
+              Edit
+            </button>
+          )}
+          {canDeleteGallery && (
+            <button
+              onClick={() => { if (confirm(`Delete ${selectedIds.size} gallery(s)?`)) bulkDeleteMut.mutate(); }}
+              disabled={bulkDeleteMut.isPending}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
+            >
+              {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+              Delete
+            </button>
+          )}
         </>
       }
     >

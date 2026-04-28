@@ -21,7 +21,7 @@ public class ApiTokensController : ControllerBase
     public record CreateApiTokenRequest(string Name, string[]? Scope = null, DateTime? ExpiresAt = null);
 
     [HttpGet]
-    [AllowWithoutPermission]
+    [RequiresPermission(Permissions.ApiTokensWrite)]
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var p = _principalAccessor.Current;
@@ -30,7 +30,7 @@ public class ApiTokensController : ControllerBase
     }
 
     [HttpPost]
-    [AllowWithoutPermission]
+    [RequiresPermission(Permissions.ApiTokensWrite)]
     public async Task<IActionResult> Create([FromBody] CreateApiTokenRequest req, CancellationToken ct)
     {
         var p = _principalAccessor.Current;
@@ -42,7 +42,7 @@ public class ApiTokensController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [AllowWithoutPermission]
+    [RequiresPermission(Permissions.ApiTokensWrite)]
     public async Task<IActionResult> Revoke(Guid id, CancellationToken ct)
     {
         var p = _principalAccessor.Current;

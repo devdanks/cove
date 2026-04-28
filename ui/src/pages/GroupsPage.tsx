@@ -15,6 +15,8 @@ import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { useRouteRegistry } from "../router/RouteRegistry";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 
@@ -49,6 +51,9 @@ export function GroupsPage({ onNavigate }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canWriteGroup = canWriteEntity("group", hasPermission);
+  const canDeleteGroup = canDeleteEntity("group", hasPermission);
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const { data, isLoading } = useQuery({
@@ -96,27 +101,31 @@ export function GroupsPage({ onNavigate }: Props) {
         criteriaDefinitions={GROUP_CRITERIA}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
-        onNew={() => setShowCreate(true)}
+        onNew={canWriteGroup ? () => setShowCreate(true) : undefined}
         selectedIds={selectedIds}
         onSelectAll={selectAll}
         onSelectNone={selectNone}
         selectionActions={
           <>
-            <button
-              onClick={() => setShowBulkEdit(true)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-            >
-              <Edit className="w-3 h-3" />
-              Edit
-            </button>
-            <button
-              onClick={() => { if (confirm(`Delete ${selectedIds.size} group(s)?`)) bulkDeleteMut.mutate(); }}
-              disabled={bulkDeleteMut.isPending}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-            >
-              {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-              Delete
-            </button>
+            {canWriteGroup && (
+              <button
+                onClick={() => setShowBulkEdit(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
+              >
+                <Edit className="w-3 h-3" />
+                Edit
+              </button>
+            )}
+            {canDeleteGroup && (
+              <button
+                onClick={() => { if (confirm(`Delete ${selectedIds.size} group(s)?`)) bulkDeleteMut.mutate(); }}
+                disabled={bulkDeleteMut.isPending}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
+              >
+                {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                Delete
+              </button>
+            )}
           </>
         }
       >

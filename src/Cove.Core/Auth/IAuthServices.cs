@@ -11,6 +11,7 @@ public interface IUserService
     Task ChangePasswordAsync(int userId, string newPassword, CovePrincipal? actor, CancellationToken ct = default);
     Task<bool> VerifyPasswordAsync(int userId, string password, CancellationToken ct = default);
     Task SetRolesAsync(int userId, IEnumerable<string> roleNames, CovePrincipal? actor, CancellationToken ct = default);
+    Task<UserUiPreferencesDto?> UpdateUiPreferencesAsync(int userId, UserUiPreferencesDto preferences, CovePrincipal? actor, CancellationToken ct = default);
     Task RecordLoginSuccessAsync(int userId, string? ip, CancellationToken ct = default);
     Task RecordLoginFailureAsync(int userId, CancellationToken ct = default);
     Task UnlockAsync(int userId, CovePrincipal? actor, CancellationToken ct = default);
@@ -56,7 +57,23 @@ public sealed record UserDto(
     DateTime? LastLoginAt,
     string? LastLoginIp,
     DateTime CreatedAt,
-    IReadOnlyList<string> Roles);
+    IReadOnlyList<string> Roles,
+    UserUiPreferencesDto? UiPreferences);
+
+public sealed record UserThemePreferencesDto(
+    string? ActiveThemeId,
+    IReadOnlyList<string>? ActiveComponentStyles,
+    string? ActiveLayoutStyle,
+    Dictionary<string, string>? CustomThemeColors,
+    Dictionary<string, Dictionary<string, string>>? StyleOptions);
+
+public sealed record UserRatingSystemOptionsDto(
+    string? Type,
+    string? StarPrecision);
+
+public sealed record UserUiPreferencesDto(
+    UserThemePreferencesDto? Theme,
+    UserRatingSystemOptionsDto? RatingSystemOptions);
 
 public sealed record CreateUserRequest(
     string Username,

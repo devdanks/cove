@@ -60,13 +60,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         var gallery = await galleryRepo.GetByIdWithRelationsAsync(id, ct);
         if (gallery == null) return NotFound();
 
-        var firstImageId = await db.Set<ImageGallery>()
-            .Where(ig => ig.GalleryId == id)
-            .OrderBy(ig => ig.ImageId)
-            .Select(ig => (int?)ig.ImageId)
-            .FirstOrDefaultAsync(ct);
-
-        return Ok(MapToDto(gallery, firstImageId: firstImageId));
+        return Ok(MapToDto(gallery));
     }
 
     [HttpGet("{id:int}/cover")]
@@ -94,6 +88,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     }
 
     [HttpPost]
+    [RequiresPermission(Permissions.GalleriesWrite)]
     public async Task<ActionResult<GalleryDto>> Create([FromBody] GalleryCreateDto dto, CancellationToken ct)
     {
         var gallery = new Gallery
@@ -113,6 +108,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     }
 
     [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
     public async Task<ActionResult<GalleryDto>> Update(int id, [FromBody] GalleryUpdateDto dto, CancellationToken ct)
     {
         var gallery = await galleryRepo.GetByIdWithRelationsAsync(id, ct);
@@ -156,6 +153,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
 
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.GalleriesDelete)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var g = await galleryRepo.GetByIdAsync(id, ct);
@@ -164,28 +162,29 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         return NoContent();
     }
 
-    private static GalleryDto MapToDto(Gallery g, int? imageCount = null, int? sceneCount = null, int? firstImageId = null) => new(
+    private static GalleryDto MapToDto(Gallery g, int? imageCount = null, int? sceneCount = null) => new(
         g.Id, g.Title, g.Code, g.Date?.ToString("yyyy-MM-dd"), g.Details, g.Photographer,
         g.Rating, g.Organized, g.StudioId, g.Studio?.Name,
         g.Urls.Select(u => u.Url).ToList(),
         g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => new TagDto(gt.Tag!.Id, gt.Tag.Name, gt.Tag.Description, gt.Tag.Favorite, gt.Tag.IgnoreAutoTag, [])).ToList(),
         g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => new PerformerSummaryDto(gp.Performer!.Id, gp.Performer.Name, gp.Performer.Disambiguation, gp.Performer.Gender?.ToString(), gp.Performer.Birthdate?.ToString("yyyy-MM-dd"), gp.Performer.Favorite, gp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(gp.Performer.Id, gp.Performer.UpdatedAt) : null)).ToList(),
-        imageCount ?? g.ImageGalleries?.Count ?? 0,
-        sceneCount ?? g.SceneGalleries?.Count ?? 0,
+        imageCount ?? g.ImageCount,
+        sceneCount ?? g.SceneCount,
         g.SceneGalleries?.Select(sg => sg.SceneId).ToList() ?? [],
         g.Folder?.Path,
         g.Files?.Select(f => new GalleryFileInfoDto(f.Id, f.Path, f.Size, f.ModTime.ToString("o"),
             f.Fingerprints?.Select(fp => new FingerprintDto(fp.Type, fp.Value)).ToList() ?? [])).ToList() ?? [],
         g.CustomFields,
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
-        ResolveCoverPath(g, firstImageId),
+        ResolveCoverPath(g, imageCount),
         g.CoverImageId
     );
 
     /// <summary>Resolve cover image URL through the unified gallery cover endpoint.</summary>
-    private static string? ResolveCoverPath(Gallery g, int? firstImageId)
+    private static string? ResolveCoverPath(Gallery g, int? imageCount = null)
     {
-        if (g.ImageBlobId != null || g.CoverImageId != null || firstImageId != null) return EntityImageUrls.GalleryCover(g.Id, g.UpdatedAt);
+        var resolvedImageCount = imageCount ?? g.ImageCount;
+        if (g.ImageBlobId != null || g.CoverImageId != null || resolvedImageCount > 0) return EntityImageUrls.GalleryCover(g.Id, g.UpdatedAt);
         return null;
     }
 
@@ -200,20 +199,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     private async Task<List<GalleryDto>> MapListToDtos(IReadOnlyList<Gallery> items, CancellationToken ct)
     {
         if (items.Count == 0) return [];
-        var ids = items.Select(g => g.Id).ToList();
-        var imgCounts = await db.Set<ImageGallery>().Where(ig => ids.Contains(ig.GalleryId))
-            .GroupBy(ig => ig.GalleryId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var sceneCounts = await db.Set<SceneGallery>().Where(sg => ids.Contains(sg.GalleryId))
-            .GroupBy(sg => sg.GalleryId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        // Get first image ID per gallery for cover fallback
-        var firstImageIds = await db.Set<ImageGallery>().Where(ig => ids.Contains(ig.GalleryId))
-            .GroupBy(ig => ig.GalleryId).Select(g => new { Id = g.Key, FirstImageId = g.Min(ig => ig.ImageId) })
-            .ToDictionaryAsync(x => x.Id, x => x.FirstImageId, ct);
-        return items.Select(g => MapToDto(g,
-            imgCounts.GetValueOrDefault(g.Id, 0),
-            sceneCounts.GetValueOrDefault(g.Id, 0),
-            firstImageIds.GetValueOrDefault(g.Id)
-        )).ToList();
+        return items.Select(g => MapToDto(g)).ToList();
     }
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
@@ -222,6 +208,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     // ===== Image Management =====
 
     [HttpPost("{id:int}/images")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
     public async Task<IActionResult> AddImages(int id, [FromBody] GalleryAddImagesDto dto, CancellationToken ct)
     {
         var gallery = await db.Galleries.Include(g => g.ImageGalleries).FirstOrDefaultAsync(g => g.Id == id, ct);
@@ -236,6 +224,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     }
 
     [HttpDelete("{id:int}/images")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
     public async Task<IActionResult> RemoveImages(int id, [FromBody] GalleryRemoveImagesDto dto, CancellationToken ct)
     {
         var toRemove = await db.Set<ImageGallery>()
@@ -263,6 +253,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     }
 
     [HttpPost("{id:int}/chapters")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
     public async Task<ActionResult<GalleryChapterDto>> CreateChapter(int id, [FromBody] GalleryChapterCreateDto dto, CancellationToken ct)
     {
         var gallery = await db.Galleries.FindAsync([id], ct);
@@ -275,6 +267,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     }
 
     [HttpPut("{galleryId:int}/chapters/{chapterId:int}")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite, RouteValueName = "galleryId")]
     public async Task<ActionResult<GalleryChapterDto>> UpdateChapter(int galleryId, int chapterId, [FromBody] GalleryChapterUpdateDto dto, CancellationToken ct)
     {
         var chapter = await db.GalleryChapters.FirstOrDefaultAsync(c => c.Id == chapterId && c.GalleryId == galleryId, ct);
@@ -287,6 +281,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     }
 
     [HttpDelete("{galleryId:int}/chapters/{chapterId:int}")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite, RouteValueName = "galleryId")]
     public async Task<IActionResult> DeleteChapter(int galleryId, int chapterId, CancellationToken ct)
     {
         var chapter = await db.GalleryChapters.FirstOrDefaultAsync(c => c.Id == chapterId && c.GalleryId == galleryId, ct);
@@ -299,6 +295,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     // ===== Bulk Operations =====
 
     [HttpPost("bulk")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
     public async Task<IActionResult> BulkUpdate([FromBody] BulkGalleryUpdateDto dto, CancellationToken ct)
     {
         var galleries = await db.Galleries

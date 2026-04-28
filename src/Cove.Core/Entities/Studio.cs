@@ -13,6 +13,15 @@ public class Studio : BaseEntity
     // Image stored as blob reference
     public string? ImageBlobId { get; set; }
 
+    // Denormalized relationship counters for hot list/detail reads.
+    public int SceneCount { get; set; }
+    public int ImageCount { get; set; }
+    public int GalleryCount { get; set; }
+    public int GroupCount { get; set; }
+    public int PerformerCount { get; set; }
+    public int ChildStudioCount { get; set; }
+    public int TagCount { get; set; }
+
     // Navigation properties
     public Studio? Parent { get; set; }
     public ICollection<Studio> Children { get; set; } = [];

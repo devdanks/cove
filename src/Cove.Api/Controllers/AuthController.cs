@@ -1,7 +1,9 @@
 ﻿using Cove.Core.Auth;
 using Cove.Core.DTOs;
+using Cove.Data.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Globalization;
 
 namespace Cove.Api.Controllers;
 
@@ -9,6 +11,7 @@ namespace Cove.Api.Controllers;
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
+    private const string AccessCookieName = "cove_access_token";
     private readonly ITokenService _tokens;
     private readonly IUserService _users;
     private readonly IAuditService _audit;
@@ -35,8 +38,7 @@ public class AuthController : ControllerBase
         var user = await _users.FindByUsernameAsync(request.Username, ct);
         if (user is null)
         {
-            try { _ = BCrypt.Net.BCrypt.Verify(request.Password, "$2a$12$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY01234"); }
-            catch { }
+            PasswordHasher.VerifyDummy(request.Password);
             await _audit.LogAsync(AuditActions.LoginFail, AuditOutcomes.Fail,
                 CovePrincipal.Anonymous(ip, ua), "user", request.Username, new { reason = "no_user" }, ct);
             return invalid;
@@ -58,6 +60,7 @@ public class AuthController : ControllerBase
 
         await _users.RecordLoginSuccessAsync(user.Id, ip, ct);
         var pair = await _tokens.IssueForUserAsync(user.Id, ip, ua, ct);
+        WriteAccessCookie(pair.AccessToken, pair.AccessExpires);
         await _audit.LogAsync(AuditActions.LoginSuccess, AuditOutcomes.Success,
             CovePrincipal.Anonymous(ip, ua), "user", user.Id.ToString(), null, ct);
 
@@ -84,6 +87,7 @@ public class AuthController : ControllerBase
         try
         {
             var pair = await _tokens.RefreshAsync(request.RefreshToken, ip, ua, ct);
+            WriteAccessCookie(pair.AccessToken, pair.AccessExpires);
             await _audit.LogAsync(AuditActions.TokenRefresh, AuditOutcomes.Success,
                 CovePrincipal.Anonymous(ip, ua), "user", pair.User.Id.ToString(), null, ct);
             return Ok(new
@@ -109,6 +113,7 @@ public class AuthController : ControllerBase
     {
         if (!string.IsNullOrWhiteSpace(request?.RefreshToken))
             await _tokens.RevokeChainAsync(request.RefreshToken, ct);
+        ClearAccessCookie();
         var p = _principalAccessor.Current;
         await _audit.LogAsync(AuditActions.Logout, AuditOutcomes.Success, p, null, null, null, ct);
         return Ok(new { message = "Logged out" });
@@ -116,21 +121,54 @@ public class AuthController : ControllerBase
 
     [HttpGet("me")]
     [AllowWithoutPermission]
-    public IActionResult Me()
+    public async Task<IActionResult> Me(CancellationToken ct)
     {
         var p = _principalAccessor.Current;
         if (p is null || p.Kind == PrincipalKind.Anonymous)
             return Unauthorized(new { code = "UNAUTHORIZED" });
+
+        UserUiPreferencesDto? uiPreferences = null;
+        var userId = p.UserId?.ToString(CultureInfo.InvariantCulture)
+            ?? p.TokenId?.ToString("N", CultureInfo.InvariantCulture)
+            ?? p.Username;
+        var username = p.Kind == PrincipalKind.ShareLink ? "Share link" : p.Username;
+
+        if (p.UserId is int currentUserId)
+        {
+            var user = await _users.GetAsync(currentUserId, ct);
+            if (user is not null)
+            {
+                userId = user.Id.ToString(CultureInfo.InvariantCulture);
+                username = user.Username;
+                uiPreferences = user.UiPreferences;
+            }
+        }
+
         return Ok(new
         {
             user = new
             {
-                id = p.UserId,
-                username = p.Username,
+                id = userId,
+                username,
                 roles = p.Roles.ToArray(),
+                kind = ToClientUserKind(p.Kind),
+                uiPreferences,
             },
             permissions = p.Permissions.ToArray(),
+            readGrantedEntityKinds = p.ReadGrantedEntityKinds.ToArray(),
         });
+    }
+
+    [HttpPut("me/ui-preferences")]
+    [AllowWithoutPermission]
+    public async Task<IActionResult> UpdateUiPreferences([FromBody] UserUiPreferencesDto preferences, CancellationToken ct)
+    {
+        var p = _principalAccessor.Current;
+        if (p?.UserId is not int userId)
+            return Unauthorized(new { code = "UNAUTHORIZED" });
+
+        var updated = await _users.UpdateUiPreferencesAsync(userId, preferences, p, ct);
+        return Ok(updated);
     }
 
     [HttpPost("change-password")]
@@ -144,8 +182,43 @@ public class AuthController : ControllerBase
         if (!ok) return BadRequest(new { code = "INVALID_PASSWORD", message = "Current password is incorrect." });
         await _users.ChangePasswordAsync(userId, req.NewPassword, p, ct);
         await _tokens.RevokeAllForUserAsync(userId, ct);
+        ClearAccessCookie();
         return Ok(new { message = "Password changed; please log in again." });
     }
+
+    private void WriteAccessCookie(string token, DateTime expiresUtc)
+    {
+        Response.Cookies.Append(AccessCookieName, token, new CookieOptions
+        {
+            HttpOnly = true,
+            IsEssential = true,
+            SameSite = SameSiteMode.Strict,
+            Secure = Request.IsHttps,
+            Path = "/",
+            Expires = new DateTimeOffset(DateTime.SpecifyKind(expiresUtc, DateTimeKind.Utc)),
+        });
+    }
+
+    private void ClearAccessCookie()
+    {
+        Response.Cookies.Delete(AccessCookieName, new CookieOptions
+        {
+            HttpOnly = true,
+            IsEssential = true,
+            SameSite = SameSiteMode.Strict,
+            Secure = Request.IsHttps,
+            Path = "/",
+        });
+    }
+
+    private static string ToClientUserKind(PrincipalKind kind) => kind switch
+    {
+        PrincipalKind.ShareLink => "shareLink",
+        PrincipalKind.ApiToken => "apiToken",
+        PrincipalKind.System => "system",
+        PrincipalKind.User => "user",
+        _ => "anonymous",
+    };
 }
 
 public record RefreshRequest(string RefreshToken);

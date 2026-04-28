@@ -29,3 +29,19 @@ public sealed class RequiresPermissionAttribute : Attribute
 public sealed class AllowWithoutPermissionAttribute : Attribute
 {
 }
+
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = true)]
+public sealed class RequiresEntityAccessAttribute : Attribute
+{
+    public string EntityKind { get; }
+    public string Permission { get; }
+    public string? RouteValueName { get; init; } = "id";
+    public string? ActionArgumentName { get; init; }
+    public string? PropertyName { get; init; }
+
+    public RequiresEntityAccessAttribute(string entityKind, string permission)
+    {
+        EntityKind = entityKind;
+        Permission = permission;
+    }
+}

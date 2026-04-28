@@ -7,6 +7,7 @@ using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
 using Cove.Core.Interfaces;
+using IAuthorizationService = Cove.Core.Auth.IAuthorizationService;
 
 namespace Cove.Api.Controllers;
 
@@ -34,7 +35,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         };
 
         var (items, totalCount) = await studioRepo.FindAsync(filter, findFilter, ct);
-        var dtos = await MapListToDtos(items, ct);
+        var dtos = MapListToDtos(items);
         return Ok(new PaginatedResponse<StudioDto>(dtos, totalCount, page, perPage));
     }
 
@@ -44,7 +45,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new StudioFilter();
         var (items, totalCount) = await studioRepo.FindAsync(filter, findFilter, ct);
-        var dtos = await MapListToDtos(items, ct);
+        var dtos = MapListToDtos(items);
         return Ok(new PaginatedResponse<StudioDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -54,18 +55,11 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     {
         var studio = await studioRepo.GetByIdWithRelationsAsync(id, ct);
         if (studio == null) return NotFound();
-        var sceneCount = await db.Scenes.CountAsync(sc => sc.StudioId == id, ct);
-        var imageCount = await db.Images.CountAsync(i => i.StudioId == id, ct);
-        var galleryCount = await db.Galleries.CountAsync(g => g.StudioId == id, ct);
-        var groupCount = await db.Groups.CountAsync(g => g.StudioId == id, ct);
-        var performerCount = await db.Set<ScenePerformer>()
-            .Where(sp => sp.Scene!.StudioId == id)
-            .Select(sp => sp.PerformerId).Distinct().CountAsync(ct);
-        var childStudioCount = await db.Studios.CountAsync(s => s.ParentId == id, ct);
-        return Ok(MapToDto(studio, sceneCount, imageCount, galleryCount, groupCount, performerCount, childStudioCount));
+        return Ok(MapToDto(studio));
     }
 
     [HttpPost]
+    [RequiresPermission(Permissions.StudiosWrite)]
     public async Task<ActionResult<StudioDto>> Create([FromBody] StudioCreateDto dto, CancellationToken ct)
     {
         var studio = new Studio
@@ -88,6 +82,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     }
 
     [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.StudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite)]
     public async Task<ActionResult<StudioDto>> Update(int id, [FromBody] StudioUpdateDto dto, CancellationToken ct)
     {
         var studio = await studioRepo.GetByIdWithRelationsAsync(id, ct);
@@ -129,6 +125,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.StudiosDelete)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var s = await studioRepo.GetByIdAsync(id, ct);
@@ -140,6 +137,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     // ===== Bulk Update =====
 
     [HttpPost("bulk")]
+    [RequiresPermission(Permissions.StudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
     public async Task<IActionResult> BulkUpdate([FromBody] BulkStudioUpdateDto dto, CancellationToken ct)
     {
         var studios = await db.Studios
@@ -181,44 +180,20 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         s.Aliases.Select(a => a.Alias).ToList(),
         s.StudioTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
         s.RemoteIds.Select(sid => new StudioRemoteIdDto(sid.Endpoint, sid.RemoteId)).ToList(),
-        sceneCount ?? s.Scenes?.Count ?? 0,
-        imageCount ?? s.Images?.Count ?? 0,
-        galleryCount ?? s.Galleries?.Count ?? 0,
-        groupCount ?? s.Groups?.Count ?? 0,
-        performerCount ?? 0,
-        childStudioCount ?? s.Children?.Count ?? 0,
+        sceneCount ?? s.SceneCount,
+        imageCount ?? s.ImageCount,
+        galleryCount ?? s.GalleryCount,
+        groupCount ?? s.GroupCount,
+        performerCount ?? s.PerformerCount,
+        childStudioCount ?? s.ChildStudioCount,
         s.ImageBlobId != null ? EntityImageUrls.Studio(s.Id, s.UpdatedAt) : null,
         s.CustomFields,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
 
-    private async Task<List<StudioDto>> MapListToDtos(IReadOnlyList<Studio> items, CancellationToken ct)
+    private static List<StudioDto> MapListToDtos(IReadOnlyList<Studio> items)
     {
-        if (items.Count == 0) return [];
-        var ids = items.Select(s => s.Id).ToList();
-        var sceneCounts = await db.Scenes.Where(sc => sc.StudioId.HasValue && ids.Contains(sc.StudioId.Value))
-            .GroupBy(sc => sc.StudioId!.Value).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var imgCounts = await db.Images.Where(i => i.StudioId.HasValue && ids.Contains(i.StudioId.Value))
-            .GroupBy(i => i.StudioId!.Value).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var galCounts = await db.Galleries.Where(g => g.StudioId.HasValue && ids.Contains(g.StudioId.Value))
-            .GroupBy(g => g.StudioId!.Value).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var grpCounts = await db.Groups.Where(g => g.StudioId.HasValue && ids.Contains(g.StudioId.Value))
-            .GroupBy(g => g.StudioId!.Value).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var perfCounts = await db.Set<ScenePerformer>()
-            .Where(sp => sp.Scene!.StudioId.HasValue && ids.Contains(sp.Scene.StudioId!.Value))
-            .GroupBy(sp => sp.Scene!.StudioId!.Value)
-            .Select(g => new { Id = g.Key, Count = g.Select(sp => sp.PerformerId).Distinct().Count() })
-            .ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var childCounts = await db.Studios.Where(s => s.ParentId.HasValue && ids.Contains(s.ParentId.Value))
-            .GroupBy(s => s.ParentId!.Value).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        return items.Select(s => MapToDto(s,
-            sceneCounts.GetValueOrDefault(s.Id, 0),
-            imgCounts.GetValueOrDefault(s.Id, 0),
-            galCounts.GetValueOrDefault(s.Id, 0),
-            grpCounts.GetValueOrDefault(s.Id, 0),
-            perfCounts.GetValueOrDefault(s.Id, 0),
-            childCounts.GetValueOrDefault(s.Id, 0)
-        )).ToList();
+        return items.Count == 0 ? [] : items.Select(studio => MapToDto(studio)).ToList();
     }
 
     private static List<int>? ParseIntList(string? csv) => string.IsNullOrEmpty(csv) ? null : csv.Split(',').Select(int.Parse).ToList();
@@ -226,6 +201,9 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     // ===== Merge =====
 
     [HttpPost("merge")]
+    [RequiresPermission(Permissions.StudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite, ActionArgumentName = "dto", PropertyName = "TargetId")]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite, ActionArgumentName = "dto", PropertyName = "SourceIds")]
     public async Task<ActionResult<StudioDto>> MergeStudios([FromBody] StudioMergeDto dto, CancellationToken ct)
     {
         var target = await studioRepo.GetByIdWithRelationsAsync(dto.TargetId, ct);
@@ -310,6 +288,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     }
 
     [HttpPost("{id:int}/metadata-server/import")]
+    [RequiresPermission(Permissions.StudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite)]
     public async Task<ActionResult<StudioDto>> ImportFromMetadataServer(int id, [FromBody] MetadataServerStudioImportRequestDto dto, CancellationToken ct)
     {
         var studio = await db.Studios
@@ -330,6 +310,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]
+    [RequiresPermission(Permissions.StudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite)]
     public async Task<IActionResult> SubmitStudioDraft(int id, [FromBody] MetadataServerEndpointDto dto, CancellationToken ct)
     {
         var studio = await db.Studios
@@ -345,7 +327,9 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     }
 
     [HttpPost("metadata-server/batch-tag")]
-    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerStudioBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, CancellationToken ct)
+    [RequiresPermission(Permissions.StudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
+    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerStudioBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, [FromServices] IAuthorizationService authorizationService, [FromServices] ICurrentPrincipalAccessor principalAccessor, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Endpoint))
             return BadRequest(new { message = "Endpoint is required" });
@@ -353,6 +337,22 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         var ids = await ResolveSelectedStudioIdsAsync(dto, ct);
         if (ids.Count == 0)
             return BadRequest(new { message = "No studios selected for batch tagging" });
+
+        var principal = principalAccessor.Current;
+        if (principal == null)
+            return Forbid();
+
+        foreach (var id in ids)
+        {
+            var result = await authorizationService.AuthorizeAsync(
+                principal,
+                Permissions.StudiosWrite,
+                new EntityRef(EntityKinds.Studio, id.ToString()),
+                ct);
+
+            if (!result.Allowed)
+                return Forbid();
+        }
 
         var jobId = jobService.Enqueue(
             "metadata-server:studios",

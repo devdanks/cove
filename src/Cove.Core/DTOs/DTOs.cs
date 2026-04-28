@@ -211,8 +211,8 @@ public record ApiKeyResponse(string ApiKey);
 // ===== CONFIG DTOs =====
 public record SystemStatusDto(
     string Version,
-    string AppDir,
-    string ConfigFile,
+    string? AppDir,
+    string? ConfigFile,
     string DatabasePath,
     bool MigrationRequired = false,
     string[]? PendingMigrations = null,

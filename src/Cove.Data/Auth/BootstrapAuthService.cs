@@ -68,6 +68,7 @@ public sealed class BootstrapAuthService : IHostedService
             using var scope = _services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
 
+            await AuthorizationSqlBootstrap.EnsureAsync(db, ct);
             await UpsertPermissionsAsync(db, ct);
             await SeedBuiltinRolesAsync(db, ct);
             await EnsureOwnerUserAsync(db, ct);
@@ -165,6 +166,7 @@ public sealed class BootstrapAuthService : IHostedService
 
         // Owner: always has *, even after upgrades.
         EnsurePermissions(db, owner, ["*"]);
+        EnsurePermissions(db, admin, [Permissions.ApiTokensWrite, Permissions.ShareLinksWrite]);
 
         // For Admin/Member/Viewer/Guest, only seed if currently empty (we don't want to
         // stomp admin customizations on every boot).
@@ -225,7 +227,7 @@ public sealed class BootstrapAuthService : IHostedService
             // Generate a random initial password and surface it in the log + a sentinel file.
             var seed = TokenService.NewOpaqueToken();
             var plain = seed.plain[..16];
-            passwordHash = BCrypt.Net.BCrypt.HashPassword(plain, workFactor: 12);
+            passwordHash = PasswordHasher.HashPassword(plain);
             try
             {
                 var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "cove");
@@ -249,7 +251,7 @@ public sealed class BootstrapAuthService : IHostedService
             Username = username,
             DisplayName = "Owner",
             PasswordHash = passwordHash,
-            PasswordAlgo = "bcrypt",
+            PasswordAlgo = PasswordHasher.DetectAlgorithm(passwordHash),
             IsActive = true,
             IsLocked = false,
             IsSystem = true,

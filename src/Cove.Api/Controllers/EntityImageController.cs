@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
@@ -15,11 +16,13 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     // ── Scenes ──────────────────────────────────────────────────
 
     [HttpPost("scenes/{id:int}/image")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> UploadSceneImage(int id, IFormFile file, CancellationToken ct)
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Scenes.FindAsync([id], ct);
+        var entity = await db.Scenes.FirstOrDefaultAsync(scene => scene.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId != null)
@@ -33,18 +36,21 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     }
 
     [HttpGet("scenes/{id:int}/image")]
+    [RequiresPermission(Permissions.ScenesRead)]
     public async Task<IActionResult> GetSceneImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Scenes.FindAsync([id], ct);
+        var entity = await db.Scenes.FirstOrDefaultAsync(scene => scene.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }
 
     [HttpDelete("scenes/{id:int}/image")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> DeleteSceneImage(int id, CancellationToken ct)
     {
-        var entity = await db.Scenes.FindAsync([id], ct);
+        var entity = await db.Scenes.FirstOrDefaultAsync(scene => scene.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
@@ -57,11 +63,13 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     // ── Performers ──────────────────────────────────────────────
 
     [HttpPost("performers/{id:int}/image")]
+    [RequiresPermission(Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite)]
     public async Task<IActionResult> UploadPerformerImage(int id, IFormFile file, CancellationToken ct)
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Performers.FindAsync([id], ct);
+        var entity = await db.Performers.FirstOrDefaultAsync(performer => performer.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId != null)
@@ -75,18 +83,21 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     }
 
     [HttpGet("performers/{id:int}/image")]
+    [RequiresPermission(Permissions.PerformersRead)]
     public async Task<IActionResult> GetPerformerImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Performers.FindAsync([id], ct);
+        var entity = await db.Performers.FirstOrDefaultAsync(performer => performer.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }
 
     [HttpDelete("performers/{id:int}/image")]
+    [RequiresPermission(Permissions.PerformersWrite)]
+    [RequiresEntityAccess(EntityKinds.Performer, Permissions.PerformersWrite)]
     public async Task<IActionResult> DeletePerformerImage(int id, CancellationToken ct)
     {
-        var entity = await db.Performers.FindAsync([id], ct);
+        var entity = await db.Performers.FirstOrDefaultAsync(performer => performer.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
@@ -99,11 +110,13 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     // ── Studios ─────────────────────────────────────────────────
 
     [HttpPost("studios/{id:int}/image")]
+    [RequiresPermission(Permissions.StudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite)]
     public async Task<IActionResult> UploadStudioImage(int id, IFormFile file, CancellationToken ct)
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Studios.FindAsync([id], ct);
+        var entity = await db.Studios.FirstOrDefaultAsync(studio => studio.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId != null)
@@ -117,18 +130,21 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     }
 
     [HttpGet("studios/{id:int}/image")]
+    [RequiresPermission(Permissions.StudiosRead)]
     public async Task<IActionResult> GetStudioImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Studios.FindAsync([id], ct);
+        var entity = await db.Studios.FirstOrDefaultAsync(studio => studio.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }
 
     [HttpDelete("studios/{id:int}/image")]
+    [RequiresPermission(Permissions.StudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite)]
     public async Task<IActionResult> DeleteStudioImage(int id, CancellationToken ct)
     {
-        var entity = await db.Studios.FindAsync([id], ct);
+        var entity = await db.Studios.FirstOrDefaultAsync(studio => studio.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
@@ -141,11 +157,13 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     // ── Tags ────────────────────────────────────────────────────
 
     [HttpPost("tags/{id:int}/image")]
+    [RequiresPermission(Permissions.TagsWrite)]
+    [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsWrite)]
     public async Task<IActionResult> UploadTagImage(int id, IFormFile file, CancellationToken ct)
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Tags.FindAsync([id], ct);
+        var entity = await db.Tags.FirstOrDefaultAsync(tag => tag.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId != null)
@@ -159,18 +177,21 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     }
 
     [HttpGet("tags/{id:int}/image")]
+    [RequiresPermission(Permissions.TagsRead)]
     public async Task<IActionResult> GetTagImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Tags.FindAsync([id], ct);
+        var entity = await db.Tags.FirstOrDefaultAsync(tag => tag.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }
 
     [HttpDelete("tags/{id:int}/image")]
+    [RequiresPermission(Permissions.TagsWrite)]
+    [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsWrite)]
     public async Task<IActionResult> DeleteTagImage(int id, CancellationToken ct)
     {
-        var entity = await db.Tags.FindAsync([id], ct);
+        var entity = await db.Tags.FirstOrDefaultAsync(tag => tag.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
@@ -183,11 +204,13 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     // ── Groups (front) ──────────────────────────────────────────
 
     [HttpPost("groups/{id:int}/image/front")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite)]
     public async Task<IActionResult> UploadGroupFrontImage(int id, IFormFile file, CancellationToken ct)
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Groups.FindAsync([id], ct);
+        var entity = await db.Groups.FirstOrDefaultAsync(group => group.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.FrontImageBlobId != null)
@@ -201,18 +224,21 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     }
 
     [HttpGet("groups/{id:int}/image/front")]
+    [RequiresPermission(Permissions.GroupsRead)]
     public async Task<IActionResult> GetGroupFrontImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Groups.FindAsync([id], ct);
+        var entity = await db.Groups.FirstOrDefaultAsync(group => group.Id == id, ct);
         if (entity?.FrontImageBlobId == null) return NotFound();
 
         return await ServeBlobAsync(entity.FrontImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }
 
     [HttpDelete("groups/{id:int}/image/front")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite)]
     public async Task<IActionResult> DeleteGroupFrontImage(int id, CancellationToken ct)
     {
-        var entity = await db.Groups.FindAsync([id], ct);
+        var entity = await db.Groups.FirstOrDefaultAsync(group => group.Id == id, ct);
         if (entity?.FrontImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.FrontImageBlobId, ct);
@@ -225,11 +251,13 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     // ── Groups (back) ───────────────────────────────────────────
 
     [HttpPost("groups/{id:int}/image/back")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite)]
     public async Task<IActionResult> UploadGroupBackImage(int id, IFormFile file, CancellationToken ct)
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Groups.FindAsync([id], ct);
+        var entity = await db.Groups.FirstOrDefaultAsync(group => group.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.BackImageBlobId != null)
@@ -243,18 +271,21 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     }
 
     [HttpGet("groups/{id:int}/image/back")]
+    [RequiresPermission(Permissions.GroupsRead)]
     public async Task<IActionResult> GetGroupBackImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Groups.FindAsync([id], ct);
+        var entity = await db.Groups.FirstOrDefaultAsync(group => group.Id == id, ct);
         if (entity?.BackImageBlobId == null) return NotFound();
 
         return await ServeBlobAsync(entity.BackImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }
 
     [HttpDelete("groups/{id:int}/image/back")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite)]
     public async Task<IActionResult> DeleteGroupBackImage(int id, CancellationToken ct)
     {
-        var entity = await db.Groups.FindAsync([id], ct);
+        var entity = await db.Groups.FirstOrDefaultAsync(group => group.Id == id, ct);
         if (entity?.BackImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.BackImageBlobId, ct);
@@ -267,11 +298,13 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     // ── Galleries ───────────────────────────────────────────────
 
     [HttpPost("galleries/{id:int}/image")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
     public async Task<IActionResult> UploadGalleryImage(int id, IFormFile file, CancellationToken ct)
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Galleries.FindAsync([id], ct);
+        var entity = await db.Galleries.FirstOrDefaultAsync(gallery => gallery.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId != null)
@@ -285,18 +318,21 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     }
 
     [HttpGet("galleries/{id:int}/image")]
+    [RequiresPermission(Permissions.GalleriesRead)]
     public async Task<IActionResult> GetGalleryImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Galleries.FindAsync([id], ct);
+        var entity = await db.Galleries.FirstOrDefaultAsync(gallery => gallery.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }
 
     [HttpDelete("galleries/{id:int}/image")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
     public async Task<IActionResult> DeleteGalleryImage(int id, CancellationToken ct)
     {
-        var entity = await db.Galleries.FindAsync([id], ct);
+        var entity = await db.Galleries.FirstOrDefaultAsync(gallery => gallery.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
@@ -309,9 +345,11 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     // ── Gallery Cover (Set from gallery images) ─────────────────
 
     [HttpPut("galleries/{id:int}/cover")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
     public async Task<IActionResult> SetGalleryCover(int id, [FromBody] GallerySetCoverDto dto, CancellationToken ct)
     {
-        var gallery = await db.Galleries.FindAsync([id], ct);
+        var gallery = await db.Galleries.FirstOrDefaultAsync(entity => entity.Id == id, ct);
         if (gallery == null) return NotFound();
 
         // Verify image belongs to the gallery
@@ -325,9 +363,11 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     }
 
     [HttpDelete("galleries/{id:int}/cover")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
     public async Task<IActionResult> ResetGalleryCover(int id, CancellationToken ct)
     {
-        var gallery = await db.Galleries.FindAsync([id], ct);
+        var gallery = await db.Galleries.FirstOrDefaultAsync(entity => entity.Id == id, ct);
         if (gallery == null) return NotFound();
 
         gallery.CoverImageId = null;

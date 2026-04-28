@@ -2,6 +2,7 @@ using Cove.Core.Auth;
 using Cove.Core.Entities.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Cove.Data.Auth;
 
@@ -9,6 +10,11 @@ public sealed class UserService : IUserService
 {
     public const int MaxFailedLogins = 8;
     public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+    private static readonly JsonSerializerOptions UiPreferencesJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+    };
 
     private readonly CoveContext _db;
     private readonly IAuditService _audit;
@@ -59,8 +65,8 @@ public sealed class UserService : IUserService
             Username = req.Username,
             DisplayName = req.DisplayName,
             Email = string.IsNullOrWhiteSpace(req.Email) ? null : req.Email,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password, workFactor: 12),
-            PasswordAlgo = "bcrypt",
+            PasswordHash = PasswordHasher.HashPassword(req.Password),
+            PasswordAlgo = PasswordHasher.Algorithm,
             IsActive = true,
             MustChangePassword = req.MustChangePassword,
             CreatedAt = DateTime.UtcNow,
@@ -115,8 +121,8 @@ public sealed class UserService : IUserService
         Validation.Password(newPassword);
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
             ?? throw new KeyNotFoundException("User not found.");
-        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword, workFactor: 12);
-        user.PasswordAlgo = "bcrypt";
+        user.PasswordHash = PasswordHasher.HashPassword(newPassword);
+        user.PasswordAlgo = PasswordHasher.Algorithm;
         user.MustChangePassword = false;
         user.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
@@ -126,10 +132,21 @@ public sealed class UserService : IUserService
 
     public async Task<bool> VerifyPasswordAsync(int userId, string password, CancellationToken ct = default)
     {
-        var hash = await _db.Users.Where(u => u.Id == userId).Select(u => u.PasswordHash).FirstOrDefaultAsync(ct);
-        if (hash is null) return false;
-        try { return BCrypt.Net.BCrypt.Verify(password, hash); }
-        catch { return false; }
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null) return false;
+
+        var verified = PasswordHasher.Verify(password, user.PasswordHash, user.PasswordAlgo);
+        if (!verified) return false;
+
+        if (PasswordHasher.NeedsRehash(user.PasswordHash, user.PasswordAlgo))
+        {
+            user.PasswordHash = PasswordHasher.HashPassword(password);
+            user.PasswordAlgo = PasswordHasher.Algorithm;
+            user.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return true;
     }
 
     public async Task SetRolesAsync(int userId, IEnumerable<string> roleNames, CovePrincipal? actor, CancellationToken ct = default)
@@ -154,6 +171,22 @@ public sealed class UserService : IUserService
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync(AuditActions.RoleGrant, AuditOutcomes.Success, actor,
             "user", userId.ToString(), new { roles = nameList }, ct);
+    }
+
+    public async Task<UserUiPreferencesDto?> UpdateUiPreferencesAsync(int userId, UserUiPreferencesDto preferences, CovePrincipal? actor, CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new KeyNotFoundException("User not found.");
+
+        var normalized = NormalizeUiPreferences(preferences);
+        user.UiPreferencesJson = SerializeUiPreferences(normalized);
+        user.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync(AuditActions.UserUpdate, AuditOutcomes.Success, actor,
+            "user", user.Id.ToString(), new { user.Username, field = "ui_preferences" }, ct);
+
+        return normalized;
     }
 
     public async Task RecordLoginSuccessAsync(int userId, string? ip, CancellationToken ct = default)
@@ -194,7 +227,149 @@ public sealed class UserService : IUserService
         u.Id, u.Username, u.DisplayName, u.Email,
         u.IsActive, u.IsLocked, u.IsSystem, u.MustChangePassword,
         u.LastLoginAt, u.LastLoginIp, u.CreatedAt,
-        u.Roles.Select(r => r.Role!.Name).ToList());
+        u.Roles.Select(r => r.Role!.Name).ToList(),
+        ParseUiPreferences(u.UiPreferencesJson));
+
+    public static UserUiPreferencesDto? ParseUiPreferences(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        try
+        {
+            return NormalizeUiPreferences(JsonSerializer.Deserialize<UserUiPreferencesDto>(raw, UiPreferencesJsonOptions));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static string? SerializeUiPreferences(UserUiPreferencesDto? preferences)
+    {
+        var normalized = NormalizeUiPreferences(preferences);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Serialize(normalized, UiPreferencesJsonOptions);
+    }
+
+    private static UserUiPreferencesDto? NormalizeUiPreferences(UserUiPreferencesDto? preferences)
+    {
+        if (preferences is null)
+        {
+            return null;
+        }
+
+        var theme = NormalizeThemePreferences(preferences.Theme);
+        var ratingSystemOptions = NormalizeRatingSystemOptions(preferences.RatingSystemOptions);
+        if (theme is null && ratingSystemOptions is null)
+        {
+            return null;
+        }
+
+        return new UserUiPreferencesDto(theme, ratingSystemOptions);
+    }
+
+    private static UserThemePreferencesDto? NormalizeThemePreferences(UserThemePreferencesDto? theme)
+    {
+        if (theme is null)
+        {
+            return null;
+        }
+
+        var activeThemeId = string.IsNullOrWhiteSpace(theme.ActiveThemeId) ? null : theme.ActiveThemeId.Trim();
+        var activeComponentStyles = theme.ActiveComponentStyles?
+            .Select(style => style?.Trim())
+            .Where(style => !string.IsNullOrWhiteSpace(style))
+            .Select(style => style!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var activeLayoutStyle = string.IsNullOrWhiteSpace(theme.ActiveLayoutStyle) ? null : theme.ActiveLayoutStyle.Trim();
+
+        Dictionary<string, string>? customThemeColors = null;
+        if (theme.CustomThemeColors is { Count: > 0 })
+        {
+            customThemeColors = theme.CustomThemeColors
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && !string.IsNullOrWhiteSpace(entry.Value))
+                .ToDictionary(entry => entry.Key.Trim(), entry => entry.Value.Trim(), StringComparer.OrdinalIgnoreCase);
+            if (customThemeColors.Count == 0)
+            {
+                customThemeColors = null;
+            }
+        }
+
+        Dictionary<string, Dictionary<string, string>>? styleOptions = null;
+        if (theme.StyleOptions is { Count: > 0 })
+        {
+            styleOptions = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (styleId, options) in theme.StyleOptions)
+            {
+                if (string.IsNullOrWhiteSpace(styleId) || options is null || options.Count == 0)
+                {
+                    continue;
+                }
+
+                var normalizedOptions = options
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && !string.IsNullOrWhiteSpace(entry.Value))
+                    .ToDictionary(entry => entry.Key.Trim(), entry => entry.Value.Trim(), StringComparer.OrdinalIgnoreCase);
+                if (normalizedOptions.Count > 0)
+                {
+                    styleOptions[styleId.Trim()] = normalizedOptions;
+                }
+            }
+
+            if (styleOptions.Count == 0)
+            {
+                styleOptions = null;
+            }
+        }
+
+        if (activeThemeId is null
+            && (activeComponentStyles is null || activeComponentStyles.Length == 0)
+            && activeLayoutStyle is null
+            && customThemeColors is null
+            && styleOptions is null)
+        {
+            return null;
+        }
+
+        return new UserThemePreferencesDto(activeThemeId, activeComponentStyles, activeLayoutStyle, customThemeColors, styleOptions);
+    }
+
+    private static UserRatingSystemOptionsDto? NormalizeRatingSystemOptions(UserRatingSystemOptionsDto? ratingSystemOptions)
+    {
+        if (ratingSystemOptions is null)
+        {
+            return null;
+        }
+
+        var type = ratingSystemOptions.Type?.Trim().ToLowerInvariant() switch
+        {
+            "stars" => "stars",
+            "decimal" => "decimal",
+            _ => null,
+        };
+        if (type is null)
+        {
+            return null;
+        }
+
+        var starPrecision = ratingSystemOptions.StarPrecision?.Trim().ToLowerInvariant() switch
+        {
+            "full" => "full",
+            "half" => "half",
+            "quarter" => "quarter",
+            "tenth" => "tenth",
+            _ => "full",
+        };
+
+        return new UserRatingSystemOptionsDto(type, starPrecision);
+    }
 
     public static class Validation
     {

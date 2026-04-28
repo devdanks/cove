@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { system } from "../api/client";
+import { authStore, hasPermission } from "../auth/authStore";
 import type { CoveConfig, SystemStatus } from "../api/types";
 
 const defaultMenuItems = ["scenes", "images", "markers", "performers", "galleries", "studios", "tags", "groups"];
@@ -81,9 +82,23 @@ interface AppConfigContextValue {
 const AppConfigContext = createContext<AppConfigContextValue | null>(null);
 
 export function AppConfigProvider({ children }: { children: ReactNode }) {
+  const [authUser, setAuthUser] = useState(() => authStore.getUser());
+
+  useEffect(() => authStore.subscribe(() => setAuthUser(authStore.getUser())), []);
+
+  const statusQuery = useQuery({
+    queryKey: ["system-status"],
+    queryFn: system.status,
+  });
+
+  const canReadSystemConfig = !!statusQuery.data
+    && (!statusQuery.data.authEnabled || hasPermission(authUser?.permissions, "system.read", authUser?.readGrantedEntityKinds));
+
   const configQuery = useQuery({
-    queryKey: ["system-config"],
+    queryKey: ["system-config", statusQuery.data?.authEnabled ? authUser?.id ?? "anonymous" : "auth-disabled"],
     queryFn: system.getConfig,
+    enabled: canReadSystemConfig,
+    retry: false,
   });
 
   const config = useMemo(() => {
@@ -93,12 +108,6 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
 
     return normalizeConfig(configQuery.data);
   }, [configQuery.data]);
-
-  const statusQuery = useQuery({
-    queryKey: ["system-status"],
-    queryFn: system.status,
-  });
-
   useEffect(() => {
     document.title = config?.ui.title?.trim() || "Cove";
   }, [config?.ui.title]);

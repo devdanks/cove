@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using Cove.Core.Entities;
+using PermissionKeys = Cove.Core.Auth.Permissions;
 
 namespace Cove.Core.Auth;
 
@@ -14,8 +16,11 @@ public interface ICurrentPrincipalAccessor
 
 public sealed class CurrentPrincipalAccessor : ICurrentPrincipalAccessor
 {
-    public CovePrincipal? Current { get; private set; }
-    public void Set(CovePrincipal? principal) => Current = principal;
+    private static readonly AsyncLocal<CovePrincipal?> CurrentHolder = new();
+
+    public CovePrincipal? Current => CurrentHolder.Value;
+
+    public void Set(CovePrincipal? principal) => CurrentHolder.Value = principal;
 }
 
 public sealed class CovePrincipal
@@ -26,6 +31,16 @@ public sealed class CovePrincipal
     public required IReadOnlySet<string> Roles { get; init; }
     /// <summary>Resolved permission set with wildcards expanded.</summary>
     public required IReadOnlySet<string> Permissions { get; init; }
+    /// <summary>
+    /// Entity kinds that need content-rule evaluation for read access.
+    /// Empty means standard permission checks are sufficient for normal user requests.
+    /// </summary>
+    public IReadOnlySet<string> ReadRestrictedEntityKinds { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Entity kinds that can be read only through explicit read-scoped allow rules or entity overrides.
+    /// These do not imply unrestricted read access; SQL scope evaluation must still run per entity.
+    /// </summary>
+    public IReadOnlySet<string> ReadGrantedEntityKinds { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     public ClaimsPrincipal? ClaimsPrincipal { get; init; }
     /// <summary>For api_token / share_link principals: the originating token id.</summary>
     public Guid? TokenId { get; init; }
@@ -66,6 +81,46 @@ public sealed class CovePrincipal
         if (Permissions.Contains(resource + ".*")) return true;
         if (Permissions.Contains("*." + verb)) return true;
         return false;
+    }
+
+    public bool HasReadGrant(string permission)
+    {
+        return TryGetReadGrantEntityKind(permission, out var entityKind)
+            && ReadGrantedEntityKinds.Contains(entityKind);
+    }
+
+    private static bool TryGetReadGrantEntityKind(string permission, out string entityKind)
+    {
+        switch (permission)
+        {
+            case PermissionKeys.ScenesRead:
+                entityKind = EntityKinds.Scene;
+                return true;
+            case PermissionKeys.PerformersRead:
+                entityKind = EntityKinds.Performer;
+                return true;
+            case PermissionKeys.TagsRead:
+                entityKind = EntityKinds.Tag;
+                return true;
+            case PermissionKeys.StudiosRead:
+                entityKind = EntityKinds.Studio;
+                return true;
+            case PermissionKeys.GalleriesRead:
+                entityKind = EntityKinds.Gallery;
+                return true;
+            case PermissionKeys.ImagesRead:
+                entityKind = EntityKinds.Image;
+                return true;
+            case PermissionKeys.GroupsRead:
+                entityKind = EntityKinds.Group;
+                return true;
+            case PermissionKeys.MarkersRead:
+                entityKind = EntityKinds.Marker;
+                return true;
+            default:
+                entityKind = string.Empty;
+                return false;
+        }
     }
 }
 

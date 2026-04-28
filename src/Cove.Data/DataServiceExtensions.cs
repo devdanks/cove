@@ -45,11 +45,13 @@ public static class DataServiceExtensions
 
         // Auth / RBAC services
         services.AddSingleton<IPermissionRegistry, PermissionRegistry>();
-        services.AddScoped<ICurrentPrincipalAccessor, CurrentPrincipalAccessor>();
+        services.AddSingleton<ICurrentPrincipalAccessor, CurrentPrincipalAccessor>();
         services.AddScoped<IAuthorizationService, AuthorizationService>();
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IRoleService, RoleService>();
+        services.AddScoped<IContentRuleService, ContentRuleService>();
+        services.AddScoped<IShareLinkService, ShareLinkService>();
         services.AddSingleton<AuditService>();
         services.AddSingleton<IAuditService>(sp => sp.GetRequiredService<AuditService>());
         services.AddHostedService(sp => sp.GetRequiredService<AuditService>());

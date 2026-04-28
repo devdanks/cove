@@ -102,20 +102,22 @@ public sealed class PermissionAuthorizationFilter : IAsyncAuthorizationFilter
 
         foreach (var attr in requires)
         {
+            bool Satisfies(string permission) => principal.Has(permission) || principal.HasReadGrant(permission);
+
             var passed = attr.Mode == PermissionMode.All
-                ? attr.Permissions.All(p => principal.Has(p))
-                : attr.Permissions.Any(p => principal.Has(p));
+                ? attr.Permissions.All(Satisfies)
+                : attr.Permissions.Any(Satisfies);
             if (!passed)
             {
                 context.Result = new ObjectResult(new
                 {
                     code = "FORBIDDEN",
-                    missing = attr.Permissions.Where(p => !principal.Has(p)).ToArray(),
+                    missing = attr.Permissions.Where(p => !Satisfies(p)).ToArray(),
                 })
                 { StatusCode = StatusCodes.Status403Forbidden };
                 await _audit.LogAsync(AuditActions.PermissionDeny, AuditOutcomes.Deny, principal,
                     "endpoint", cad.DisplayName,
-                    new { missing = attr.Permissions.Where(p => !principal.Has(p)).ToArray(),
+                    new { missing = attr.Permissions.Where(p => !Satisfies(p)).ToArray(),
                           path = context.HttpContext.Request.Path.ToString() });
                 return;
             }

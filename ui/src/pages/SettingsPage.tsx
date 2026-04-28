@@ -34,6 +34,7 @@ import type {
   JobInfo,
   PackageSource,
   Plugin,
+  RatingSystemOptions,
   RatingStarPrecision,
   RatingSystemType,
   ScraperPreference,
@@ -56,18 +57,18 @@ import {
   queueImportedUrlDownloads,
   type DownloadSelectionEntity,
 } from "../utils/batchDownloads";
-import { UsersTab, RolesTab, AuditTab } from "./settings/AdminSections";
+import { useAuth } from "../auth/AuthContext";
+import { UsersTab, RolesTab, AuditTab, ContentRulesTab, ApiTokensTab, ShareLinksTab } from "./settings/AdminSections";
+import { defaultRatingSystemOptions, normalizeRatingOptions } from "../components/Rating";
+import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
+import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 
-type SettingsTab = "tasks" | "library" | "interface" | "security" | "users" | "roles" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
+type SettingsTab = "tasks" | "library" | "interface" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
-const tabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
+const primaryTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
   { key: "tasks", label: "Tasks", icon: PlayCircle },
   { key: "library", label: "Library", icon: FolderOpen },
   { key: "interface", label: "Interface", icon: Monitor },
-  { key: "security", label: "Security", icon: Shield },
-  { key: "users", label: "Users", icon: Users },
-  { key: "roles", label: "Roles", icon: KeyRound },
-  { key: "audit", label: "Audit log", icon: FileText },
   { key: "metadata-providers", label: "Metadata Providers", icon: SearchCode },
   { key: "extensions", label: "Extensions", icon: Plug },
   { key: "logs", label: "Logs", icon: ScrollText },
@@ -75,6 +76,39 @@ const tabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
   { key: "changelog", label: "Changelog", icon: History },
   { key: "about", label: "About", icon: Info },
 ];
+
+const authTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
+  { key: "security", label: "Security", icon: Shield },
+  { key: "users", label: "Users", icon: Users },
+  { key: "roles", label: "Roles", icon: KeyRound },
+  { key: "content-rules", label: "Content rules", icon: Shield },
+  { key: "api-tokens", label: "API tokens", icon: KeyRound },
+  { key: "share-links", label: "Share links", icon: Plug },
+  { key: "audit", label: "Audit log", icon: FileText },
+];
+
+const tabs = [...primaryTabs, ...authTabs];
+const authTabKeys = new Set(authTabs.map((tab) => tab.key));
+const limitedPrimaryTabKeys = new Set<SettingsTab>(["interface", "changelog", "about"]);
+
+const tabDescriptions: Record<SettingsTab, string> = {
+  tasks: "Scan, generate, and maintenance operations.",
+  library: "Content locations, generated assets, and scan rules.",
+  interface: "Language, custom title, navigation, and rating presentation.",
+  security: "Authentication and session settings for the local instance.",
+  users: "Manage local user accounts and their role assignments.",
+  roles: "Define roles and the permissions they grant. Built-in roles are read-only.",
+  "content-rules": "Restrict what each role can see or modify per entity kind. Deny rules override allow.",
+  "api-tokens": "Long-lived personal access tokens. Scope is intersected with your own permissions.",
+  "share-links": "Anonymous, time-limited, optionally password-gated read-only links.",
+  audit: "Authentication, authorization, and admin action history.",
+  "metadata-providers": "Scraper directories, package source URLs, configured MetadataServer endpoints, and discovered Cove-compatible scrapers.",
+  extensions: "Manage extensions, themes, and settings.",
+  logs: "Recent application logs from the current host.",
+  system: "Host, port, and task concurrency. Server changes take effect after restart.",
+  changelog: "Release history and version information.",
+  about: "Runtime status and effective config locations.",
+};
 
 const SETTINGS_TAB_QUERY_KEY = "tab";
 const TASK_SCAN_OPTIONS_KEY = "cove-settings-scan-options";
@@ -112,6 +146,18 @@ function isSettingsTab(value: string | null): value is SettingsTab {
 function readSettingsTabFromUrl(): SettingsTab {
   const tab = new URLSearchParams(window.location.search).get(SETTINGS_TAB_QUERY_KEY);
   return isSettingsTab(tab) ? tab : "library";
+}
+
+export function resolveVisibleSettingsTab(
+  activeTab: SettingsTab,
+  visibleTabs: Array<{ key: SettingsTab }>,
+  fallback: SettingsTab = "about",
+): SettingsTab {
+  if (visibleTabs.some((tab) => tab.key === activeTab)) {
+    return activeTab;
+  }
+
+  return visibleTabs[0]?.key ?? fallback;
 }
 
 function loadStoredTaskOptions<T extends object>(key: string, fallback: T): T {
@@ -355,12 +401,15 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
 
 export function SettingsPage() {
   const { config, status, configLoading, statusLoading } = useAppConfig();
+  const { authEnabled, user, hasPermission } = useAuth();
   const { getSettingsPanelsForTab, resolveComponent } = useExtensions();
+  const canWriteSystemSettings = hasPermission("system.settings.write");
   const libraryExtensionsPanels = getSettingsPanelsForTab("library", "extensions");
   const libraryStandalonePanels = getSettingsPanelsForTab("library");
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => readSettingsTabFromUrl());
-  const [draft, setDraft] = useState<CoveConfig | null>(null);
+  const [authGroupOpen, setAuthGroupOpen] = useState(() => authTabKeys.has(readSettingsTabFromUrl()));
+  const [draftState, setDraft] = useState<CoveConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -370,13 +419,13 @@ export function SettingsPage() {
   const { data: availableScrapers = [] } = useQuery({
     queryKey: ["system-scrapers"],
     queryFn: system.listScrapers,
-    enabled: activeTab === "metadata-providers",
+    enabled: canWriteSystemSettings && activeTab === "metadata-providers",
   });
 
   const { data: availableDownloaders = [] } = useQuery({
     queryKey: ["system-downloaders"],
     queryFn: system.listDownloaders,
-    enabled: activeTab === "library",
+    enabled: canWriteSystemSettings && activeTab === "library",
   });
 
   const sceneScraperPreferenceGroups = useMemo(() => {
@@ -479,7 +528,7 @@ export function SettingsPage() {
   const { data: scrapers = [], isLoading: scrapersLoading } = useQuery({
     queryKey: ["system-scrapers"],
     queryFn: system.listScrapers,
-    enabled: activeTab === "metadata-providers",
+    enabled: canWriteSystemSettings && activeTab === "metadata-providers",
   });
 
   const reloadScrapersMutation = useMutation({
@@ -512,9 +561,51 @@ export function SettingsPage() {
     }, {});
   }, [scrapers]);
 
+  const visibleAuthTabs = useMemo(() => {
+    return authTabs.filter((tab) => {
+      switch (tab.key) {
+        case "security":
+          return hasPermission("system.settings.write");
+        case "users":
+          return hasPermission("users.read");
+        case "roles":
+        case "content-rules":
+          return hasPermission("roles.read");
+        case "api-tokens":
+          return authEnabled && !!user && hasPermission("apitokens.write");
+        case "share-links":
+          return authEnabled && !!user && hasPermission("sharelinks.write");
+        case "audit":
+          return hasPermission("audit.read");
+        default:
+          return true;
+      }
+    });
+  }, [authEnabled, hasPermission, user]);
+
+  const visiblePrimaryTabs = useMemo(
+    () => (canWriteSystemSettings ? primaryTabs : primaryTabs.filter((tab) => limitedPrimaryTabKeys.has(tab.key))),
+    [canWriteSystemSettings],
+  );
+
+  const visibleTabs = useMemo(() => [...visiblePrimaryTabs, ...visibleAuthTabs], [visibleAuthTabs, visiblePrimaryTabs]);
+
+  useEffect(() => {
+    if (authTabKeys.has(activeTab)) {
+      setAuthGroupOpen(true);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    const nextTab = resolveVisibleSettingsTab(activeTab, visibleTabs, canWriteSystemSettings ? "library" : "about");
+    if (nextTab !== activeTab) {
+      setActiveTab(nextTab);
+    }
+  }, [activeTab, canWriteSystemSettings, visibleTabs]);
+
   // Debounced auto-save: triggers 800ms after draft changes
   useEffect(() => {
-    if (!draft) return;
+    if (!draftState || !canWriteSystemSettings) return;
     // Skip the first render when draft is initialized from config
     if (!initializedRef.current) {
       initializedRef.current = true;
@@ -522,14 +613,14 @@ export function SettingsPage() {
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      saveMutation.mutate(normalizeConfig(draft));
+      saveMutation.mutate(normalizeConfig(draftState));
     }, 800);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draftState, canWriteSystemSettings]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (configLoading || !draft) {
+  if (configLoading || (canWriteSystemSettings && !draftState)) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted" />
@@ -541,20 +632,31 @@ export function SettingsPage() {
     setDraft((current) => (current ? updater(current) : current));
   };
 
+  const draft = draftState as CoveConfig;
+  const resolvedActiveTab = resolveVisibleSettingsTab(activeTab, visibleTabs, canWriteSystemSettings ? "library" : "about");
+  const activeTabMeta = visibleTabs.find((tab) => tab.key === resolvedActiveTab) ?? tabs.find((tab) => tab.key === resolvedActiveTab);
+  const activeTabDescription = resolvedActiveTab === "interface" && !canWriteSystemSettings
+    ? "Theme and rating display preferences stored locally in this browser."
+    : tabDescriptions[resolvedActiveTab];
+
   return (
     <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
       <aside className="h-fit rounded-2xl border border-border bg-surface p-2 lg:sticky lg:top-16">
         <div className="mb-2 px-3 py-2">
           <h1 className="text-lg font-semibold text-foreground">Settings</h1>
-          <p className="mt-1 text-sm text-secondary">Stock Cove-style categories, backed by the rewrite config.</p>
+          <p className="mt-1 text-sm text-secondary">
+            {canWriteSystemSettings
+              ? "System configuration, auth administration, and runtime controls."
+              : "Personal appearance, release notes, and account-level tools."}
+          </p>
         </div>
         <nav className="space-y-1">
-          {tabs.map(({ key, label, icon: Icon }) => (
+          {visiblePrimaryTabs.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
               className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                activeTab === key
+                resolvedActiveTab === key
                   ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--color-border)]"
                   : "text-secondary hover:bg-card hover:text-foreground"
               }`}
@@ -563,6 +665,37 @@ export function SettingsPage() {
               <span>{label}</span>
             </button>
           ))}
+
+          {visibleAuthTabs.length > 0 ? (
+            <div className="pt-2">
+              <button
+                onClick={() => setAuthGroupOpen((current) => !current)}
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-secondary transition-colors hover:bg-card hover:text-foreground"
+              >
+                <Shield className="h-4 w-4" />
+                <span className="flex-1">Security & Access</span>
+                {authGroupOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+              {authGroupOpen ? (
+                <div className="mt-1 space-y-1 border-l border-border/60 pl-3 ml-3">
+                  {visibleAuthTabs.map(({ key, label, icon: Icon }) => (
+                    <button
+                      key={key}
+                      onClick={() => setActiveTab(key)}
+                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                        resolvedActiveTab === key
+                          ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--color-border)]"
+                          : "text-secondary hover:bg-card hover:text-foreground"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </nav>
       </aside>
 
@@ -570,21 +703,8 @@ export function SettingsPage() {
         <section className="rounded-2xl border border-border bg-surface p-5 shadow-lg shadow-black/20">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-foreground">{tabs.find((tab) => tab.key === activeTab)?.label}</h2>
-              <p className="mt-1 text-sm text-secondary">
-                {activeTab === "tasks" && "Scan, generate, and maintenance operations."}
-                {activeTab === "library" && "Content locations, generated assets, and scan rules."}
-                {activeTab === "interface" && "Language, custom title, navigation, and rating presentation."}
-                {activeTab === "security" && "Authentication and session settings. Password changes are persisted immediately."}
-                {activeTab === "users" && "Manage local user accounts and their role assignments."}
-                {activeTab === "roles" && "Define roles and the permissions they grant. Built-in roles are read-only."}
-                {activeTab === "audit" && "Authentication, authorization, and admin action history."}
-                {activeTab === "metadata-providers" && "Scraper directories, package source URLs, configured MetadataServer endpoints, and discovered Cove-compatible scrapers."}
-                {activeTab === "extensions" && "Manage extensions, themes, and settings."}
-                {activeTab === "system" && "Host, port, and task concurrency. Server changes take effect after restart."}
-                {activeTab === "changelog" && "Release history and version information."}
-                {activeTab === "about" && "Runtime status and effective config locations."}
-              </p>
+              <h2 className="text-xl font-semibold text-foreground">{activeTabMeta?.label}</h2>
+              <p className="mt-1 text-sm text-secondary">{activeTabDescription}</p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               {error && <span className="text-sm text-red-300">{error}</span>}
@@ -593,9 +713,9 @@ export function SettingsPage() {
           </div>
         </section>
 
-        {activeTab === "tasks" && <TasksPanel />}
+        {resolvedActiveTab === "tasks" && <TasksPanel />}
 
-        {activeTab === "library" && (
+        {resolvedActiveTab === "library" && (
           <>
             <SectionCard title="Library Paths" description="Add the content roots the scanner should process.">
               <div className="space-y-3">
@@ -906,8 +1026,9 @@ export function SettingsPage() {
           </>
         )}
 
-        {activeTab === "interface" && (
-          <>
+        {resolvedActiveTab === "interface" && (
+          canWriteSystemSettings ? (
+            <>
             <SectionCard title="Basic Interface" description="Persisted UI preferences used across the app shell.">
               <div className="grid gap-4 md:grid-cols-2">
                 <SelectField
@@ -1117,10 +1238,13 @@ export function SettingsPage() {
             </SectionCard>
 
             <ThemeSelector />
-          </>
+            </>
+          ) : (
+            <LocalInterfacePanel serverRatingOptions={draftState?.ui.ratingSystemOptions} />
+          )
         )}
 
-        {activeTab === "security" && (
+        {resolvedActiveTab === "security" && (
           <>
             <SectionCard title="Authentication" description="These values persist to config immediately. Enabling or disabling auth may still require a restart for middleware changes.">
               <div className="space-y-4">
@@ -1163,7 +1287,7 @@ export function SettingsPage() {
           </>
         )}
 
-        {activeTab === "metadata-providers" && (
+        {resolvedActiveTab === "metadata-providers" && (
           <>
             <SectionCard title="Scraper Directories" description="Directories are scanned recursively for Cove-compatible YAML scraper definitions.">
               <div className="space-y-3">
@@ -1697,11 +1821,14 @@ export function SettingsPage() {
           </>
         )}
 
-        {activeTab === "users" && <UsersTab />}
-        {activeTab === "roles" && <RolesTab />}
-        {activeTab === "audit" && <AuditTab />}
+        {resolvedActiveTab === "users" && <UsersTab />}
+        {resolvedActiveTab === "roles" && <RolesTab />}
+        {resolvedActiveTab === "content-rules" && <ContentRulesTab />}
+        {resolvedActiveTab === "api-tokens" && <ApiTokensTab />}
+        {resolvedActiveTab === "share-links" && <ShareLinksTab />}
+        {resolvedActiveTab === "audit" && <AuditTab />}
 
-        {activeTab === "system" && (
+        {resolvedActiveTab === "system" && (
           <>
             <SectionCard title="Server" description="Host and port are persisted immediately but require a restart to rebind the listener.">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1874,11 +2001,11 @@ export function SettingsPage() {
           </>
         )}
 
-        {activeTab === "extensions" && <ExtensionsPanel />}
+        {resolvedActiveTab === "extensions" && <ExtensionsPanel />}
 
-        {activeTab === "logs" && <LogsPanel />}
+        {resolvedActiveTab === "logs" && <LogsPanel />}
 
-        {activeTab === "changelog" && (
+        {resolvedActiveTab === "changelog" && (
           <>
             <SectionCard title="Changelog" description="What's new in this version.">
               <div className="space-y-6">
@@ -1903,7 +2030,7 @@ export function SettingsPage() {
           </>
         )}
 
-        {activeTab === "about" && (
+        {resolvedActiveTab === "about" && (
           <>
             <SectionCard title="About Cove" description="An organizer for your media library.">
               <div className="flex items-start gap-6">
@@ -1934,8 +2061,8 @@ export function SettingsPage() {
                 <dl className="grid gap-4 md:grid-cols-2">
                   <InfoPair label="Version" value={status.version} />
                   <InfoPair label="Database" value={status.databasePath} />
-                  <InfoPair label="Config file" value={status.configFile} />
-                  <InfoPair label="App directory" value={status.appDir} />
+                  {status.configFile ? <InfoPair label="Config file" value={status.configFile} /> : null}
+                  {status.appDir ? <InfoPair label="App directory" value={status.appDir} /> : null}
                 </dl>
               ) : (
                 <div className="text-sm text-secondary">Runtime status is unavailable.</div>
@@ -1951,15 +2078,21 @@ export function SettingsPage() {
               </dl>
             </SectionCard>
 
-            <SectionCard title="Current Config Summary" description="High-level values from the effective client-side config object.">
-              <dl className="grid gap-4 md:grid-cols-2">
-                <InfoPair label="Library paths" value={String(draft.covePaths.filter((path) => path.path.trim() !== "").length)} />
-                <InfoPair label="Scraper directories" value={String(draft.scraping.scraperDirectories.filter(Boolean).length)} />
-                <InfoPair label="Metadata Servers" value={String(draft.scraping.metadataServers.filter((box) => box.endpoint.trim() !== "").length)} />
-                <InfoPair label="Rating system" value={draft.ui.ratingSystemOptions.type} />
-                <InfoPair label="Authentication" value={draft.security.enabled ? "enabled" : "disabled"} />
-              </dl>
-            </SectionCard>
+            {draftState ? (
+              <SectionCard title="Current Config Summary" description="High-level values from the effective client-side config object.">
+                <dl className="grid gap-4 md:grid-cols-2">
+                  <InfoPair label="Library paths" value={String(draftState.covePaths.filter((path) => path.path.trim() !== "").length)} />
+                  <InfoPair label="Scraper directories" value={String(draftState.scraping.scraperDirectories.filter(Boolean).length)} />
+                  <InfoPair label="Metadata Servers" value={String(draftState.scraping.metadataServers.filter((box) => box.endpoint.trim() !== "").length)} />
+                  <InfoPair label="Rating system" value={draftState.ui.ratingSystemOptions.type} />
+                  <InfoPair label="Authentication" value={draftState.security.enabled ? "enabled" : "disabled"} />
+                </dl>
+              </SectionCard>
+            ) : (
+              <SectionCard title="Current Config Summary" description="High-level values from the effective client-side config object.">
+                <div className="text-sm text-secondary">Config summary requires system read access.</div>
+              </SectionCard>
+            )}
 
             <SectionCard title="Keyboard Shortcuts" description="Press ? anywhere to view the full shortcut reference.">
               <div className="grid gap-3 md:grid-cols-2 text-sm">
@@ -1973,6 +2106,84 @@ export function SettingsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function LocalInterfacePanel({ serverRatingOptions }: { serverRatingOptions?: Partial<RatingSystemOptions> | null }) {
+  const { authEnabled, user } = useAuth();
+  const accountBackedPreferences = supportsServerBackedUiPreferences(user);
+  const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
+  const [localRatingOverride, setLocalRatingOverride] = useState<RatingSystemOptions | null>(() => readStoredRatingOptionsOverride());
+
+  useEffect(() => {
+    setLocalRatingOverride(readStoredRatingOptionsOverride());
+  }, [serverRatingOptions, user]);
+
+  const effectiveRatingOptions = localRatingOverride ?? normalizeRatingOptions(serverRatingOptions ?? defaultRatingSystemOptions);
+
+  const updateRatingOptions = (nextOptions: RatingSystemOptions | null) => {
+    writeStoredRatingOptionsOverride(nextOptions);
+    setLocalRatingOverride(nextOptions);
+  };
+
+  return (
+    <>
+      <SectionCard
+        title={sharedProfilePreferences ? "Shared Appearance" : accountBackedPreferences ? "Personal Appearance" : "Local Appearance"}
+        description={sharedProfilePreferences
+          ? "These preferences are stored in Cove's shared built-in profile, so they carry across browsers and devices while authentication is disabled."
+          : accountBackedPreferences
+            ? "These preferences follow your signed-in account across browsers. When signed out, the browser-local values are still used as a fallback."
+            : "These preferences are stored in this browser and do not change the server configuration."}
+      >
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <p className="text-sm text-secondary">Choose whether ratings follow the system default or your personal display preference.</p>
+            <button
+              onClick={() => updateRatingOptions(null)}
+              disabled={!localRatingOverride}
+              className="inline-flex items-center justify-center rounded-xl border border-border px-3 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Use system default
+            </button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <SelectField
+              label="Rating system"
+              value={effectiveRatingOptions.type}
+              onChange={(value) =>
+                updateRatingOptions(normalizeRatingOptions({
+                  ...effectiveRatingOptions,
+                  type: value as RatingSystemType,
+                  starPrecision: value === "decimal" ? "full" : effectiveRatingOptions.starPrecision,
+                }))
+              }
+              options={ratingSystemOptions}
+            />
+            {effectiveRatingOptions.type === "stars" ? (
+              <SelectField
+                label="Star precision"
+                value={effectiveRatingOptions.starPrecision}
+                onChange={(value) =>
+                  updateRatingOptions(normalizeRatingOptions({
+                    ...effectiveRatingOptions,
+                    starPrecision: value as RatingStarPrecision,
+                  }))
+                }
+                options={starPrecisionOptions}
+              />
+            ) : (
+              <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-secondary">
+                Decimal ratings always use 0.1 steps.
+              </div>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+
+      <ThemeSelector />
+    </>
   );
 }
 
@@ -3109,6 +3320,7 @@ function buildColorWithAlpha(hex: string, alpha: number): string {
 }
 
 function ThemeSelector() {
+  const { user } = useAuth();
   const {
     availableThemes, activeThemeId, setActiveTheme,
     availableComponentStyles, activeComponentStyles, toggleComponentStyle,
@@ -3132,11 +3344,13 @@ function ThemeSelector() {
     });
   };
 
-  // Style option configs stored in localStorage
-  const [styleOptions, setStyleOptionsState] = useState<Record<string, Record<string, string>>>(() => {
+  const readPersistedStyleOptions = () => {
     try {
-      const raw = JSON.parse(localStorage.getItem("cove-style-options") ?? "{}");
-      // Migrate old gradient settings to unified dropdowns
+      const source = supportsServerBackedUiPreferences(user)
+        ? (readAuthenticatedUserThemePreferences()?.styleOptions ?? {})
+        : JSON.parse(localStorage.getItem("cove-style-options") ?? "{}");
+      const raw = JSON.parse(JSON.stringify(source)) as Record<string, Record<string, string>>;
+
       if (raw.gradient) {
         const g = raw.gradient;
         if (g.animated === "on" && g.speed) { g.animated = g.speed; }
@@ -3144,13 +3358,12 @@ function ThemeSelector() {
         delete g.speed;
         if (g.cards === "on" && g.cardstrength) { g.cards = g.cardstrength; }
         else if (g.cards === "on") { g.cards = "medium"; }
-        else if (g.cards === "off") { /* keep off */ }
         delete g.cardstrength;
         if (g.bgstrength && !g.background) { g.background = g.bgstrength; }
         delete g.bgstrength;
         raw.gradient = g;
       }
-      // Migrate discrete string values to numeric (continuous sliders)
+
       const discreteToNumeric: Record<string, Record<string, Record<string, string>>> = {
         gradient: {
           animated: { off: "0", slow: "25", medium: "55", fast: "85" },
@@ -3169,26 +3382,43 @@ function ThemeSelector() {
           bgspeed: { off: "0", slow: "25", medium: "55", fast: "85" },
         },
       };
+
       let migrated = false;
       for (const [styleId, opts] of Object.entries(raw)) {
-        for (const [key, val] of Object.entries(opts as Record<string, string>)) {
-          const migVal = discreteToNumeric[styleId]?.[key]?.[val];
-          if (migVal) {
-            (raw as Record<string, Record<string, string>>)[styleId][key] = migVal;
+        for (const [key, val] of Object.entries(opts)) {
+          const migratedValue = discreteToNumeric[styleId]?.[key]?.[val];
+          if (migratedValue) {
+            raw[styleId][key] = migratedValue;
             migrated = true;
           }
         }
       }
+
       if (migrated) {
         localStorage.setItem("cove-style-options", JSON.stringify(raw));
       }
+
       return raw;
-    } catch { return {}; }
+    } catch {
+      return {};
+    }
+  };
+
+  // Style option configs stored in localStorage
+  const [styleOptions, setStyleOptionsState] = useState<Record<string, Record<string, string>>>(() => {
+    return readPersistedStyleOptions();
   });
   const setStyleOption = (styleId: string, optionKey: string, value: string) => {
     const updated = { ...styleOptions, [styleId]: { ...styleOptions[styleId], [optionKey]: value } };
     setStyleOptionsState(updated);
     localStorage.setItem("cove-style-options", JSON.stringify(updated));
+    updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      theme: {
+        ...(current?.theme ?? {}),
+        styleOptions: updated,
+      },
+    }));
     // Apply to document as data attribute for CSS targeting
     document.documentElement.dataset[`style${styleId.charAt(0).toUpperCase()}${styleId.slice(1)}${optionKey.charAt(0).toUpperCase()}${optionKey.slice(1)}`] = value;
     // Set CSS custom property for range-type configs
@@ -3197,6 +3427,10 @@ function ThemeSelector() {
       document.documentElement.style.setProperty(cfg.cssVar, value);
     }
   };
+
+  useEffect(() => {
+    setStyleOptionsState(readPersistedStyleOptions());
+  }, [user]);
 
   // Apply style options on mount (and clean up old migrated attributes)
   useEffect(() => {
@@ -3214,7 +3448,7 @@ function ThemeSelector() {
         }
       }
     }
-  }, []);
+  }, [styleOptions]);
 
   // Style-specific configuration definitions
   // "range" type: continuous slider with CSS custom property. "select" (no type): dropdown.

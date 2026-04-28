@@ -1,7 +1,442 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { auditApi, rolesApi, usersApi, type PermissionInfo, type RoleRow, type UserRow } from "../../api/client";
+import {
+  apiTokensApi,
+  auditApi,
+  contentRulesApi,
+  rolesApi,
+  shareLinksApi,
+  studios as studiosApi,
+  tags as tagsApi,
+  usersApi,
+  type ApiTokenIssuedRow,
+  type ApiTokenRow,
+  type ContentRuleRow,
+  type EntityOverrideRow,
+  type PermissionInfo,
+  type RoleRow,
+  type ShareLinkIssuedRow,
+  type ShareLinkRow,
+  type UserRow,
+} from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { buildRoutePath } from "../../router/location";
+
+const ENTITY_KINDS = ["scene", "performer", "tag", "studio", "gallery", "image", "group", "marker"] as const;
+const SCOPE_KINDS = ["all", "tag", "studio", "identifier", "attribute", "expression"] as const;
+const APPLIES_TO = ["read", "write", "delete", "all"] as const;
+const EFFECTS = ["deny", "allow"] as const;
+const SIMPLE_SCOPE_KINDS = ["all", "tag", "studio", "identifier", "attribute"] as const;
+const IDENTIFIER_SCHEMES = [
+  { value: "", label: "Any scheme" },
+  { value: "url", label: "URL" },
+  { value: "alias", label: "Alias" },
+  { value: "remote_id", label: "Remote ID" },
+] as const;
+const ATTRIBUTE_OPERATORS = [
+  { value: "exists", label: "Exists" },
+  { value: "notExists", label: "Does not exist" },
+  { value: "equals", label: "Equals" },
+  { value: "notEquals", label: "Does not equal" },
+  { value: "contains", label: "Contains" },
+  { value: "startsWith", label: "Starts with" },
+  { value: "endsWith", label: "Ends with" },
+  { value: "regex", label: "Matches regex" },
+  { value: "in", label: "Matches any of" },
+  { value: "gt", label: "Greater than" },
+  { value: "gte", label: "Greater than or equal" },
+  { value: "lt", label: "Less than" },
+  { value: "lte", label: "Less than or equal" },
+] as const;
+const ENTITY_LIST_ROUTES: Record<string, string> = {
+  scene: "scenes",
+  performer: "performers",
+  tag: "tags",
+  studio: "studios",
+  gallery: "galleries",
+  image: "images",
+  group: "groups",
+  marker: "markers",
+};
+
+type SimpleScopeKind = (typeof SIMPLE_SCOPE_KINDS)[number];
+type IdentifierScheme = (typeof IDENTIFIER_SCHEMES)[number]["value"];
+type AttributeOperator = (typeof ATTRIBUTE_OPERATORS)[number]["value"];
+type ExpressionOperator = "and" | "or" | "not";
+
+interface ContentRuleScopeDraft {
+  tagId?: number;
+  studioId?: number;
+  identifierScheme: IdentifierScheme;
+  identifierSource: string;
+  identifierValue: string;
+  attributePath: string;
+  attributeOperator: AttributeOperator;
+  attributeValue: string;
+}
+
+interface ContentRuleExpressionRuleDraft extends ContentRuleScopeDraft {
+  id: string;
+  scopeKind: SimpleScopeKind;
+}
+
+type ScopeBuildResult =
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; error: string };
+
+let contentRuleDraftId = 0;
+
+function nextContentRuleDraftId() {
+  contentRuleDraftId += 1;
+  return `content-rule-${contentRuleDraftId}`;
+}
+
+function createEmptyScopeDraft(): ContentRuleScopeDraft {
+  return {
+    identifierScheme: "",
+    identifierSource: "",
+    identifierValue: "",
+    attributePath: "",
+    attributeOperator: "equals",
+    attributeValue: "",
+  };
+}
+
+function createExpressionRuleDraft(scopeKind: SimpleScopeKind = "tag"): ContentRuleExpressionRuleDraft {
+  return {
+    id: nextContentRuleDraftId(),
+    scopeKind,
+    ...createEmptyScopeDraft(),
+  };
+}
+
+function parseLooseScalar(value: string): string | number | boolean | null {
+  const trimmed = value.trim();
+  if (!trimmed.length) {
+    return "";
+  }
+
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  if (/^(true|false)$/i.test(trimmed)) {
+    return trimmed.toLowerCase() === "true";
+  }
+
+  if (trimmed.toLowerCase() === "null") {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function buildSimpleScopeValue(scopeKind: SimpleScopeKind, draft: ContentRuleScopeDraft): ScopeBuildResult {
+  switch (scopeKind) {
+    case "all":
+      return { ok: true, value: {} };
+    case "tag":
+      return typeof draft.tagId === "number"
+        ? { ok: true, value: { tagId: draft.tagId } }
+        : { ok: false, error: "Select a tag for this rule." };
+    case "studio":
+      return typeof draft.studioId === "number"
+        ? { ok: true, value: { studioId: draft.studioId } }
+        : { ok: false, error: "Select a studio for this rule." };
+    case "identifier": {
+      const value = draft.identifierValue.trim();
+      if (!value) {
+        return { ok: false, error: "Enter an identifier value to match." };
+      }
+
+      return {
+        ok: true,
+        value: {
+          ...(draft.identifierScheme ? { scheme: draft.identifierScheme } : {}),
+          ...(draft.identifierSource.trim() ? { source: draft.identifierSource.trim() } : {}),
+          value,
+        },
+      };
+    }
+    case "attribute": {
+      const path = draft.attributePath.trim();
+      if (!path) {
+        return { ok: false, error: "Enter an attribute path to evaluate." };
+      }
+
+      if (draft.attributeOperator === "exists") {
+        return { ok: true, value: { path, exists: true } };
+      }
+
+      if (draft.attributeOperator === "notExists") {
+        return { ok: true, value: { path, exists: false } };
+      }
+
+      const rawValue = draft.attributeValue.trim();
+      if (!rawValue) {
+        return { ok: false, error: "Enter a value for this attribute rule." };
+      }
+
+      if (draft.attributeOperator === "in") {
+        const values = rawValue
+          .split(/[\r\n,]+/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .map(parseLooseScalar);
+
+        if (!values.length) {
+          return { ok: false, error: "Enter at least one value for the list match." };
+        }
+
+        return { ok: true, value: { path, in: values } };
+      }
+
+      return {
+        ok: true,
+        value: {
+          path,
+          [draft.attributeOperator]: parseLooseScalar(rawValue),
+        },
+      };
+    }
+    default:
+      return { ok: false, error: "Unsupported scope kind." };
+  }
+}
+
+function buildScopeValue(scopeKind: (typeof SCOPE_KINDS)[number], draft: ContentRuleScopeDraft, expressionOperator: ExpressionOperator, expressionRules: ContentRuleExpressionRuleDraft[]): ScopeBuildResult {
+  if (scopeKind !== "expression") {
+    return buildSimpleScopeValue(scopeKind, draft);
+  }
+
+  if (!expressionRules.length) {
+    return { ok: false, error: "Add at least one expression rule." };
+  }
+
+  const builtRules: Array<{ scopeKind: SimpleScopeKind; scopeValue: Record<string, unknown> }> = [];
+  for (const rule of expressionRules) {
+    const builtRule = buildSimpleScopeValue(rule.scopeKind, rule);
+    if (!builtRule.ok) {
+      return { ok: false, error: builtRule.error };
+    }
+
+    builtRules.push({ scopeKind: rule.scopeKind, scopeValue: builtRule.value });
+  }
+
+  if (expressionOperator === "not") {
+    return {
+      ok: true,
+      value: builtRules.length === 1
+        ? { op: "not", rule: builtRules[0] }
+        : { op: "not", rule: { scopeKind: "expression", scopeValue: { op: "or", rules: builtRules } } },
+    };
+  }
+
+  return { ok: true, value: { op: expressionOperator, rules: builtRules } };
+}
+
+function parseScopeValue(scopeValue: string): Record<string, unknown> | null {
+  if (!scopeValue.trim()) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(scopeValue) as unknown;
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatScopeScalar(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => formatScopeScalar(item)).join(", ");
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (value === null) {
+    return "null";
+  }
+
+  return JSON.stringify(value);
+}
+
+function formatParsedScopeSummary(scopeKind: string, scopeValue: Record<string, unknown>): string {
+  switch (scopeKind) {
+    case "all":
+      return "all content";
+    case "tag":
+      return `tag #${scopeValue.tagId ?? "?"}`;
+    case "studio":
+      return `studio #${scopeValue.studioId ?? "?"}`;
+    case "identifier": {
+      const parts = [
+        scopeValue.scheme ? String(scopeValue.scheme) : "any scheme",
+        scopeValue.source ? `from ${scopeValue.source}` : null,
+        scopeValue.normalizedValue ? `matches ${scopeValue.normalizedValue}` : scopeValue.value ? `matches ${scopeValue.value}` : null,
+      ].filter(Boolean);
+      return parts.join(" · ") || "identifier rule";
+    }
+    case "attribute": {
+      const path = String(scopeValue.path ?? scopeValue.field ?? "attribute");
+      if (Object.prototype.hasOwnProperty.call(scopeValue, "exists")) {
+        return `${path} ${scopeValue.exists ? "exists" : "does not exist"}`;
+      }
+
+      const operator = ["equals", "notEquals", "contains", "startsWith", "endsWith", "regex", "in", "gt", "gte", "lt", "lte"]
+        .find((key) => Object.prototype.hasOwnProperty.call(scopeValue, key));
+      return operator ? `${path} ${operator} ${formatScopeScalar(scopeValue[operator])}` : `${path} attribute rule`;
+    }
+    case "expression": {
+      const op = String(scopeValue.op ?? "").toLowerCase();
+      if (op === "not") {
+        const child = scopeValue.rule as Record<string, unknown> | undefined;
+        if (!child) return "not rule";
+        return `not (${formatParsedScopeSummary(String(child.scopeKind ?? "all"), (child.scopeValue as Record<string, unknown>) ?? {})})`;
+      }
+
+      const rules = Array.isArray(scopeValue.rules) ? scopeValue.rules as Array<Record<string, unknown>> : [];
+      const summaries = rules.map((rule) => formatParsedScopeSummary(String(rule.scopeKind ?? "all"), (rule.scopeValue as Record<string, unknown>) ?? {}));
+      if (!summaries.length) {
+        return "expression rule";
+      }
+
+      const separator = op === "or" ? " OR " : " AND ";
+      return summaries.join(separator);
+    }
+    default:
+      return `${scopeKind} rule`;
+  }
+}
+
+function formatContentRuleScope(rule: Pick<ContentRuleRow, "scopeKind" | "scopeValue">): string {
+  const parsed = parseScopeValue(rule.scopeValue);
+  if (!parsed) {
+    return rule.scopeKind === "all" ? "all content" : `${rule.scopeKind} rule`;
+  }
+
+  return formatParsedScopeSummary(rule.scopeKind, parsed);
+}
+
+function SingleEntitySelector({ entityType, value, onChange, placeholder }: { entityType: "tags" | "studios"; value?: number; onChange: (value: number | undefined) => void; placeholder: string }) {
+  const [searchText, setSearchText] = useState("");
+  const { data: items, isLoading } = useQuery({
+    queryKey: ["content-rule-selector", entityType],
+    queryFn: async () => {
+      if (entityType === "tags") {
+        return (await tagsApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items.map((item) => ({ id: item.id, label: item.name }));
+      }
+
+      return (await studiosApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items.map((item) => ({ id: item.id, label: item.name }));
+    },
+    staleTime: 60000,
+  });
+
+  const selectedItem = items?.find((item) => item.id === value);
+  const filteredItems = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    return (items ?? []).filter((item) => item.id !== value && (!q || item.label.toLowerCase().includes(q))).slice(0, 25);
+  }, [items, searchText, value]);
+
+  return (
+    <div className="space-y-2">
+      {selectedItem ? (
+        <div className="inline-flex items-center gap-2 rounded border border-app bg-surface-2 px-2 py-1 text-xs text-foreground">
+          {selectedItem.label}
+          <button type="button" className="text-secondary hover:text-red-400" onClick={() => onChange(undefined)}>Clear</button>
+        </div>
+      ) : null}
+
+      <input
+        className="input"
+        value={searchText}
+        onChange={(event) => setSearchText(event.target.value)}
+        placeholder={placeholder}
+      />
+
+      {searchText.trim() ? (
+        <div className="max-h-36 overflow-y-auto rounded border border-app bg-surface-2">
+          {isLoading ? <div className="px-3 py-2 text-sm text-secondary">Loading…</div> : null}
+          {!isLoading && filteredItems.length === 0 ? <div className="px-3 py-2 text-sm text-secondary">No matches.</div> : null}
+          {filteredItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="block w-full border-b border-app/40 px-3 py-2 text-left text-sm hover:bg-surface last:border-b-0"
+              onClick={() => {
+                onChange(item.id);
+                setSearchText("");
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ContentRuleScopeFields({ scopeKind, draft, onChange }: { scopeKind: SimpleScopeKind; draft: ContentRuleScopeDraft; onChange: (update: Partial<ContentRuleScopeDraft>) => void }) {
+  if (scopeKind === "all") {
+    return <p className="text-sm text-secondary">This rule applies to all entities of the selected type.</p>;
+  }
+
+  if (scopeKind === "tag") {
+    return <SingleEntitySelector entityType="tags" value={draft.tagId} onChange={(value) => onChange({ tagId: value })} placeholder="Search tags..." />;
+  }
+
+  if (scopeKind === "studio") {
+    return <SingleEntitySelector entityType="studios" value={draft.studioId} onChange={(value) => onChange({ studioId: value })} placeholder="Search studios..." />;
+  }
+
+  if (scopeKind === "identifier") {
+    return (
+      <div className="space-y-3">
+        <Field label="Identifier scheme">
+          <select className="input" value={draft.identifierScheme} onChange={(event) => onChange({ identifierScheme: event.target.value as IdentifierScheme })}>
+            {IDENTIFIER_SCHEMES.map((scheme) => <option key={scheme.value || "any"} value={scheme.value}>{scheme.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Identifier value">
+          <input className="input" value={draft.identifierValue} onChange={(event) => onChange({ identifierValue: event.target.value })} placeholder="https://example.com/item/123" />
+        </Field>
+        <Field label="Source (optional)">
+          <input className="input" value={draft.identifierSource} onChange={(event) => onChange({ identifierSource: event.target.value })} placeholder="Useful for remote IDs" />
+        </Field>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field label="Attribute path">
+        <input className="input" value={draft.attributePath} onChange={(event) => onChange({ attributePath: event.target.value })} placeholder="details or rating" />
+      </Field>
+      <Field label="Operator">
+        <select className="input" value={draft.attributeOperator} onChange={(event) => onChange({ attributeOperator: event.target.value as AttributeOperator })}>
+          {ATTRIBUTE_OPERATORS.map((operator) => <option key={operator.value} value={operator.value}>{operator.label}</option>)}
+        </select>
+      </Field>
+      {draft.attributeOperator !== "exists" && draft.attributeOperator !== "notExists" ? (
+        <Field label={draft.attributeOperator === "in" ? "Values" : "Value"}>
+          {draft.attributeOperator === "in" ? (
+            <textarea className="input min-h-24" value={draft.attributeValue} onChange={(event) => onChange({ attributeValue: event.target.value })} placeholder="one value per line or comma-separated" />
+          ) : (
+            <input className="input" value={draft.attributeValue} onChange={(event) => onChange({ attributeValue: event.target.value })} placeholder="Value to compare" />
+          )}
+        </Field>
+      ) : null}
+    </div>
+  );
+}
 
 function Section({ title, description, children, actions }: { title: string; description?: string; children: React.ReactNode; actions?: React.ReactNode }) {
   return (
@@ -434,6 +869,576 @@ export function AuditTab() {
         </>
       ) : null}
     </Section>
+  );
+}
+
+export function ContentRulesTab() {
+  const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canWrite = hasPermission("roles.write");
+  const [filterRoleId, setFilterRoleId] = useState<number | "">("");
+  const [showCreate, setShowCreate] = useState(false);
+
+  const rolesQ = useQuery({ queryKey: ["admin", "roles"], queryFn: rolesApi.list });
+  const rulesQ = useQuery({
+    queryKey: ["admin", "content-rules", filterRoleId || null],
+    queryFn: () => contentRulesApi.list(typeof filterRoleId === "number" ? filterRoleId : undefined),
+  });
+  const overridesQ = useQuery({
+    queryKey: ["admin", "entity-overrides", filterRoleId || null],
+    queryFn: () => contentRulesApi.listOverrides(typeof filterRoleId === "number" ? filterRoleId : undefined),
+  });
+
+  const removeRule = useMutation({
+    mutationFn: (id: number) => contentRulesApi.remove(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "content-rules"] }),
+  });
+  const removeOverride = useMutation({
+    mutationFn: (id: number) => contentRulesApi.removeOverride(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "entity-overrides"] }),
+  });
+
+  return (
+    <div className="space-y-6">
+      <Section
+        title="Content rules"
+        description="Role-scoped visibility and write/delete rules. Matching deny rules win unless there is an explicit entity allow override."
+        actions={canWrite ? <Btn variant="primary" onClick={() => setShowCreate(true)}>+ New rule</Btn> : null}
+      >
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <Field label="Role filter">
+            <select
+              className="input"
+              value={filterRoleId}
+              onChange={(event) => setFilterRoleId(event.target.value === "" ? "" : Number(event.target.value))}
+            >
+              <option value="">All roles</option>
+              {rolesQ.data?.map((role) => (
+                <option key={role.id} value={role.id}>{role.name}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        {rulesQ.isLoading ? <p className="text-sm text-secondary">Loading…</p> : null}
+        {rulesQ.data ? <ContentRuleTable rules={rulesQ.data} canWrite={canWrite} onDelete={(id) => removeRule.mutate(id)} /> : null}
+      </Section>
+
+      <Section title="Entity overrides" description="One-off allow or deny rules for specific entity ids.">
+        {overridesQ.isLoading ? <p className="text-sm text-secondary">Loading…</p> : null}
+        {overridesQ.data ? <EntityOverrideTable overrides={overridesQ.data} canWrite={canWrite} onDelete={(id) => removeOverride.mutate(id)} /> : null}
+      </Section>
+
+      {showCreate && rolesQ.data ? <CreateContentRuleDialog roles={rolesQ.data} onClose={() => setShowCreate(false)} /> : null}
+    </div>
+  );
+}
+
+export function ApiTokensTab() {
+  const queryClient = useQueryClient();
+  const tokensQ = useQuery({ queryKey: ["admin", "api-tokens"], queryFn: () => apiTokensApi.list() });
+  const [showCreate, setShowCreate] = useState(false);
+  const [issued, setIssued] = useState<ApiTokenIssuedRow | null>(null);
+
+  const revoke = useMutation({
+    mutationFn: (id: string) => apiTokensApi.revoke(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "api-tokens"] }),
+  });
+
+  return (
+    <Section
+      title="API tokens"
+      description="Long-lived personal access tokens. Scope is intersected with your own permissions."
+      actions={<Btn variant="primary" onClick={() => setShowCreate(true)}>+ New token</Btn>}
+    >
+      {tokensQ.isLoading ? <p className="text-sm text-secondary">Loading…</p> : null}
+      {tokensQ.data ? <ApiTokensTable tokens={tokensQ.data} onRevoke={(id) => revoke.mutate(id)} /> : null}
+      {showCreate ? <CreateApiTokenDialog onClose={() => setShowCreate(false)} onIssued={(token) => { setIssued(token); setShowCreate(false); }} /> : null}
+      {issued ? <IssuedTokenDialog token={issued} onClose={() => setIssued(null)} /> : null}
+    </Section>
+  );
+}
+
+export function ShareLinksTab() {
+  const queryClient = useQueryClient();
+  const linksQ = useQuery({ queryKey: ["admin", "share-links"], queryFn: () => shareLinksApi.list() });
+  const [showCreate, setShowCreate] = useState(false);
+  const [issued, setIssued] = useState<ShareLinkIssuedRow | null>(null);
+
+  const revoke = useMutation({
+    mutationFn: (id: string) => shareLinksApi.revoke(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "share-links"] }),
+  });
+
+  return (
+    <Section
+      title="Share links"
+      description="Anonymous, time-limited, optionally password-gated read-only links."
+      actions={<Btn variant="primary" onClick={() => setShowCreate(true)}>+ New share link</Btn>}
+    >
+      {linksQ.isLoading ? <p className="text-sm text-secondary">Loading…</p> : null}
+      {linksQ.data ? <ShareLinksTable links={linksQ.data} onRevoke={(id) => revoke.mutate(id)} /> : null}
+      {showCreate ? <CreateShareLinkDialog onClose={() => setShowCreate(false)} onIssued={(link) => { setIssued(link); setShowCreate(false); }} /> : null}
+      {issued ? <IssuedShareLinkDialog link={issued} onClose={() => setIssued(null)} /> : null}
+    </Section>
+  );
+}
+
+function ContentRuleTable({ rules, canWrite, onDelete }: { rules: ContentRuleRow[]; canWrite: boolean; onDelete: (id: number) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead className="border-b border-app text-left text-xs uppercase tracking-wide text-secondary">
+          <tr>
+            <th className="px-2 py-2">Role</th>
+            <th className="px-2 py-2">Entity</th>
+            <th className="px-2 py-2">Effect</th>
+            <th className="px-2 py-2">Scope</th>
+            <th className="px-2 py-2">Applies to</th>
+            <th className="px-2 py-2">Updated</th>
+            <th className="px-2 py-2 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rules.map((rule) => (
+            <tr key={rule.id} className="border-b border-app/40">
+              <td className="px-2 py-2 font-medium">{rule.roleName}</td>
+              <td className="px-2 py-2">{rule.entityKind}</td>
+              <td className="px-2 py-2">
+                <span className={rule.effect === "deny" ? "text-amber-400" : "text-emerald-400"}>{rule.effect}</span>
+              </td>
+              <td className="px-2 py-2 text-xs text-secondary">{formatContentRuleScope(rule)}</td>
+              <td className="px-2 py-2">{rule.appliesTo}</td>
+              <td className="px-2 py-2 text-secondary">{new Date(rule.updatedAt).toLocaleString()}</td>
+              <td className="px-2 py-2 text-right">
+                {canWrite ? <Btn variant="danger" onClick={() => { if (confirm("Delete this content rule?")) onDelete(rule.id); }}>Delete</Btn> : null}
+              </td>
+            </tr>
+          ))}
+          {rules.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="px-2 py-4 text-center text-secondary">No content rules.</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function EntityOverrideTable({ overrides, canWrite, onDelete }: { overrides: EntityOverrideRow[]; canWrite: boolean; onDelete: (id: number) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead className="border-b border-app text-left text-xs uppercase tracking-wide text-secondary">
+          <tr>
+            <th className="px-2 py-2">Role</th>
+            <th className="px-2 py-2">Entity</th>
+            <th className="px-2 py-2">Id</th>
+            <th className="px-2 py-2">Effect</th>
+            <th className="px-2 py-2">Applies to</th>
+            <th className="px-2 py-2">Created</th>
+            <th className="px-2 py-2 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {overrides.map((overrideItem) => (
+            <tr key={overrideItem.id} className="border-b border-app/40">
+              <td className="px-2 py-2 font-medium">{overrideItem.roleName}</td>
+              <td className="px-2 py-2">{overrideItem.entityKind}</td>
+              <td className="px-2 py-2 text-secondary">{overrideItem.entityId}</td>
+              <td className="px-2 py-2">
+                <span className={overrideItem.effect === "deny" ? "text-amber-400" : "text-emerald-400"}>{overrideItem.effect}</span>
+              </td>
+              <td className="px-2 py-2">{overrideItem.appliesTo}</td>
+              <td className="px-2 py-2 text-secondary">{new Date(overrideItem.createdAt).toLocaleString()}</td>
+              <td className="px-2 py-2 text-right">
+                {canWrite ? <Btn variant="danger" onClick={() => { if (confirm("Delete this entity override?")) onDelete(overrideItem.id); }}>Delete</Btn> : null}
+              </td>
+            </tr>
+          ))}
+          {overrides.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="px-2 py-4 text-center text-secondary">No entity overrides.</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ExpressionRuleBuilder({
+  operator,
+  rules,
+  onOperatorChange,
+  onRulesChange,
+}: {
+  operator: ExpressionOperator;
+  rules: ContentRuleExpressionRuleDraft[];
+  onOperatorChange: (operator: ExpressionOperator) => void;
+  onRulesChange: (rules: ContentRuleExpressionRuleDraft[]) => void;
+}) {
+  const updateRule = (id: string, update: Partial<ContentRuleExpressionRuleDraft>) => {
+    onRulesChange(rules.map((rule) => (rule.id === id ? { ...rule, ...update } : rule)));
+  };
+
+  const removeRule = (id: string) => {
+    onRulesChange(rules.filter((rule) => rule.id !== id));
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border border-app/60 bg-surface-2 p-3">
+      <Field label="Expression mode">
+        <select className="input" value={operator} onChange={(event) => onOperatorChange(event.target.value as ExpressionOperator)}>
+          <option value="and">All of these rules must match</option>
+          <option value="or">Any of these rules may match</option>
+          <option value="not">None of these rules may match</option>
+        </select>
+      </Field>
+
+      <div className="space-y-3">
+        {rules.map((rule, index) => (
+          <div key={rule.id} className="rounded border border-app/60 bg-surface p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <span className="text-sm font-medium">Condition {index + 1}</span>
+              <Btn onClick={() => removeRule(rule.id)} disabled={rules.length === 1}>Remove</Btn>
+            </div>
+
+            <Field label="Condition type">
+              <select className="input" value={rule.scopeKind} onChange={(event) => updateRule(rule.id, { scopeKind: event.target.value as SimpleScopeKind })}>
+                {SIMPLE_SCOPE_KINDS.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </Field>
+
+            <div className="mt-3">
+              <ContentRuleScopeFields scopeKind={rule.scopeKind} draft={rule} onChange={(update) => updateRule(rule.id, update)} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Btn onClick={() => onRulesChange([...rules, createExpressionRuleDraft("tag")])}>+ Add condition</Btn>
+    </div>
+  );
+}
+
+function CreateContentRuleDialog({ roles, onClose }: { roles: RoleRow[]; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [mode, setMode] = useState<"rule" | "override">("rule");
+  const [roleId, setRoleId] = useState(roles[0]?.id ?? 0);
+  const [entityKind, setEntityKind] = useState<(typeof ENTITY_KINDS)[number]>("scene");
+  const [effect, setEffect] = useState<(typeof EFFECTS)[number]>("deny");
+  const [scopeKind, setScopeKind] = useState<(typeof SCOPE_KINDS)[number]>("all");
+  const [scopeDraft, setScopeDraft] = useState<ContentRuleScopeDraft>(() => createEmptyScopeDraft());
+  const [expressionOperator, setExpressionOperator] = useState<ExpressionOperator>("and");
+  const [expressionRules, setExpressionRules] = useState<ContentRuleExpressionRuleDraft[]>(() => [createExpressionRuleDraft("tag")]);
+  const [appliesTo, setAppliesTo] = useState<(typeof APPLIES_TO)[number]>("all");
+  const [entityId, setEntityId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const builtScope = useMemo(
+    () => buildScopeValue(scopeKind, scopeDraft, expressionOperator, expressionRules),
+    [expressionOperator, expressionRules, scopeDraft, scopeKind],
+  );
+
+  const createRule = useMutation({
+    mutationFn: () => {
+      if (!builtScope.ok) {
+        throw new Error(builtScope.error);
+      }
+
+      return contentRulesApi.create({ roleId, entityKind, effect, scopeKind, scopeValue: JSON.stringify(builtScope.value), appliesTo });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "content-rules"] });
+      onClose();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+  const createOverride = useMutation({
+    mutationFn: () => contentRulesApi.createOverride({ roleId, entityKind, entityId, effect, appliesTo }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "entity-overrides"] });
+      onClose();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  return (
+    <Modal title="Create content rule" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="flex gap-2 border-b border-app pb-2">
+          <Btn onClick={() => setMode("rule")} className={mode === "rule" ? "border-blue-500" : ""}>Rule</Btn>
+          <Btn onClick={() => setMode("override")} className={mode === "override" ? "border-blue-500" : ""}>Override</Btn>
+        </div>
+
+        <Field label="Role">
+          <select className="input" value={roleId} onChange={(event) => setRoleId(Number(event.target.value))}>
+            {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Entity kind">
+          <select className="input" value={entityKind} onChange={(event) => setEntityKind(event.target.value as (typeof ENTITY_KINDS)[number])}>
+            {ENTITY_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+          </select>
+        </Field>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="Effect">
+            <select className="input" value={effect} onChange={(event) => setEffect(event.target.value as (typeof EFFECTS)[number])}>
+              {EFFECTS.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </Field>
+          <Field label="Applies to">
+            <select className="input" value={appliesTo} onChange={(event) => setAppliesTo(event.target.value as (typeof APPLIES_TO)[number])}>
+              {APPLIES_TO.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </Field>
+        </div>
+
+        {mode === "rule" ? (
+          <>
+            <Field label="Scope kind">
+              <select className="input" value={scopeKind} onChange={(event) => setScopeKind(event.target.value as (typeof SCOPE_KINDS)[number])}>
+                {SCOPE_KINDS.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </Field>
+
+            {scopeKind === "expression" ? (
+              <ExpressionRuleBuilder
+                operator={expressionOperator}
+                rules={expressionRules}
+                onOperatorChange={setExpressionOperator}
+                onRulesChange={setExpressionRules}
+              />
+            ) : (
+              <ContentRuleScopeFields scopeKind={scopeKind} draft={scopeDraft} onChange={(update) => setScopeDraft((current) => ({ ...current, ...update }))} />
+            )}
+
+            {builtScope.ok ? (
+              <p className="text-xs text-secondary">Summary: {formatParsedScopeSummary(scopeKind, builtScope.value)}</p>
+            ) : null}
+          </>
+        ) : (
+          <Field label="Entity id">
+            <input className="input" value={entityId} onChange={(event) => setEntityId(event.target.value)} placeholder="123" />
+          </Field>
+        )}
+
+        {mode === "rule" && !builtScope.ok ? <p className="text-sm text-red-400">{builtScope.error}</p> : null}
+        {error ? <p className="text-sm text-red-400">{error}</p> : null}
+        <div className="flex justify-end gap-2 pt-2">
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn
+            variant="primary"
+            onClick={() => mode === "rule" ? createRule.mutate() : createOverride.mutate()}
+            disabled={createRule.isPending || createOverride.isPending || (mode === "override" && !entityId.trim()) || (mode === "rule" && !builtScope.ok)}
+          >
+            Create
+          </Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ApiTokensTable({ tokens, onRevoke }: { tokens: ApiTokenRow[]; onRevoke: (id: string) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead className="border-b border-app text-left text-xs uppercase tracking-wide text-secondary">
+          <tr>
+            <th className="px-2 py-2">Name</th>
+            <th className="px-2 py-2">Prefix</th>
+            <th className="px-2 py-2">Scope</th>
+            <th className="px-2 py-2">Created</th>
+            <th className="px-2 py-2">Last used</th>
+            <th className="px-2 py-2">Expires</th>
+            <th className="px-2 py-2 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tokens.map((token) => (
+            <tr key={token.id} className="border-b border-app/40">
+              <td className="px-2 py-2 font-medium">{token.name}</td>
+              <td className="px-2 py-2 font-mono text-xs">{token.prefix}…</td>
+              <td className="px-2 py-2 text-secondary">{token.scope?.length ? `${token.scope.length} perms` : "full"}</td>
+              <td className="px-2 py-2 text-secondary">{new Date(token.createdAt).toLocaleString()}</td>
+              <td className="px-2 py-2 text-secondary">{token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleString() : "—"}</td>
+              <td className="px-2 py-2 text-secondary">{token.expiresAt ? new Date(token.expiresAt).toLocaleString() : "never"}</td>
+              <td className="px-2 py-2 text-right">
+                <Btn variant="danger" onClick={() => { if (confirm(`Revoke token "${token.name}"?`)) onRevoke(token.id); }}>Revoke</Btn>
+              </td>
+            </tr>
+          ))}
+          {tokens.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="px-2 py-4 text-center text-secondary">No API tokens.</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CreateApiTokenDialog({ onClose, onIssued }: { onClose: () => void; onIssued: (token: ApiTokenIssuedRow) => void }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [expires, setExpires] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () => apiTokensApi.create({ name, expiresAt: expires || undefined }),
+    onSuccess: (token) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "api-tokens"] });
+      onIssued(token);
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  return (
+    <Modal title="Create API token" onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Name"><input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="my-laptop" /></Field>
+        <Field label="Expires (ISO datetime, blank = never)"><input className="input" value={expires} onChange={(event) => setExpires(event.target.value)} placeholder="2026-12-31T00:00:00Z" /></Field>
+        {error ? <p className="text-sm text-red-400">{error}</p> : null}
+        <div className="flex justify-end gap-2 pt-2">
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" onClick={() => create.mutate()} disabled={!name || create.isPending}>Create</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function IssuedTokenDialog({ token, onClose }: { token: ApiTokenIssuedRow; onClose: () => void }) {
+  return (
+    <Modal title="Token issued" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-sm text-amber-400">Copy this token now. You will not be shown it again.</p>
+        <pre className="overflow-auto rounded border border-app bg-surface-2 p-3 text-xs">{token.plaintextToken}</pre>
+        <div className="flex justify-end gap-2 pt-2">
+          <Btn variant="primary" onClick={() => { navigator.clipboard.writeText(token.plaintextToken); onClose(); }}>Copy & close</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ShareLinksTable({ links, onRevoke }: { links: ShareLinkRow[]; onRevoke: (id: string) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead className="border-b border-app text-left text-xs uppercase tracking-wide text-secondary">
+          <tr>
+            <th className="px-2 py-2">Created by</th>
+            <th className="px-2 py-2">Entity</th>
+            <th className="px-2 py-2">Ids</th>
+            <th className="px-2 py-2">Views</th>
+            <th className="px-2 py-2">Expires</th>
+            <th className="px-2 py-2">Status</th>
+            <th className="px-2 py-2 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {links.map((link) => (
+            <tr key={link.id} className="border-b border-app/40">
+              <td className="px-2 py-2">{link.createdByUsername ?? <span className="text-secondary">—</span>}</td>
+              <td className="px-2 py-2">{link.entityKind}</td>
+              <td className="px-2 py-2 text-secondary">{link.entityIds.length}</td>
+              <td className="px-2 py-2 text-secondary">{link.viewCount}</td>
+              <td className="px-2 py-2 text-secondary">{link.expiresAt ? new Date(link.expiresAt).toLocaleString() : "never"}</td>
+              <td className="px-2 py-2">
+                {link.revoked ? <span className="text-red-400">revoked</span> : link.hasPassword ? "password-gated" : "active"}
+              </td>
+              <td className="px-2 py-2 text-right">
+                {!link.revoked ? <Btn variant="danger" onClick={() => { if (confirm("Revoke this share link?")) onRevoke(link.id); }}>Revoke</Btn> : null}
+              </td>
+            </tr>
+          ))}
+          {links.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="px-2 py-4 text-center text-secondary">No share links.</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CreateShareLinkDialog({ onClose, onIssued }: { onClose: () => void; onIssued: (link: ShareLinkIssuedRow) => void }) {
+  const queryClient = useQueryClient();
+  const [entityKind, setEntityKind] = useState<(typeof ENTITY_KINDS)[number]>("scene");
+  const [ids, setIds] = useState("");
+  const [expires, setExpires] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () => shareLinksApi.create({
+      entityKind,
+      entityIds: ids.split(/[\s,]+/).map((value) => value.trim()).filter(Boolean),
+      expiresAt: expires || undefined,
+      password: password || undefined,
+    }),
+    onSuccess: (link) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "share-links"] });
+      onIssued(link);
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  return (
+    <Modal title="Create share link" onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Entity kind">
+          <select className="input" value={entityKind} onChange={(event) => setEntityKind(event.target.value as (typeof ENTITY_KINDS)[number])}>
+            {ENTITY_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+          </select>
+        </Field>
+        <Field label="Entity ids (comma- or space-separated)">
+          <input className="input" value={ids} onChange={(event) => setIds(event.target.value)} placeholder="123, 124, 125" />
+        </Field>
+        <Field label="Expires (ISO datetime, blank = never)">
+          <input className="input" value={expires} onChange={(event) => setExpires(event.target.value)} />
+        </Field>
+        <Field label="Password (optional)">
+          <input className="input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        </Field>
+        {error ? <p className="text-sm text-red-400">{error}</p> : null}
+        <div className="flex justify-end gap-2 pt-2">
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" onClick={() => create.mutate()} disabled={!ids.trim() || create.isPending}>Create</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function IssuedShareLinkDialog({ link, onClose }: { link: ShareLinkIssuedRow; onClose: () => void }) {
+  const primaryEntityId = link.entityIds.length === 1 ? Number(link.entityIds[0]) : undefined;
+  const canUseDetailRoute = link.entityIds.length === 1 && link.entityKind !== "marker" && Number.isInteger(primaryEntityId) && (primaryEntityId ?? 0) > 0;
+  const routePath = buildRoutePath(canUseDetailRoute
+    ? { page: link.entityKind, id: primaryEntityId }
+    : { page: ENTITY_LIST_ROUTES[link.entityKind] ?? link.entityKind });
+  const shareUrl = new URL(routePath, window.location.origin);
+  shareUrl.searchParams.set("share_token", link.plaintextToken);
+
+  return (
+    <Modal title="Share link issued" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-sm text-amber-400">Copy this link now. The plaintext share token will not be shown again.</p>
+        <pre className="overflow-auto rounded border border-app bg-surface-2 p-3 text-xs">{shareUrl.toString()}</pre>
+        {link.hasPassword ? <p className="text-xs text-secondary">This link is password-gated. Share the password separately; the recipient will be prompted for it.</p> : null}
+        <div className="flex justify-end gap-2 pt-2">
+          <Btn onClick={() => navigator.clipboard.writeText(link.plaintextToken)}>Copy raw token</Btn>
+          <Btn variant="primary" onClick={() => { navigator.clipboard.writeText(shareUrl.toString()); onClose(); }}>Copy link & close</Btn>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

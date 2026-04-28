@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Cove.Core.Auth;
 using Cove.Core.Entities;
 using Cove.Core.Entities.Auth;
 using Cove.Plugins;
@@ -6,16 +8,20 @@ using System.Linq.Expressions;
 
 namespace Cove.Data;
 
-public class CoveContext : DbContext
+public partial class CoveContext : DbContext
 {
     private static IReadOnlyList<IDataExtension> _dataExtensions = [];
+    private bool _persistingDerivedCounts;
 
     public static void SetDataExtensions(IEnumerable<IDataExtension> extensions)
     {
         _dataExtensions = extensions.ToList();
     }
 
-    public CoveContext(DbContextOptions<CoveContext> options) : base(options) { }
+    public CoveContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor? principalAccessor = null) : base(options)
+    {
+        _principalAccessor = principalAccessor;
+    }
 
     protected CoveContext(DbContextOptions options) : base(options) { }
 
@@ -98,22 +104,42 @@ public class CoveContext : DbContext
         {
             ext.ConfigureModel(modelBuilder);
         }
+
+        if (Database.ProviderName?.Contains("Npgsql", StringComparison.Ordinal) == true)
+            ConfigureAuthorizationFilters(modelBuilder);
     }
 
     public override int SaveChanges()
     {
+        if (_persistingDerivedCounts)
+            return base.SaveChanges();
+
         UpdateTimestamps();
         ComputeFilePaths();
         MaintainDenormalizedIdArrays();
-        return base.SaveChanges();
+        var derivedCountTargets = CollectDerivedCountTargets();
+        var result = base.SaveChanges();
+        PersistDerivedCounts(derivedCountTargets);
+        return result;
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        if (_persistingDerivedCounts)
+            return base.SaveChangesAsync(cancellationToken);
+
         UpdateTimestamps();
         ComputeFilePaths();
         MaintainDenormalizedIdArrays();
-        return base.SaveChangesAsync(cancellationToken);
+        var derivedCountTargets = CollectDerivedCountTargets();
+        return SaveChangesWithDerivedCountsAsync(derivedCountTargets, cancellationToken);
+    }
+
+    private async Task<int> SaveChangesWithDerivedCountsAsync(DerivedCountTargets derivedCountTargets, CancellationToken cancellationToken)
+    {
+        var result = await base.SaveChangesAsync(cancellationToken);
+        await PersistDerivedCountsAsync(derivedCountTargets, cancellationToken);
+        return result;
     }
 
     private void MaintainDenormalizedIdArrays()
@@ -152,6 +178,1126 @@ public class CoveContext : DbContext
             RebuildArray<Gallery, GalleryTag>(galleryTagParents, g => g.TagIds, e => e.GalleryId, e => e.TagId);
         if (galleryPerformerParents.Count > 0)
             RebuildArray<Gallery, GalleryPerformer>(galleryPerformerParents, g => g.PerformerIds, e => e.GalleryId, e => e.PerformerId);
+    }
+
+    private readonly record struct DerivedCountTargets(
+        HashSet<int> TagIds,
+        HashSet<int> StudioIds,
+        HashSet<int> PerformerIds,
+        HashSet<int> GalleryIds,
+        HashSet<int> SceneIds,
+        HashSet<int> ImageIds)
+    {
+        public bool HasAny => TagIds.Count > 0
+            || StudioIds.Count > 0
+            || PerformerIds.Count > 0
+            || GalleryIds.Count > 0
+            || SceneIds.Count > 0
+            || ImageIds.Count > 0;
+    }
+
+    private DerivedCountTargets CollectDerivedCountTargets()
+    {
+        return new DerivedCountTargets(
+            CollectAffectedTagCountIds(),
+            CollectAffectedStudioCountIds(),
+            CollectAffectedPerformerCountIds(),
+            CollectAffectedGalleryCountIds(),
+            CollectAffectedSceneMetricIds(),
+            CollectAffectedImageIds());
+    }
+
+    private HashSet<int> CollectAffectedSceneMetricIds()
+    {
+        var ids = new HashSet<int>();
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<VideoFile>(), entry => entry.SceneId, nameof(VideoFile.SceneId));
+        return ids;
+    }
+
+    private HashSet<int> CollectAffectedImageIds()
+    {
+        var ids = new HashSet<int>();
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<ImageFile>(), entry => entry.ImageId, nameof(ImageFile.ImageId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<ImageTag>(), entry => entry.ImageId, nameof(ImageTag.ImageId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<ImagePerformer>(), entry => entry.ImageId, nameof(ImagePerformer.ImageId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<ImageGallery>(), entry => entry.ImageId, nameof(ImageGallery.ImageId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Tag>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            tagIds => Set<ImageTag>().AsNoTracking()
+                .Where(imageTag => tagIds.Contains(imageTag.TagId))
+                .Select(imageTag => imageTag.ImageId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Performer>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            performerIds => Set<ImagePerformer>().AsNoTracking()
+                .Where(imagePerformer => performerIds.Contains(imagePerformer.PerformerId))
+                .Select(imagePerformer => imagePerformer.ImageId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Gallery>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            galleryIds => Set<ImageGallery>().AsNoTracking()
+                .Where(imageGallery => galleryIds.Contains(imageGallery.GalleryId))
+                .Select(imageGallery => imageGallery.ImageId));
+
+        return ids;
+    }
+
+    private HashSet<int> CollectAffectedPerformerCountIds()
+    {
+        var ids = new HashSet<int>();
+
+        CollectChangedIntKey(ids, ChangeTracker.Entries<ScenePerformer>(), entry => entry.PerformerId, nameof(ScenePerformer.PerformerId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<ImagePerformer>(), entry => entry.PerformerId, nameof(ImagePerformer.PerformerId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryPerformer>(), entry => entry.PerformerId, nameof(GalleryPerformer.PerformerId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<PerformerTag>(), entry => entry.PerformerId, nameof(PerformerTag.PerformerId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Scene>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            sceneIds => Set<ScenePerformer>().AsNoTracking()
+                .Where(scenePerformer => sceneIds.Contains(scenePerformer.SceneId))
+                .Select(scenePerformer => scenePerformer.PerformerId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Image>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            imageIds => Set<ImagePerformer>().AsNoTracking()
+                .Where(imagePerformer => imageIds.Contains(imagePerformer.ImageId))
+                .Select(imagePerformer => imagePerformer.PerformerId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Gallery>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            galleryIds => Set<GalleryPerformer>().AsNoTracking()
+                .Where(galleryPerformer => galleryIds.Contains(galleryPerformer.GalleryId))
+                .Select(galleryPerformer => galleryPerformer.PerformerId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Tag>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            tagIds => Set<PerformerTag>().AsNoTracking()
+                .Where(performerTag => tagIds.Contains(performerTag.TagId))
+                .Select(performerTag => performerTag.PerformerId));
+
+        return ids;
+    }
+
+    private HashSet<int> CollectAffectedGalleryCountIds()
+    {
+        var ids = new HashSet<int>();
+
+        CollectChangedIntKey(ids, ChangeTracker.Entries<ImageGallery>(), entry => entry.GalleryId, nameof(ImageGallery.GalleryId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<SceneGallery>(), entry => entry.GalleryId, nameof(SceneGallery.GalleryId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryPerformer>(), entry => entry.GalleryId, nameof(GalleryPerformer.GalleryId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryTag>(), entry => entry.GalleryId, nameof(GalleryTag.GalleryId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Image>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            imageIds => Set<ImageGallery>().AsNoTracking()
+                .Where(imageGallery => imageIds.Contains(imageGallery.ImageId))
+                .Select(imageGallery => imageGallery.GalleryId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Scene>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            sceneIds => Set<SceneGallery>().AsNoTracking()
+                .Where(sceneGallery => sceneIds.Contains(sceneGallery.SceneId))
+                .Select(sceneGallery => sceneGallery.GalleryId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Performer>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            performerIds => Set<GalleryPerformer>().AsNoTracking()
+                .Where(galleryPerformer => performerIds.Contains(galleryPerformer.PerformerId))
+                .Select(galleryPerformer => galleryPerformer.GalleryId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Tag>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            tagIds => Set<GalleryTag>().AsNoTracking()
+                .Where(galleryTag => tagIds.Contains(galleryTag.TagId))
+                .Select(galleryTag => galleryTag.GalleryId));
+
+        return ids;
+    }
+
+    private HashSet<int> CollectAffectedTagCountIds()
+    {
+        var ids = new HashSet<int>();
+
+        CollectChangedIntKey(ids, ChangeTracker.Entries<SceneTag>(), entry => entry.TagId, nameof(SceneTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<PerformerTag>(), entry => entry.TagId, nameof(PerformerTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<ImageTag>(), entry => entry.TagId, nameof(ImageTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryTag>(), entry => entry.TagId, nameof(GalleryTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<StudioTag>(), entry => entry.TagId, nameof(StudioTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<GroupTag>(), entry => entry.TagId, nameof(GroupTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<SceneMarkerTag>(), entry => entry.TagId, nameof(SceneMarkerTag.TagId));
+
+        foreach (var entry in ChangeTracker.Entries<SceneMarker>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            AddIfPositive(ids, entry.Entity.PrimaryTagId);
+            AddIfPositive(ids, entry.Property<int>(nameof(SceneMarker.PrimaryTagId)).OriginalValue);
+        }
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Scene>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            sceneIds => Set<SceneTag>().AsNoTracking()
+                .Where(sceneTag => sceneIds.Contains(sceneTag.SceneId))
+                .Select(sceneTag => sceneTag.TagId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Performer>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            performerIds => Set<PerformerTag>().AsNoTracking()
+                .Where(performerTag => performerIds.Contains(performerTag.PerformerId))
+                .Select(performerTag => performerTag.TagId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Image>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            imageIds => Set<ImageTag>().AsNoTracking()
+                .Where(imageTag => imageIds.Contains(imageTag.ImageId))
+                .Select(imageTag => imageTag.TagId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Gallery>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            galleryIds => Set<GalleryTag>().AsNoTracking()
+                .Where(galleryTag => galleryIds.Contains(galleryTag.GalleryId))
+                .Select(galleryTag => galleryTag.TagId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Studio>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            studioIds => Set<StudioTag>().AsNoTracking()
+                .Where(studioTag => studioIds.Contains(studioTag.StudioId))
+                .Select(studioTag => studioTag.TagId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Group>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            groupIds => Set<GroupTag>().AsNoTracking()
+                .Where(groupTag => groupIds.Contains(groupTag.GroupId))
+                .Select(groupTag => groupTag.TagId));
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<SceneMarker>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            markerIds => Set<SceneMarkerTag>().AsNoTracking()
+                .Where(sceneMarkerTag => markerIds.Contains(sceneMarkerTag.SceneMarkerId))
+                .Select(sceneMarkerTag => sceneMarkerTag.TagId));
+
+        return ids;
+    }
+
+    private HashSet<int> CollectAffectedStudioCountIds()
+    {
+        var ids = new HashSet<int>();
+
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Scene>(), entry => entry.StudioId, nameof(Scene.StudioId));
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Image>(), entry => entry.StudioId, nameof(Image.StudioId));
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Gallery>(), entry => entry.StudioId, nameof(Gallery.StudioId));
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Group>(), entry => entry.StudioId, nameof(Group.StudioId));
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Studio>(), entry => entry.ParentId, nameof(Studio.ParentId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<StudioTag>(), entry => entry.StudioId, nameof(StudioTag.StudioId));
+
+        var sceneIds = new HashSet<int>();
+        foreach (var entry in ChangeTracker.Entries<ScenePerformer>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            AddIfPositive(sceneIds, entry.Entity.SceneId);
+            AddIfPositive(sceneIds, entry.Property<int>(nameof(ScenePerformer.SceneId)).OriginalValue);
+        }
+
+        if (sceneIds.Count > 0)
+        {
+            var trackedScenes = ChangeTracker.Entries<Scene>()
+                .Where(entry => sceneIds.Contains(entry.Entity.Id))
+                .ToDictionary(entry => entry.Entity.Id);
+
+            foreach (var sceneId in sceneIds)
+            {
+                if (!trackedScenes.TryGetValue(sceneId, out var trackedScene))
+                    continue;
+
+                AddIfPositive(ids, trackedScene.Entity.StudioId);
+                AddIfPositive(ids, trackedScene.Property<int?>(nameof(Scene.StudioId)).OriginalValue);
+            }
+
+            var missingSceneIds = sceneIds.Where(sceneId => !trackedScenes.ContainsKey(sceneId)).ToArray();
+            if (missingSceneIds.Length > 0)
+            {
+                foreach (var studioId in Scenes.AsNoTracking()
+                    .Where(scene => missingSceneIds.Contains(scene.Id) && scene.StudioId.HasValue)
+                    .Select(scene => scene.StudioId)
+                    .ToList())
+                {
+                    AddIfPositive(ids, studioId);
+                }
+            }
+        }
+
+        AddRelatedIdsFromDeletedParents(ids,
+            ChangeTracker.Entries<Performer>()
+                .Where(entry => entry.State == EntityState.Deleted)
+                .Select(entry => entry.Entity.Id)
+                .ToArray(),
+            performerIds => Set<ScenePerformer>().AsNoTracking()
+                .Where(scenePerformer => performerIds.Contains(scenePerformer.PerformerId) && scenePerformer.Scene!.StudioId.HasValue)
+                .Select(scenePerformer => scenePerformer.Scene!.StudioId!.Value));
+
+        return ids;
+    }
+
+    private void PersistDerivedCounts(DerivedCountTargets derivedCountTargets)
+    {
+        if (!derivedCountTargets.HasAny)
+            return;
+
+        _persistingDerivedCounts = true;
+        try
+        {
+            if (derivedCountTargets.TagIds.Count > 0)
+                RefreshTagCounts(derivedCountTargets.TagIds);
+            if (derivedCountTargets.StudioIds.Count > 0)
+                RefreshStudioCounts(derivedCountTargets.StudioIds);
+            if (derivedCountTargets.PerformerIds.Count > 0)
+                RefreshPerformerCounts(derivedCountTargets.PerformerIds);
+            if (derivedCountTargets.GalleryIds.Count > 0)
+                RefreshGalleryCounts(derivedCountTargets.GalleryIds);
+            if (derivedCountTargets.SceneIds.Count > 0)
+                RefreshSceneMetrics(derivedCountTargets.SceneIds);
+            if (derivedCountTargets.ImageIds.Count > 0)
+                RefreshImageMetrics(derivedCountTargets.ImageIds);
+
+            if (ChangeTracker.HasChanges())
+                base.SaveChanges();
+        }
+        finally
+        {
+            _persistingDerivedCounts = false;
+        }
+    }
+
+    private async Task PersistDerivedCountsAsync(DerivedCountTargets derivedCountTargets, CancellationToken cancellationToken)
+    {
+        if (!derivedCountTargets.HasAny)
+            return;
+
+        _persistingDerivedCounts = true;
+        try
+        {
+            if (derivedCountTargets.TagIds.Count > 0)
+                await RefreshTagCountsAsync(derivedCountTargets.TagIds, cancellationToken);
+            if (derivedCountTargets.StudioIds.Count > 0)
+                await RefreshStudioCountsAsync(derivedCountTargets.StudioIds, cancellationToken);
+            if (derivedCountTargets.PerformerIds.Count > 0)
+                await RefreshPerformerCountsAsync(derivedCountTargets.PerformerIds, cancellationToken);
+            if (derivedCountTargets.GalleryIds.Count > 0)
+                await RefreshGalleryCountsAsync(derivedCountTargets.GalleryIds, cancellationToken);
+            if (derivedCountTargets.SceneIds.Count > 0)
+                await RefreshSceneMetricsAsync(derivedCountTargets.SceneIds, cancellationToken);
+            if (derivedCountTargets.ImageIds.Count > 0)
+                await RefreshImageMetricsAsync(derivedCountTargets.ImageIds, cancellationToken);
+
+            if (ChangeTracker.HasChanges())
+                await base.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            _persistingDerivedCounts = false;
+        }
+    }
+
+    private void RefreshTagCounts(HashSet<int> affectedTagIds)
+    {
+        var tags = Tags.Where(BuildIdContainsPredicate<Tag>(affectedTagIds.ToArray())).ToDictionary(tag => tag.Id);
+        if (tags.Count == 0)
+            return;
+
+        var ids = tags.Keys.ToArray();
+        var sceneCounts = Set<SceneTag>().AsNoTracking().Where(sceneTag => ids.Contains(sceneTag.TagId))
+            .GroupBy(sceneTag => sceneTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var primaryMarkerCounts = SceneMarkers.AsNoTracking().Where(marker => ids.Contains(marker.PrimaryTagId))
+            .GroupBy(marker => marker.PrimaryTagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var secondaryMarkerCounts = Set<SceneMarkerTag>().AsNoTracking().Where(sceneMarkerTag => ids.Contains(sceneMarkerTag.TagId))
+            .GroupBy(sceneMarkerTag => sceneMarkerTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var imageCounts = Set<ImageTag>().AsNoTracking().Where(imageTag => ids.Contains(imageTag.TagId))
+            .GroupBy(imageTag => imageTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var galleryCounts = Set<GalleryTag>().AsNoTracking().Where(galleryTag => ids.Contains(galleryTag.TagId))
+            .GroupBy(galleryTag => galleryTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var groupCounts = Set<GroupTag>().AsNoTracking().Where(groupTag => ids.Contains(groupTag.TagId))
+            .GroupBy(groupTag => groupTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var performerCounts = Set<PerformerTag>().AsNoTracking().Where(performerTag => ids.Contains(performerTag.TagId))
+            .GroupBy(performerTag => performerTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var studioCounts = Set<StudioTag>().AsNoTracking().Where(studioTag => ids.Contains(studioTag.TagId))
+            .GroupBy(studioTag => studioTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+
+        foreach (var tag in tags.Values)
+        {
+            tag.SceneCount = sceneCounts.GetValueOrDefault(tag.Id, 0);
+            tag.SceneMarkerCount = primaryMarkerCounts.GetValueOrDefault(tag.Id, 0) + secondaryMarkerCounts.GetValueOrDefault(tag.Id, 0);
+            tag.ImageCount = imageCounts.GetValueOrDefault(tag.Id, 0);
+            tag.GalleryCount = galleryCounts.GetValueOrDefault(tag.Id, 0);
+            tag.GroupCount = groupCounts.GetValueOrDefault(tag.Id, 0);
+            tag.PerformerCount = performerCounts.GetValueOrDefault(tag.Id, 0);
+            tag.StudioCount = studioCounts.GetValueOrDefault(tag.Id, 0);
+        }
+    }
+
+    private async Task RefreshTagCountsAsync(HashSet<int> affectedTagIds, CancellationToken cancellationToken)
+    {
+        var tags = await Tags.Where(BuildIdContainsPredicate<Tag>(affectedTagIds.ToArray())).ToDictionaryAsync(tag => tag.Id, cancellationToken);
+        if (tags.Count == 0)
+            return;
+
+        var ids = tags.Keys.ToArray();
+        var sceneCounts = await Set<SceneTag>().AsNoTracking().Where(sceneTag => ids.Contains(sceneTag.TagId))
+            .GroupBy(sceneTag => sceneTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var primaryMarkerCounts = await SceneMarkers.AsNoTracking().Where(marker => ids.Contains(marker.PrimaryTagId))
+            .GroupBy(marker => marker.PrimaryTagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var secondaryMarkerCounts = await Set<SceneMarkerTag>().AsNoTracking().Where(sceneMarkerTag => ids.Contains(sceneMarkerTag.TagId))
+            .GroupBy(sceneMarkerTag => sceneMarkerTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var imageCounts = await Set<ImageTag>().AsNoTracking().Where(imageTag => ids.Contains(imageTag.TagId))
+            .GroupBy(imageTag => imageTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var galleryCounts = await Set<GalleryTag>().AsNoTracking().Where(galleryTag => ids.Contains(galleryTag.TagId))
+            .GroupBy(galleryTag => galleryTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var groupCounts = await Set<GroupTag>().AsNoTracking().Where(groupTag => ids.Contains(groupTag.TagId))
+            .GroupBy(groupTag => groupTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var performerCounts = await Set<PerformerTag>().AsNoTracking().Where(performerTag => ids.Contains(performerTag.TagId))
+            .GroupBy(performerTag => performerTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var studioCounts = await Set<StudioTag>().AsNoTracking().Where(studioTag => ids.Contains(studioTag.TagId))
+            .GroupBy(studioTag => studioTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+
+        foreach (var tag in tags.Values)
+        {
+            tag.SceneCount = sceneCounts.GetValueOrDefault(tag.Id, 0);
+            tag.SceneMarkerCount = primaryMarkerCounts.GetValueOrDefault(tag.Id, 0) + secondaryMarkerCounts.GetValueOrDefault(tag.Id, 0);
+            tag.ImageCount = imageCounts.GetValueOrDefault(tag.Id, 0);
+            tag.GalleryCount = galleryCounts.GetValueOrDefault(tag.Id, 0);
+            tag.GroupCount = groupCounts.GetValueOrDefault(tag.Id, 0);
+            tag.PerformerCount = performerCounts.GetValueOrDefault(tag.Id, 0);
+            tag.StudioCount = studioCounts.GetValueOrDefault(tag.Id, 0);
+        }
+    }
+
+    private void RefreshSceneMetrics(HashSet<int> affectedSceneIds)
+    {
+        var scenes = Scenes.Where(BuildIdContainsPredicate<Scene>(affectedSceneIds.ToArray())).ToDictionary(scene => scene.Id);
+        if (scenes.Count == 0)
+            return;
+
+        var ids = scenes.Keys.ToArray();
+        var fileRows = VideoFiles.AsNoTracking()
+            .Where(file => file.SceneId.HasValue && ids.Contains(file.SceneId.Value))
+            .Select(file => new
+            {
+                SceneId = file.SceneId!.Value,
+                file.Path,
+                file.Duration,
+                file.Width,
+                file.Height,
+                file.FrameRate,
+                file.BitRate,
+                file.Size,
+                file.ModTime,
+                file.Interactive,
+            })
+            .ToList();
+        var summaries = fileRows
+            .GroupBy(file => file.SceneId)
+            .ToDictionary(
+                group => group.Key,
+                group => new
+                {
+                    FileCount = group.Count(),
+                    MaxDuration = group.Max(file => file.Duration),
+                    MaxResolution = group.Max(file => Math.Max(file.Width, file.Height)),
+                    MaxHeight = group.Max(file => file.Height),
+                    MaxFrameRate = group.Max(file => file.FrameRate),
+                    MaxBitRate = group.Max(file => file.BitRate),
+                    MaxFileSize = group.Max(file => file.Size),
+                    MaxFileModTime = group.Max(file => (DateTime?)file.ModTime),
+                    MinPath = group.Min(file => file.Path),
+                    MaxPath = group.Max(file => file.Path),
+                    FileSearchText = BuildFileSearchText(group.Select(file => file.Path)),
+                    HasDimensionData = group.Any(file => file.Width > 0 && file.Height > 0),
+                    HasLandscapeFiles = group.Any(file => file.Width > file.Height),
+                    HasPortraitFiles = group.Any(file => file.Height > file.Width),
+                    HasSquareFiles = group.Any(file => file.Width > 0 && file.Width == file.Height),
+                    HasInteractiveFiles = group.Any(file => file.Interactive),
+                    HasNonInteractiveFiles = group.Any(file => !file.Interactive),
+                });
+
+        foreach (var scene in scenes.Values)
+        {
+            if (!summaries.TryGetValue(scene.Id, out var summary))
+            {
+                scene.FileCount = 0;
+                scene.MaxDuration = 0;
+                scene.MaxResolution = 0;
+                scene.MaxHeight = 0;
+                scene.MaxFrameRate = 0;
+                scene.MaxBitRate = 0;
+                scene.MaxFileSize = 0;
+                scene.MaxFileModTime = null;
+                scene.MinPath = null;
+                scene.MaxPath = null;
+                scene.FileSearchText = null;
+                scene.HasDimensionData = false;
+                scene.HasLandscapeFiles = false;
+                scene.HasPortraitFiles = false;
+                scene.HasSquareFiles = false;
+                scene.HasInteractiveFiles = false;
+                scene.HasNonInteractiveFiles = false;
+                continue;
+            }
+
+            scene.FileCount = summary.FileCount;
+            scene.MaxDuration = summary.MaxDuration;
+            scene.MaxResolution = summary.MaxResolution;
+            scene.MaxHeight = summary.MaxHeight;
+            scene.MaxFrameRate = summary.MaxFrameRate;
+            scene.MaxBitRate = summary.MaxBitRate;
+            scene.MaxFileSize = summary.MaxFileSize;
+            scene.MaxFileModTime = summary.MaxFileModTime;
+            scene.MinPath = summary.MinPath;
+            scene.MaxPath = summary.MaxPath;
+            scene.FileSearchText = summary.FileSearchText;
+            scene.HasDimensionData = summary.HasDimensionData;
+            scene.HasLandscapeFiles = summary.HasLandscapeFiles;
+            scene.HasPortraitFiles = summary.HasPortraitFiles;
+            scene.HasSquareFiles = summary.HasSquareFiles;
+            scene.HasInteractiveFiles = summary.HasInteractiveFiles;
+            scene.HasNonInteractiveFiles = summary.HasNonInteractiveFiles;
+        }
+    }
+
+    private async Task RefreshSceneMetricsAsync(HashSet<int> affectedSceneIds, CancellationToken cancellationToken)
+    {
+        var scenes = await Scenes.Where(BuildIdContainsPredicate<Scene>(affectedSceneIds.ToArray())).ToDictionaryAsync(scene => scene.Id, cancellationToken);
+        if (scenes.Count == 0)
+            return;
+
+        var ids = scenes.Keys.ToArray();
+        var fileRows = await VideoFiles.AsNoTracking()
+            .Where(file => file.SceneId.HasValue && ids.Contains(file.SceneId.Value))
+            .Select(file => new
+            {
+                SceneId = file.SceneId!.Value,
+                file.Path,
+                file.Duration,
+                file.Width,
+                file.Height,
+                file.FrameRate,
+                file.BitRate,
+                file.Size,
+                file.ModTime,
+                file.Interactive,
+            })
+            .ToListAsync(cancellationToken);
+        var summaries = fileRows
+            .GroupBy(file => file.SceneId)
+            .ToDictionary(
+                group => group.Key,
+                group => new
+                {
+                    FileCount = group.Count(),
+                    MaxDuration = group.Max(file => file.Duration),
+                    MaxResolution = group.Max(file => Math.Max(file.Width, file.Height)),
+                    MaxHeight = group.Max(file => file.Height),
+                    MaxFrameRate = group.Max(file => file.FrameRate),
+                    MaxBitRate = group.Max(file => file.BitRate),
+                    MaxFileSize = group.Max(file => file.Size),
+                    MaxFileModTime = group.Max(file => (DateTime?)file.ModTime),
+                    MinPath = group.Min(file => file.Path),
+                    MaxPath = group.Max(file => file.Path),
+                    FileSearchText = BuildFileSearchText(group.Select(file => file.Path)),
+                    HasDimensionData = group.Any(file => file.Width > 0 && file.Height > 0),
+                    HasLandscapeFiles = group.Any(file => file.Width > file.Height),
+                    HasPortraitFiles = group.Any(file => file.Height > file.Width),
+                    HasSquareFiles = group.Any(file => file.Width > 0 && file.Width == file.Height),
+                    HasInteractiveFiles = group.Any(file => file.Interactive),
+                    HasNonInteractiveFiles = group.Any(file => !file.Interactive),
+                });
+
+        foreach (var scene in scenes.Values)
+        {
+            if (!summaries.TryGetValue(scene.Id, out var summary))
+            {
+                scene.FileCount = 0;
+                scene.MaxDuration = 0;
+                scene.MaxResolution = 0;
+                scene.MaxHeight = 0;
+                scene.MaxFrameRate = 0;
+                scene.MaxBitRate = 0;
+                scene.MaxFileSize = 0;
+                scene.MaxFileModTime = null;
+                scene.MinPath = null;
+                scene.MaxPath = null;
+                scene.FileSearchText = null;
+                scene.HasDimensionData = false;
+                scene.HasLandscapeFiles = false;
+                scene.HasPortraitFiles = false;
+                scene.HasSquareFiles = false;
+                scene.HasInteractiveFiles = false;
+                scene.HasNonInteractiveFiles = false;
+                continue;
+            }
+
+            scene.FileCount = summary.FileCount;
+            scene.MaxDuration = summary.MaxDuration;
+            scene.MaxResolution = summary.MaxResolution;
+            scene.MaxHeight = summary.MaxHeight;
+            scene.MaxFrameRate = summary.MaxFrameRate;
+            scene.MaxBitRate = summary.MaxBitRate;
+            scene.MaxFileSize = summary.MaxFileSize;
+            scene.MaxFileModTime = summary.MaxFileModTime;
+            scene.MinPath = summary.MinPath;
+            scene.MaxPath = summary.MaxPath;
+            scene.FileSearchText = summary.FileSearchText;
+            scene.HasDimensionData = summary.HasDimensionData;
+            scene.HasLandscapeFiles = summary.HasLandscapeFiles;
+            scene.HasPortraitFiles = summary.HasPortraitFiles;
+            scene.HasSquareFiles = summary.HasSquareFiles;
+            scene.HasInteractiveFiles = summary.HasInteractiveFiles;
+            scene.HasNonInteractiveFiles = summary.HasNonInteractiveFiles;
+        }
+    }
+
+    private void RefreshImageMetrics(HashSet<int> affectedImageIds)
+    {
+        var images = Images.Where(BuildIdContainsPredicate<Image>(affectedImageIds.ToArray())).ToDictionary(image => image.Id);
+        if (images.Count == 0)
+            return;
+
+        var ids = images.Keys.ToArray();
+        var tagCounts = Set<ImageTag>().AsNoTracking().Where(imageTag => ids.Contains(imageTag.ImageId))
+            .GroupBy(imageTag => imageTag.ImageId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var performerCounts = Set<ImagePerformer>().AsNoTracking().Where(imagePerformer => ids.Contains(imagePerformer.ImageId))
+            .GroupBy(imagePerformer => imagePerformer.ImageId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var galleryCounts = Set<ImageGallery>().AsNoTracking().Where(imageGallery => ids.Contains(imageGallery.ImageId))
+            .GroupBy(imageGallery => imageGallery.ImageId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var fileRows = ImageFiles.AsNoTracking()
+            .Where(file => file.ImageId.HasValue && ids.Contains(file.ImageId.Value))
+            .Select(file => new
+            {
+                ImageId = file.ImageId!.Value,
+                file.Path,
+                file.Width,
+                file.Height,
+                file.Size,
+                file.ModTime,
+            })
+            .ToList();
+        var summaries = fileRows
+            .GroupBy(file => file.ImageId)
+            .ToDictionary(
+                group => group.Key,
+                group => new
+                {
+                    FileCount = group.Count(),
+                    MaxResolution = group.Max(file => Math.Max(file.Width, file.Height)),
+                    MaxFileSize = group.Max(file => file.Size),
+                    MaxFileModTime = group.Max(file => (DateTime?)file.ModTime),
+                    MinPath = group.Min(file => file.Path),
+                    MaxPath = group.Max(file => file.Path),
+                    FileSearchText = BuildFileSearchText(group.Select(file => file.Path)),
+                    HasDimensionData = group.Any(file => file.Width > 0 && file.Height > 0),
+                    HasLandscapeFiles = group.Any(file => file.Width > file.Height),
+                    HasPortraitFiles = group.Any(file => file.Height > file.Width),
+                    HasSquareFiles = group.Any(file => file.Width > 0 && file.Width == file.Height),
+                });
+
+        foreach (var image in images.Values)
+        {
+            image.TagCount = tagCounts.GetValueOrDefault(image.Id, 0);
+            image.PerformerCount = performerCounts.GetValueOrDefault(image.Id, 0);
+            image.GalleryCount = galleryCounts.GetValueOrDefault(image.Id, 0);
+
+            if (!summaries.TryGetValue(image.Id, out var summary))
+            {
+                image.FileCount = 0;
+                image.MaxResolution = 0;
+                image.MaxFileSize = 0;
+                image.MaxFileModTime = null;
+                image.MinPath = null;
+                image.MaxPath = null;
+                image.FileSearchText = null;
+                image.HasDimensionData = false;
+                image.HasLandscapeFiles = false;
+                image.HasPortraitFiles = false;
+                image.HasSquareFiles = false;
+                continue;
+            }
+
+            image.FileCount = summary.FileCount;
+            image.MaxResolution = summary.MaxResolution;
+            image.MaxFileSize = summary.MaxFileSize;
+            image.MaxFileModTime = summary.MaxFileModTime;
+            image.MinPath = summary.MinPath;
+            image.MaxPath = summary.MaxPath;
+            image.FileSearchText = summary.FileSearchText;
+            image.HasDimensionData = summary.HasDimensionData;
+            image.HasLandscapeFiles = summary.HasLandscapeFiles;
+            image.HasPortraitFiles = summary.HasPortraitFiles;
+            image.HasSquareFiles = summary.HasSquareFiles;
+        }
+    }
+
+    private async Task RefreshImageMetricsAsync(HashSet<int> affectedImageIds, CancellationToken cancellationToken)
+    {
+        var images = await Images.Where(BuildIdContainsPredicate<Image>(affectedImageIds.ToArray())).ToDictionaryAsync(image => image.Id, cancellationToken);
+        if (images.Count == 0)
+            return;
+
+        var ids = images.Keys.ToArray();
+        var tagCounts = await Set<ImageTag>().AsNoTracking().Where(imageTag => ids.Contains(imageTag.ImageId))
+            .GroupBy(imageTag => imageTag.ImageId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var performerCounts = await Set<ImagePerformer>().AsNoTracking().Where(imagePerformer => ids.Contains(imagePerformer.ImageId))
+            .GroupBy(imagePerformer => imagePerformer.ImageId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var galleryCounts = await Set<ImageGallery>().AsNoTracking().Where(imageGallery => ids.Contains(imageGallery.ImageId))
+            .GroupBy(imageGallery => imageGallery.ImageId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var fileRows = await ImageFiles.AsNoTracking()
+            .Where(file => file.ImageId.HasValue && ids.Contains(file.ImageId.Value))
+            .Select(file => new
+            {
+                ImageId = file.ImageId!.Value,
+                file.Path,
+                file.Width,
+                file.Height,
+                file.Size,
+                file.ModTime,
+            })
+            .ToListAsync(cancellationToken);
+        var summaries = fileRows
+            .GroupBy(file => file.ImageId)
+            .ToDictionary(
+                group => group.Key,
+                group => new
+                {
+                    FileCount = group.Count(),
+                    MaxResolution = group.Max(file => Math.Max(file.Width, file.Height)),
+                    MaxFileSize = group.Max(file => file.Size),
+                    MaxFileModTime = group.Max(file => (DateTime?)file.ModTime),
+                    MinPath = group.Min(file => file.Path),
+                    MaxPath = group.Max(file => file.Path),
+                    FileSearchText = BuildFileSearchText(group.Select(file => file.Path)),
+                    HasDimensionData = group.Any(file => file.Width > 0 && file.Height > 0),
+                    HasLandscapeFiles = group.Any(file => file.Width > file.Height),
+                    HasPortraitFiles = group.Any(file => file.Height > file.Width),
+                    HasSquareFiles = group.Any(file => file.Width > 0 && file.Width == file.Height),
+                });
+
+        foreach (var image in images.Values)
+        {
+            image.TagCount = tagCounts.GetValueOrDefault(image.Id, 0);
+            image.PerformerCount = performerCounts.GetValueOrDefault(image.Id, 0);
+            image.GalleryCount = galleryCounts.GetValueOrDefault(image.Id, 0);
+
+            if (!summaries.TryGetValue(image.Id, out var summary))
+            {
+                image.FileCount = 0;
+                image.MaxResolution = 0;
+                image.MaxFileSize = 0;
+                image.MaxFileModTime = null;
+                image.MinPath = null;
+                image.MaxPath = null;
+                image.FileSearchText = null;
+                image.HasDimensionData = false;
+                image.HasLandscapeFiles = false;
+                image.HasPortraitFiles = false;
+                image.HasSquareFiles = false;
+                continue;
+            }
+
+            image.FileCount = summary.FileCount;
+            image.MaxResolution = summary.MaxResolution;
+            image.MaxFileSize = summary.MaxFileSize;
+            image.MaxFileModTime = summary.MaxFileModTime;
+            image.MinPath = summary.MinPath;
+            image.MaxPath = summary.MaxPath;
+            image.FileSearchText = summary.FileSearchText;
+            image.HasDimensionData = summary.HasDimensionData;
+            image.HasLandscapeFiles = summary.HasLandscapeFiles;
+            image.HasPortraitFiles = summary.HasPortraitFiles;
+            image.HasSquareFiles = summary.HasSquareFiles;
+        }
+    }
+
+    private void RefreshPerformerCounts(HashSet<int> affectedPerformerIds)
+    {
+        var performers = Performers.Where(BuildIdContainsPredicate<Performer>(affectedPerformerIds.ToArray())).ToDictionary(performer => performer.Id);
+        if (performers.Count == 0)
+            return;
+
+        var ids = performers.Keys.ToArray();
+        var sceneCounts = Set<ScenePerformer>().AsNoTracking().Where(scenePerformer => ids.Contains(scenePerformer.PerformerId))
+            .GroupBy(scenePerformer => scenePerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var imageCounts = Set<ImagePerformer>().AsNoTracking().Where(imagePerformer => ids.Contains(imagePerformer.PerformerId))
+            .GroupBy(imagePerformer => imagePerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var galleryCounts = Set<GalleryPerformer>().AsNoTracking().Where(galleryPerformer => ids.Contains(galleryPerformer.PerformerId))
+            .GroupBy(galleryPerformer => galleryPerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var tagCounts = Set<PerformerTag>().AsNoTracking().Where(performerTag => ids.Contains(performerTag.PerformerId))
+            .GroupBy(performerTag => performerTag.PerformerId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+
+        foreach (var performer in performers.Values)
+        {
+            performer.SceneCount = sceneCounts.GetValueOrDefault(performer.Id, 0);
+            performer.ImageCount = imageCounts.GetValueOrDefault(performer.Id, 0);
+            performer.GalleryCount = galleryCounts.GetValueOrDefault(performer.Id, 0);
+            performer.TagCount = tagCounts.GetValueOrDefault(performer.Id, 0);
+        }
+    }
+
+    private async Task RefreshPerformerCountsAsync(HashSet<int> affectedPerformerIds, CancellationToken cancellationToken)
+    {
+        var performers = await Performers.Where(BuildIdContainsPredicate<Performer>(affectedPerformerIds.ToArray())).ToDictionaryAsync(performer => performer.Id, cancellationToken);
+        if (performers.Count == 0)
+            return;
+
+        var ids = performers.Keys.ToArray();
+        var sceneCounts = await Set<ScenePerformer>().AsNoTracking().Where(scenePerformer => ids.Contains(scenePerformer.PerformerId))
+            .GroupBy(scenePerformer => scenePerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var imageCounts = await Set<ImagePerformer>().AsNoTracking().Where(imagePerformer => ids.Contains(imagePerformer.PerformerId))
+            .GroupBy(imagePerformer => imagePerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var galleryCounts = await Set<GalleryPerformer>().AsNoTracking().Where(galleryPerformer => ids.Contains(galleryPerformer.PerformerId))
+            .GroupBy(galleryPerformer => galleryPerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var tagCounts = await Set<PerformerTag>().AsNoTracking().Where(performerTag => ids.Contains(performerTag.PerformerId))
+            .GroupBy(performerTag => performerTag.PerformerId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+
+        foreach (var performer in performers.Values)
+        {
+            performer.SceneCount = sceneCounts.GetValueOrDefault(performer.Id, 0);
+            performer.ImageCount = imageCounts.GetValueOrDefault(performer.Id, 0);
+            performer.GalleryCount = galleryCounts.GetValueOrDefault(performer.Id, 0);
+            performer.TagCount = tagCounts.GetValueOrDefault(performer.Id, 0);
+        }
+    }
+
+    private void RefreshGalleryCounts(HashSet<int> affectedGalleryIds)
+    {
+        var galleries = Galleries.Where(BuildIdContainsPredicate<Gallery>(affectedGalleryIds.ToArray())).ToDictionary(gallery => gallery.Id);
+        if (galleries.Count == 0)
+            return;
+
+        var ids = galleries.Keys.ToArray();
+        var imageCounts = Set<ImageGallery>().AsNoTracking().Where(imageGallery => ids.Contains(imageGallery.GalleryId))
+            .GroupBy(imageGallery => imageGallery.GalleryId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var sceneCounts = Set<SceneGallery>().AsNoTracking().Where(sceneGallery => ids.Contains(sceneGallery.GalleryId))
+            .GroupBy(sceneGallery => sceneGallery.GalleryId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var performerCounts = Set<GalleryPerformer>().AsNoTracking().Where(galleryPerformer => ids.Contains(galleryPerformer.GalleryId))
+            .GroupBy(galleryPerformer => galleryPerformer.GalleryId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var tagCounts = Set<GalleryTag>().AsNoTracking().Where(galleryTag => ids.Contains(galleryTag.GalleryId))
+            .GroupBy(galleryTag => galleryTag.GalleryId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+
+        foreach (var gallery in galleries.Values)
+        {
+            gallery.ImageCount = imageCounts.GetValueOrDefault(gallery.Id, 0);
+            gallery.SceneCount = sceneCounts.GetValueOrDefault(gallery.Id, 0);
+            gallery.PerformerCount = performerCounts.GetValueOrDefault(gallery.Id, 0);
+            gallery.TagCount = tagCounts.GetValueOrDefault(gallery.Id, 0);
+        }
+    }
+
+    private async Task RefreshGalleryCountsAsync(HashSet<int> affectedGalleryIds, CancellationToken cancellationToken)
+    {
+        var galleries = await Galleries.Where(BuildIdContainsPredicate<Gallery>(affectedGalleryIds.ToArray())).ToDictionaryAsync(gallery => gallery.Id, cancellationToken);
+        if (galleries.Count == 0)
+            return;
+
+        var ids = galleries.Keys.ToArray();
+        var imageCounts = await Set<ImageGallery>().AsNoTracking().Where(imageGallery => ids.Contains(imageGallery.GalleryId))
+            .GroupBy(imageGallery => imageGallery.GalleryId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var sceneCounts = await Set<SceneGallery>().AsNoTracking().Where(sceneGallery => ids.Contains(sceneGallery.GalleryId))
+            .GroupBy(sceneGallery => sceneGallery.GalleryId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var performerCounts = await Set<GalleryPerformer>().AsNoTracking().Where(galleryPerformer => ids.Contains(galleryPerformer.GalleryId))
+            .GroupBy(galleryPerformer => galleryPerformer.GalleryId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var tagCounts = await Set<GalleryTag>().AsNoTracking().Where(galleryTag => ids.Contains(galleryTag.GalleryId))
+            .GroupBy(galleryTag => galleryTag.GalleryId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+
+        foreach (var gallery in galleries.Values)
+        {
+            gallery.ImageCount = imageCounts.GetValueOrDefault(gallery.Id, 0);
+            gallery.SceneCount = sceneCounts.GetValueOrDefault(gallery.Id, 0);
+            gallery.PerformerCount = performerCounts.GetValueOrDefault(gallery.Id, 0);
+            gallery.TagCount = tagCounts.GetValueOrDefault(gallery.Id, 0);
+        }
+    }
+
+    private static string? BuildFileSearchText(IEnumerable<string?> paths)
+    {
+        var normalizedPaths = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!.Replace('\\', '/'))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+
+        if (normalizedPaths.Length == 0)
+            return null;
+
+        return "\n" + string.Join("\n", normalizedPaths) + "\n";
+    }
+
+    private void RefreshStudioCounts(HashSet<int> affectedStudioIds)
+    {
+        var studios = Studios.Where(BuildIdContainsPredicate<Studio>(affectedStudioIds.ToArray())).ToDictionary(studio => studio.Id);
+        if (studios.Count == 0)
+            return;
+
+        var ids = studios.Keys.ToArray();
+        var sceneCounts = Scenes.AsNoTracking().Where(scene => scene.StudioId.HasValue && ids.Contains(scene.StudioId.Value))
+            .GroupBy(scene => scene.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var imageCounts = Images.AsNoTracking().Where(image => image.StudioId.HasValue && ids.Contains(image.StudioId.Value))
+            .GroupBy(image => image.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var galleryCounts = Galleries.AsNoTracking().Where(gallery => gallery.StudioId.HasValue && ids.Contains(gallery.StudioId.Value))
+            .GroupBy(gallery => gallery.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var groupCounts = Set<Group>().AsNoTracking().Where(groupEntity => groupEntity.StudioId.HasValue && ids.Contains(groupEntity.StudioId.Value))
+            .GroupBy(groupEntity => groupEntity.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var performerCounts = Set<ScenePerformer>().AsNoTracking().Where(scenePerformer => scenePerformer.Scene!.StudioId.HasValue && ids.Contains(scenePerformer.Scene.StudioId.Value))
+            .GroupBy(scenePerformer => scenePerformer.Scene!.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Select(scenePerformer => scenePerformer.PerformerId).Distinct().Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var childCounts = Studios.AsNoTracking().Where(studio => studio.ParentId.HasValue && ids.Contains(studio.ParentId.Value))
+            .GroupBy(studio => studio.ParentId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+        var tagCounts = Set<StudioTag>().AsNoTracking().Where(studioTag => ids.Contains(studioTag.StudioId))
+            .GroupBy(studioTag => studioTag.StudioId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionary(x => x.Key, x => x.Count);
+
+        foreach (var studio in studios.Values)
+        {
+            studio.SceneCount = sceneCounts.GetValueOrDefault(studio.Id, 0);
+            studio.ImageCount = imageCounts.GetValueOrDefault(studio.Id, 0);
+            studio.GalleryCount = galleryCounts.GetValueOrDefault(studio.Id, 0);
+            studio.GroupCount = groupCounts.GetValueOrDefault(studio.Id, 0);
+            studio.PerformerCount = performerCounts.GetValueOrDefault(studio.Id, 0);
+            studio.ChildStudioCount = childCounts.GetValueOrDefault(studio.Id, 0);
+            studio.TagCount = tagCounts.GetValueOrDefault(studio.Id, 0);
+        }
+    }
+
+    private async Task RefreshStudioCountsAsync(HashSet<int> affectedStudioIds, CancellationToken cancellationToken)
+    {
+        var studios = await Studios.Where(BuildIdContainsPredicate<Studio>(affectedStudioIds.ToArray())).ToDictionaryAsync(studio => studio.Id, cancellationToken);
+        if (studios.Count == 0)
+            return;
+
+        var ids = studios.Keys.ToArray();
+        var sceneCounts = await Scenes.AsNoTracking().Where(scene => scene.StudioId.HasValue && ids.Contains(scene.StudioId.Value))
+            .GroupBy(scene => scene.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var imageCounts = await Images.AsNoTracking().Where(image => image.StudioId.HasValue && ids.Contains(image.StudioId.Value))
+            .GroupBy(image => image.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var galleryCounts = await Galleries.AsNoTracking().Where(gallery => gallery.StudioId.HasValue && ids.Contains(gallery.StudioId.Value))
+            .GroupBy(gallery => gallery.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var groupCounts = await Set<Group>().AsNoTracking().Where(groupEntity => groupEntity.StudioId.HasValue && ids.Contains(groupEntity.StudioId.Value))
+            .GroupBy(groupEntity => groupEntity.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var performerCounts = await Set<ScenePerformer>().AsNoTracking().Where(scenePerformer => scenePerformer.Scene!.StudioId.HasValue && ids.Contains(scenePerformer.Scene.StudioId.Value))
+            .GroupBy(scenePerformer => scenePerformer.Scene!.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Select(scenePerformer => scenePerformer.PerformerId).Distinct().Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var childCounts = await Studios.AsNoTracking().Where(studio => studio.ParentId.HasValue && ids.Contains(studio.ParentId.Value))
+            .GroupBy(studio => studio.ParentId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var tagCounts = await Set<StudioTag>().AsNoTracking().Where(studioTag => ids.Contains(studioTag.StudioId))
+            .GroupBy(studioTag => studioTag.StudioId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+
+        foreach (var studio in studios.Values)
+        {
+            studio.SceneCount = sceneCounts.GetValueOrDefault(studio.Id, 0);
+            studio.ImageCount = imageCounts.GetValueOrDefault(studio.Id, 0);
+            studio.GalleryCount = galleryCounts.GetValueOrDefault(studio.Id, 0);
+            studio.GroupCount = groupCounts.GetValueOrDefault(studio.Id, 0);
+            studio.PerformerCount = performerCounts.GetValueOrDefault(studio.Id, 0);
+            studio.ChildStudioCount = childCounts.GetValueOrDefault(studio.Id, 0);
+            studio.TagCount = tagCounts.GetValueOrDefault(studio.Id, 0);
+        }
+    }
+
+    private static void CollectChangedIntKey<TEntity>(HashSet<int> ids, IEnumerable<EntityEntry<TEntity>> entries, Func<TEntity, int> currentSelector, string propertyName)
+        where TEntity : class
+    {
+        foreach (var entry in entries)
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            AddIfPositive(ids, currentSelector(entry.Entity));
+            AddIfPositive(ids, entry.Property<int>(propertyName).OriginalValue);
+        }
+    }
+
+    private static void CollectChangedNullableIntKey<TEntity>(HashSet<int> ids, IEnumerable<EntityEntry<TEntity>> entries, Func<TEntity, int?> currentSelector, string propertyName)
+        where TEntity : class
+    {
+        foreach (var entry in entries)
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            AddIfPositive(ids, currentSelector(entry.Entity));
+            AddIfPositive(ids, entry.Property<int?>(propertyName).OriginalValue);
+        }
+    }
+
+    private static void AddRelatedIdsFromDeletedParents(HashSet<int> ids, int[] deletedParentIds, Func<int[], IQueryable<int>> queryBuilder)
+    {
+        if (deletedParentIds.Length == 0)
+            return;
+
+        foreach (var tagId in queryBuilder(deletedParentIds).ToList())
+            AddIfPositive(ids, tagId);
+    }
+
+    private static void AddIfPositive(HashSet<int> ids, int? value)
+    {
+        if (value is > 0)
+            ids.Add(value.Value);
     }
 
     private HashSet<int> CollectChangedParentIds<TLink>(Func<TLink, int> parentId) where TLink : class

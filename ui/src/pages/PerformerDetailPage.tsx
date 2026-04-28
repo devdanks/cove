@@ -21,6 +21,8 @@ import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PerformerScrapeDialog } from "../components/PerformerScrapeDialog";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission, hasAnyPermission } from "../auth/visibility";
 
 interface Props {
   id: number;
@@ -46,6 +48,7 @@ const GROUP_SORT = [
 
 export function PerformerDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
+  const { hasPermission } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: performer, isLoading } = useQuery({
     queryKey: ["performer", id],
@@ -72,6 +75,23 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "performers" }, onNavigate);
+  const canWritePerformer = canWriteEntity("performer", hasPermission);
+  const canDeletePerformer = canDeleteEntity("performer", hasPermission);
+  const canReadPerformerScenes = canReadEntity("scene", hasPermission);
+  const canReadPerformerGalleries = canReadEntity("gallery", hasPermission);
+  const canReadPerformerImages = canReadEntity("image", hasPermission);
+  const canReadPerformerGroups = canReadEntity("group", hasPermission);
+  const canReadTags = canReadEntity("tag", hasPermission);
+  const canAutoTagPerformer = hasPermission("library.autotag") && canWritePerformer;
+  const canScrapePerformer = hasAnyPermission(hasPermission, ["performers.scrape", "performers.write"]);
+  const showPerformerOpsMenu = canWritePerformer || canAutoTagPerformer || canScrapePerformer || canDeletePerformer;
+  const visiblePerformerTabs = filterItemsByPermission(performerTabs, {
+    scenes: "scenes.read",
+    galleries: "galleries.read",
+    images: "images.read",
+    groups: "groups.read",
+    appearsWith: "performers.read",
+  }, hasPermission);
 
   const deleteMut = useMutation({
     mutationFn: () => performers.delete(id),
@@ -104,15 +124,15 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       switch (e.key) {
-        case "e": setEditing((v) => !v); break;
-        case "f": if (performer) updateMut.mutate({ favorite: !performer.favorite }); break;
-        case "c": setActiveTab("scenes"); break;
-        case "g": setActiveTab("galleries"); break;
+        case "e": if (canWritePerformer) setEditing((v) => !v); break;
+        case "f": if (performer && canWritePerformer) updateMut.mutate({ favorite: !performer.favorite }); break;
+        case "c": if (canReadPerformerScenes) setActiveTab("scenes"); break;
+        case "g": if (canReadPerformerGalleries) setActiveTab("galleries"); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [performer]);
+  }, [canReadPerformerGalleries, canReadPerformerScenes, canWritePerformer, performer]);
 
   useEffect(() => {
     if (!showOpsMenu) return;
@@ -122,6 +142,12 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showOpsMenu]);
+
+  useEffect(() => {
+    if (visiblePerformerTabs.length > 0 && !visiblePerformerTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(visiblePerformerTabs[0].key as TabKey);
+    }
+  }, [activeTab, visiblePerformerTabs]);
 
   if (isLoading) {
     return (
@@ -160,35 +186,37 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
             </button>
             <div className="flex items-center gap-2">
               <ExtensionSlot slot="performer-detail-actions" context={{ performer, onNavigate }} />
-              <div className="relative" ref={opsMenuRef}>
-                <button
-                  onClick={() => setShowOpsMenu(!showOpsMenu)}
-                  className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground"
-                  title="Actions"
-                >
-                  <MoreVertical className="h-4 w-4" />
-                </button>
-                {showOpsMenu && (
-                  <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
-                    <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                      <Pencil className="h-3.5 w-3.5" /> Edit
-                    </button>
-                    <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">
-                      {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
-                    </button>
-                    <button onClick={() => { setScrapeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                      <Search className="h-3.5 w-3.5" /> Scrape...
-                    </button>
-                    <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                      <GitMerge className="h-3.5 w-3.5" /> Merge...
-                    </button>
-                    <div className="my-1 border-t border-border" />
-                    <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface">
-                      <Trash2 className="h-3.5 w-3.5" /> Delete
-                    </button>
-                  </div>
-                )}
-              </div>
+              {showPerformerOpsMenu ? (
+                <div className="relative" ref={opsMenuRef}>
+                  <button
+                    onClick={() => setShowOpsMenu(!showOpsMenu)}
+                    className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground"
+                    title="Actions"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                  {showOpsMenu && (
+                    <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
+                      {canWritePerformer ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </button> : null}
+                      {canAutoTagPerformer ? <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">
+                        {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
+                      </button> : null}
+                      {canScrapePerformer ? <button onClick={() => { setScrapeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
+                        <Search className="h-3.5 w-3.5" /> Scrape...
+                      </button> : null}
+                      {canWritePerformer ? <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
+                        <GitMerge className="h-3.5 w-3.5" /> Merge...
+                      </button> : null}
+                      {canDeletePerformer ? <div className="my-1 border-t border-border" /> : null}
+                      {canDeletePerformer ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface">
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </button> : null}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -220,20 +248,26 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                     <p className="mt-1 text-sm text-secondary">Also known as: {performer.aliases.join(", ")}</p>
                   )}
                 </div>
-                <button
-                  onClick={() => updateMut.mutate({ favorite: !performer.favorite })}
-                  className={`rounded-full p-2 transition-colors ${
-                    performer.favorite
-                      ? "bg-red-500/15 text-red-500"
-                      : "bg-card text-muted hover:text-red-400"
-                  }`}
-                  title={performer.favorite ? "Remove from favorites" : "Add to favorites"}
-                >
-                  <Heart className={`h-6 w-6 ${performer.favorite ? "fill-current" : ""}`} />
-                </button>
+                {canWritePerformer ? (
+                  <button
+                    onClick={() => updateMut.mutate({ favorite: !performer.favorite })}
+                    className={`rounded-full p-2 transition-colors ${
+                      performer.favorite
+                        ? "bg-red-500/15 text-red-500"
+                        : "bg-card text-muted hover:text-red-400"
+                    }`}
+                    title={performer.favorite ? "Remove from favorites" : "Add to favorites"}
+                  >
+                    <Heart className={`h-6 w-6 ${performer.favorite ? "fill-current" : ""}`} />
+                  </button>
+                ) : performer.favorite ? (
+                  <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite performer">
+                    <Heart className="h-6 w-6 fill-current" />
+                  </span>
+                ) : null}
               </div>
 
-              <InteractiveRating value={performer.rating} onChange={(value) => updateMut.mutate({ rating: value })} />
+              <InteractiveRating value={performer.rating} onChange={(value) => updateMut.mutate({ rating: value })} readOnly={!canWritePerformer} />
 
               <div className="mt-4 flex flex-wrap gap-3">
                 <CountCard label="Scenes" value={performer.sceneCount} icon={<Film className="h-4 w-4" />} />
@@ -289,7 +323,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                 <p className="mt-4 text-sm text-emerald-300">Auto-tag job queued.</p>
               )}
 
-              {performer.tags.length > 0 && (
+              {canReadTags && performer.tags.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   {performer.tags.map((tag) => (
                     <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
@@ -337,7 +371,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
 
         <div className="mx-auto max-w-7xl mt-0 border-b border-border">
           <div className="flex gap-1 overflow-x-auto">
-            {performerTabs.map((tab) => (
+            {visiblePerformerTabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key as TabKey)}

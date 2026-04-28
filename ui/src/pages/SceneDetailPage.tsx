@@ -9,12 +9,8 @@ import {
   RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download,
   PictureInPicture2, Repeat, Repeat1, Subtitles
 } from "lucide-react";
-import { useState, useRef, useEffect, useCallback, Fragment, useMemo } from "react";
-import { SceneEditModal } from "./SceneEditModal";
+import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { GenerateDialog } from "../components/GenerateDialog";
-import { DetailMergeDialog } from "../components/DetailMergeDialog";
-import { IdentifyDialog } from "../components/IdentifyDialog";
 import type { Scene, SceneMarkerCreate, SceneUpdate } from "../api/types";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { InteractiveRating } from "../components/Rating";
@@ -25,8 +21,15 @@ import { createRouteLinkProps } from "../components/cardNavigation";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { useBackNavigation } from "../hooks/useBackNavigation";
-import { SceneDownloadDialog } from "../components/SceneDownloadDialog";
-import { SceneScrapeDialog } from "../components/SceneScrapeDialog";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission, hasAnyPermission } from "../auth/visibility";
+
+const SceneEditModal = lazy(() => import("./SceneEditModal").then((module) => ({ default: module.SceneEditModal })));
+const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
+const DetailMergeDialog = lazy(() => import("../components/DetailMergeDialog").then((module) => ({ default: module.DetailMergeDialog })));
+const IdentifyDialog = lazy(() => import("../components/IdentifyDialog").then((module) => ({ default: module.IdentifyDialog })));
+const SceneDownloadDialog = lazy(() => import("../components/SceneDownloadDialog").then((module) => ({ default: module.SceneDownloadDialog })));
+const SceneScrapeDialog = lazy(() => import("../components/SceneScrapeDialog").then((module) => ({ default: module.SceneScrapeDialog })));
 
 interface Props {
   id: number;
@@ -40,6 +43,7 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
     queryKey: ["scene", id],
     queryFn: () => scenes.get(id),
   });
+  const { hasPermission } = useAuth();
   const { config } = useAppConfig();
   const { hasPrev, hasNext, prevId, nextId, currentPosition, queueLength } = useSceneQueue();
   const { getTabsForPage, resolveComponent: resolveExtComponent } = useExtensions();
@@ -56,6 +60,19 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("details");
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "scenes" }, onNavigate);
+  const canWriteScene = canWriteEntity("scene", hasPermission);
+  const canDeleteScene = canDeleteEntity("scene", hasPermission);
+  const canReadGroups = canReadEntity("group", hasPermission);
+  const canReadGalleries = canReadEntity("gallery", hasPermission);
+  const canReadMarkers = canReadEntity("marker", hasPermission);
+  const canReadFiles = hasPermission("files.read");
+  const canRunJobs = hasPermission("jobs.run");
+  const canLibraryScan = hasPermission("library.scan");
+  const canLibraryAutoTag = hasPermission("library.autotag");
+  const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
+  const canGenerateScene = canRunJobs && canWriteScene;
+  const canIdentifyScene = canLibraryAutoTag && canWriteScene;
+  const canDownloadScene = canRunJobs && canWriteScene;
   const seekRef = useRef<((time: number) => void) | null>(null);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const coverFileInputRef = useRef<HTMLInputElement>(null);
@@ -96,18 +113,18 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
       switch (e.key) {
         case ",": setTheaterMode((prev) => !prev); break;
         case "a": setActiveTab("details"); break;
-        case "e": setActiveTab("edit"); break;
-        case "k": setActiveTab("markers"); break;
-        case "i": setActiveTab("file-info"); break;
+        case "e": if (canWriteScene) setActiveTab("edit"); break;
+        case "k": if (canReadMarkers) setActiveTab("markers"); break;
+        case "i": if (canReadFiles) setActiveTab("file-info"); break;
         case "h": setActiveTab("history"); break;
-        case "o": if (scene) incrementOMut.mutate(); break;
+        case "o": if (scene && canWriteScene) incrementOMut.mutate(); break;
         case "[": if (hasPrev && prevId != null) onNavigate({ page: "scene", id: prevId }); break;
         case "]": if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [canReadFiles, canReadMarkers, canWriteScene, hasNext, hasPrev, nextId, onNavigate, prevId, scene]);
 
   // Close ops menu on outside click
   useEffect(() => {
@@ -204,6 +221,30 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
     mutationFn: () => scenes.rescan(id),
   });
 
+  const tabs = filterItemsByPermission([
+    { key: "details", label: "Details" },
+    { key: "markers", label: "Markers" },
+    ...(scene?.groups.length ? [{ key: "groups" as TabKey, label: "Groups" }] : []),
+    ...(scene?.galleries.length ? [{ key: "galleries" as TabKey, label: "Galleries" }] : []),
+    { key: "filters", label: "Filters" },
+    { key: "file-info", label: `File Info${scene?.files.length && scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },
+    { key: "history", label: "History" },
+    ...getTabsForPage("scene").map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label })),
+    { key: "edit", label: "Edit" },
+  ], {
+    groups: "groups.read",
+    galleries: "galleries.read",
+    markers: "markers.read",
+    "file-info": "files.read",
+    edit: "scenes.write",
+  }, hasPermission);
+
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab("details");
+    }
+  }, [activeTab, tabs]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -218,19 +259,6 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
   const streamUrl = scenes.streamUrl(id);
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
 
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: "details", label: "Details" },
-    { key: "markers", label: "Markers" },
-    ...(scene.groups.length > 0 ? [{ key: "groups" as TabKey, label: "Groups" }] : []),
-    ...(scene.galleries.length > 0 ? [{ key: "galleries" as TabKey, label: "Galleries" }] : []),
-    { key: "filters", label: "Filters" },
-    { key: "file-info", label: `File Info${scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },
-    { key: "history", label: "History" },
-    // Extension-contributed tabs
-    ...getTabsForPage("scene").map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label })),
-    { key: "edit", label: "Edit" },
-  ];
-
   const studioImageUrl = scene.studioId ? entityImages.studioImageUrl(scene.studioId) : null;
 
   return (
@@ -242,7 +270,58 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
         className="hidden"
         onChange={handleCoverFileChange}
       />
-      {scene && <SceneEditModal scene={scene} open={editing} onClose={() => setEditing(false)} />}
+      <Suspense fallback={null}>
+        {scene && editing ? <SceneEditModal scene={scene} open={editing} onClose={() => setEditing(false)} /> : null}
+        {showGenerate ? (
+          <GenerateDialog
+            open={showGenerate}
+            onClose={() => setShowGenerate(false)}
+            sceneIds={[id]}
+            title={`Generate for "${scene.title || "Untitled"}"`}
+          />
+        ) : null}
+        {showDownloadDialog ? (
+          <SceneDownloadDialog
+            open={showDownloadDialog}
+            scene={scene}
+            onClose={() => setShowDownloadDialog(false)}
+            onNavigate={onNavigate}
+          />
+        ) : null}
+        {showScrapeDialog ? (
+          <SceneScrapeDialog
+            open={showScrapeDialog}
+            scene={scene}
+            onClose={() => setShowScrapeDialog(false)}
+          />
+        ) : null}
+        {showMerge ? (
+          <DetailMergeDialog
+            open={showMerge}
+            onClose={() => setShowMerge(false)}
+            entityType="scene"
+            targetItem={{ id: scene.id, name: scene.title || file?.basename || `Scene ${scene.id}`, imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt), subtitle: scene.studioName }}
+            searchItems={async (term) => {
+              const response = await scenes.find({ page: 1, perPage: 20, direction: "desc", q: term || undefined });
+              return response.items.map((item) => ({
+                id: item.id,
+                name: item.title || item.files[0]?.basename || `Scene ${item.id}`,
+                imagePath: scenes.screenshotUrl(item.id, item.updatedAt),
+                subtitle: item.studioName,
+              }));
+            }}
+            onMerge={(targetId, sourceIds) => scenes.merge(targetId, sourceIds)}
+            invalidateQueryKeys={[["scene", id], ["scenes"]]}
+          />
+        ) : null}
+        {showIdentify ? (
+          <IdentifyDialog
+            open={showIdentify}
+            onClose={() => setShowIdentify(false)}
+            sceneIds={[id]}
+          />
+        ) : null}
+      </Suspense>
       <ConfirmDialog
         open={confirmDelete}
         title="Delete Scene"
@@ -251,46 +330,6 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
         onCancel={() => setConfirmDelete(false)}
         showDeleteFile
       />
-      <GenerateDialog
-        open={showGenerate}
-        onClose={() => setShowGenerate(false)}
-        sceneIds={[id]}
-        title={`Generate for "${scene.title || "Untitled"}"`}
-      />
-      <SceneDownloadDialog
-        open={showDownloadDialog}
-        scene={scene}
-        onClose={() => setShowDownloadDialog(false)}
-        onNavigate={onNavigate}
-      />
-      <SceneScrapeDialog
-        open={showScrapeDialog}
-        scene={scene}
-        onClose={() => setShowScrapeDialog(false)}
-      />
-      <DetailMergeDialog
-        open={showMerge}
-        onClose={() => setShowMerge(false)}
-        entityType="scene"
-        targetItem={{ id: scene.id, name: scene.title || file?.basename || `Scene ${scene.id}`, imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt), subtitle: scene.studioName }}
-        searchItems={async (term) => {
-          const response = await scenes.find({ page: 1, perPage: 20, direction: "desc", q: term || undefined });
-          return response.items.map((item) => ({
-            id: item.id,
-            name: item.title || item.files[0]?.basename || `Scene ${item.id}`,
-            imagePath: scenes.screenshotUrl(item.id, item.updatedAt),
-            subtitle: item.studioName,
-          }));
-        }}
-        onMerge={(targetId, sourceIds) => scenes.merge(targetId, sourceIds)}
-        invalidateQueryKeys={[["scene", id], ["scenes"]]}
-      />
-      <IdentifyDialog
-        open={showIdentify}
-        onClose={() => setShowIdentify(false)}
-        sceneIds={[id]}
-      />
-
       {/* Standard layout: left sidebar + right video */}
       <div className={theaterMode ? "flex flex-col" : "flex flex-col xl:flex-row xl:h-[calc(100vh-48px)]"}>
         {/* Left sidebar: metadata, tabs, tab content */}
@@ -327,7 +366,7 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
 
               {/* Title — large like original's h3 */}
               <h3 className="text-[1.5rem] font-semibold text-foreground leading-snug line-clamp-2 mt-1">
-                {scene.title || file?.path.split(/[\\/]/).pop() || "Untitled"}
+                {scene.title || file?.basename || `Scene ${scene.id}`}
               </h3>
 
               {/* Subheader: date left, resolution+fps right */}
@@ -351,32 +390,52 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
 
               {/* Toolbar: rating left, counters + ops right — single row */}
               <div className="flex items-center justify-between mt-3 gap-2">
-                <InteractiveRating value={scene.rating} onChange={(value) => updateMut.mutate({ rating: value })} />
+                <InteractiveRating value={scene.rating} onChange={(value) => updateMut.mutate({ rating: value })} readOnly={!canWriteScene} />
                 <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => incrementPlayMut.mutate()}
-                    className="flex items-center gap-1 text-sm text-secondary hover:text-foreground"
-                    title="Play count"
-                  >
-                    <Eye className="w-4 h-4" />
-                    <span>{scene.playCount}</span>
-                  </button>
-                  <button 
-                    onClick={() => incrementOMut.mutate()}
-                    className="flex items-center gap-1 text-sm text-secondary hover:text-accent"
-                    title="Favorite"
-                  >
-                    <Heart className={`w-4 h-4 ${scene.oCounter > 0 ? "fill-accent text-accent" : ""}`} />
-                    <span>{scene.oCounter}</span>
-                  </button>
-                  <button 
-                    onClick={() => { if (!updateMut.isPending) updateMut.mutate({ organized: !scene.organized }); }}
-                    disabled={updateMut.isPending}
-                    className={`p-1 rounded ${scene.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground"} ${updateMut.isPending ? "opacity-60 cursor-not-allowed" : ""}`}
-                    title={scene.organized ? "Organized" : "Not organized"}
-                  >
-                    <Check className="w-4 h-4" />
-                  </button>
+                  {canWriteScene ? (
+                    <button 
+                      onClick={() => incrementPlayMut.mutate()}
+                      className="flex items-center gap-1 text-sm text-secondary hover:text-foreground"
+                      title="Play count"
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span>{scene.playCount}</span>
+                    </button>
+                  ) : (
+                    <span className="flex items-center gap-1 text-sm text-secondary">
+                      <Eye className="w-4 h-4" />
+                      <span>{scene.playCount}</span>
+                    </span>
+                  )}
+                  {canWriteScene ? (
+                    <button 
+                      onClick={() => incrementOMut.mutate()}
+                      className="flex items-center gap-1 text-sm text-secondary hover:text-accent"
+                      title="Favorite"
+                    >
+                      <Heart className={`w-4 h-4 ${scene.oCounter > 0 ? "fill-accent text-accent" : ""}`} />
+                      <span>{scene.oCounter}</span>
+                    </button>
+                  ) : (
+                    <span className="flex items-center gap-1 text-sm text-secondary">
+                      <Heart className={`w-4 h-4 ${scene.oCounter > 0 ? "fill-accent text-accent" : ""}`} />
+                      <span>{scene.oCounter}</span>
+                    </span>
+                  )}
+                  {canWriteScene ? (
+                    <button 
+                      onClick={() => { if (!updateMut.isPending) updateMut.mutate({ organized: !scene.organized }); }}
+                      disabled={updateMut.isPending}
+                      className={`p-1 rounded ${scene.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground"} ${updateMut.isPending ? "opacity-60 cursor-not-allowed" : ""}`}
+                      title={scene.organized ? "Organized" : "Not organized"}
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                  ) : scene.organized ? (
+                    <span className="p-1 rounded bg-green-600 text-white" title="Organized">
+                      <Check className="w-4 h-4" />
+                    </span>
+                  ) : null}
                   {file && (
                     <a
                       href={streamUrl}
@@ -399,25 +458,25 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
                     </button>
                     {showOpsMenu && (
                       <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] bg-card border border-border rounded shadow-lg py-1">
-                        <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Pencil className="w-3.5 h-3.5" /> Edit</button>
-                        {!file && (
+                        {canWriteScene ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Pencil className="w-3.5 h-3.5" /> Edit</button> : null}
+                        {!file && canDownloadScene ? (
                           <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Download className="w-3.5 h-3.5" /> Download Media…</button>
-                        )}
-                        {file && (
+                        ) : null}
+                        {file && canLibraryScan ? (
                           <button onClick={() => { rescanMut.mutate(); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5" /> Rescan</button>
-                        )}
-                        <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Scrape…</button>
-                        <button onClick={() => { setShowIdentify(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Search className="w-3.5 h-3.5" /> Identify…</button>
-                        <div className="border-t border-border my-1" />
-                        <button onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Clapperboard className="w-3.5 h-3.5" /> Generate…</button>
-                        <button onClick={() => { handleSetCoverFromCurrentFrame(); setShowOpsMenu(false); }} disabled={coverActionPending || !file} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Camera className="w-3.5 h-3.5" /> Set Cover from Current Frame</button>
-                        <button onClick={() => { coverFileInputRef.current?.click(); setShowOpsMenu(false); }} disabled={coverActionPending} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Upload className="w-3.5 h-3.5" /> Upload Cover Image…</button>
-                        <button onClick={() => { handleResetCoverToDefault(); setShowOpsMenu(false); }} disabled={coverActionPending} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Image className="w-3.5 h-3.5" /> Use Default Cover</button>
-                        <div className="border-t border-border my-1" />
-                        <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Merge className="w-3.5 h-3.5" /> Merge…</button>
+                        ) : null}
+                        {canScrapeScene ? <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Scrape…</button> : null}
+                        {canIdentifyScene ? <button onClick={() => { setShowIdentify(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Search className="w-3.5 h-3.5" /> Identify…</button> : null}
+                        {canGenerateScene || canWriteScene ? <div className="border-t border-border my-1" /> : null}
+                        {canGenerateScene ? <button onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Clapperboard className="w-3.5 h-3.5" /> Generate…</button> : null}
+                        {canWriteScene ? <button onClick={() => { handleSetCoverFromCurrentFrame(); setShowOpsMenu(false); }} disabled={coverActionPending || !file} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Camera className="w-3.5 h-3.5" /> Set Cover from Current Frame</button> : null}
+                        {canWriteScene ? <button onClick={() => { coverFileInputRef.current?.click(); setShowOpsMenu(false); }} disabled={coverActionPending} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Upload className="w-3.5 h-3.5" /> Upload Cover Image…</button> : null}
+                        {canWriteScene ? <button onClick={() => { handleResetCoverToDefault(); setShowOpsMenu(false); }} disabled={coverActionPending} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Image className="w-3.5 h-3.5" /> Use Default Cover</button> : null}
+                        {canWriteScene ? <div className="border-t border-border my-1" /> : null}
+                        {canWriteScene ? <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Merge className="w-3.5 h-3.5" /> Merge…</button> : null}
                         <button onClick={() => { setTheaterMode(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Monitor className="w-3.5 h-3.5" /> Theater Mode</button>
-                        <div className="border-t border-border my-1" />
-                        <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+                        {canDeleteScene ? <div className="border-t border-border my-1" /> : null}
+                        {canDeleteScene ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button> : null}
                       </div>
                     )}
                   </div>
@@ -507,7 +566,6 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
                 resumeTime={scene.resumeTime}
                 sceneId={id}
                 captions={file.captions}
-                onPlay={() => incrementPlayMut.mutate()}
                 markers={scene.markers}
                 onSeekRegister={(fn) => { seekRef.current = fn; }}
                 onTimeUpdate={setVideoTime}
@@ -516,6 +574,7 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
                 onEnded={() => { if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
                 onPrev={hasPrev && prevId != null ? () => onNavigate({ page: "scene", id: prevId }) : undefined}
                 onNext={hasNext && nextId != null ? () => onNavigate({ page: "scene", id: nextId }) : undefined}
+                onPlay={canWriteScene ? () => incrementPlayMut.mutate() : () => {}}
               />
             ) : (
               <div className="flex items-center justify-center h-48 text-muted">No video file available</div>
@@ -527,7 +586,7 @@ export function SceneDetailPage({ id, onNavigate }: Props) {
           {/* Theater mode: show metadata below video */}
           {theaterMode && (
             <div className="px-4 pt-3 max-w-5xl mx-auto">
-              <h1 className="text-xl font-bold text-foreground">{scene.title || file?.path.split(/[\\/]/).pop() || "Untitled"}</h1>
+              <h1 className="text-xl font-bold text-foreground">{scene.title || file?.basename || `Scene ${scene.id}`}</h1>
               <div className="flex items-center gap-3 mt-2 flex-wrap">
                 <InteractiveRating value={scene.rating} onChange={(value) => updateMut.mutate({ rating: value })} />
                 <button onClick={() => incrementPlayMut.mutate()} className="flex items-center gap-1 text-sm text-secondary hover:text-foreground"><Eye className="w-4 h-4" />{scene.playCount}</button>

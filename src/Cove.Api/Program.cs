@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -81,6 +82,7 @@ try
     builder.Services.AddScoped<IBackupService, BackupService>();
     builder.Services.AddSingleton<IBlobService, BlobService>();
     builder.Services.AddSingleton<ConfigService>();
+    builder.Services.AddSingleton<AuthBypassPrincipalProvider>();
     builder.Services.AddSingleton<ScraperService>();
     builder.Services.AddSingleton<ISceneCoverService, SceneCoverService>();
     builder.Services.AddScoped<ISceneMetadataApplyService, SceneMetadataApplyService>();
@@ -196,6 +198,7 @@ try
         options.Filters.Add<Cove.Api.Middleware.EntityEventFilter>();
         options.Filters.Add<Cove.Api.Middleware.AuthExceptionFilter>();
         options.Filters.Add<Cove.Api.Middleware.PermissionAuthorizationFilter>();
+        options.Filters.Add<Cove.Api.Middleware.EntityAccessActionFilter>();
     })
         .AddJsonOptions(options =>
         {
@@ -219,7 +222,11 @@ try
     builder.Services.AddOutputCache(options =>
     {
         options.AddBasePolicy(b => b.NoCache());
-        options.AddPolicy("ShortCache", b => b.Expire(TimeSpan.FromSeconds(1)).SetVaryByQuery("*").SetLocking(false));
+        options.AddPolicy("ShortCache", b => b
+            .AddPolicy<Cove.Api.Middleware.AuthAwareOutputCachePolicy>()
+            .Expire(TimeSpan.FromSeconds(1))
+            .SetVaryByHeader("Authorization", "Cookie", "X-Share-Token", "X-Share-Password")
+            .SetLocking(false), true);
     });
 
     // In-memory cache for POST query results
@@ -513,6 +520,20 @@ static async Task EnsureColumnsAsync(CoveContext db)
     var conn = db.Database.GetDbConnection();
     await conn.OpenAsync();
 
+    async Task<string?> GetRelationKindAsync(string relation)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT c.relkind
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relname = '{relation}'
+            LIMIT 1
+            """;
+        var kind = await cmd.ExecuteScalarAsync();
+        return kind?.ToString();
+    }
+
     async Task AddColumnIfMissing(string table, string column, string type, string? defaultValue = null)
     {
         await using var cmd = conn.CreateCommand();
@@ -580,17 +601,24 @@ static async Task EnsureColumnsAsync(CoveContext db)
 
     var remoteIdIndexCommands = new[]
     {
-        "CREATE INDEX IF NOT EXISTS \"IX_SceneRemoteId_SceneId\" ON \"SceneRemoteId\" (\"SceneId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_PerformerRemoteId_PerformerId\" ON \"PerformerRemoteId\" (\"PerformerId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_TagRemoteId_TagId\" ON \"TagRemoteId\" (\"TagId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_StudioRemoteId_StudioId\" ON \"StudioRemoteId\" (\"StudioId\")",
+        new { Relation = "SceneRemoteId", Sql = "CREATE INDEX IF NOT EXISTS \"IX_SceneRemoteId_SceneId\" ON \"SceneRemoteId\" (\"SceneId\")" },
+        new { Relation = "PerformerRemoteId", Sql = "CREATE INDEX IF NOT EXISTS \"IX_PerformerRemoteId_PerformerId\" ON \"PerformerRemoteId\" (\"PerformerId\")" },
+        new { Relation = "TagRemoteId", Sql = "CREATE INDEX IF NOT EXISTS \"IX_TagRemoteId_TagId\" ON \"TagRemoteId\" (\"TagId\")" },
+        new { Relation = "StudioRemoteId", Sql = "CREATE INDEX IF NOT EXISTS \"IX_StudioRemoteId_StudioId\" ON \"StudioRemoteId\" (\"StudioId\")" },
     };
 
-    foreach (var sql in remoteIdIndexCommands)
+    foreach (var indexCommand in remoteIdIndexCommands)
     {
-        await using var indexCommand = conn.CreateCommand();
-        indexCommand.CommandText = sql;
-        await indexCommand.ExecuteNonQueryAsync();
+        var relationKind = await GetRelationKindAsync(indexCommand.Relation);
+        if (relationKind is not ("r" or "p"))
+        {
+            Log.Information("Skipping compatibility index bootstrap for relation {Relation} (kind={Kind})", indexCommand.Relation, relationKind ?? "missing");
+            continue;
+        }
+
+        await using var createIndex = conn.CreateCommand();
+        createIndex.CommandText = indexCommand.Sql;
+        await createIndex.ExecuteNonQueryAsync();
     }
 
     // Extension key-value storage (added after initial schema)

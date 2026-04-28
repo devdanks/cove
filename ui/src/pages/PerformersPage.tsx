@@ -14,6 +14,8 @@ import { PerformerTagger } from "../components/PerformerTagger";
 import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, GalleriesPopoverContent } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
@@ -53,6 +55,10 @@ export function PerformersPage({ onNavigate }: Props) {
   const [showMerge, setShowMerge] = useState(false);
   const [showMetadataBatch, setShowMetadataBatch] = useState(false);
   const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canWritePerformer = canWriteEntity("performer", hasPermission);
+  const canDeletePerformer = canDeleteEntity("performer", hasPermission);
+  const canMetadataBatch = hasPermission("library.autotag") && canWritePerformer;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
 
@@ -105,7 +111,7 @@ export function PerformersPage({ onNavigate }: Props) {
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
         availableDisplayModes={["grid", "list", "tagger"]}
-        onNew={() => setShowCreate(true)}
+        onNew={canWritePerformer ? () => setShowCreate(true) : undefined}
         criteriaDefinitions={PERFORMER_CRITERIA}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
@@ -114,21 +120,25 @@ export function PerformersPage({ onNavigate }: Props) {
         onSelectNone={selectNone}
         selectionActions={
           <>
-            <button
-              onClick={() => setShowMetadataBatch(true)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
-            >
-              <Users className="w-3 h-3" />
-              MetadataServer
-            </button>
-            <button
-              onClick={() => setShowBulkEdit(true)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-            >
-              <Edit className="w-3 h-3" />
-              Edit
-            </button>
-            {selectedIds.size >= 2 && (
+            {canMetadataBatch && (
+              <button
+                onClick={() => setShowMetadataBatch(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+              >
+                <Users className="w-3 h-3" />
+                MetadataServer
+              </button>
+            )}
+            {canWritePerformer && (
+              <button
+                onClick={() => setShowBulkEdit(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
+              >
+                <Edit className="w-3 h-3" />
+                Edit
+              </button>
+            )}
+            {canWritePerformer && selectedIds.size >= 2 && (
               <button
                 onClick={() => setShowMerge(true)}
                 className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/20"
@@ -137,14 +147,16 @@ export function PerformersPage({ onNavigate }: Props) {
                 Merge
               </button>
             )}
-            <button
-              onClick={() => { if (confirm(`Delete ${selectedIds.size} performer(s)?`)) bulkDeleteMut.mutate(); }}
-              disabled={bulkDeleteMut.isPending}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-            >
-              {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-              Delete
-            </button>
+            {canDeletePerformer && (
+              <button
+                onClick={() => { if (confirm(`Delete ${selectedIds.size} performer(s)?`)) bulkDeleteMut.mutate(); }}
+                disabled={bulkDeleteMut.isPending}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
+              >
+                {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                Delete
+              </button>
+            )}
           </>
         }
       >

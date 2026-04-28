@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { scenes, tags, performers, galleries } from "../api/client";
 import type { FindFilter, Scene, SceneCreate, SceneFilterCriteria } from "../api/types";
@@ -12,22 +12,17 @@ import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { EditModal, Field, TextArea, TextInput, SaveButton } from "../components/EditModal";
 import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Download } from "lucide-react";
-import { MergeDialog } from "../components/MergeDialog";
 import { useSceneQueue } from "../state/SceneQueueContext";
-import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDialog";
-import { IdentifyDialog } from "../components/IdentifyDialog";
-import { SceneQueue } from "../components/SceneQueue";
 import { SceneCard } from "../components/EntityCards";
-import { QuickViewDialog } from "../components/QuickViewDialog";
 import { RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canWriteEntity, hasAnyPermission } from "../auth/visibility";
 import { StringListEditor } from "../components/StringListEditor";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { StudioSelector } from "../components/StudioSelector";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
-import { SceneDownloadDialog } from "../components/SceneDownloadDialog";
-import { SceneBatchScrapeDialog } from "../components/SceneBatchScrapeDialog";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -39,6 +34,14 @@ import {
 } from "../utils/batchDownloads";
 
 import { getDefaultFilter } from "../components/SavedFilterMenu";
+
+const SceneDownloadDialog = lazy(() => import("../components/SceneDownloadDialog").then((module) => ({ default: module.SceneDownloadDialog })));
+const SceneBatchScrapeDialog = lazy(() => import("../components/SceneBatchScrapeDialog").then((module) => ({ default: module.SceneBatchScrapeDialog })));
+const BatchDownloadOptionsDialog = lazy(() => import("../components/BatchDownloadOptionsDialog").then((module) => ({ default: module.BatchDownloadOptionsDialog })));
+const MergeDialog = lazy(() => import("../components/MergeDialog").then((module) => ({ default: module.MergeDialog })));
+const IdentifyDialog = lazy(() => import("../components/IdentifyDialog").then((module) => ({ default: module.IdentifyDialog })));
+const SceneQueue = lazy(() => import("../components/SceneQueue").then((module) => ({ default: module.SceneQueue })));
+const QuickViewDialog = lazy(() => import("../components/QuickViewDialog").then((module) => ({ default: module.QuickViewDialog })));
 
 interface Props {
   onNavigate: (r: any) => void;
@@ -72,6 +75,12 @@ export function ScenesPage({ onNavigate }: Props) {
   const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
   const queryClient = useQueryClient();
   const { setQueue } = useSceneQueue();
+  const { hasPermission } = useAuth();
+  const canWriteScene = canWriteEntity("scene", hasPermission);
+  const canDeleteScene = canDeleteEntity("scene", hasPermission);
+  const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
+  const canIdentifyScene = hasPermission("library.autotag") && canWriteScene;
+  const canDownloadScene = hasPermission("jobs.run") && canWriteScene;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
 
@@ -89,7 +98,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const selecting = selectedIds.size > 0;
   const selectedScene = selectedIds.size === 1 ? items.find((scene) => selectedIds.has(scene.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
-  const canDownloadSelectedScene = selectedDownloadTargets.length > 0;
+  const canDownloadSelectedScene = canDownloadScene && selectedDownloadTargets.length > 0;
   const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-scenes");
   const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
 
@@ -161,31 +170,39 @@ export function ScenesPage({ onNavigate }: Props) {
   return (
     <>
     <SceneCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "scene", id })} />
-    <SceneDownloadDialog
-      open={downloadTarget !== null}
-      scene={downloadTarget && downloadTarget !== "new" ? downloadTarget : undefined}
-      onClose={() => setDownloadTarget(null)}
-      onNavigate={onNavigate}
-    />
-    <SceneBatchScrapeDialog
-      open={showBatchScrape}
-      onClose={() => setShowBatchScrape(false)}
-      scenes={items.filter((scene) => selectedIds.has(scene.id))}
-    />
-    <BatchDownloadOptionsDialog
-      open={showBatchDownloadOptions}
-      entity="Scene"
-      itemCount={selectedDownloadTargets.length}
-      initialOptions={batchDownloadOptions}
-      isPending={batchDownloadMut.isPending}
-      onClose={() => setShowBatchDownloadOptions(false)}
-      onConfirm={(options) => {
-        setBatchDownloadOptions(options);
-        saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
-        setShowBatchDownloadOptions(false);
-        batchDownloadMut.mutate(options);
-      }}
-    />
+    <Suspense fallback={null}>
+      {downloadTarget !== null ? (
+        <SceneDownloadDialog
+          open={downloadTarget !== null}
+          scene={downloadTarget !== "new" ? downloadTarget : undefined}
+          onClose={() => setDownloadTarget(null)}
+          onNavigate={onNavigate}
+        />
+      ) : null}
+      {showBatchScrape ? (
+        <SceneBatchScrapeDialog
+          open={showBatchScrape}
+          onClose={() => setShowBatchScrape(false)}
+          scenes={items.filter((scene) => selectedIds.has(scene.id))}
+        />
+      ) : null}
+      {showBatchDownloadOptions ? (
+        <BatchDownloadOptionsDialog
+          open={showBatchDownloadOptions}
+          entity="Scene"
+          itemCount={selectedDownloadTargets.length}
+          initialOptions={batchDownloadOptions}
+          isPending={batchDownloadMut.isPending}
+          onClose={() => setShowBatchDownloadOptions(false)}
+          onConfirm={(options) => {
+            setBatchDownloadOptions(options);
+            saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
+            setShowBatchDownloadOptions(false);
+            batchDownloadMut.mutate(options);
+          }}
+        />
+      ) : null}
+    </Suspense>
     <ListPage
       title="Scenes"
       pageKey="scenes"
@@ -198,21 +215,21 @@ export function ScenesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall", "tagger"]}
-      renderOperations={() => (
+      renderOperations={canDownloadScene ? () => (
         <button
           onClick={() => setDownloadTarget("new")}
           className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
         >
           From URL
         </button>
-      )}
+      ) : undefined}
       metadataByline={byline}
       criteriaDefinitions={SCENE_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
-      onNew={() => setShowCreate(true)}
+      onNew={canWriteScene ? () => setShowCreate(true) : undefined}
       selectedIds={selectedIds}
       onSelectAll={selectAll}
       onSelectNone={selectNone}
@@ -235,28 +252,34 @@ export function ScenesPage({ onNavigate }: Props) {
               Download
             </button>
           )}
-          <button
-            onClick={() => setShowBulkEdit(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-          >
-            <Edit className="w-3 h-3" />
-            Edit
-          </button>
-          <button
-            onClick={() => setShowIdentify(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-          >
-            <Search className="w-3 h-3" />
-            Identify
-          </button>
-          <button
-            onClick={() => setShowBatchScrape(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
-          >
-            <Search className="w-3 h-3" />
-            Scrape
-          </button>
-          {selectedIds.size >= 2 && (
+          {canWriteScene && (
+            <button
+              onClick={() => setShowBulkEdit(true)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
+            >
+              <Edit className="w-3 h-3" />
+              Edit
+            </button>
+          )}
+          {canIdentifyScene && (
+            <button
+              onClick={() => setShowIdentify(true)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
+            >
+              <Search className="w-3 h-3" />
+              Identify
+            </button>
+          )}
+          {canScrapeScene && (
+            <button
+              onClick={() => setShowBatchScrape(true)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+            >
+              <Search className="w-3 h-3" />
+              Scrape
+            </button>
+          )}
+          {canWriteScene && selectedIds.size >= 2 && (
             <button
               onClick={() => setShowMerge(true)}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/20"
@@ -272,14 +295,16 @@ export function ScenesPage({ onNavigate }: Props) {
             <Play className="w-3 h-3" />
             Play
           </button>
-          <button
-            onClick={() => { if (confirm(`Delete ${selectedIds.size} scene(s)?`)) bulkDeleteMut.mutate(); }}
-            disabled={bulkDeleteMut.isPending}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-          >
-            {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-            Delete
-          </button>
+          {canDeleteScene && (
+            <button
+              onClick={() => { if (confirm(`Delete ${selectedIds.size} scene(s)?`)) bulkDeleteMut.mutate(); }}
+              disabled={bulkDeleteMut.isPending}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
+            >
+              {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+              Delete
+            </button>
+          )}
         </>
       }
     >
@@ -335,34 +360,40 @@ export function ScenesPage({ onNavigate }: Props) {
       onApply={(values) => bulkEditMut.mutate(values)}
       isPending={bulkEditMut.isPending}
     />
-    <MergeDialog
-      open={showMerge}
-      onClose={() => { setShowMerge(false); selectNone(); }}
-      entityType="scene"
-      items={items.filter((s) => selectedIds.has(s.id)).map((s) => ({ id: s.id, name: s.title || s.files[0]?.basename || `Scene ${s.id}` }))}
-      onMerge={scenes.merge}
-      queryKey="scenes"
-    />
-    <IdentifyDialog
-      open={showIdentify}
-      onClose={() => { setShowIdentify(false); selectNone(); }}
-      sceneIds={[...selectedIds]}
-    />
-    {showQueue && (
-      <SceneQueue
-        scenes={items.filter((s) => selectedIds.has(s.id)).map((s) => ({
-          id: s.id,
-          title: s.title || s.files[0]?.basename,
-          duration: s.files[0]?.duration,
-          screenshotUrl: scenes.screenshotUrl(s.id, s.updatedAt),
-        }))}
-        onClose={() => { setShowQueue(false); selectNone(); }}
-        onNavigate={onNavigate}
-      />
-    )}
-    {quickViewId !== null && (
-      <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
-    )}
+    <Suspense fallback={null}>
+      {showMerge ? (
+        <MergeDialog
+          open={showMerge}
+          onClose={() => { setShowMerge(false); selectNone(); }}
+          entityType="scene"
+          items={items.filter((s) => selectedIds.has(s.id)).map((s) => ({ id: s.id, name: s.title || s.files[0]?.basename || `Scene ${s.id}` }))}
+          onMerge={scenes.merge}
+          queryKey="scenes"
+        />
+      ) : null}
+      {showIdentify ? (
+        <IdentifyDialog
+          open={showIdentify}
+          onClose={() => { setShowIdentify(false); selectNone(); }}
+          sceneIds={[...selectedIds]}
+        />
+      ) : null}
+      {showQueue ? (
+        <SceneQueue
+          scenes={items.filter((s) => selectedIds.has(s.id)).map((s) => ({
+            id: s.id,
+            title: s.title || s.files[0]?.basename,
+            duration: s.files[0]?.duration,
+            screenshotUrl: scenes.screenshotUrl(s.id, s.updatedAt),
+          }))}
+          onClose={() => { setShowQueue(false); selectNone(); }}
+          onNavigate={onNavigate}
+        />
+      ) : null}
+      {quickViewId !== null ? (
+        <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+      ) : null}
+    </Suspense>
     </>
   );
 }

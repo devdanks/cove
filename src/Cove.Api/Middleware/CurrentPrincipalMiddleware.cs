@@ -1,4 +1,7 @@
+using Cove.Api.Services;
 using Cove.Core.Auth;
+using Cove.Core.Interfaces;
+using Cove.Data.Auth;
 
 namespace Cove.Api.Middleware;
 
@@ -8,14 +11,80 @@ namespace Cove.Api.Middleware;
 /// </summary>
 public sealed class CurrentPrincipalMiddleware
 {
+    private const string AccessCookieName = "cove_access_token";
     private readonly RequestDelegate _next;
 
     public CurrentPrincipalMiddleware(RequestDelegate next) => _next = next;
 
-    public async Task InvokeAsync(HttpContext context, ITokenService tokens, ICurrentPrincipalAccessor accessor)
+    public async Task InvokeAsync(
+        HttpContext context,
+        ITokenService tokens,
+        IShareLinkService shareLinks,
+        ICurrentPrincipalAccessor accessor,
+        CoveConfiguration config,
+        AuthBypassPrincipalProvider authBypassPrincipalProvider,
+        ConfigService configService,
+        IAuditService audit,
+        ILogger<CurrentPrincipalMiddleware> logger)
     {
         var ip = context.Connection.RemoteIpAddress?.ToString();
         var ua = context.Request.Headers.UserAgent.ToString();
+
+        if (!config.Auth.Enabled)
+        {
+            if (AuthDisabledRequestGuard.IsTrustedLocalAddress(context.Connection.RemoteIpAddress))
+            {
+                accessor.Set(await authBypassPrincipalProvider.GetAsync(ip, ua, context.RequestAborted));
+                await _next(context);
+                return;
+            }
+
+            config.Auth.Enabled = true;
+
+            try
+            {
+                await configService.SaveCurrentConfigAsync();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to persist automatic auth lockdown after remote request from {RemoteIp}", ip ?? "unknown");
+            }
+
+            await audit.LogAsync(
+                AuditActions.SettingsChange,
+                AuditOutcomes.Deny,
+                CovePrincipal.Anonymous(ip, ua),
+                "auth",
+                "enabled",
+                new
+                {
+                    reason = "public_request_lockdown",
+                    method = context.Request.Method,
+                    path = context.Request.Path.Value,
+                    remoteIp = ip,
+                },
+                context.RequestAborted);
+
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                code = "AUTH_LOCKDOWN_TRIGGERED",
+                message = "Authentication was automatically enabled after a public remote request was detected while authentication was disabled.",
+            }, context.RequestAborted);
+            return;
+        }
+
+        string? shareToken = context.Request.Headers["X-Share-Token"].ToString();
+        if (string.IsNullOrWhiteSpace(shareToken))
+        {
+            shareToken = context.Request.Query["share_token"].ToString();
+        }
+
+        string? sharePassword = context.Request.Headers["X-Share-Password"].ToString();
+        if (string.IsNullOrWhiteSpace(sharePassword))
+        {
+            sharePassword = context.Request.Query["share_password"].ToString();
+        }
 
         // Allow SignalR / file-stream endpoints to pass the token via ?access_token=
         string? authHeader = context.Request.Headers.Authorization.ToString();
@@ -26,7 +95,26 @@ public sealed class CurrentPrincipalMiddleware
                 authHeader = "Bearer " + qsToken;
         }
 
-        var principal = await tokens.ResolveAsync(authHeader, ip, ua, context.RequestAborted);
+        if (string.IsNullOrEmpty(authHeader)
+            && context.Request.Cookies.TryGetValue(AccessCookieName, out var cookieToken)
+            && !string.IsNullOrEmpty(cookieToken))
+        {
+            authHeader = "Bearer " + cookieToken;
+        }
+
+        CovePrincipal? principal = null;
+        if (!string.IsNullOrWhiteSpace(shareToken))
+        {
+            principal = await shareLinks.ResolveAsync(
+                shareToken,
+                string.IsNullOrWhiteSpace(sharePassword) ? null : sharePassword,
+                ip,
+                ua,
+                context.RequestAborted);
+        }
+        else if (!string.IsNullOrEmpty(authHeader))
+            principal = await tokens.ResolveAsync(authHeader, ip, ua, context.RequestAborted);
+
         if (principal is not null)
         {
             accessor.Set(principal);

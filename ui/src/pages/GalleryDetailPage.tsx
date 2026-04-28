@@ -19,6 +19,8 @@ import { createRouteLinkProps } from "../components/cardNavigation";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 
 interface Props {
   id: number;
@@ -28,6 +30,7 @@ interface Props {
 type TabKey = "images" | "scenes" | "chapters" | "fileinfo" | (string & {});
 
 export function GalleryDetailPage({ id, onNavigate }: Props) {
+  const { hasPermission } = useAuth();
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 60, direction: "desc" });
   const { data: gallery, isLoading } = useQuery({
     queryKey: ["gallery", id],
@@ -56,6 +59,17 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "galleries" }, onNavigate);
+  const canWriteGallery = canWriteEntity("gallery", hasPermission);
+  const canDeleteGallery = canDeleteEntity("gallery", hasPermission);
+  const canDownloadGallery = hasPermission("jobs.run") && canWriteGallery;
+  const canReadGalleryImages = canReadEntity("image", hasPermission);
+  const canReadPerformers = canReadEntity("performer", hasPermission);
+  const canReadStudios = canReadEntity("studio", hasPermission);
+  const canReadTags = canReadEntity("tag", hasPermission);
+  const visibleGalleryTabs = filterItemsByPermission(galleryTabs, {
+    images: "images.read",
+    scenes: "scenes.read",
+  }, hasPermission);
 
   useEffect(() => {
     if (gallery) document.title = `${gallery.title || `Gallery ${id}`} | Cove`;
@@ -77,14 +91,20 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
       const el = (e.target as HTMLElement).tagName;
       if (el === "INPUT" || el === "TEXTAREA" || el === "SELECT") return;
       switch (e.key) {
-        case "e": setEditing((v) => !v); break;
-        case "a": setActiveTab("images"); break;
+        case "e": if (canWriteGallery) setEditing((v) => !v); break;
+        case "a": if (canReadGalleryImages) setActiveTab("images"); break;
         case "f": setActiveTab("fileinfo"); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [canReadGalleryImages, canWriteGallery]);
+
+  useEffect(() => {
+    if (visibleGalleryTabs.length > 0 && !visibleGalleryTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(visibleGalleryTabs[0].key);
+    }
+  }, [activeTab, visibleGalleryTabs]);
 
   const deleteMut = useMutation({
     mutationFn: () => galleries.delete(id),
@@ -188,12 +208,12 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
             </button>
             <div className="flex items-center gap-2">
               <ExtensionSlot slot="gallery-detail-actions" context={{ gallery, onNavigate }} />
-              <button
+              {canWriteGallery ? <button
                 onClick={() => setEditing(true)}
                 className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
-              </button>
+              </button> : null}
               <div className="relative" ref={opsMenuRef}>
                 <button
                   onClick={() => setShowOpsMenu(!showOpsMenu)}
@@ -204,11 +224,11 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
                 </button>
                 {showOpsMenu && (
                   <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] bg-card border border-border rounded shadow-lg py-1">
-                    <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Pencil className="w-3.5 h-3.5" /> Edit</button>
-                    {gallery.files.length === 0 && <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Download className="w-3.5 h-3.5" /> Download Media…</button>}
+                    {canWriteGallery ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Pencil className="w-3.5 h-3.5" /> Edit</button> : null}
+                    {gallery.files.length === 0 && canDownloadGallery ? <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Download className="w-3.5 h-3.5" /> Download Media…</button> : null}
                     <button onClick={() => { setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5" /> Rescan</button>
-                    <div className="border-t border-border my-1" />
-                    <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+                    {canDeleteGallery ? <div className="border-t border-border my-1" /> : null}
+                    {canDeleteGallery ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button> : null}
                   </div>
                 )}
               </div>
@@ -227,32 +247,32 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
               <h1 className="truncate text-2xl sm:text-3xl md:text-4xl font-bold text-foreground">{gallery.title || "Untitled Gallery"}</h1>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-secondary">
                 {gallery.date && <span>{formatDate(gallery.date)}</span>}
-                {gallery.studioName && gallery.studioId && (
+                {gallery.studioName && gallery.studioId && (canReadStudios ? (
                   <button onClick={() => onNavigate({ page: "studio", id: gallery.studioId })} className="text-accent hover:underline">
                     {gallery.studioName}
                   </button>
-                )}
+                ) : <span>{gallery.studioName}</span>)}
                 {gallery.photographer && <span>Photographer: {gallery.photographer}</span>}
                 {gallery.code && <span>Code: {gallery.code}</span>}
                 <span className="flex items-center gap-1"><ImageIcon className="h-4 w-4" /> {gallery.imageCount} images</span>
                 <span title={`Created ${formatDate(gallery.createdAt)}`}>Updated {formatDate(gallery.updatedAt)}</span>
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/60 px-4 py-3">
-                <InteractiveRating value={gallery.rating} onChange={(value) => galleryUpdateMut.mutate({ rating: value })} />
+                <InteractiveRating value={gallery.rating} onChange={(value) => galleryUpdateMut.mutate({ rating: value })} readOnly={!canWriteGallery} />
                 <div className="flex items-center gap-2">
-                  <button
+                  {canWriteGallery ? <button
                     onClick={() => galleryUpdateMut.mutate({ organized: !gallery.organized })}
                     className={`p-1.5 rounded transition-colors ${gallery.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground border border-border"}`}
                     title={gallery.organized ? "Organized" : "Not organized"}
                   >
                     <Check className="w-4 h-4" />
-                  </button>
+                  </button> : gallery.organized ? <span className="rounded bg-green-600 p-1.5 text-white" title="Organized gallery"><Check className="w-4 h-4" /></span> : null}
                 </div>
               </div>
               {gallery.details && (
                 <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{gallery.details}</p>
               )}
-              {gallery.tags.length > 0 && (
+              {canReadTags && gallery.tags.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   {gallery.tags.map((tag) => (
                     <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
@@ -274,7 +294,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
 
           {/* Tabs */}
           <div className="mt-6 flex gap-1 border-b border-border">
-            {galleryTabs.map((tab) => (
+            {visibleGalleryTabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
@@ -306,7 +326,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
       />
 
       <div className="px-4 py-6">
-          {gallery.performers.length > 0 && (
+          {canReadPerformers && gallery.performers.length > 0 && (
               <div className="mb-6 rounded-xl border border-border bg-card p-4">
                 <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Performers</h2>
                 <div className="flex flex-wrap justify-center gap-3">
@@ -329,6 +349,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
                 removeImagesMut={removeImagesMut}
                 imageZoom={imageZoom}
                 setImageZoom={setImageZoom}
+                canWriteGallery={canWriteGallery}
               />
             )}
 
@@ -348,7 +369,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
       </div>
 
       {/* Add Images Dialog */}
-      {showAddImages && (
+      {showAddImages && canWriteGallery && (
         <AddImagesDialog
           galleryId={id}
           existingImageIds={new Set(galleryImages?.items.map((i) => i.id) ?? [])}
@@ -456,7 +477,7 @@ const IMAGE_SORT = [
   { label: "Created At", value: "created_at" },
 ];
 
-function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryImages, onShowAddImages, onLightbox, removeImagesMut, imageZoom, setImageZoom }: {
+function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryImages, onShowAddImages, onLightbox, removeImagesMut, imageZoom, setImageZoom, canWriteGallery }: {
   galleryId: number;
   filter: FindFilter;
   setFilter: (f: FindFilter) => void;
@@ -467,6 +488,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
   removeImagesMut: any;
   imageZoom: number;
   setImageZoom: (z: number) => void;
+  canWriteGallery: boolean;
 }) {
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(galleryImages?.items ?? []);
@@ -475,11 +497,11 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
   if (!galleryImages) return <EmptyPanel icon={<ImageIcon className="h-12 w-12" />} message="No images in this gallery" />;
   if (galleryImages.items.length === 0) return (
     <>
-      <div className="flex justify-end mb-3">
+      {canWriteGallery ? <div className="flex justify-end mb-3">
         <button onClick={onShowAddImages} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10 border border-border">
           <Plus className="w-3 h-3" /> Add Images
         </button>
-      </div>
+      </div> : null}
       <EmptyPanel icon={<ImageIcon className="h-12 w-12" />} message="No images in this gallery" />
     </>
   );
@@ -500,22 +522,22 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
         selectionActions={
           <>
             <BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={galleryImages.items} />
-            <button
+            {canWriteGallery ? <button
               onClick={() => { if (confirm(`Remove ${selectedIds.size} image(s) from gallery?`)) removeImagesMut.mutate([...selectedIds]); }}
               disabled={removeImagesMut.isPending}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-orange-400 hover:text-orange-300 hover:bg-orange-900/20"
             >
               {removeImagesMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
               Remove from Gallery
-            </button>
+            </button> : null}
           </>
         }
       />
-      <div className="flex justify-end mb-2">
+      {canWriteGallery ? <div className="flex justify-end mb-2">
         <button onClick={onShowAddImages} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10 border border-border">
           <Plus className="w-3 h-3" /> Add Images
         </button>
-      </div>
+      </div> : null}
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + imageZoom * 50}px, 1fr))` }}>
         {galleryImages.items.map((image, idx) => (
           <ImageTile

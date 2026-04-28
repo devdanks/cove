@@ -55,6 +55,7 @@ public static class Permissions
 
     // Files
     public const string FilesRead = "files.read";
+    public const string FilesWrite = "files.write";
     public const string FilesDelete = "files.delete";
 
     // Library / scan / cleanup
@@ -85,6 +86,8 @@ public static class Permissions
     public const string RolesRead = "roles.read";
     public const string RolesWrite = "roles.write";
     public const string RolesDelete = "roles.delete";
+    public const string ApiTokensWrite = "apitokens.write";
+    public const string ShareLinksWrite = "sharelinks.write";
 
     // System
     public const string SystemRead = "system.read";
@@ -144,7 +147,8 @@ public static class Permissions
         new(MarkersDelete, "Markers", "Delete scene markers.", Implies: [MarkersRead]),
 
         new(FilesRead, "Files", "List orphan/raw files in the library."),
-        new(FilesDelete, "Files", "Delete raw files from disk.", Dangerous: true),
+        new(FilesWrite, "Files", "Move files or edit raw-file metadata/fingerprints.", Dangerous: true, Implies: [FilesRead]),
+        new(FilesDelete, "Files", "Delete raw files from disk.", Dangerous: true, Implies: [FilesWrite]),
 
         new(LibraryScan, "Library", "Trigger library scans."),
         new(LibraryAutoTag, "Library", "Trigger auto-tag jobs."),
@@ -169,6 +173,8 @@ public static class Permissions
         new(RolesRead, "Roles", "View roles and permissions."),
         new(RolesWrite, "Roles", "Create or edit roles and permission assignments.", Dangerous: true, Implies: [RolesRead]),
         new(RolesDelete, "Roles", "Delete roles.", Dangerous: true, Implies: [RolesRead]),
+        new(ApiTokensWrite, "Access", "Create, list, and revoke API tokens for user accounts.", Dangerous: true),
+        new(ShareLinksWrite, "Access", "Create, list, and revoke share links for accessible content.", Dangerous: true),
 
         new(SystemRead, "System", "View system status and configuration."),
         new(SystemSettingsWrite, "System", "Change application settings.", Dangerous: true, Implies: [SystemRead]),
@@ -191,7 +197,7 @@ public static class Permissions
         TagsWrite, StudiosWrite,
         GalleriesWrite, ImagesWrite, GroupsWrite,
         MarkersWrite, MarkersDelete,
-        FilesRead,
+        FilesRead, FilesWrite,
         LibraryScan, LibraryAutoTag,
         SavedFiltersWrite, SavedFiltersDelete,
         JobsRun, JobsCancel,

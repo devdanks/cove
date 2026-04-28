@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Regex = System.Text.RegularExpressions.Regex;
 using RegexOptions = System.Text.RegularExpressions.RegexOptions;
+using PermissionKeys = Cove.Core.Auth.Permissions;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 
@@ -247,10 +248,15 @@ public class PerformerRepository : IPerformerRepository
             filter.StudiosCriterion = expandedStudios.Criterion;
         }
 
-        var query = _db.Performers
-            .Include(p => p.PerformerTags).ThenInclude(pt => pt.Tag)
-            .AsSplitQuery()
-            .AsQueryable();
+        var currentPrincipal = _db.CurrentPrincipalForReadOptimization;
+        var readScopePlan = await ReadScopeListOptimization.TryBuildPlanAsync<Performer>(
+            _db,
+            EntityKinds.Performer,
+            currentPrincipal?.Has(PermissionKeys.PerformersRead) == true,
+            currentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Performer) == true,
+            ct);
+
+        var query = (readScopePlan ?? new ReadScopeRootPlan<Performer>(false, null)).Apply(_db.Performers.AsQueryable());
 
         if (filter != null)
         {
@@ -275,9 +281,9 @@ public class PerformerRepository : IPerformerRepository
             {
                 query = filter.SceneCountCriterion.Modifier switch
                 {
-                    CriterionModifier.IsNull => query.Where(p => !p.ScenePerformers.Any()),
-                    CriterionModifier.NotNull => query.Where(p => p.ScenePerformers.Any()),
-                    _ => FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, p => p.ScenePerformers.Count),
+                    CriterionModifier.IsNull => query.Where(p => p.SceneCount == 0),
+                    CriterionModifier.NotNull => query.Where(p => p.SceneCount > 0),
+                    _ => FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, p => p.SceneCount),
                 };
             }
 
@@ -295,8 +301,8 @@ public class PerformerRepository : IPerformerRepository
                 };
             }
 
-            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, p => p.ImagePerformers.Count);
-            query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, p => p.GalleryPerformers.Count);
+            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, p => p.ImageCount);
+            query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, p => p.GalleryCount);
 
             // Age criterion â€” computed from Birthdate
             if (filter.AgeCriterion != null && filter.AgeCriterion.Value > 0)
@@ -447,7 +453,7 @@ public class PerformerRepository : IPerformerRepository
             query = FilterHelpers.ApplyInt(query, filter.PenisLengthCriterion, p => (int)(p.PenisLength ?? 0));
 
             // Count criteria
-            query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, p => p.PerformerTags.Count);
+            query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, p => p.TagCount);
             query = FilterHelpers.ApplyInt(query, filter.PlayCountCriterion, p => p.ScenePerformers.Sum(sp => sp.Scene!.PlayCount));
             query = FilterHelpers.ApplyInt(query, filter.OCounterCriterion, p => p.ScenePerformers.Sum(sp => sp.Scene!.OCounter));
 
@@ -515,7 +521,7 @@ public class PerformerRepository : IPerformerRepository
                 p.Aliases.Any(a => EF.Functions.ILike(a.Alias, $"%{q}%")));
         }
 
-        var totalCount = await query.CountAsync(ct);
+        var totalCount = await query.AsNoTracking().CountAsync(ct);
 
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
@@ -527,22 +533,14 @@ public class PerformerRepository : IPerformerRepository
                 : query.OrderBy(p => p.Rating == null || p.Rating <= 0 ? 0 : 1).ThenBy(p => p.Rating),
             "created_at" => desc ? query.OrderByDescending(p => p.CreatedAt) : query.OrderBy(p => p.CreatedAt),
             "birthdate" => desc ? query.OrderByDescending(p => p.Birthdate) : query.OrderBy(p => p.Birthdate),
-            "scene_count" => desc
-                ? query.OrderByDescending(p => p.ScenePerformers.Count)
-                : query.OrderBy(p => p.ScenePerformers.Count),
-            "image_count" => desc
-                ? query.OrderByDescending(p => p.ImagePerformers.Count)
-                : query.OrderBy(p => p.ImagePerformers.Count),
-            "gallery_count" => desc
-                ? query.OrderByDescending(p => p.GalleryPerformers.Count)
-                : query.OrderBy(p => p.GalleryPerformers.Count),
+            "scene_count" => desc ? query.OrderByDescending(p => p.SceneCount) : query.OrderBy(p => p.SceneCount),
+            "image_count" => desc ? query.OrderByDescending(p => p.ImageCount) : query.OrderBy(p => p.ImageCount),
+            "gallery_count" => desc ? query.OrderByDescending(p => p.GalleryCount) : query.OrderBy(p => p.GalleryCount),
             "career_length" => ApplyCareerLengthSort(query, desc),
             "height" => ApplyHeightSort(query, desc),
             "weight" => desc ? query.OrderByDescending(p => p.Weight) : query.OrderBy(p => p.Weight),
             "measurements" => ApplyMeasurementsSort(query, desc),
-            "tag_count" => desc
-                ? query.OrderByDescending(p => p.PerformerTags.Count)
-                : query.OrderBy(p => p.PerformerTags.Count),
+            "tag_count" => desc ? query.OrderByDescending(p => p.TagCount) : query.OrderBy(p => p.TagCount),
             "o_counter" => desc
                 ? query.OrderByDescending(p => p.ScenePerformers.Sum(sp => sp.Scene!.OCounter))
                 : query.OrderBy(p => p.ScenePerformers.Sum(sp => sp.Scene!.OCounter)),
@@ -555,9 +553,34 @@ public class PerformerRepository : IPerformerRepository
 
         var page = findFilter?.Page ?? 1;
         var perPage = findFilter?.PerPage ?? 25;
-        var items = await query.Skip((page - 1) * perPage).Take(perPage).AsNoTracking().ToListAsync(ct);
 
-        return (items, totalCount);
+        if (perPage <= 0)
+        {
+            return (Array.Empty<Performer>(), totalCount);
+        }
+
+        var pagedIds = await query
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+
+        if (pagedIds.Count == 0)
+        {
+            return (Array.Empty<Performer>(), totalCount);
+        }
+
+        var items = await _db.Performers
+            .Include(p => p.PerformerTags).ThenInclude(pt => pt.Tag)
+            .AsSplitQuery()
+            .Where(p => pagedIds.Contains(p.Id))
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var orderMap = pagedIds.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+        var sortedItems = items.OrderBy(p => orderMap.GetValueOrDefault(p.Id, int.MaxValue)).ToList();
+
+        return (sortedItems, totalCount);
     }
 
     private sealed record ExpandedHierarchicalStudioCriterion(MultiIdCriterion Criterion, IReadOnlyList<int[]> ValueGroups);
@@ -637,7 +660,6 @@ public class TagRepository : ITagRepository
             .Include(t => t.Aliases)
             .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent)
             .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child)
-            .Include(t => t.RemoteIds)
             .AsSplitQuery()
             .FirstOrDefaultAsync(t => t.Id == id, ct);
 
@@ -675,11 +697,7 @@ public class TagRepository : ITagRepository
 
     public async Task<(IReadOnlyList<Tag> Items, int TotalCount)> FindAsync(TagFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
     {
-        var query = _db.Tags
-            .Include(t => t.Aliases)
-            .Include(t => t.RemoteIds)
-            .AsSplitQuery()
-            .AsQueryable();
+        var query = _db.Tags.AsQueryable();
 
         if (filter != null)
         {
@@ -776,19 +794,26 @@ public class TagRepository : ITagRepository
             query = await ApplyTagCountCriteriaAsync(query, filter, ct);
         }
 
-        var totalCount = await query.CountAsync(ct);
+        var perPage = findFilter?.PerPage ?? 25;
+        if (perPage <= 0)
+        {
+            var count = await query.CountAsync(ct);
+            return (Array.Empty<Tag>(), count);
+        }
+
+        var totalCount = await query.AsNoTracking().CountAsync(ct);
 
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
         query = sort switch
         {
             "name" => desc ? query.OrderByDescending(t => t.Name) : query.OrderBy(t => t.Name),
-            "scene_count" => desc ? query.OrderByDescending(t => t.SceneTags.Count) : query.OrderBy(t => t.SceneTags.Count),
-            "gallery_count" => desc ? query.OrderByDescending(t => t.GalleryTags.Count) : query.OrderBy(t => t.GalleryTags.Count),
-            "group_count" => desc ? query.OrderByDescending(t => t.GroupTags.Count) : query.OrderBy(t => t.GroupTags.Count),
-            "image_count" => desc ? query.OrderByDescending(t => t.ImageTags.Count) : query.OrderBy(t => t.ImageTags.Count),
-            "performer_count" => desc ? query.OrderByDescending(t => t.PerformerTags.Count) : query.OrderBy(t => t.PerformerTags.Count),
-            "studio_count" => desc ? query.OrderByDescending(t => t.StudioTags.Count) : query.OrderBy(t => t.StudioTags.Count),
+            "scene_count" => desc ? query.OrderByDescending(t => t.SceneCount) : query.OrderBy(t => t.SceneCount),
+            "gallery_count" => desc ? query.OrderByDescending(t => t.GalleryCount) : query.OrderBy(t => t.GalleryCount),
+            "group_count" => desc ? query.OrderByDescending(t => t.GroupCount) : query.OrderBy(t => t.GroupCount),
+            "image_count" => desc ? query.OrderByDescending(t => t.ImageCount) : query.OrderBy(t => t.ImageCount),
+            "performer_count" => desc ? query.OrderByDescending(t => t.PerformerCount) : query.OrderBy(t => t.PerformerCount),
+            "studio_count" => desc ? query.OrderByDescending(t => t.StudioCount) : query.OrderBy(t => t.StudioCount),
             "created_at" => desc ? query.OrderByDescending(t => t.CreatedAt) : query.OrderBy(t => t.CreatedAt),
             "updated_at" => desc ? query.OrderByDescending(t => t.UpdatedAt) : query.OrderBy(t => t.UpdatedAt),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, t => t.Id, desc),
@@ -796,35 +821,53 @@ public class TagRepository : ITagRepository
         };
 
         var page = findFilter?.Page ?? 1;
-        var perPage = findFilter?.PerPage ?? 25;
-        var items = await query.Skip((page - 1) * perPage).Take(perPage).AsNoTracking().ToListAsync(ct);
+        var pagedIds = await query
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
 
-        return (items, totalCount);
+        if (pagedIds.Count == 0)
+        {
+            return (Array.Empty<Tag>(), totalCount);
+        }
+
+        var items = await _db.Tags
+            .Include(t => t.Aliases)
+            .AsSplitQuery()
+            .Where(t => pagedIds.Contains(t.Id))
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var orderMap = pagedIds.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+        var sortedItems = items.OrderBy(t => orderMap.GetValueOrDefault(t.Id, int.MaxValue)).ToList();
+
+        return (sortedItems, totalCount);
     }
 
     private async Task<IQueryable<Tag>> ApplyTagCountCriteriaAsync(IQueryable<Tag> query, TagFilter filter, CancellationToken ct)
     {
         query = filter.SceneCountIncludesChildren
             ? query
-            : FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, t => t.SceneTags.Count);
+            : FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, t => t.SceneCount);
         query = filter.MarkerCountIncludesChildren
             ? query
-            : ApplyDirectMarkerCountCriterion(query, filter.MarkerCountCriterion);
+            : FilterHelpers.ApplyInt(query, filter.MarkerCountCriterion, t => t.SceneMarkerCount);
         query = filter.PerformerCountIncludesChildren
             ? query
-            : FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, t => t.PerformerTags.Count);
+            : FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, t => t.PerformerCount);
         query = filter.ImageCountIncludesChildren
             ? query
-            : FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, t => t.ImageTags.Count);
+            : FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, t => t.ImageCount);
         query = filter.GalleryCountIncludesChildren
             ? query
-            : FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, t => t.GalleryTags.Count);
+            : FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, t => t.GalleryCount);
         query = filter.StudioCountIncludesChildren
             ? query
-            : FilterHelpers.ApplyInt(query, filter.StudioCountCriterion, t => t.StudioTags.Count);
+            : FilterHelpers.ApplyInt(query, filter.StudioCountCriterion, t => t.StudioCount);
         query = filter.GroupCountIncludesChildren
             ? query
-            : FilterHelpers.ApplyInt(query, filter.GroupCountCriterion, t => t.GroupTags.Count);
+            : FilterHelpers.ApplyInt(query, filter.GroupCountCriterion, t => t.GroupCount);
         query = FilterHelpers.ApplyInt(query, filter.ParentCountCriterion, t => t.ParentRelations.Count);
         query = FilterHelpers.ApplyInt(query, filter.ChildCountCriterion, t => t.ChildRelations.Count);
 
@@ -1136,7 +1179,7 @@ public class StudioRepository : IStudioRepository
 
     public async Task<Studio?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
         => await _db.Studios
-            .Include(s => s.Parent).Include(s => s.Children)
+            .Include(s => s.Parent)
             .Include(s => s.Urls).Include(s => s.Aliases)
             .Include(s => s.StudioTags).ThenInclude(st => st.Tag)
             .Include(s => s.RemoteIds)
@@ -1169,7 +1212,7 @@ public class StudioRepository : IStudioRepository
 
     public async Task<(IReadOnlyList<Studio> Items, int TotalCount)> FindAsync(StudioFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
     {
-        var query = _db.Studios.Include(s => s.StudioTags).ThenInclude(st => st.Tag).Include(s => s.RemoteIds).AsSplitQuery().AsQueryable();
+        var query = _db.Studios.AsQueryable();
         if (filter != null)
         {
             if (!string.IsNullOrEmpty(filter.Name)) query = query.Where(s => EF.Functions.ILike(s.Name, $"%{filter.Name}%"));
@@ -1179,9 +1222,9 @@ public class StudioRepository : IStudioRepository
 
             // Advanced criteria
             query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, s => s.Rating ?? 0);
-            query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, s => s.Scenes.Count);
-            query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, s => s.Galleries.Count);
-            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, s => s.Images.Count);
+            query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, s => s.SceneCount);
+            query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, s => s.GalleryCount);
+            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, s => s.ImageCount);
 
             if (filter.FavoriteCriterion != null)
                 query = query.Where(s => s.Favorite == filter.FavoriteCriterion.Value);
@@ -1248,9 +1291,9 @@ public class StudioRepository : IStudioRepository
             }
 
             // Count criteria
-            query = FilterHelpers.ApplyInt(query, filter.ChildCountCriterion, s => s.Children.Count);
-            query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, s => s.StudioTags.Count);
-            query = FilterHelpers.ApplyInt(query, filter.GroupCountCriterion, s => s.Groups.Count);
+            query = FilterHelpers.ApplyInt(query, filter.ChildCountCriterion, s => s.ChildStudioCount);
+            query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, s => s.TagCount);
+            query = FilterHelpers.ApplyInt(query, filter.GroupCountCriterion, s => s.GroupCount);
 
             // Bool criteria
             if (filter.IgnoreAutoTagCriterion != null)
@@ -1264,27 +1307,56 @@ public class StudioRepository : IStudioRepository
         if (filter == null || !filter.ParentId.HasValue)
             query = query.Where(s => s.ParentId == null);
 
-        var totalCount = await query.CountAsync(ct);
+        var perPage = findFilter?.PerPage ?? 25;
+        if (perPage <= 0)
+        {
+            var count = await query.CountAsync(ct);
+            return (Array.Empty<Studio>(), count);
+        }
+
+        var totalCount = await query.AsNoTracking().CountAsync(ct);
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
         query = sort switch
         {
             "name" => desc ? query.OrderByDescending(s => s.Name) : query.OrderBy(s => s.Name),
-            "scene_count" => desc ? query.OrderByDescending(s => s.Scenes.Count) : query.OrderBy(s => s.Scenes.Count),
-            "gallery_count" => desc ? query.OrderByDescending(s => s.Galleries.Count) : query.OrderBy(s => s.Galleries.Count),
-            "image_count" => desc ? query.OrderByDescending(s => s.Images.Count) : query.OrderBy(s => s.Images.Count),
+            "scene_count" => desc ? query.OrderByDescending(s => s.SceneCount) : query.OrderBy(s => s.SceneCount),
+            "gallery_count" => desc ? query.OrderByDescending(s => s.GalleryCount) : query.OrderBy(s => s.GalleryCount),
+            "image_count" => desc ? query.OrderByDescending(s => s.ImageCount) : query.OrderBy(s => s.ImageCount),
             "rating" => ApplyStudioRatingSort(query, desc),
-            "child_count" => desc ? query.OrderByDescending(s => s.Children.Count) : query.OrderBy(s => s.Children.Count),
-            "tag_count" => desc ? query.OrderByDescending(s => s.StudioTags.Count) : query.OrderBy(s => s.StudioTags.Count),
+            "child_count" => desc ? query.OrderByDescending(s => s.ChildStudioCount) : query.OrderBy(s => s.ChildStudioCount),
+            "tag_count" => desc ? query.OrderByDescending(s => s.TagCount) : query.OrderBy(s => s.TagCount),
             "created_at" => desc ? query.OrderByDescending(s => s.CreatedAt) : query.OrderBy(s => s.CreatedAt),
             "updated_at" => desc ? query.OrderByDescending(s => s.UpdatedAt) : query.OrderBy(s => s.UpdatedAt),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, s => s.Id, desc),
             _ => desc ? query.OrderByDescending(s => s.UpdatedAt) : query.OrderBy(s => s.UpdatedAt),
         };
         var page = findFilter?.Page ?? 1;
-        var perPage = findFilter?.PerPage ?? 25;
-        var items = await query.Skip((page - 1) * perPage).Take(perPage).AsNoTracking().ToListAsync(ct);
-        return (items, totalCount);
+        var pagedIds = await query
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+
+        if (pagedIds.Count == 0)
+        {
+            return (Array.Empty<Studio>(), totalCount);
+        }
+
+        var items = await _db.Studios
+            .Include(s => s.Parent)
+            .Include(s => s.Urls)
+            .Include(s => s.Aliases)
+            .Include(s => s.StudioTags).ThenInclude(st => st.Tag)
+            .Include(s => s.RemoteIds)
+            .AsSplitQuery()
+            .Where(s => pagedIds.Contains(s.Id))
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var orderMap = pagedIds.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+        var sortedItems = items.OrderBy(s => orderMap.GetValueOrDefault(s.Id, int.MaxValue)).ToList();
+        return (sortedItems, totalCount);
     }
 }
 
@@ -1300,7 +1372,6 @@ public class GalleryRepository : IGalleryRepository
             .Include(g => g.Studio).Include(g => g.Urls)
             .Include(g => g.GalleryTags).ThenInclude(gt => gt.Tag)
             .Include(g => g.GalleryPerformers).ThenInclude(gp => gp.Performer)
-            .Include(g => g.ImageGalleries)
             .Include(g => g.Chapters)
             .Include(g => g.Files).ThenInclude(f => f.ParentFolder)
             .Include(g => g.Files).ThenInclude(f => f.Fingerprints)
@@ -1335,7 +1406,7 @@ public class GalleryRepository : IGalleryRepository
 
     public async Task<(IReadOnlyList<Gallery> Items, int TotalCount)> FindAsync(GalleryFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
     {
-        var query = _db.Galleries.Include(g => g.GalleryTags).ThenInclude(gt => gt.Tag).AsSplitQuery().AsQueryable();
+        var query = _db.Galleries.AsQueryable();
         if (filter != null)
         {
             if (!string.IsNullOrEmpty(filter.Title)) query = query.Where(g => g.Title != null && EF.Functions.ILike(g.Title, $"%{filter.Title}%"));
@@ -1347,7 +1418,7 @@ public class GalleryRepository : IGalleryRepository
 
             // Advanced criteria
             query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, g => g.Rating ?? 0);
-            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, g => g.ImageGalleries.Count);
+            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, g => g.ImageCount);
 
             if (filter.OrganizedCriterion != null)
                 query = query.Where(g => g.Organized == filter.OrganizedCriterion.Value);
@@ -1398,8 +1469,8 @@ public class GalleryRepository : IGalleryRepository
 
             // Count criteria
             query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, g => g.Files.Count);
-            query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, g => g.GalleryTags.Count);
-            query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, g => g.GalleryPerformers.Count);
+            query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, g => g.TagCount);
+            query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, g => g.PerformerCount);
 
             // Scenes criterion
             query = FilterHelpers.ApplyMultiId(query, filter.ScenesCriterion, g => g.SceneGalleries.Select(sg => sg.SceneId));
@@ -1430,10 +1501,10 @@ public class GalleryRepository : IGalleryRepository
             "file_mod_time" => ApplyGalleryFileModTimeSort(query, desc),
             "path" => ApplyGalleryPathSort(query, desc),
             "title" => desc ? query.OrderByDescending(g => g.Title) : query.OrderBy(g => g.Title),
-            "image_count" => desc ? query.OrderByDescending(g => g.ImageGalleries.Count) : query.OrderBy(g => g.ImageGalleries.Count),
+            "image_count" => desc ? query.OrderByDescending(g => g.ImageCount) : query.OrderBy(g => g.ImageCount),
             "rating" => ApplyGalleryRatingSort(query, desc),
-            "performer_count" => desc ? query.OrderByDescending(g => g.GalleryPerformers.Count) : query.OrderBy(g => g.GalleryPerformers.Count),
-            "tag_count" => desc ? query.OrderByDescending(g => g.GalleryTags.Count) : query.OrderBy(g => g.GalleryTags.Count),
+            "performer_count" => desc ? query.OrderByDescending(g => g.PerformerCount) : query.OrderBy(g => g.PerformerCount),
+            "tag_count" => desc ? query.OrderByDescending(g => g.TagCount) : query.OrderBy(g => g.TagCount),
             "zip_file_count" => desc
                 ? query.OrderByDescending(g => g.Files.Count(file => file.Basename.EndsWith(".zip")))
                 : query.OrderBy(g => g.Files.Count(file => file.Basename.EndsWith(".zip"))),
@@ -1443,8 +1514,33 @@ public class GalleryRepository : IGalleryRepository
         };
         var page = findFilter?.Page ?? 1;
         var perPage = findFilter?.PerPage ?? 25;
-        var items = await query.Skip((page - 1) * perPage).Take(perPage).AsNoTracking().ToListAsync(ct);
-        return (items, totalCount);
+
+        if (perPage <= 0)
+        {
+            return (Array.Empty<Gallery>(), totalCount);
+        }
+
+        var pagedIds = await query
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
+            .Select(g => g.Id)
+            .ToListAsync(ct);
+
+        if (pagedIds.Count == 0)
+        {
+            return (Array.Empty<Gallery>(), totalCount);
+        }
+
+        var items = await _db.Galleries
+            .Include(g => g.GalleryTags).ThenInclude(gt => gt.Tag)
+            .AsSplitQuery()
+            .Where(g => pagedIds.Contains(g.Id))
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var orderMap = pagedIds.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+        var sortedItems = items.OrderBy(g => orderMap.GetValueOrDefault(g.Id, int.MaxValue)).ToList();
+        return (sortedItems, totalCount);
     }
 
     private static IQueryable<Gallery> ApplyGalleryFileModTimeSort(IQueryable<Gallery> query, bool desc)
@@ -1724,8 +1820,16 @@ public class ImageRepository : IImageRepository
             filter.TagsCriterion = expandedTags.Criterion;
         }
 
+        var currentPrincipal = _db.CurrentPrincipalForReadOptimization;
+        var readScopePlan = await ReadScopeListOptimization.TryBuildPlanAsync<Image>(
+            _db,
+            EntityKinds.Image,
+            currentPrincipal?.Has(PermissionKeys.ImagesRead) == true,
+            currentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Image) == true,
+            ct);
+
         // Build filter query once (lightweight, no includes)
-        var filterQuery = _db.Images.AsQueryable();
+        var filterQuery = (readScopePlan ?? new ReadScopeRootPlan<Image>(false, null)).Apply(_db.Images.AsQueryable());
         filterQuery = ApplyImageFilters(filterQuery, filter, expandedTags?.ValueGroups);
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
         {
@@ -1735,9 +1839,7 @@ public class ImageRepository : IImageRepository
                 (i.Details != null && i.Details.ToLower().Contains(searchTerm)) ||
                 (i.Code != null && i.Code.ToLower().Contains(searchTerm)) ||
                 (i.Photographer != null && i.Photographer.ToLower().Contains(searchTerm)) ||
-                i.Files.Any(f =>
-                    f.Basename.ToLower().Contains(searchTerm) ||
-                    f.Path.ToLower().Contains(searchTerm)));
+                (i.FileSearchText != null && i.FileSearchText.ToLower().Contains(searchTerm)));
         }
 
         var perPage = findFilter?.PerPage ?? 25;
@@ -1771,7 +1873,7 @@ public class ImageRepository : IImageRepository
             .Include(i => i.ImageTags).ThenInclude(it => it.Tag)
             .Include(i => i.ImagePerformers).ThenInclude(ip => ip.Performer)
             .Include(i => i.ImageGalleries).ThenInclude(ig => ig.Gallery)
-            .Include(i => i.Files).ThenInclude(f => f.ParentFolder)
+            .Include(i => i.Files)
             .AsSplitQuery()
             .Where(i => pagedIds.Contains(i.Id))
             .AsNoTracking()
@@ -1805,7 +1907,7 @@ public class ImageRepository : IImageRepository
         if (filter.OrganizedCriterion != null)
             query = query.Where(i => i.Organized == filter.OrganizedCriterion.Value);
         if (filter.ResolutionCriterion != null)
-            query = FilterHelpers.ApplyResolution(query, filter.ResolutionCriterion, i => i.Files.Select(f => Math.Max(f.Width, f.Height)).Max());
+            query = FilterHelpers.ApplyResolution(query, filter.ResolutionCriterion, i => i.MaxResolution);
 
         // Multi-ID criteria
         if (filter.TagsCriterion != null)
@@ -1818,7 +1920,7 @@ public class ImageRepository : IImageRepository
         if (filter.GalleriesCriterion != null)
             query = FilterHelpers.ApplyMultiId(query, filter.GalleriesCriterion, i => i.ImageGalleries.Select(ig => ig.GalleryId));
 
-        query = FilterHelpers.ApplyFilePath(query, filter.PathCriterion, i => i.Files);
+        query = ApplyPathCriterion(query, filter.PathCriterion);
 
         query = ApplyFingerprintCriterion(query, filter.FingerprintCriterion);
         query = ApplyFingerprintCriterion(query, filter.ChecksumCriterion, "md5");
@@ -1855,9 +1957,9 @@ public class ImageRepository : IImageRepository
         query = FilterHelpers.ApplyDate(query, filter.DateCriterion, i => i.Date);
 
         // Count criteria
-        query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, i => i.Files.Count);
-        query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, i => i.ImageTags.Count);
-        query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, i => i.ImagePerformers.Count);
+        query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, i => i.FileCount);
+        query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, i => i.TagCount);
+        query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, i => i.PerformerCount);
 
         // Performer tags criterion
         if (filter.PerformerTagsCriterion != null)
@@ -1898,16 +2000,10 @@ public class ImageRepository : IImageRepository
         "o_counter" => desc ? query.OrderByDescending(i => i.OCounter) : query.OrderBy(i => i.OCounter),
         "random" => query.OrderBy(i => i.Id),
         "file_mod_time" => ApplyFileModTimeSort(query, desc),
-        "file_size" => desc
-            ? query.OrderByDescending(i => i.Files.Select(file => (long?)file.Size).Max() ?? 0)
-            : query.OrderBy(i => i.Files.Select(file => (long?)file.Size).Max() ?? 0),
+        "file_size" => desc ? query.OrderByDescending(i => i.MaxFileSize) : query.OrderBy(i => i.MaxFileSize),
         "path" => ApplyPathSort(query, desc),
-        "tag_count" => desc
-            ? query.OrderByDescending(i => i.ImageTags.Count)
-            : query.OrderBy(i => i.ImageTags.Count),
-        "performer_count" => desc
-            ? query.OrderByDescending(i => i.ImagePerformers.Count)
-            : query.OrderBy(i => i.ImagePerformers.Count),
+        "tag_count" => desc ? query.OrderByDescending(i => i.TagCount) : query.OrderBy(i => i.TagCount),
+        "performer_count" => desc ? query.OrderByDescending(i => i.PerformerCount) : query.OrderBy(i => i.PerformerCount),
         "created_at" => desc ? query.OrderByDescending(i => i.CreatedAt) : query.OrderBy(i => i.CreatedAt),
         _ => desc ? query.OrderByDescending(i => i.UpdatedAt) : query.OrderBy(i => i.UpdatedAt),
     };
@@ -1952,46 +2048,16 @@ public class ImageRepository : IImageRepository
 
     private static IQueryable<Image> ApplyFileModTimeSort(IQueryable<Image> query, bool desc)
     {
-        var sortQuery = query.Select(image => new
-        {
-            Image = image,
-            FileModTime = image.Files.Select(file => (DateTime?)file.ModTime).Max(),
-        });
-
         return desc
-            ? sortQuery.OrderBy(item => item.FileModTime == null ? 1 : 0).ThenByDescending(item => item.FileModTime).Select(item => item.Image)
-            : sortQuery.OrderBy(item => item.FileModTime == null ? 1 : 0).ThenBy(item => item.FileModTime).Select(item => item.Image);
+            ? query.OrderBy(image => image.MaxFileModTime == null ? 1 : 0).ThenByDescending(image => image.MaxFileModTime)
+            : query.OrderBy(image => image.MaxFileModTime == null ? 1 : 0).ThenBy(image => image.MaxFileModTime);
     }
 
     private static IQueryable<Image> ApplyPathSort(IQueryable<Image> query, bool desc)
     {
-        // Sort by the indexed denormalized files.Path column. This collapses what was a
-        // 308 ms correlated subquery (folders JOIN + REPLACE + concat per row) into an
-        // index-only ORDER BY scan.
-        if (desc)
-        {
-            var descendingQuery = query.Select(image => new
-            {
-                Image = image,
-                Path = image.Files.Select(file => file.Path).OrderByDescending(path => path).FirstOrDefault(),
-            });
-
-            return descendingQuery
-                .OrderBy(item => item.Path == null ? 1 : 0)
-                .ThenByDescending(item => item.Path)
-                .Select(item => item.Image);
-        }
-
-        var ascendingQuery = query.Select(image => new
-        {
-            Image = image,
-            Path = image.Files.Select(file => file.Path).OrderBy(path => path).FirstOrDefault(),
-        });
-
-        return ascendingQuery
-            .OrderBy(item => item.Path == null ? 1 : 0)
-            .ThenBy(item => item.Path)
-            .Select(item => item.Image);
+        return desc
+            ? query.OrderBy(image => image.MaxPath == null ? 1 : 0).ThenByDescending(image => image.MaxPath)
+            : query.OrderBy(image => image.MinPath == null ? 1 : 0).ThenBy(image => image.MinPath);
     }
 
     private static IQueryable<Image> ApplyFingerprintCriterion(IQueryable<Image> query, StringCriterion? criterion, string fingerprintType)
@@ -2084,9 +2150,9 @@ public class ImageRepository : IImageRepository
 
         IQueryable<Image> matchingQuery = orientation switch
         {
-            "landscape" => query.Where(i => i.Files.Any(f => f.Width > f.Height)),
-            "portrait" => query.Where(i => i.Files.Any(f => f.Height > f.Width)),
-            "square" => query.Where(i => i.Files.Any(f => f.Width == f.Height && f.Width > 0)),
+            "landscape" => query.Where(i => i.HasLandscapeFiles),
+            "portrait" => query.Where(i => i.HasPortraitFiles),
+            "square" => query.Where(i => i.HasSquareFiles),
             _ => query,
         };
 
@@ -2096,9 +2162,31 @@ public class ImageRepository : IImageRepository
         return criterion.Modifier switch
         {
             CriterionModifier.NotEquals => query.Where(i => !matchingQuery.Select(item => item.Id).Contains(i.Id)),
-            CriterionModifier.IsNull => query.Where(i => !i.Files.Any(f => f.Width > 0 && f.Height > 0)),
-            CriterionModifier.NotNull => query.Where(i => i.Files.Any(f => f.Width > 0 && f.Height > 0)),
+            CriterionModifier.IsNull => query.Where(i => !i.HasDimensionData),
+            CriterionModifier.NotNull => query.Where(i => i.HasDimensionData),
             _ => matchingQuery,
+        };
+    }
+
+    private static IQueryable<Image> ApplyPathCriterion(IQueryable<Image> query, StringCriterion? criterion)
+    {
+        if (criterion == null) return query;
+
+        var value = criterion.Value.Replace("\\", "/");
+        var pattern = $"%{value}%";
+        var exactPattern = $"%\n{value}\n%";
+
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => query.Where(i => i.FileSearchText != null && EF.Functions.Like(i.FileSearchText, exactPattern)),
+            CriterionModifier.NotEquals => query.Where(i => i.FileSearchText == null || !EF.Functions.Like(i.FileSearchText, exactPattern)),
+            CriterionModifier.Includes => query.Where(i => i.FileSearchText != null && EF.Functions.ILike(i.FileSearchText, pattern)),
+            CriterionModifier.Excludes => query.Where(i => i.FileSearchText == null || !EF.Functions.ILike(i.FileSearchText, pattern)),
+            CriterionModifier.MatchesRegex => query.Where(i => i.FileSearchText != null && Regex.IsMatch(i.FileSearchText, value, RegexOptions.IgnoreCase)),
+            CriterionModifier.NotMatchesRegex => query.Where(i => i.FileSearchText == null || !Regex.IsMatch(i.FileSearchText, value, RegexOptions.IgnoreCase)),
+            CriterionModifier.IsNull => query.Where(i => i.FileCount == 0 || i.FileSearchText == null || i.FileSearchText == ""),
+            CriterionModifier.NotNull => query.Where(i => i.FileCount > 0 && i.FileSearchText != null && i.FileSearchText != ""),
+            _ => query,
         };
     }
 

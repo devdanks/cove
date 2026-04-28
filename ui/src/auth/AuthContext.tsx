@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react";
 import { authStore, hasPermission as hasPermImpl } from "./authStore";
 import type { AuthUser } from "./authStore";
+import { auth } from "../api/client";
+import type { MeResponse } from "../api/types";
 
 interface AuthState {
   user: AuthUser | null;
@@ -21,11 +23,6 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-interface MeResponse {
-  user: { id: string; username: string; roles?: string[] };
-  permissions: string[];
-}
-
 interface LoginResponse {
   token: string;
   refreshToken: string;
@@ -34,25 +31,81 @@ interface LoginResponse {
 }
 
 async function fetchMe(): Promise<MeResponse | null> {
-  const token = authStore.getAccessToken();
-  if (!token) return null;
-  const res = await fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) return null;
-  return res.json() as Promise<MeResponse>;
+  try {
+    return await auth.me();
+  } catch {
+    return null;
+  }
+}
+
+function captureShareCredentialsFromUrl(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const url = new URL(window.location.href);
+  const shareToken = url.searchParams.get("share_token");
+  const sharePassword = url.searchParams.get("share_password");
+  if (!shareToken && !sharePassword) {
+    return false;
+  }
+
+  if (shareToken) {
+    authStore.setShareToken(shareToken);
+  }
+  if (sharePassword) {
+    authStore.setSharePassword(sharePassword);
+  }
+
+  url.searchParams.delete("share_token");
+  url.searchParams.delete("share_password");
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  return true;
 }
 
 export function AuthProvider({ children, authEnabled }: { children: ReactNode; authEnabled: boolean }) {
   const [user, setUser] = useState<AuthUser | null>(() => authStore.getUser());
   const [loading, setLoading] = useState(true);
+  const effectivePermissions = authEnabled ? user?.permissions ?? [] : ["*"];
+  const effectiveReadGrantedKinds = authEnabled ? user?.readGrantedEntityKinds ?? [] : [];
 
   const refreshMe = useCallback(async () => {
-    const me = await fetchMe();
+    let me = await fetchMe();
+    if (!me && authStore.getShareToken()) {
+      if (!authStore.getSharePassword()) {
+        const password = window.prompt("Enter the password for this share link.");
+        if (password != null) {
+          authStore.setSharePassword(password);
+          me = await fetchMe();
+        }
+      }
+
+      if (!me) {
+        authStore.clearShareCredentials();
+        if (authStore.getAccessToken()) {
+          me = await fetchMe();
+        }
+      }
+    }
+
     if (me) {
-      const u: AuthUser = { id: String(me.user.id), username: me.user.username, permissions: me.permissions };
+      const u: AuthUser = {
+        id: String(me.user.id),
+        username: me.user.username,
+        kind: me.user.kind,
+        permissions: me.permissions,
+        readGrantedEntityKinds: me.readGrantedEntityKinds ?? [],
+        uiPreferences: me.user.uiPreferences ?? null,
+      };
       authStore.setUser(u);
       setUser(u);
     } else {
-      authStore.clear();
+      if (authStore.getAccessToken()) {
+        authStore.clear();
+      } else {
+        authStore.clearShareCredentials();
+        authStore.setUser(null);
+      }
       setUser(null);
     }
   }, []);
@@ -61,8 +114,13 @@ export function AuthProvider({ children, authEnabled }: { children: ReactNode; a
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!authEnabled) { setLoading(false); return; }
-      if (authStore.getAccessToken()) {
+      if (!authEnabled) {
+        await refreshMe();
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      captureShareCredentialsFromUrl();
+      if (authStore.getAccessToken() || authStore.getShareToken() || authStore.getUser()) {
         await refreshMe();
       }
       if (!cancelled) setLoading(false);
@@ -98,6 +156,7 @@ export function AuthProvider({ children, authEnabled }: { children: ReactNode; a
       return { ok: false, error: message };
     }
     const body = await res.json() as LoginResponse;
+    authStore.clearShareCredentials();
     authStore.setTokens(body.token, body.refreshToken);
     await refreshMe();
     return { ok: true };
@@ -118,15 +177,15 @@ export function AuthProvider({ children, authEnabled }: { children: ReactNode; a
 
   const value = useMemo<AuthContextValue>(() => ({
     user,
-    permissions: user?.permissions ?? [],
+    permissions: effectivePermissions,
     loading,
     authEnabled,
     ready: !authEnabled || !!user,
     login,
     logout,
-    hasPermission: (k: string) => hasPermImpl(user?.permissions, k),
+    hasPermission: (k: string) => hasPermImpl(effectivePermissions, k, effectiveReadGrantedKinds),
     refreshMe,
-  }), [user, loading, authEnabled, login, logout, refreshMe]);
+  }), [user, effectivePermissions, effectiveReadGrantedKinds, loading, authEnabled, login, logout, refreshMe]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -481,6 +481,9 @@ namespace Cove.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("UiPreferencesJson")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -746,8 +749,18 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
+                    b.Property<int>("ImageCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<bool>("Organized")
                         .HasColumnType("boolean");
+
+                    b.Property<int>("PerformerCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.PrimitiveCollection<int[]>("PerformerIds")
                         .IsRequired()
@@ -759,8 +772,18 @@ namespace Cove.Data.Migrations
                     b.Property<int?>("Rating")
                         .HasColumnType("integer");
 
+                    b.Property<int>("SceneCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<int?>("StudioId")
                         .HasColumnType("integer");
+
+                    b.Property<int>("TagCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.PrimitiveCollection<int[]>("TagIds")
                         .IsRequired()
@@ -774,19 +797,37 @@ namespace Cove.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Date");
+
                     b.HasIndex("FolderId");
+
+                    b.HasIndex("ImageCount");
+
+                    b.HasIndex("Organized");
+
+                    b.HasIndex("PerformerCount");
 
                     b.HasIndex("PerformerIds");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("PerformerIds"), "gin");
 
+                    b.HasIndex("Rating");
+
+                    b.HasIndex("SceneCount");
+
                     b.HasIndex("StudioId");
+
+                    b.HasIndex("TagCount");
 
                     b.HasIndex("TagIds");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("TagIds"), "gin");
 
                     b.HasIndex("Title");
+
+                    b.HasIndex("UpdatedAt");
 
                     b.ToTable("galleries", (string)null);
                 });
@@ -1013,11 +1054,68 @@ namespace Cove.Data.Migrations
                     b.Property<string>("Details")
                         .HasColumnType("text");
 
+                    b.Property<int>("FileCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("FileSearchText")
+                        .HasColumnType("text");
+
+                    b.Property<int>("GalleryCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("HasDimensionData")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasLandscapeFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasPortraitFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasSquareFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTime?>("MaxFileModTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("MaxFileSize")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<string>("MaxPath")
+                        .HasColumnType("text");
+
+                    b.Property<int>("MaxResolution")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("MinPath")
+                        .HasColumnType("text");
+
                     b.Property<int>("OCounter")
                         .HasColumnType("integer");
 
                     b.Property<bool>("Organized")
                         .HasColumnType("boolean");
+
+                    b.Property<int>("PerformerCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.PrimitiveCollection<int[]>("PerformerIds")
                         .IsRequired()
@@ -1031,6 +1129,11 @@ namespace Cove.Data.Migrations
 
                     b.Property<int?>("StudioId")
                         .HasColumnType("integer");
+
+                    b.Property<int>("TagCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.PrimitiveCollection<int[]>("TagIds")
                         .IsRequired()
@@ -1046,7 +1149,31 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("CreatedAt");
 
+                    b.HasIndex("FileCount");
+
+                    b.HasIndex("GalleryCount");
+
+                    b.HasIndex("HasDimensionData");
+
+                    b.HasIndex("HasLandscapeFiles");
+
+                    b.HasIndex("HasPortraitFiles");
+
+                    b.HasIndex("HasSquareFiles");
+
+                    b.HasIndex("MaxFileModTime");
+
+                    b.HasIndex("MaxFileSize");
+
+                    b.HasIndex("MaxPath");
+
+                    b.HasIndex("MaxResolution");
+
+                    b.HasIndex("MinPath");
+
                     b.HasIndex("Organized");
+
+                    b.HasIndex("PerformerCount");
 
                     b.HasIndex("PerformerIds");
 
@@ -1055,6 +1182,8 @@ namespace Cove.Data.Migrations
                     b.HasIndex("Rating");
 
                     b.HasIndex("StudioId");
+
+                    b.HasIndex("TagCount");
 
                     b.HasIndex("TagIds");
 
@@ -1184,6 +1313,11 @@ namespace Cove.Data.Migrations
                     b.Property<bool>("Favorite")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("GalleryCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<int?>("Gender")
                         .HasColumnType("integer");
 
@@ -1198,6 +1332,11 @@ namespace Cove.Data.Migrations
 
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
+
+                    b.Property<int>("ImageCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<string>("Measurements")
                         .HasColumnType("text");
@@ -1216,6 +1355,16 @@ namespace Cove.Data.Migrations
                     b.Property<int?>("Rating")
                         .HasColumnType("integer");
 
+                    b.Property<int>("SceneCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("TagCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Tattoos")
                         .HasColumnType("text");
 
@@ -1229,9 +1378,17 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("Favorite");
 
+                    b.HasIndex("GalleryCount");
+
+                    b.HasIndex("ImageCount");
+
                     b.HasIndex("Name");
 
                     b.HasIndex("Rating");
+
+                    b.HasIndex("SceneCount");
+
+                    b.HasIndex("TagCount");
 
                     b.ToTable("performers", (string)null);
                 });
@@ -1385,6 +1542,44 @@ namespace Cove.Data.Migrations
                     b.Property<string>("Director")
                         .HasColumnType("text");
 
+                    b.Property<int>("FileCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("FileSearchText")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("HasDimensionData")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasInteractiveFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasLandscapeFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasNonInteractiveFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasPortraitFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("HasSquareFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
@@ -1393,6 +1588,45 @@ namespace Cove.Data.Migrations
 
                     b.Property<DateTime?>("LastPlayedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("MaxBitRate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<double>("MaxDuration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(0.0);
+
+                    b.Property<DateTime?>("MaxFileModTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("MaxFileSize")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<double>("MaxFrameRate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(0.0);
+
+                    b.Property<int>("MaxHeight")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("MaxPath")
+                        .HasColumnType("text");
+
+                    b.Property<int>("MaxResolution")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("MinPath")
+                        .HasColumnType("text");
 
                     b.Property<int>("OCounter")
                         .HasColumnType("integer");
@@ -1435,6 +1669,38 @@ namespace Cove.Data.Migrations
                     b.HasIndex("CreatedAt");
 
                     b.HasIndex("Date");
+
+                    b.HasIndex("FileCount");
+
+                    b.HasIndex("HasDimensionData");
+
+                    b.HasIndex("HasInteractiveFiles");
+
+                    b.HasIndex("HasLandscapeFiles");
+
+                    b.HasIndex("HasNonInteractiveFiles");
+
+                    b.HasIndex("HasPortraitFiles");
+
+                    b.HasIndex("HasSquareFiles");
+
+                    b.HasIndex("MaxBitRate");
+
+                    b.HasIndex("MaxDuration");
+
+                    b.HasIndex("MaxFileModTime");
+
+                    b.HasIndex("MaxFileSize");
+
+                    b.HasIndex("MaxFrameRate");
+
+                    b.HasIndex("MaxHeight");
+
+                    b.HasIndex("MaxPath");
+
+                    b.HasIndex("MaxResolution");
+
+                    b.HasIndex("MinPath");
 
                     b.HasIndex("Organized");
 
@@ -1738,6 +2004,11 @@ namespace Cove.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("ChildStudioCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1750,11 +2021,26 @@ namespace Cove.Data.Migrations
                     b.Property<bool>("Favorite")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("GalleryCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("GroupCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<bool>("IgnoreAutoTag")
                         .HasColumnType("boolean");
 
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
+
+                    b.Property<int>("ImageCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1767,17 +2053,52 @@ namespace Cove.Data.Migrations
                     b.Property<int?>("ParentId")
                         .HasColumnType("integer");
 
+                    b.Property<int>("PerformerCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<int?>("Rating")
                         .HasColumnType("integer");
+
+                    b.Property<int>("SceneCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("TagCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ChildStudioCount");
+
+                    b.HasIndex("Favorite");
+
+                    b.HasIndex("GalleryCount");
+
+                    b.HasIndex("GroupCount");
+
+                    b.HasIndex("ImageCount");
+
                     b.HasIndex("Name");
 
+                    b.HasIndex("Organized");
+
                     b.HasIndex("ParentId");
+
+                    b.HasIndex("PerformerCount");
+
+                    b.HasIndex("Rating");
+
+                    b.HasIndex("SceneCount");
+
+                    b.HasIndex("TagCount");
 
                     b.ToTable("studios", (string)null);
                 });
@@ -1887,19 +2208,54 @@ namespace Cove.Data.Migrations
                     b.Property<bool>("Favorite")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("GalleryCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("GroupCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<bool>("IgnoreAutoTag")
                         .HasColumnType("boolean");
 
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
+                    b.Property<int>("ImageCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<int>("PerformerCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("SceneCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("SceneMarkerCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("SortName")
                         .HasColumnType("text");
+
+                    b.Property<int>("StudioCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1908,8 +2264,22 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("Favorite");
 
+                    b.HasIndex("GalleryCount");
+
+                    b.HasIndex("GroupCount");
+
+                    b.HasIndex("ImageCount");
+
                     b.HasIndex("Name")
                         .IsUnique();
+
+                    b.HasIndex("PerformerCount");
+
+                    b.HasIndex("SceneCount");
+
+                    b.HasIndex("SceneMarkerCount");
+
+                    b.HasIndex("StudioCount");
 
                     b.ToTable("tags", (string)null);
                 });

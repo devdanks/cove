@@ -18,6 +18,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.PasswordAlgo).IsRequired().HasMaxLength(32);
         builder.Property(u => u.LastLoginIp).HasMaxLength(64);
         builder.Property(u => u.TotpSecret).HasMaxLength(200);
+        builder.Property(u => u.UiPreferencesJson).HasColumnType("text");
 
         builder.HasIndex(u => u.Username).IsUnique();
         builder.HasIndex(u => u.Email).IsUnique().HasFilter("\"Email\" IS NOT NULL");

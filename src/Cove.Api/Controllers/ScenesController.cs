@@ -14,8 +14,11 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.ScenesRead)]
-public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers) : ControllerBase
+public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
 {
+    private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
+    private static string GetVisibleBasename(string path, string basename) => string.IsNullOrWhiteSpace(basename) ? System.IO.Path.GetFileName(path) : basename;
+
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<PaginatedResponse<SceneDto>>> Find(
@@ -40,7 +43,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         };
 
         var (items, totalCount) = await sceneRepo.FindAsync(filter, findFilter, ct);
-        var dtos = items.Select(MapToDto).ToList();
+        var dtos = items.Select(MapListToDto).ToList();
         return Ok(new PaginatedResponse<SceneDto>(dtos, totalCount, page, perPage));
     }
 
@@ -57,7 +60,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new SceneFilter();
         var (items, totalCount) = await sceneRepo.FindAsync(filter, findFilter, ct);
-        var dtos = items.Select(MapToDto).ToList();
+        var dtos = items.Select(MapListToDto).ToList();
         var result = new PaginatedResponse<SceneDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage);
 
         memoryCache.Set(cacheKey, result, TimeSpan.FromSeconds(1));
@@ -74,6 +77,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost]
+    [RequiresPermission(Permissions.ScenesWrite)]
     public async Task<ActionResult<SceneDto>> Create([FromBody] SceneCreateDto dto, CancellationToken ct)
     {
         var scene = new Scene
@@ -99,6 +103,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<ActionResult<SceneDto>> Update(int id, [FromBody] SceneUpdateDto dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
@@ -151,6 +157,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.ScenesDelete)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesDelete)]
     public async Task<IActionResult> Delete(int id, [FromQuery] bool deleteFile = false, CancellationToken ct = default)
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
@@ -169,6 +176,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("destroy")]
+    [RequiresPermission(Permissions.ScenesDelete)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesDelete, ActionArgumentName = "dto", PropertyName = "Ids")]
     public async Task<IActionResult> DestroyBatch([FromBody] BatchDeleteDto dto, CancellationToken ct)
     {
         var deletedCount = 0;
@@ -194,6 +203,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/metadata-server/import")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<ActionResult<SceneDto>> ImportFromMetadataServer(int id, [FromBody] MetadataServerSceneImportRequestDto dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
@@ -208,6 +219,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/metadata-server/submit-fingerprints")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> SubmitFingerprints(int id, [FromBody] MetadataServerEndpointDto dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
@@ -218,6 +231,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> SubmitSceneDraft(int id, [FromBody] MetadataServerEndpointDto dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
@@ -228,6 +243,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/cover/from-frame")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> SetCoverFromFrame(int id, [FromBody] GenerateScreenshotDto? dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -247,7 +264,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         return Ok(new { success = true });
     }
 
-    private static SceneDto MapToDto(Scene s) => new(
+    private SceneDto MapToDto(Scene s) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"), s.Rating, s.Organized, s.StudioId, s.Studio?.Name,
         s.ResumeTime, s.PlayDuration, s.PlayCount, s.LastPlayedAt?.ToString("o"),
@@ -256,7 +273,19 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
         s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
-        s.Files.Select(f => new VideoFileDto(f.Id, f.Path, f.Basename, f.Format, f.Width, f.Height, f.Duration, f.VideoCodec, f.AudioCodec, f.FrameRate, f.BitRate, f.Size,
+        s.Files.Select(f => new VideoFileDto(
+            f.Id,
+            CanReadFiles ? f.Path : string.Empty,
+            GetVisibleBasename(f.Path, f.Basename),
+            f.Format,
+            f.Width,
+            f.Height,
+            f.Duration,
+            f.VideoCodec,
+            f.AudioCodec,
+            f.FrameRate,
+            f.BitRate,
+            f.Size,
             f.Fingerprints.Select(fp => new FingerprintDto(fp.Type, fp.Value)).ToList(),
             f.Captions.Select(c => new CaptionDto(c.Id, c.LanguageCode, c.CaptionType, c.Filename)).ToList())).ToList(),
         s.SceneMarkers.Select(m => new SceneMarkerSummaryDto(m.Id, m.Title, m.Seconds, m.EndSeconds, m.PrimaryTagId, m.PrimaryTag?.Name ?? "")).ToList(),
@@ -264,6 +293,38 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
         s.RemoteIds.Select(remoteId => new SceneRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
         s.CustomFields,
+        s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
+    );
+
+    private SceneDto MapListToDto(Scene s) => new(
+        s.Id, s.Title, s.Code, s.Details, s.Director,
+        s.Date?.ToString("yyyy-MM-dd"), s.Rating, s.Organized, s.StudioId, s.Studio?.Name,
+        s.ResumeTime, s.PlayDuration, s.PlayCount, s.LastPlayedAt?.ToString("o"),
+        s.OCounter,
+        s.Captions, s.InteractiveSpeed,
+        s.Urls.Select(u => u.Url).ToList(),
+        s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
+        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
+        s.Files.Select(f => new VideoFileDto(
+            f.Id,
+            CanReadFiles ? f.Path : string.Empty,
+            GetVisibleBasename(f.Path, f.Basename),
+            f.Format,
+            f.Width,
+            f.Height,
+            f.Duration,
+            f.VideoCodec,
+            f.AudioCodec,
+            f.FrameRate,
+            f.BitRate,
+            f.Size,
+            [],
+            [])).ToList(),
+        s.SceneMarkers.Select(m => new SceneMarkerSummaryDto(m.Id, m.Title, m.Seconds, m.EndSeconds, m.PrimaryTagId, m.PrimaryTag?.Name ?? "")).ToList(),
+        s.SceneGroups.Where(sg => sg.Group != null).Select(sg => new GroupSummaryDto(sg.Group!.Id, sg.Group.Name, sg.SceneIndex)).ToList(),
+        s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
+        [],
+        null,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
 
@@ -286,6 +347,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{sceneId:int}/markers")]
+    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
     public async Task<ActionResult<SceneMarkerSummaryDto>> CreateMarker(int sceneId, [FromBody] SceneMarkerCreateDto dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(sceneId, ct);
@@ -312,6 +375,9 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPut("{sceneId:int}/markers/{markerId:int}")]
+    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
+    [RequiresEntityAccess("marker", Permissions.MarkersWrite, RouteValueName = "markerId")]
     public async Task<ActionResult<SceneMarkerSummaryDto>> UpdateMarker(int sceneId, int markerId, [FromBody] SceneMarkerUpdateDto dto, CancellationToken ct)
     {
         var marker = await db.SceneMarkers.Include(m => m.PrimaryTag).Include(m => m.SceneMarkerTags).FirstOrDefaultAsync(m => m.Id == markerId && m.SceneId == sceneId, ct);
@@ -335,6 +401,9 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpDelete("{sceneId:int}/markers/{markerId:int}")]
+    [RequiresPermission(Permissions.MarkersDelete)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersDelete, RouteValueName = "sceneId")]
+    [RequiresEntityAccess("marker", Permissions.MarkersDelete, RouteValueName = "markerId")]
     public async Task<IActionResult> DeleteMarker(int sceneId, int markerId, CancellationToken ct)
     {
         var marker = await db.SceneMarkers.FirstOrDefaultAsync(m => m.Id == markerId && m.SceneId == sceneId, ct);
@@ -348,6 +417,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     // ===== Activity Tracking =====
 
     [HttpPost("{id:int}/play")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> RecordPlay(int id, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -361,6 +432,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpDelete("{id:int}/play")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> DeletePlay(int id, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -373,6 +446,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/play/reset")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> ResetPlayCount(int id, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -387,6 +462,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/o")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<ActionResult<int>> IncrementO(int id, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -399,6 +476,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpDelete("{id:int}/o")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> DecrementO(int id, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -411,6 +490,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/o/reset")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> ResetO(int id, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -423,6 +504,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpGet("{id:int}/history")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<ActionResult<SceneHistoryDto>> GetHistory(int id, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -439,6 +522,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/activity")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> SaveActivity(int id, [FromBody] SceneActivityDto dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -451,6 +536,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     [HttpPost("{id:int}/activity/reset")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> ResetActivity(int id, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -518,6 +605,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     // ===== Bulk Operations =====
 
     [HttpPost("bulk")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
     public async Task<IActionResult> BulkUpdate([FromBody] BulkSceneUpdateDto dto, CancellationToken ct)
     {
         var scenes = await db.Scenes
@@ -593,6 +682,9 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     // ===== Merge =====
 
     [HttpPost("merge")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite, ActionArgumentName = "dto", PropertyName = "TargetId")]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite, ActionArgumentName = "dto", PropertyName = "SourceIds")]
     public async Task<ActionResult<SceneDto>> MergeScenes([FromBody] SceneMergeDto dto, CancellationToken ct)
     {
         var target = await sceneRepo.GetByIdWithRelationsAsync(dto.TargetId, ct);
@@ -636,6 +728,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     // ===== Generate Screenshot =====
 
     [HttpPost("{id:int}/generate-screenshot")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> GenerateScreenshot(int id, [FromBody] GenerateScreenshotDto? dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(id, ct);
@@ -650,6 +744,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     // ===== Rescan =====
 
     [HttpPost("{id:int}/rescan")]
+    [RequiresPermission(Permissions.LibraryScan)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.LibraryScan)]
     public async Task<IActionResult> Rescan(int id, CancellationToken ct)
     {
         var scene = await db.Scenes.Include(s => s.Files).FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -672,6 +768,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     // ===== Assign File =====
 
     [HttpPost("{id:int}/assign-file")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> AssignFile(int id, [FromBody] SceneAssignFileDto dto, CancellationToken ct)
     {
         var scene = await db.Scenes.FindAsync([id], ct);

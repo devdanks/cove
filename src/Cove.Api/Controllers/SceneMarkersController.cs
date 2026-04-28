@@ -52,6 +52,8 @@ public class SceneMarkersController(ISceneMarkerRepository markerRepo, ISceneRep
     }
 
     [HttpPost]
+    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
     public async Task<ActionResult<SceneMarkerSummaryDto>> Create(int sceneId, [FromBody] SceneMarkerCreateDto dto, CancellationToken ct)
     {
         var scene = await sceneRepo.GetByIdAsync(sceneId, ct);
@@ -70,6 +72,9 @@ public class SceneMarkersController(ISceneMarkerRepository markerRepo, ISceneRep
     }
 
     [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
+    [RequiresEntityAccess("marker", Permissions.MarkersWrite)]
     public async Task<ActionResult<SceneMarkerSummaryDto>> Update(int sceneId, int id, [FromBody] SceneMarkerUpdateDto dto, CancellationToken ct)
     {
         var marker = await markerRepo.GetByIdAsync(id, ct);
@@ -86,6 +91,8 @@ public class SceneMarkersController(ISceneMarkerRepository markerRepo, ISceneRep
 
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.MarkersDelete)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersDelete, RouteValueName = "sceneId")]
+    [RequiresEntityAccess("marker", Permissions.MarkersDelete)]
     public async Task<IActionResult> Delete(int sceneId, int id, CancellationToken ct)
     {
         var marker = await markerRepo.GetByIdAsync(id, ct);
@@ -95,6 +102,8 @@ public class SceneMarkersController(ISceneMarkerRepository markerRepo, ISceneRep
     }
 
     [HttpPost("/api/markers/bulk")]
+    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresEntityAccess("marker", Permissions.MarkersWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
     public async Task<ActionResult<List<SceneMarkerSummaryDto>>> BulkUpdate([FromBody] BulkSceneMarkerUpdateDto dto, CancellationToken ct)
     {
         var markers = await db.SceneMarkers
@@ -133,6 +142,8 @@ public class SceneMarkersController(ISceneMarkerRepository markerRepo, ISceneRep
     }
 
     [HttpPost("/api/markers/destroy")]
+    [RequiresPermission(Permissions.MarkersDelete)]
+    [RequiresEntityAccess("marker", Permissions.MarkersDelete, ActionArgumentName = "dto", PropertyName = "Ids")]
     public async Task<IActionResult> DestroyBatch([FromBody] BatchDeleteDto dto, CancellationToken ct)
     {
         var markers = await db.SceneMarkers.Where(m => dto.Ids.Contains(m.Id)).ToListAsync(ct);

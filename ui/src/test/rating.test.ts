@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   normalizeRatingSystemType,
   normalizeRatingStarPrecision,
@@ -13,6 +13,25 @@ import {
   getRatingBannerColor,
   defaultRatingSystemOptions,
 } from "../components/Rating";
+import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
+
+const storage = new Map<string, string>();
+
+beforeEach(() => {
+  storage.clear();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+    },
+  });
+});
 
 describe("normalizeRatingSystemType", () => {
   it("returns 'stars' for null", () => {
@@ -213,5 +232,20 @@ describe("getRatingBannerColor", () => {
     const c1 = getRatingBannerColor(20);
     const c2 = getRatingBannerColor(80);
     expect(c1).not.toBe(c2);
+  });
+});
+
+describe("stored rating overrides", () => {
+  it("reads back a stored override", () => {
+    writeStoredRatingOptionsOverride({ type: "decimal", starPrecision: "full" });
+
+    expect(readStoredRatingOptionsOverride()).toEqual({ type: "decimal", starPrecision: "full" });
+  });
+
+  it("clears the stored override", () => {
+    writeStoredRatingOptionsOverride({ type: "stars", starPrecision: "half" });
+    writeStoredRatingOptionsOverride(null);
+
+    expect(readStoredRatingOptionsOverride()).toBeNull();
   });
 });

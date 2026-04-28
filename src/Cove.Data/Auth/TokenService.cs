@@ -201,11 +201,13 @@ public sealed class TokenService : ITokenService
                 .FirstOrDefaultAsync(u => u.Id == userId, ct);
             if (user is null || !user.IsActive || user.IsLocked) return null;
 
+            var roleIds = user.Roles.Select(r => r.RoleId).Distinct().ToArray();
             var roleNames = user.Roles.Select(r => r.Role!.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var permissionKeys = user.Roles
                 .SelectMany(r => r.Role!.Permissions.Select(p => p.PermissionKey))
                 .ToList();
             var perms = _registry.Expand(permissionKeys);
+            var (readRestrictedEntityKinds, readGrantedEntityKinds) = await GetReadAccessProfileAsync(roleIds, ct);
 
             return new CovePrincipal
             {
@@ -214,6 +216,8 @@ public sealed class TokenService : ITokenService
                 Kind = PrincipalKind.User,
                 Roles = roleNames,
                 Permissions = perms,
+                ReadRestrictedEntityKinds = readRestrictedEntityKinds,
+                ReadGrantedEntityKinds = readGrantedEntityKinds,
                 ClaimsPrincipal = p,
                 Ip = ip,
                 UserAgent = userAgent,
@@ -244,11 +248,13 @@ public sealed class TokenService : ITokenService
         if (!BCrypt.Net.BCrypt.Verify(secret, record.TokenHash)) return null;
         if (record.User is null || !record.User.IsActive || record.User.IsLocked) return null;
 
+        var roleIds = record.User.Roles.Select(r => r.RoleId).Distinct().ToArray();
         var roleNames = record.User.Roles.Select(r => r.Role!.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var basePermissions = record.User.Roles
             .SelectMany(r => r.Role!.Permissions.Select(p => p.PermissionKey))
             .ToList();
         var expanded = _registry.Expand(basePermissions);
+        var (readRestrictedEntityKinds, readGrantedEntityKinds) = await GetReadAccessProfileAsync(roleIds, ct);
 
         // Token scope is intersected with user permissions — never expansive.
         if (!string.IsNullOrEmpty(record.ScopePermissions))
@@ -284,10 +290,48 @@ public sealed class TokenService : ITokenService
             Kind = PrincipalKind.ApiToken,
             Roles = roleNames,
             Permissions = expanded,
+            ReadRestrictedEntityKinds = readRestrictedEntityKinds,
+            ReadGrantedEntityKinds = readGrantedEntityKinds,
             TokenId = record.Id,
             Ip = ip,
             UserAgent = userAgent,
         };
+    }
+
+    private async Task<(HashSet<string> RestrictedKinds, HashSet<string> GrantedKinds)> GetReadAccessProfileAsync(IEnumerable<int> roleIds, CancellationToken ct)
+    {
+        var ids = roleIds.Distinct().ToArray();
+        if (ids.Length == 0)
+            return (
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+        var contentRules = await _db.RoleContentRules.AsNoTracking()
+            .Where(rule => ids.Contains(rule.RoleId) && (rule.AppliesTo == "read" || rule.AppliesTo == "all"))
+            .Select(rule => new { rule.EntityKind, rule.Effect })
+            .ToListAsync(ct);
+
+        var entityOverrides = await _db.RoleEntityOverrides.AsNoTracking()
+            .Where(overrideItem => ids.Contains(overrideItem.RoleId) && (overrideItem.AppliesTo == "read" || overrideItem.AppliesTo == "all"))
+            .Select(overrideItem => new { overrideItem.EntityKind, overrideItem.Effect })
+            .ToListAsync(ct);
+
+        var restrictedKinds = contentRules
+            .Select(rule => rule.EntityKind)
+            .Concat(entityOverrides.Select(overrideItem => overrideItem.EntityKind))
+            .Where(entityKind => !string.IsNullOrWhiteSpace(entityKind))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var grantedKinds = contentRules
+            .Where(rule => string.Equals(rule.Effect, "allow", StringComparison.OrdinalIgnoreCase))
+            .Select(rule => rule.EntityKind)
+            .Concat(entityOverrides
+                .Where(overrideItem => string.Equals(overrideItem.Effect, "allow", StringComparison.OrdinalIgnoreCase))
+                .Select(overrideItem => overrideItem.EntityKind))
+            .Where(entityKind => !string.IsNullOrWhiteSpace(entityKind))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return (restrictedKinds, grantedKinds);
     }
 
     public async Task<ApiTokenIssued> CreateApiTokenAsync(int userId, string name, IEnumerable<string>? scope, DateTime? expiresAt, CovePrincipal? actor, CancellationToken ct = default)
@@ -362,7 +406,8 @@ public sealed class TokenService : ITokenService
             .ToListAsync(ct);
         return new UserDto(user.Id, user.Username, user.DisplayName, user.Email,
             user.IsActive, user.IsLocked, user.IsSystem, user.MustChangePassword,
-            user.LastLoginAt, user.LastLoginIp, user.CreatedAt, roleNames);
+            user.LastLoginAt, user.LastLoginIp, user.CreatedAt, roleNames,
+            UserService.ParseUiPreferences(user.UiPreferencesJson));
     }
 
     public static string HashToken(string raw)

@@ -7,6 +7,7 @@ using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
 using Cove.Core.Interfaces;
+using IAuthorizationService = Cove.Core.Auth.IAuthorizationService;
 
 namespace Cove.Api.Controllers;
 
@@ -47,7 +48,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         };
 
         var (items, totalCount) = await tagRepo.FindAsync(filter, findFilter, ct);
-        var dtos = await MapTagListDtos(items, ct);
+        var dtos = MapTagListDtos(items);
         return Ok(new PaginatedResponse<TagListDto>(dtos, totalCount, page, perPage));
     }
 
@@ -57,7 +58,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new TagFilter();
         var (items, totalCount) = await tagRepo.FindAsync(filter, findFilter, ct);
-        var dtos = await MapTagListDtos(items, ct);
+        var dtos = MapTagListDtos(items);
         return Ok(new PaginatedResponse<TagListDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -85,8 +86,6 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var ids = items.Select(tag => tag.Id).ToList();
         var parentIdsByTagId = ids.ToDictionary(id => id, _ => new List<int>());
         var childIdsByTagId = ids.ToDictionary(id => id, _ => new List<int>());
-        var usageCountsByTagId = await GetTagUsageCountsAsync(ids, ct);
-
         var relations = await db.Set<TagParent>()
             .AsNoTracking()
             .Where(relation => ids.Contains(relation.ParentId) && ids.Contains(relation.ChildId))
@@ -102,7 +101,14 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var graphItems = items
             .Select(tag =>
             {
-                var usageCounts = usageCountsByTagId.GetValueOrDefault(tag.Id) ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0);
+                var usageCounts = new TagUsageCounts(
+                    tag.SceneCount,
+                    tag.SceneMarkerCount,
+                    tag.ImageCount,
+                    tag.GalleryCount,
+                    tag.GroupCount,
+                    tag.PerformerCount,
+                    tag.StudioCount);
 
                 return new TagGraphNodeDto(
                     tag.Id,
@@ -134,23 +140,20 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<TagDetailDto>> GetById(int id, CancellationToken ct)
     {
-        var tag = await tagRepo.GetByIdWithRelationsAsync(id, ct);
+        var tag = await db.Tags
+            .AsNoTracking()
+            .Include(t => t.Aliases)
+            .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent)
+            .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(t => t.Id == id, ct);
         if (tag == null) return NotFound();
 
-        // Use explicit COUNT queries — navigation properties aren't loaded for join tables
-        var sceneCount = await db.Set<SceneTag>().CountAsync(st => st.TagId == id, ct);
-        var performerCount = await db.Set<PerformerTag>().CountAsync(pt => pt.TagId == id, ct);
-        var imageCount = await db.Set<ImageTag>().CountAsync(it => it.TagId == id, ct);
-        var galleryCount = await db.Set<GalleryTag>().CountAsync(gt => gt.TagId == id, ct);
-        var studioCount = await db.Set<StudioTag>().CountAsync(st => st.TagId == id, ct);
-        var groupCount = await db.Set<GroupTag>().CountAsync(gt => gt.TagId == id, ct);
-        var markerCount = await db.SceneMarkers.CountAsync(m => m.PrimaryTagId == id, ct)
-            + await db.Set<SceneMarkerTag>().CountAsync(mt => mt.TagId == id, ct);
-
-        return Ok(MapToDetailDto(tag, sceneCount, performerCount, imageCount, galleryCount, studioCount, groupCount, markerCount));
+        return Ok(MapToDetailDto(tag));
     }
 
     [HttpPost]
+    [RequiresPermission(Permissions.TagsWrite)]
     public async Task<ActionResult<TagDetailDto>> Create([FromBody] TagCreateDto dto, CancellationToken ct)
     {
         var existing = await tagRepo.GetByNameAsync(dto.Name, ct);
@@ -173,6 +176,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     }
 
     [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.TagsWrite)]
+    [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsWrite)]
     public async Task<ActionResult<TagDetailDto>> Update(int id, [FromBody] TagUpdateDto dto, CancellationToken ct)
     {
         var tag = await tagRepo.GetByIdWithRelationsAsync(id, ct);
@@ -216,6 +221,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (tag == null)
             return NotFound();
 
+        await db.Entry(tag).Collection(t => t.RemoteIds).LoadAsync(ct);
+
         if (string.IsNullOrWhiteSpace(term))
         {
             var existingRemoteId = tag.RemoteIds.FirstOrDefault(remoteId => string.IsNullOrWhiteSpace(endpoint) || string.Equals(remoteId.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
@@ -250,11 +257,15 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     }
 
     [HttpPost("{id:int}/metadata-server/import")]
+    [RequiresPermission(Permissions.TagsWrite)]
+    [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsWrite)]
     public async Task<ActionResult<TagDetailDto>> ImportFromMetadataServer(int id, [FromServices] MetadataServerService metadataServerService, [FromBody] MetadataServerTagImportRequestDto dto, CancellationToken ct)
     {
         var tag = await tagRepo.GetByIdWithRelationsAsync(id, ct);
         if (tag == null)
             return NotFound();
+
+        await db.Entry(tag).Collection(t => t.RemoteIds).LoadAsync(ct);
 
         var imported = await metadataServerService.MergeTagAsync(tag, dto.Endpoint, dto.TagId, ct);
         if (!imported)
@@ -266,6 +277,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]
+    [RequiresPermission(Permissions.TagsWrite)]
+    [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsWrite)]
     public async Task<IActionResult> SubmitTagDraft(int id, [FromServices] MetadataServerService metadataServerService, [FromBody] MetadataServerEndpointDto dto, CancellationToken ct)
     {
         var tag = await tagRepo.GetByIdWithRelationsAsync(id, ct);
@@ -277,7 +290,9 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     }
 
     [HttpPost("metadata-server/batch-tag")]
-    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerTagBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, CancellationToken ct)
+    [RequiresPermission(Permissions.TagsWrite)]
+    [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
+    public async Task<ActionResult<object>> BatchTagFromMetadataServer([FromBody] MetadataServerTagBatchTagRequestDto dto, [FromServices] IJobService jobService, [FromServices] IServiceScopeFactory scopeFactory, [FromServices] IAuthorizationService authorizationService, [FromServices] ICurrentPrincipalAccessor principalAccessor, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Endpoint))
             return BadRequest(new { message = "Endpoint is required" });
@@ -285,6 +300,22 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var ids = await ResolveSelectedTagIdsAsync(dto, ct);
         if (ids.Count == 0)
             return BadRequest(new { message = "No tags selected for batch tagging" });
+
+        var principal = principalAccessor.Current;
+        if (principal == null)
+            return Forbid();
+
+        foreach (var id in ids)
+        {
+            var result = await authorizationService.AuthorizeAsync(
+                principal,
+                Permissions.TagsWrite,
+                new EntityRef(EntityKinds.Tag, id.ToString()),
+                ct);
+
+            if (!result.Allowed)
+                return Forbid();
+        }
 
         var jobId = jobService.Enqueue(
             "metadata-server:tags",
@@ -301,6 +332,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.TagsDelete)]
+    [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var tag = await tagRepo.GetByIdAsync(id, ct);
@@ -344,28 +376,28 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         return ids.Distinct().ToList();
     }
 
-    private static TagDetailDto MapToDetailDto(Tag t, int sceneCount = 0, int performerCount = 0, int imageCount = 0, int galleryCount = 0, int studioCount = 0, int groupCount = 0, int markerCount = 0) => new(
+    private static TagDetailDto MapToDetailDto(Tag t, int? sceneCount = null, int? performerCount = null, int? imageCount = null, int? galleryCount = null, int? studioCount = null, int? groupCount = null, int? markerCount = null) => new(
         t.Id, t.Name, t.SortName, t.Description, t.Favorite, t.IgnoreAutoTag,
         t.Aliases.Select(a => a.Alias).ToList(),
         t.ParentRelations.Where(pr => pr.Parent != null).Select(pr => new TagDto(pr.Parent!.Id, pr.Parent.Name, pr.Parent.Description, pr.Parent.Favorite, pr.Parent.IgnoreAutoTag, [])).ToList(),
         t.ChildRelations.Where(cr => cr.Child != null).Select(cr => new TagDto(cr.Child!.Id, cr.Child.Name, cr.Child.Description, cr.Child.Favorite, cr.Child.IgnoreAutoTag, [])).ToList(),
-        sceneCount, performerCount, imageCount, galleryCount,
-        studioCount, groupCount, markerCount,
+        sceneCount ?? t.SceneCount,
+        performerCount ?? t.PerformerCount,
+        imageCount ?? t.ImageCount,
+        galleryCount ?? t.GalleryCount,
+        studioCount ?? t.StudioCount,
+        groupCount ?? t.GroupCount,
+        markerCount ?? t.SceneMarkerCount,
         t.CustomFields,
         t.CreatedAt.ToString("o"), t.UpdatedAt.ToString("o")
     );
 
-    private async Task<List<TagListDto>> MapTagListDtos(IReadOnlyList<Tag> items, CancellationToken ct)
+    private static List<TagListDto> MapTagListDtos(IReadOnlyList<Tag> items)
     {
         if (items.Count == 0) return [];
 
-        var ids = items.Select(t => t.Id).ToList();
-        var usageCountsByTagId = await GetTagUsageCountsAsync(ids, ct);
-
         return items.Select(t =>
         {
-            var usageCounts = usageCountsByTagId.GetValueOrDefault(t.Id) ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0);
-
             return new TagListDto(
                 t.Id,
                 t.Name,
@@ -373,53 +405,21 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 t.Favorite,
                 t.IgnoreAutoTag,
                 t.Aliases.Select(a => a.Alias).ToList(),
-                usageCounts.SceneCount,
-                usageCounts.SceneMarkerCount,
-                usageCounts.ImageCount,
-                usageCounts.GalleryCount,
-                usageCounts.GroupCount,
-                usageCounts.PerformerCount,
-                usageCounts.StudioCount,
+                t.SceneCount,
+                t.SceneMarkerCount,
+                t.ImageCount,
+                t.GalleryCount,
+                t.GroupCount,
+                t.PerformerCount,
+                t.StudioCount,
                 t.ImageBlobId != null ? EntityImageUrls.Tag(t.Id, t.UpdatedAt) : null);
         }).ToList();
-    }
-
-    private async Task<Dictionary<int, TagUsageCounts>> GetTagUsageCountsAsync(IReadOnlyList<int> ids, CancellationToken ct)
-    {
-        if (ids.Count == 0) return [];
-
-        var sceneCounts = await db.Set<SceneTag>().Where(sceneTag => ids.Contains(sceneTag.TagId))
-            .GroupBy(sceneTag => sceneTag.TagId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var primaryMarkerCounts = await db.SceneMarkers.Where(marker => ids.Contains(marker.PrimaryTagId))
-            .GroupBy(marker => marker.PrimaryTagId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var secondaryMarkerCounts = await db.Set<SceneMarkerTag>().Where(markerTag => ids.Contains(markerTag.TagId))
-            .GroupBy(markerTag => markerTag.TagId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var imageCounts = await db.Set<ImageTag>().Where(imageTag => ids.Contains(imageTag.TagId))
-            .GroupBy(imageTag => imageTag.TagId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var galleryCounts = await db.Set<GalleryTag>().Where(galleryTag => ids.Contains(galleryTag.TagId))
-            .GroupBy(galleryTag => galleryTag.TagId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var groupCounts = await db.Set<GroupTag>().Where(groupTag => ids.Contains(groupTag.TagId))
-            .GroupBy(groupTag => groupTag.TagId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var performerCounts = await db.Set<PerformerTag>().Where(performerTag => ids.Contains(performerTag.TagId))
-            .GroupBy(performerTag => performerTag.TagId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        var studioCounts = await db.Set<StudioTag>().Where(studioTag => ids.Contains(studioTag.TagId))
-            .GroupBy(studioTag => studioTag.TagId).Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-
-        return ids.Distinct().ToDictionary(
-            id => id,
-            id => new TagUsageCounts(
-                sceneCounts.GetValueOrDefault(id, 0),
-                primaryMarkerCounts.GetValueOrDefault(id, 0) + secondaryMarkerCounts.GetValueOrDefault(id, 0),
-                imageCounts.GetValueOrDefault(id, 0),
-                galleryCounts.GetValueOrDefault(id, 0),
-                groupCounts.GetValueOrDefault(id, 0),
-                performerCounts.GetValueOrDefault(id, 0),
-                studioCounts.GetValueOrDefault(id, 0)));
     }
 
     // ===== Bulk Operations =====
 
     [HttpPost("bulk")]
+    [RequiresPermission(Permissions.TagsWrite)]
     public async Task<IActionResult> BulkUpdate([FromBody] BulkTagUpdateDto dto, CancellationToken ct)
     {
         var tags = await db.Tags
@@ -489,6 +489,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     }
 
     [HttpDelete("bulk")]
+    [RequiresPermission(Permissions.TagsDelete)]
     public async Task<IActionResult> BulkDelete([FromBody] BatchDeleteDto dto, CancellationToken ct)
     {
         var tags = await db.Tags.Where(t => dto.Ids.Contains(t.Id)).ToListAsync(ct);
@@ -503,6 +504,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     // ===== Merge =====
 
     [HttpPost("merge")]
+    [RequiresPermission(Permissions.TagsWrite)]
     public async Task<ActionResult<TagDetailDto>> MergeTags([FromBody] TagMergeDto dto, CancellationToken ct)
     {
         var target = await tagRepo.GetByIdWithRelationsAsync(dto.TargetId, ct);

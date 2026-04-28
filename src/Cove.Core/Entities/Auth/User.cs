@@ -30,6 +30,9 @@ public class User : BaseEntity
     /// <summary>TOTP secret for second-factor (designed-for; not enabled in v1).</summary>
     public string? TotpSecret { get; set; }
 
+    /// <summary>Per-user UI preferences persisted across browsers.</summary>
+    public string? UiPreferencesJson { get; set; }
+
     /// <summary>True for the bootstrap "owner" account that cannot be deleted.</summary>
     public bool IsSystem { get; set; }
 

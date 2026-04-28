@@ -1,0 +1,87 @@
+export type PermissionChecker = (permission: string) => boolean;
+export type NavVisibilityUser = {
+  kind?: string;
+  readGrantedEntityKinds?: string[];
+};
+
+export type EntityResource = "scene" | "image" | "performer" | "gallery" | "studio" | "tag" | "group" | "marker";
+export type NavPage = "scenes" | "images" | "markers" | "galleries" | "performers" | "studios" | "tags" | "groups";
+
+const READ_PERMISSIONS: Record<EntityResource, string> = {
+  scene: "scenes.read",
+  image: "images.read",
+  performer: "performers.read",
+  gallery: "galleries.read",
+  studio: "studios.read",
+  tag: "tags.read",
+  group: "groups.read",
+  marker: "markers.read",
+};
+
+const WRITE_PERMISSIONS: Record<EntityResource, string> = {
+  scene: "scenes.write",
+  image: "images.write",
+  performer: "performers.write",
+  gallery: "galleries.write",
+  studio: "studios.write",
+  tag: "tags.write",
+  group: "groups.write",
+  marker: "markers.write",
+};
+
+const DELETE_PERMISSIONS: Record<EntityResource, string> = {
+  scene: "scenes.delete",
+  image: "images.delete",
+  performer: "performers.delete",
+  gallery: "galleries.delete",
+  studio: "studios.delete",
+  tag: "tags.delete",
+  group: "groups.delete",
+  marker: "markers.delete",
+};
+
+const NAV_PAGE_RESOURCE: Record<NavPage, EntityResource> = {
+  scenes: "scene",
+  images: "image",
+  markers: "marker",
+  galleries: "gallery",
+  performers: "performer",
+  studios: "studio",
+  tags: "tag",
+  groups: "group",
+};
+
+export function canReadEntity(resource: EntityResource, hasPermission: PermissionChecker) {
+  return hasPermission(READ_PERMISSIONS[resource]);
+}
+
+export function canWriteEntity(resource: EntityResource, hasPermission: PermissionChecker) {
+  return hasPermission(WRITE_PERMISSIONS[resource]);
+}
+
+export function canDeleteEntity(resource: EntityResource, hasPermission: PermissionChecker) {
+  return hasPermission(DELETE_PERMISSIONS[resource]);
+}
+
+export function canShowNavPage(page: NavPage, hasPermission: PermissionChecker, user?: NavVisibilityUser | null) {
+  if (user?.kind === "shareLink") {
+    return (user.readGrantedEntityKinds ?? []).includes(NAV_PAGE_RESOURCE[page]);
+  }
+
+  return canReadEntity(NAV_PAGE_RESOURCE[page], hasPermission);
+}
+
+export function hasAnyPermission(hasPermission: PermissionChecker, permissions: string[]) {
+  return permissions.some((permission) => hasPermission(permission));
+}
+
+export function filterItemsByPermission<T extends { key: string }>(
+  items: T[],
+  permissionsByKey: Partial<Record<string, string>>,
+  hasPermission: PermissionChecker,
+) {
+  return items.filter((item) => {
+    const requiredPermission = permissionsByKey[item.key];
+    return !requiredPermission || hasPermission(requiredPermission);
+  });
+}

@@ -16,6 +16,8 @@ import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { useRouteRegistry } from "../router/RouteRegistry";
+import { useAuth } from "../auth/AuthContext";
+import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
@@ -58,6 +60,10 @@ export function StudiosPage({ onNavigate }: Props) {
   const [showMerge, setShowMerge] = useState(false);
   const [showMetadataBatch, setShowMetadataBatch] = useState(false);
   const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canWriteStudio = canWriteEntity("studio", hasPermission);
+  const canDeleteStudio = canDeleteEntity("studio", hasPermission);
+  const canMetadataBatch = hasPermission("library.autotag") && canWriteStudio;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const { data, isLoading } = useQuery({
@@ -112,27 +118,31 @@ export function StudiosPage({ onNavigate }: Props) {
         criteriaDefinitions={STUDIO_CRITERIA}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
-        onNew={() => setShowCreate(true)}
+        onNew={canWriteStudio ? () => setShowCreate(true) : undefined}
         selectedIds={selectedIds}
         onSelectAll={selectAll}
         onSelectNone={selectNone}
         selectionActions={
           <>
-            <button
-              onClick={() => setShowMetadataBatch(true)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
-            >
-              <Building2 className="w-3 h-3" />
-              MetadataServer
-            </button>
-            <button
-              onClick={() => setShowBulkEdit(true)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-            >
-              <Edit className="w-3 h-3" />
-              Edit
-            </button>
-            {selectedIds.size >= 2 && (
+            {canMetadataBatch && (
+              <button
+                onClick={() => setShowMetadataBatch(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+              >
+                <Building2 className="w-3 h-3" />
+                MetadataServer
+              </button>
+            )}
+            {canWriteStudio && (
+              <button
+                onClick={() => setShowBulkEdit(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
+              >
+                <Edit className="w-3 h-3" />
+                Edit
+              </button>
+            )}
+            {canWriteStudio && selectedIds.size >= 2 && (
               <button
                 onClick={() => setShowMerge(true)}
                 className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/20"
@@ -141,14 +151,16 @@ export function StudiosPage({ onNavigate }: Props) {
                 Merge
               </button>
             )}
-            <button
-              onClick={() => { if (confirm(`Delete ${selectedIds.size} studio(s)?`)) bulkDeleteMut.mutate(); }}
-              disabled={bulkDeleteMut.isPending}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-            >
-              {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-              Delete
-            </button>
+            {canDeleteStudio && (
+              <button
+                onClick={() => { if (confirm(`Delete ${selectedIds.size} studio(s)?`)) bulkDeleteMut.mutate(); }}
+                disabled={bulkDeleteMut.isPending}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
+              >
+                {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                Delete
+              </button>
+            )}
           </>
         }
       >
