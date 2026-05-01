@@ -12,6 +12,7 @@ public class AutoTagService(
     IJobService jobService,
     IServiceScopeFactory scopeFactory,
     ExtensionManager extensionManager,
+    ITagProvenanceService tagProvenanceService,
     ILogger<AutoTagService> logger) : IAutoTagService
 {
     public string StartAutoTag(IEnumerable<string>? performerIds = null, IEnumerable<string>? studioIds = null, IEnumerable<string>? tagIds = null)
@@ -241,6 +242,8 @@ public class AutoTagService(
                 continue;
 
             AddTag(workItem.Entity, tag.EntityId);
+            if (TryGetTagProvenanceHost(workItem.Entity, out var hostType, out var hostId))
+                await tagProvenanceService.RecordAsync(hostType, hostId, tag.EntityId, "system", cancellationToken: ct);
             added++;
         }
 
@@ -429,6 +432,29 @@ public class AutoTagService(
             case Gallery gallery:
                 gallery.GalleryTags.Add(new GalleryTag { GalleryId = gallery.Id, TagId = tagId });
                 break;
+        }
+    }
+
+    private static bool TryGetTagProvenanceHost(object entity, out AffinityHostType hostType, out int hostId)
+    {
+        switch (entity)
+        {
+            case Scene scene:
+                hostType = AffinityHostType.Scene;
+                hostId = scene.Id;
+                return true;
+            case Image image:
+                hostType = AffinityHostType.Image;
+                hostId = image.Id;
+                return true;
+            case Gallery gallery:
+                hostType = AffinityHostType.Gallery;
+                hostId = gallery.Id;
+                return true;
+            default:
+                hostType = default;
+                hostId = 0;
+                return false;
         }
     }
 

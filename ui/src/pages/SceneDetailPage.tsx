@@ -647,6 +647,7 @@ export function DetailsTab({ scene, onNavigate }: { scene: Scene; onNavigate: (r
               <TagBadge 
                 key={tag.id} 
                 name={tag.name} 
+                provenance={tag.provenance}
                 onClick={() => onNavigate({ page: "tag", id: tag.id })} 
               />
             ))}
