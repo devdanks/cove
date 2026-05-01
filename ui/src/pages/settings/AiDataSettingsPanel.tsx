@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, RefreshCw, Search, Trash2 } from "lucide-react";
 
-import { aiData, aiFaces, jobs } from "../../api/client";
-import type { AiDataKind, AiDataSelector, AiDataSummaryItem } from "../../api/types";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { aiData } from "../../api/client";
+import type { AiDataKind, AiDataPurgeRequest, AiDataPurgeResult, AiDataSelector, AiDataSummaryItem } from "../../api/types";
+import { useExtensions } from "../../extensions/ExtensionLoader";
 
 const KIND_OPTIONS: Array<{ value: AiDataKind; label: string }> = [
   { value: "embedding", label: "Embeddings" },
@@ -39,11 +39,12 @@ const EMPTY_FILTERS: FilterDraft = {
 
 export function AiDataSettingsPanel() {
   const queryClient = useQueryClient();
+  const { getSettingsPanelsForTab, resolveComponent } = useExtensions();
+  const aiDataPanels = getSettingsPanelsForTab("ai-data");
   const [filters, setFilters] = useState<FilterDraft>(EMPTY_FILTERS);
   const [previewSelector, setPreviewSelector] = useState<AiDataSelector | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [referenceImportJobId, setReferenceImportJobId] = useState<string | null>(null);
 
   const selector = useMemo(() => buildSelector(filters), [filters]);
   const selectorKey = JSON.stringify(selector);
@@ -53,87 +54,49 @@ export function AiDataSettingsPanel() {
     queryFn: () => aiData.summary(),
   });
 
-  const previewQuery = useQuery({
+  const previewSummaryQuery = useQuery({
     queryKey: ["ai-data", "summary", "preview", previewKey],
     queryFn: () => aiData.summary(previewSelector ?? undefined),
     enabled: previewSelector !== null,
   });
 
-  const referenceStatusQuery = useQuery({
-    queryKey: ["ai-faces", "reference", "status"],
-    queryFn: () => aiFaces.referenceStatus(),
-  });
-
-  const referenceImportJobQuery = useQuery({
-    queryKey: ["jobs", "ai-faces-reference", referenceImportJobId],
-    queryFn: () => jobs.get(referenceImportJobId!),
-    enabled: referenceImportJobId !== null,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "completed" || status === "failed" || status === "cancelled" ? false : 1500;
-    },
+  const previewPurgeQuery = useQuery({
+    queryKey: ["ai-data", "purge-preview", previewKey],
+    queryFn: () => aiData.purge(buildPurgeRequest(previewSelector!, true)),
+    enabled: previewSelector !== null,
   });
 
   const purgeMutation = useMutation({
-    mutationFn: (payload: AiDataSelector) => aiData.purge(payload),
+    mutationFn: (payload: AiDataPurgeRequest) => aiData.purge(payload),
     onSuccess: async () => {
       setConfirmOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["ai-data", "summary"] });
+      await queryClient.invalidateQueries({ queryKey: ["ai-data", "purge-preview"] });
       setPreviewSelector(selector);
       setPreviewKey(selectorKey);
     },
   });
 
-  const repairFaceCoversMutation = useMutation({
-    mutationFn: () => aiFaces.repairMissingCovers({ force: true }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["face"] });
-      await queryClient.invalidateQueries({ queryKey: ["faces"] });
-    },
-  });
-
-  const importReferencePackMutation = useMutation({
-    mutationFn: (file: File) => aiFaces.importReferencePack(file),
-    onSuccess: async (result) => {
-      setReferenceImportJobId(result.jobId);
-      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    },
-  });
-
-  const clearReferencePackMutation = useMutation({
-    mutationFn: () => aiFaces.clearReferencePack(),
-    onSuccess: async () => {
-      setReferenceImportJobId(null);
-      await queryClient.invalidateQueries({ queryKey: ["ai-faces", "reference", "status"] });
-    },
-  });
-
-  useEffect(() => {
-    const status = referenceImportJobQuery.data?.status;
-    if (status === "completed" || status === "failed" || status === "cancelled") {
-      queryClient.invalidateQueries({ queryKey: ["ai-faces", "reference", "status"] });
-    }
-  }, [referenceImportJobQuery.data?.status, queryClient]);
-
   const overallSummary = summaryQuery.data;
-  const previewSummary = previewQuery.data;
+  const previewSummary = previewSummaryQuery.data;
+  const previewResult = previewPurgeQuery.data;
   const previewMatchesCurrent = previewKey === selectorKey;
   const activeSummary = previewSummary && previewMatchesCurrent ? previewSummary : overallSummary;
   const hasActiveFilters = selectorKey !== JSON.stringify({});
-  const canPurge = Boolean(previewSummary && previewMatchesCurrent && previewSummary.totalCount > 0 && !purgeMutation.isPending);
+  const previewTotal = previewResult ? getPurgeTotal(previewResult) : 0;
+  const canPurge = Boolean(previewResult && previewMatchesCurrent && previewTotal > 0 && !previewPurgeQuery.isFetching && !purgeMutation.isPending);
 
   return (
     <div className="space-y-5">
-      <ConfirmDialog
+      <PurgeConfirmDialog
         open={confirmOpen}
-        title="Purge AI Data"
-        message={previewSummary
-          ? `Remove ${previewSummary.totalCount} AI artifact row(s) that match the current preview? This also removes AI-only tag links when their provenance is deleted.`
-          : "Preview the current selector before purging."}
-        confirmLabel="Purge"
+        previewResult={previewMatchesCurrent ? previewResult ?? null : null}
+        previewTotal={previewMatchesCurrent ? previewTotal : 0}
+        isPending={purgeMutation.isPending}
+        error={purgeMutation.isError ? (purgeMutation.error instanceof Error ? purgeMutation.error.message : "Purge failed.") : null}
         onConfirm={() => {
           if (previewSelector) {
-            purgeMutation.mutate(previewSelector);
+            purgeMutation.mutate(buildPurgeRequest(previewSelector, false));
           }
         }}
         onCancel={() => setConfirmOpen(false)}
@@ -164,113 +127,23 @@ export function AiDataSettingsPanel() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">Reference Face DB</h3>
-            <p className="mt-1 text-sm text-secondary">Import a `.saie` archive so AI.Faces can suggest performers from an external face reference database.</p>
-          </div>
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-50">
-            <Database className="h-4 w-4" />
-            {importReferencePackMutation.isPending ? "Uploading..." : "Upload .saie pack"}
-            <input
-              type="file"
-              accept=".saie"
-              className="hidden"
-              disabled={importReferencePackMutation.isPending}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) {
-                  importReferencePackMutation.mutate(file);
-                }
+      {aiDataPanels.map((panel) => {
+        const Component = resolveComponent(panel.componentName);
+        if (!Component) {
+          return null;
+        }
 
-                event.target.value = "";
-              }}
-            />
-          </label>
-        </div>
-
-        {referenceImportJobQuery.data ? (
-          <div className="mt-4 rounded-xl border border-border bg-card p-4 text-sm text-secondary">
-            Import job {referenceImportJobQuery.data.id} is {referenceImportJobQuery.data.status.toLowerCase()} at {Math.round(referenceImportJobQuery.data.progress * 100)}%.
-            {referenceImportJobQuery.data.subTask ? ` ${referenceImportJobQuery.data.subTask}` : ""}
-          </div>
-        ) : null}
-
-        {referenceStatusQuery.data ? (
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-border bg-card p-4 text-sm text-secondary">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Pack</div>
-              <div className="mt-2 text-base font-semibold text-foreground">{referenceStatusQuery.data.packId}</div>
-              <div className="mt-1">{referenceStatusQuery.data.performerCount.toLocaleString()} identities â€¢ {referenceStatusQuery.data.embeddingDim} dims</div>
+        return (
+          <section key={panel.id} className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
+            <div className="mb-4">
+              <h3 className="text-base font-semibold text-foreground">{panel.label}</h3>
+              <p className="mt-1 text-sm text-secondary">Provided by the {panel.extensionId} extension.</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4 text-sm text-secondary">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Source</div>
-              <div className="mt-2 break-all text-foreground">{referenceStatusQuery.data.sourceEndpoint ?? "Unknown source"}</div>
-              <div className="mt-1">Imported {new Date(referenceStatusQuery.data.importedAt).toLocaleString()}</div>
-            </div>
-          </div>
-        ) : referenceStatusQuery.isLoading ? (
-          <div className="mt-4 rounded-xl border border-border bg-card p-4 text-sm text-secondary">Loading reference pack status...</div>
-        ) : (
-          <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-secondary">No `.saie` reference pack is currently imported.</div>
-        )}
+            <Component />
+          </section>
+        );
+      })}
 
-        {referenceStatusQuery.data ? (
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                if (window.confirm("Remove the imported AI.Faces reference pack and clear its cached suggestion source?")) {
-                  clearReferencePackMutation.mutate();
-                }
-              }}
-              disabled={clearReferencePackMutation.isPending}
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Trash2 className="h-4 w-4" />
-              {clearReferencePackMutation.isPending ? "Clearing..." : "Clear imported reference pack"}
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">Face Cover Actions</h3>
-            <p className="mt-1 text-sm text-secondary">Recompute AI face covers using the strongest AI.Faces exemplar so face detail pages pick sharper, larger crops.</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm("Regenerate face covers for all faces with stored AI.Faces cover metadata? Existing face covers will be replaced when a better exemplar is available.")) {
-                repairFaceCoversMutation.mutate();
-              }
-            }}
-            disabled={repairFaceCoversMutation.isPending}
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${repairFaceCoversMutation.isPending ? "animate-spin" : ""}`} />
-            {repairFaceCoversMutation.isPending ? "Regenerating..." : "Regenerate face covers"}
-          </button>
-        </div>
-
-        {repairFaceCoversMutation.data ? (
-          <div className="mt-4 space-y-3">
-            <div className="rounded-xl border border-border bg-card p-4 text-sm text-secondary">
-              Scanned {repairFaceCoversMutation.data.scannedCount} faces, repaired {repairFaceCoversMutation.data.repairedCount}, skipped {repairFaceCoversMutation.data.skippedCount}, failed {repairFaceCoversMutation.data.failedCount}.
-            </div>
-            {repairFaceCoversMutation.data.errors.length > 0 ? (
-              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
-                {repairFaceCoversMutation.data.errors.slice(0, 3).map((error) => (
-                  <div key={error}>{error}</div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
 
       <section className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -285,10 +158,11 @@ export function AiDataSettingsPanel() {
                 setPreviewSelector(selector);
                 setPreviewKey(selectorKey);
               }}
-              className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-sm font-medium text-white transition hover:bg-accent-hover"
+              disabled={previewSummaryQuery.isFetching || previewPurgeQuery.isFetching}
+              className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-sm font-medium text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Search className="h-4 w-4" />
-              Preview
+              {previewSummaryQuery.isFetching || previewPurgeQuery.isFetching ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              {previewSummaryQuery.isFetching || previewPurgeQuery.isFetching ? "Previewing..." : "Preview"}
             </button>
             <button
               type="button"
@@ -349,21 +223,39 @@ export function AiDataSettingsPanel() {
           </div>
         </div>
 
-        {!previewMatchesCurrent && previewSummary ? (
+        {!previewMatchesCurrent && (previewSummary || previewResult) ? (
           <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
             Filters changed after the last preview. Run Preview again before purging.
           </div>
         ) : null}
 
-        {previewSummary && previewMatchesCurrent ? (
+        {previewMatchesCurrent && (previewSummaryQuery.isFetching || previewPurgeQuery.isFetching) ? (
+          <div className="mt-4 rounded-xl border border-border bg-card p-4 text-sm text-secondary">
+            Calculating dry-run preview...
+          </div>
+        ) : null}
+
+        {previewPurgeQuery.isError && previewMatchesCurrent ? (
+          <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+            {previewPurgeQuery.error instanceof Error ? previewPurgeQuery.error.message : "Preview failed."}
+          </div>
+        ) : null}
+
+        {previewResult && previewMatchesCurrent ? (
           <div className="mt-4 rounded-xl border border-border bg-card p-4">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <Database className="h-4 w-4 text-accent" />
-              Preview matches {previewSummary.totalCount} row(s)
+              Dry-run preview would remove {previewTotal.toLocaleString()} row(s)
             </div>
             <p className="mt-1 text-sm text-secondary">
               {hasActiveFilters ? "This preview is scoped to the current selector." : "No filters are set, so the preview spans all AI-managed artifacts."}
             </p>
+            <PurgeKindCounts result={previewResult} />
+            {previewTotal === 0 ? (
+              <p className="mt-3 text-sm text-secondary">Nothing matches the current selector, so deletion stays disabled.</p>
+            ) : (
+              <p className="mt-3 text-sm text-secondary">Open Purge and type purge to enable the destructive action.</p>
+            )}
           </div>
         ) : null}
       </section>
@@ -374,7 +266,7 @@ export function AiDataSettingsPanel() {
           <p className="mt-1 text-sm text-secondary">Grouped by artifact kind, detail, provenance source, model, and host type.</p>
         </div>
 
-        {summaryQuery.isLoading || previewQuery.isFetching ? (
+        {summaryQuery.isLoading || previewSummaryQuery.isFetching ? (
           <div className="mt-6 flex items-center justify-center py-10 text-secondary">
             <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
             Loading AI data summary...
@@ -435,6 +327,114 @@ function buildSelector(filters: FilterDraft): AiDataSelector {
     hostId: Number.isFinite(hostId) ? hostId : undefined,
     kinds: filters.kinds.length > 0 ? filters.kinds : undefined,
   };
+}
+
+function buildPurgeRequest(selector: AiDataSelector, dryRun: boolean): AiDataPurgeRequest {
+  return {
+    ...selector,
+    dryRun,
+  };
+}
+
+function getPurgeTotal(result: AiDataPurgeResult) {
+  return Object.values(result.removedCounts).reduce((sum, count) => sum + count, 0);
+}
+
+function PurgeKindCounts({ result }: { result: AiDataPurgeResult }) {
+  return (
+    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      {KIND_OPTIONS.map((option) => (
+        <div key={option.value} className="rounded-xl border border-border bg-surface p-4">
+          <div className="text-xs uppercase tracking-[0.16em] text-muted">{option.label}</div>
+          <div className="mt-2 text-xl font-semibold text-foreground">{(result.removedCounts[option.value] ?? 0).toLocaleString()}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PurgeConfirmDialog({
+  open,
+  previewResult,
+  previewTotal,
+  isPending,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  previewResult: AiDataPurgeResult | null;
+  previewTotal: number;
+  isPending: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setValue("");
+    }
+  }, [open]);
+
+  if (!open) {
+    return null;
+  }
+
+  const canConfirm = value === "purge" && !isPending && previewResult !== null && previewTotal > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="fixed inset-0 bg-black/60" onClick={onCancel} />
+      <div className="relative mx-4 w-full max-w-2xl rounded-lg border border-border bg-surface p-6 shadow-xl">
+        <h3 className="text-lg font-semibold text-foreground">Purge AI Data</h3>
+        <p className="mt-2 text-sm text-secondary">This permanently deletes the AI artifacts from the current dry-run preview.</p>
+
+        {previewResult ? (
+          <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+            <div className="text-sm font-medium text-foreground">This delete will remove {previewTotal.toLocaleString()} row(s).</div>
+            <PurgeKindCounts result={previewResult} />
+          </div>
+        ) : (
+          <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-secondary">
+            Run Preview before opening the destructive confirm.
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-col gap-2">
+          <p className="text-sm font-medium text-red-300">Final confirmation: type purge to enable permanent deletion.</p>
+          <input
+            type="text"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            placeholder="Type purge"
+            className="w-48 rounded border border-red-800 bg-card px-3 py-1.5 text-sm text-foreground focus:border-red-500 focus:outline-none"
+          />
+          {error ? <p className="text-xs text-red-400">{error}</p> : null}
+        </div>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-secondary transition-colors hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={!canConfirm}
+            className="flex items-center gap-1.5 rounded-md bg-red-700 px-4 py-2 text-sm text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isPending ? <span className="inline-block h-3 w-3 animate-spin rounded-full border border-white border-t-transparent" /> : null}
+            Delete AI Data
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SummaryCard({ label, value }: { label: string; value: number }) {

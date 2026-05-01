@@ -10,6 +10,7 @@ import type {
   Group, GroupCreate, GroupUpdate,
   GroupItem, GroupItemCreate, GroupItemsFromSpans, GroupItemsReorder, GroupItemUpdate,
   GroupPlaybackManifest,
+  AiDataPurgeRequest,
   AiDataPurgeResult,
   AiDataSelector,
   AiDataSummary,
@@ -774,7 +775,7 @@ export const jobs = {
 
 export const aiData = {
   summary: (selector?: AiDataSelector) => request<AiDataSummary>(`/ai-data/summary${buildAiDataQuery(selector)}`),
-  purge: (selector: AiDataSelector) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(selector) }),
+  purge: (requestBody: AiDataPurgeRequest) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(requestBody) }),
 };
 
 // ===== Metadata Tasks =====
@@ -1268,45 +1269,10 @@ export const shareLinksApi = {
   revoke: (id: string) => request<void>(`/share-links/${id}`, { method: "DELETE" }),
 };
 
-interface AiFaceCoverRepairRequest {
-  force?: boolean;
-  faceIds?: number[];
-}
-
-interface AiFaceCoverRepairResult {
-  scannedCount: number;
-  repairedCount: number;
-  skippedCount: number;
-  failedCount: number;
-  errors: string[];
-}
-interface AiFaceReferencePackStatus {
-  packId: string;
-  sourceEndpoint?: string | null;
-  performerCount: number;
-  embeddingDim: number;
-  importedAt: string;
-  sourceCreatedAt?: string | null;
-}
-
-interface AiFaceReferenceImportResponse {
-  jobId: string;
-}
 export const aiFaces = {
-  repairMissingCovers: (payload: AiFaceCoverRepairRequest = {}) =>
-    request<AiFaceCoverRepairResult>("/ext/ai-faces/repair/missing-covers", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  referenceStatus: () => request<AiFaceReferencePackStatus | null>("/ext/ai-faces/reference/status"),
-  clearReferencePack: () => request<void>("/ext/ai-faces/reference", { method: "DELETE" }),
-  importReferencePack: (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    return requestForm<AiFaceReferenceImportResponse>("/ext/ai-faces/reference/import", formData, { method: "POST" });
-  },
   rejectReferenceSuggestion: (faceId: number, data: { referenceSuggestionId: number }) =>
     request<void>(`/ext/ai-faces/reference/faces/${faceId}/reject`, { method: "POST", body: JSON.stringify(data) }),
   importReferencePerformer: (faceId: number, data: { referenceSuggestionId: number }) =>
     request<void>(`/ext/ai-faces/reference/faces/${faceId}/import-performer`, { method: "POST", body: JSON.stringify(data) }),
 };
+

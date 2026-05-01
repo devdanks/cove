@@ -53,4 +53,5 @@ public static class AuditActions
     public const string RoleGrant = "role.grant";
     public const string RoleRevoke = "role.revoke";
     public const string SettingsChange = "settings.change";
+    public const string AiDataPurge = "ai_data.purge";
 }

@@ -784,6 +784,20 @@ public record AiDataSelectorDto(
     int? HostId,
     List<string>? Kinds);
 
+public record AiDataPurgeRequestDto(
+    string? SourceKey,
+    string? SourceRunId,
+    string? Model,
+    string? Modality,
+    string? HostType,
+    int? HostId,
+    List<string>? Kinds,
+    bool DryRun = false)
+{
+    public AiDataSelectorDto ToSelectorDto()
+        => new(SourceKey, SourceRunId, Model, Modality, HostType, HostId, Kinds);
+}
+
 public record AiDataSummaryItemDto(
     string Kind,
     string? Detail,

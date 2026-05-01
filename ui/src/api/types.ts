@@ -989,6 +989,10 @@ export interface AiDataSelector {
   kinds?: AiDataKind[];
 }
 
+export interface AiDataPurgeRequest extends AiDataSelector {
+  dryRun?: boolean;
+}
+
 export interface AiDataSummaryItem {
   kind: string;
   detail?: string;

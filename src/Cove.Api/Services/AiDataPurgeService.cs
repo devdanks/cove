@@ -73,14 +73,14 @@ public sealed class AiDataPurgeService(
         return new AiDataSummaryDto(items, totals, items.Sum(item => item.Count));
     }
 
-    public async Task<int> DeleteEmbeddingsAsync(AiDataSelectorDto selectorDto, CancellationToken cancellationToken = default)
+    public async Task<int> DeleteEmbeddingsAsync(AiDataSelectorDto selectorDto, bool dryRun = false, CancellationToken cancellationToken = default)
     {
         var selector = Normalize(selectorDto);
         var runModels = await LoadAiRunModelLookupAsync(selector, cancellationToken);
-        return await PurgeEmbeddingsCoreAsync(selector, runModels, cancellationToken);
+        return await PurgeEmbeddingsCoreAsync(selector, runModels, dryRun, cancellationToken);
     }
 
-    public async Task<AiDataPurgeResultDto> PurgeAsync(AiDataSelectorDto selectorDto, CancellationToken cancellationToken = default)
+    public async Task<AiDataPurgeResultDto> PurgeAsync(AiDataSelectorDto selectorDto, bool dryRun = false, CancellationToken cancellationToken = default)
     {
         var selector = Normalize(selectorDto);
         var runModels = await LoadAiRunModelLookupAsync(selector, cancellationToken);
@@ -88,25 +88,26 @@ public sealed class AiDataPurgeService(
         var faceIds = selector.IncludesKind("face")
             ? await ResolveFaceIdsAsync(selector, runModels, cancellationToken)
             : [];
+        IReadOnlyCollection<int>? excludedFaceIds = faceIds.Count > 0 ? faceIds : null;
 
-        await using var transaction = _db.Database.IsRelational()
+        await using var transaction = !dryRun && _db.Database.IsRelational()
             ? await _db.Database.BeginTransactionAsync(cancellationToken)
             : null;
 
         if (faceIds.Count > 0)
-            MergeRemovedCounts(removed, await PurgeFacesByIdsAsync(faceIds, cancellationToken));
+            MergeRemovedCounts(removed, await PurgeFacesByIdsAsync(faceIds, dryRun, cancellationToken));
 
         if (selector.IncludesKind("embedding"))
-            AddRemovedCount(removed, "embedding", await PurgeEmbeddingsCoreAsync(selector, runModels, cancellationToken));
+            AddRemovedCount(removed, "embedding", await PurgeEmbeddingsCoreAsync(selector, runModels, dryRun, cancellationToken, excludedFaceIds));
 
         if (selector.IncludesKind("detection"))
-            AddRemovedCount(removed, "detection", await PurgeDetectionsCoreAsync(selector, runModels, cancellationToken));
+            AddRemovedCount(removed, "detection", await PurgeDetectionsCoreAsync(selector, runModels, dryRun, cancellationToken, excludedFaceIds));
 
         if (selector.IncludesKind("segment"))
-            AddRemovedCount(removed, "segment", await PurgeSegmentsCoreAsync(selector, runModels, cancellationToken));
+            AddRemovedCount(removed, "segment", await PurgeSegmentsCoreAsync(selector, runModels, dryRun, cancellationToken, excludedFaceIds));
 
         if (selector.IncludesKind("tagapplication"))
-            MergeRemovedCounts(removed, await PurgeTagApplicationsCoreAsync(selector, cancellationToken));
+            MergeRemovedCounts(removed, await PurgeTagApplicationsCoreAsync(selector, dryRun, cancellationToken));
 
         if (transaction is not null)
             await transaction.CommitAsync(cancellationToken);
@@ -308,12 +309,17 @@ public sealed class AiDataPurgeService(
             .ToList();
     }
 
-    private async Task<int> PurgeEmbeddingsCoreAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken)
+    private async Task<int> PurgeEmbeddingsCoreAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, bool dryRun, CancellationToken cancellationToken, IReadOnlyCollection<int>? excludedFaceIds = null)
     {
-        var candidates = await QueryEmbeddingCandidatesAsync(selector, runModels, cancellationToken);
+        var candidates = await QueryEmbeddingCandidatesAsync(selector, runModels, cancellationToken, excludedFaceIds: excludedFaceIds);
         if (candidates.Count == 0)
         {
             return 0;
+        }
+
+        if (dryRun)
+        {
+            return candidates.Count;
         }
 
         var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
@@ -323,12 +329,17 @@ public sealed class AiDataPurgeService(
         return embeddings.Count;
     }
 
-    private async Task<int> PurgeDetectionsCoreAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken)
+    private async Task<int> PurgeDetectionsCoreAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, bool dryRun, CancellationToken cancellationToken, IReadOnlyCollection<int>? excludedFaceIds = null)
     {
-        var candidates = await QueryDetectionCandidatesAsync(selector, runModels, cancellationToken);
+        var candidates = await QueryDetectionCandidatesAsync(selector, runModels, cancellationToken, excludedFaceIds: excludedFaceIds);
         if (candidates.Count == 0)
         {
             return 0;
+        }
+
+        if (dryRun)
+        {
+            return candidates.Count;
         }
 
         var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
@@ -338,12 +349,17 @@ public sealed class AiDataPurgeService(
         return detections.Count;
     }
 
-    private async Task<int> PurgeSegmentsCoreAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken)
+    private async Task<int> PurgeSegmentsCoreAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, bool dryRun, CancellationToken cancellationToken, IReadOnlyCollection<int>? excludedFaceIds = null)
     {
-        var candidates = await QuerySegmentCandidatesAsync(selector, runModels, cancellationToken);
+        var candidates = await QuerySegmentCandidatesAsync(selector, runModels, cancellationToken, excludedFaceIds: excludedFaceIds);
         if (candidates.Count == 0)
         {
             return 0;
+        }
+
+        if (dryRun)
+        {
+            return candidates.Count;
         }
 
         var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
@@ -353,7 +369,7 @@ public sealed class AiDataPurgeService(
         return segments.Count;
     }
 
-    private async Task<Dictionary<string, int>> PurgeTagApplicationsCoreAsync(AiDataSelector selector, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, int>> PurgeTagApplicationsCoreAsync(AiDataSelector selector, bool dryRun, CancellationToken cancellationToken)
     {
         var query = _db.ReadSet<TagApplication>().AsNoTracking();
 
@@ -379,6 +395,14 @@ public sealed class AiDataPurgeService(
         if (candidates.Count == 0)
         {
             return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (dryRun)
+        {
+            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["tagApplication"] = candidates.Count,
+            };
         }
 
         var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
@@ -427,7 +451,7 @@ public sealed class AiDataPurgeService(
         return faceIds;
     }
 
-    private async Task<Dictionary<string, int>> PurgeFacesByIdsAsync(IReadOnlyCollection<int> faceIds, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, int>> PurgeFacesByIdsAsync(IReadOnlyCollection<int> faceIds, bool dryRun, CancellationToken cancellationToken)
     {
         if (faceIds.Count == 0)
         {
@@ -435,22 +459,38 @@ public sealed class AiDataPurgeService(
         }
 
         var faceIdSet = faceIds.ToHashSet();
-        var faces = await _db.Faces.Where(face => faceIdSet.Contains(face.Id)).ToListAsync(cancellationToken);
-        if (faces.Count == 0)
+        var facesQuery = _db.Faces.Where(face => faceIdSet.Contains(face.Id));
+        var faceCount = await facesQuery.CountAsync(cancellationToken);
+        if (faceCount == 0)
         {
             return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         }
 
+        var detectionsQuery = _db.Set<Detection>()
+            .Where(detection => detection.RefId.HasValue && faceIdSet.Contains((int)detection.RefId.Value) && detection.RefKind != null && detection.RefKind.ToLower() == "face");
+        var embeddingsQuery = _db.Embeddings
+            .Where(embedding => embedding.HostType == EmbeddingHostType.Face && faceIdSet.Contains(embedding.HostId));
+        var segmentsQuery = _db.Segments
+            .Where(segment => segment.RefId.HasValue && faceIdSet.Contains((int)segment.RefId.Value) && segment.Kind != null && segment.Kind.ToLower() == "face");
+
+        if (dryRun)
+        {
+            var removedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["face"] = faceCount,
+            };
+            AddRemovedCount(removedCounts, "detection", await detectionsQuery.CountAsync(cancellationToken));
+            AddRemovedCount(removedCounts, "embedding", await embeddingsQuery.CountAsync(cancellationToken));
+            AddRemovedCount(removedCounts, "segment", await segmentsQuery.CountAsync(cancellationToken));
+            return removedCounts;
+        }
+
+        var faces = await facesQuery.ToListAsync(cancellationToken);
+
         var mergedFaces = await _db.Faces.Where(face => face.MergedIntoFaceId.HasValue && faceIdSet.Contains(face.MergedIntoFaceId.Value)).ToListAsync(cancellationToken);
-        var detections = await _db.Set<Detection>()
-            .Where(detection => detection.RefId.HasValue && faceIdSet.Contains((int)detection.RefId.Value) && detection.RefKind != null && detection.RefKind.ToLower() == "face")
-            .ToListAsync(cancellationToken);
-        var embeddings = await _db.Embeddings
-            .Where(embedding => embedding.HostType == EmbeddingHostType.Face && faceIdSet.Contains(embedding.HostId))
-            .ToListAsync(cancellationToken);
-        var segments = await _db.Segments
-            .Where(segment => segment.RefId.HasValue && faceIdSet.Contains((int)segment.RefId.Value) && segment.Kind != null && segment.Kind.ToLower() == "face")
-            .ToListAsync(cancellationToken);
+        var detections = await detectionsQuery.ToListAsync(cancellationToken);
+        var embeddings = await embeddingsQuery.ToListAsync(cancellationToken);
+        var segments = await segmentsQuery.ToListAsync(cancellationToken);
         var coverBlobIds = faces
             .Select(face => Clean(face.CoverBlobId))
             .Where(static blobId => !string.IsNullOrWhiteSpace(blobId))
@@ -555,7 +595,7 @@ public sealed class AiDataPurgeService(
         }
     }
 
-    private async Task<List<EmbeddingCandidate>> QueryEmbeddingCandidatesAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken, EmbeddingHostType? forceHostType = null)
+    private async Task<List<EmbeddingCandidate>> QueryEmbeddingCandidatesAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken, EmbeddingHostType? forceHostType = null, IReadOnlyCollection<int>? excludedFaceIds = null)
     {
         var query = _db.ReadSet<Embedding>().AsNoTracking();
 
@@ -580,6 +620,12 @@ public sealed class AiDataPurgeService(
         if (selector.HostId.HasValue)
             query = query.Where(embedding => embedding.HostId == selector.HostId.Value);
 
+        if (excludedFaceIds is { Count: > 0 })
+        {
+            var excludedIds = excludedFaceIds.ToArray();
+            query = query.Where(embedding => embedding.HostType != EmbeddingHostType.Face || !excludedIds.Contains(embedding.HostId));
+        }
+
         var rows = await query
             .Select(embedding => new EmbeddingCandidate(
                 embedding.Id,
@@ -593,7 +639,7 @@ public sealed class AiDataPurgeService(
             .ToList();
     }
 
-    private async Task<List<DetectionCandidate>> QueryDetectionCandidatesAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken, bool requireFaceReference = false)
+    private async Task<List<DetectionCandidate>> QueryDetectionCandidatesAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken, bool requireFaceReference = false, IReadOnlyCollection<int>? excludedFaceIds = null)
     {
         var query = _db.ReadSet<Detection>().AsNoTracking();
 
@@ -608,6 +654,12 @@ public sealed class AiDataPurgeService(
 
         if (selector.HostId.HasValue)
             query = query.Where(detection => detection.HostId == selector.HostId.Value);
+
+        if (excludedFaceIds is { Count: > 0 })
+        {
+            var excludedIds = excludedFaceIds.ToArray();
+            query = query.Where(detection => !(detection.RefId.HasValue && detection.RefKind != null && detection.RefKind.ToLower() == "face" && excludedIds.Contains((int)detection.RefId.Value)));
+        }
 
         if (requireFaceReference)
             query = query.Where(detection => detection.RefId.HasValue && detection.RefKind != null && detection.RefKind.ToLower() == "face");
@@ -625,7 +677,7 @@ public sealed class AiDataPurgeService(
             .ToList();
     }
 
-    private async Task<List<SegmentCandidate>> QuerySegmentCandidatesAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken, bool requireFaceReference = false)
+    private async Task<List<SegmentCandidate>> QuerySegmentCandidatesAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken, bool requireFaceReference = false, IReadOnlyCollection<int>? excludedFaceIds = null)
     {
         var query = _db.ReadSet<Segment>().AsNoTracking();
 
@@ -640,6 +692,12 @@ public sealed class AiDataPurgeService(
 
         if (selector.HostId.HasValue)
             query = query.Where(segment => segment.HostId == selector.HostId.Value);
+
+        if (excludedFaceIds is { Count: > 0 })
+        {
+            var excludedIds = excludedFaceIds.ToArray();
+            query = query.Where(segment => !(segment.RefId.HasValue && segment.Kind != null && segment.Kind.ToLower() == "face" && excludedIds.Contains((int)segment.RefId.Value)));
+        }
 
         if (requireFaceReference)
             query = query.Where(segment => segment.RefId.HasValue && segment.Kind != null && segment.Kind.ToLower() == "face");

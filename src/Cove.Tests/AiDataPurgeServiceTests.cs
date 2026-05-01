@@ -240,6 +240,144 @@ public sealed class AiDataPurgeServiceTests
         Assert.Empty(await db.Segments.ToListAsync());
     }
 
+    [Fact]
+    public async Task DryRun_ReturnsCounts_WithoutMutating()
+    {
+        await using var environment = await CreateEnvironmentAsync();
+        var db = environment.Context;
+
+        var scene = new Scene { Title = "Dry Run Scene" };
+        var image = new Image { Title = "Dry Run Image" };
+        var tag = new Tag { Name = "Dry Tag" };
+        db.AddRange(scene, image, tag);
+        await db.SaveChangesAsync();
+
+        db.Set<SceneTag>().Add(new SceneTag { SceneId = scene.Id, TagId = tag.Id });
+        db.TagApplications.Add(new TagApplication
+        {
+            HostType = AffinityHostType.Scene,
+            HostId = scene.Id,
+            TagId = tag.Id,
+            SourceKey = "ext:ai.tagging",
+            SourceRunId = "dry-run-1",
+            ModelKey = "tagger-v1",
+        });
+        db.Segments.Add(new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 5,
+            EndSec = 8,
+            Kind = "tag",
+            SourceKey = "ext:ai.tagging",
+            SourceRunId = "dry-run-1",
+        });
+        db.Set<Detection>().Add(new Detection
+        {
+            HostType = DetectionHostType.Scene,
+            HostId = scene.Id,
+            Class = "face",
+            Score = 0.91f,
+            SourceKey = "ext:ai.tagging",
+            SourceRunId = "dry-run-1",
+        });
+        db.Embeddings.Add(new Embedding
+        {
+            HostType = EmbeddingHostType.Image,
+            HostId = image.Id,
+            Kind = "clip.image",
+            Modality = EmbeddingModality.Visual,
+            Dim = 2,
+            Vector = new Pgvector.Vector(new float[] { 0.4f, 0.8f }),
+            SourceKey = "ext:ai.tagging",
+            SourceRunId = "dry-run-1",
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.PurgeAsync(
+            new AiDataSelectorDto("ext:ai.tagging", "dry-run-1", null, null, null, null, ["embedding", "detection", "segment", "tagApplication"]),
+            dryRun: true);
+
+        Assert.Equal(1, result.RemovedCounts["embedding"]);
+        Assert.Equal(1, result.RemovedCounts["detection"]);
+        Assert.Equal(1, result.RemovedCounts["segment"]);
+        Assert.Equal(1, result.RemovedCounts["tagApplication"]);
+        Assert.Single(await db.Embeddings.ToListAsync());
+        Assert.Single(await db.Set<Detection>().ToListAsync());
+        Assert.Single(await db.Segments.ToListAsync());
+        Assert.Single(await db.TagApplications.ToListAsync());
+        Assert.Single(await db.Set<SceneTag>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task DryRun_WithFaceKind_DoesNotDoubleCountFaceOwnedArtifacts()
+    {
+        await using var environment = await CreateEnvironmentAsync();
+        var db = environment.Context;
+
+        var scene = new Scene { Title = "Face Scene" };
+        db.Scenes.Add(scene);
+        await db.SaveChangesAsync();
+
+        var face = new Face
+        {
+            Label = "Face A",
+            PrimarySourceKey = "ext:ai.faces",
+        };
+        db.Faces.Add(face);
+        await db.SaveChangesAsync();
+
+        db.Set<Detection>().Add(new Detection
+        {
+            HostType = DetectionHostType.Scene,
+            HostId = scene.Id,
+            Class = "face",
+            Score = 0.97f,
+            RefKind = "face",
+            RefId = face.Id,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "face-run-1",
+        });
+        db.Segments.Add(new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 1,
+            EndSec = 2,
+            Kind = "face",
+            RefId = face.Id,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "face-run-1",
+        });
+        db.Embeddings.Add(new Embedding
+        {
+            HostType = EmbeddingHostType.Face,
+            HostId = face.Id,
+            Kind = "face.embedding",
+            Modality = EmbeddingModality.Face,
+            Dim = 2,
+            Vector = new Pgvector.Vector(new float[] { 0.2f, 0.6f }),
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "face-run-1",
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.PurgeAsync(
+            new AiDataSelectorDto("ext:ai.faces", null, null, null, null, null, ["embedding", "detection", "segment", "face"]),
+            dryRun: true);
+
+        Assert.Equal(1, result.RemovedCounts["face"]);
+        Assert.Equal(1, result.RemovedCounts["embedding"]);
+        Assert.Equal(1, result.RemovedCounts["detection"]);
+        Assert.Equal(1, result.RemovedCounts["segment"]);
+        Assert.Single(await db.Faces.ToListAsync());
+        Assert.Single(await db.Embeddings.ToListAsync());
+        Assert.Single(await db.Set<Detection>().ToListAsync());
+        Assert.Single(await db.Segments.ToListAsync());
+    }
+
     private static AiDataPurgeService CreateService(CoveContext context)
         => new(context, [], new StubBlobService(), NullLogger<AiDataPurgeService>.Instance);
 
