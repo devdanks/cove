@@ -43,6 +43,7 @@ public partial class CoveContext : DbContext
     public DbSet<SegmentDisplayRule> SegmentDisplayRules => Set<SegmentDisplayRule>();
     public DbSet<Detection> Detections => Set<Detection>();
     public DbSet<Face> Faces => Set<Face>();
+    public DbSet<FaceAppearance> FaceAppearances => Set<FaceAppearance>();
     public DbSet<FaceSuggestionDecision> FaceSuggestionDecisions => Set<FaceSuggestionDecision>();
     public DbSet<Embedding> Embeddings => Set<Embedding>();
     public DbSet<AiRun> AiRuns => Set<AiRun>();
@@ -1794,3 +1795,4 @@ public partial class CoveContext : DbContext
         }
     }
 }
+

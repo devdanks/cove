@@ -581,6 +581,8 @@ public class FaceConfiguration : IEntityTypeConfiguration<Face>
         builder.Property(face => face.PrimarySourceKey).HasMaxLength(200);
         builder.Property(face => face.CustomFields).HasColumnType("jsonb");
         builder.Property(face => face.DetectionCount).HasDefaultValue(0);
+        builder.Property(face => face.AppearanceCount).HasDefaultValue(0);
+        builder.Property(face => face.FrameSampleCount).HasDefaultValue(0);
         builder.Property(face => face.SceneCount).HasDefaultValue(0);
         builder.Property(face => face.ImageCount).HasDefaultValue(0);
 
@@ -594,11 +596,44 @@ public class FaceConfiguration : IEntityTypeConfiguration<Face>
             .HasForeignKey(face => face.MergedIntoFaceId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.HasMany(face => face.Appearances)
+            .WithOne(appearance => appearance.Face)
+            .HasForeignKey(appearance => appearance.FaceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.HasIndex(face => face.PerformerId);
         builder.HasIndex(face => face.MergedIntoFaceId);
         builder.HasIndex(face => face.Ignored);
         builder.HasIndex(face => face.PrimarySourceKey);
         builder.HasIndex(face => face.Label);
+    }
+}
+
+public class FaceAppearanceConfiguration : IEntityTypeConfiguration<FaceAppearance>
+{
+    public void Configure(EntityTypeBuilder<FaceAppearance> builder)
+    {
+        builder.ToTable("face_appearances");
+        builder.HasKey(appearance => appearance.Id);
+        builder.Property(appearance => appearance.SourceKey).IsRequired().HasMaxLength(200);
+        builder.Property(appearance => appearance.SourceRunId).HasMaxLength(200);
+        builder.Property(appearance => appearance.GroupKey).HasMaxLength(200);
+        builder.Property(appearance => appearance.Payload).HasColumnType("jsonb");
+        builder.Property(appearance => appearance.SampleCount).HasDefaultValue(0);
+        builder.Property(appearance => appearance.RetainedSpatialSampleCount).HasDefaultValue(0);
+        builder.Property(appearance => appearance.SegmentCount).HasDefaultValue(0);
+
+        builder.HasOne(appearance => appearance.Face)
+            .WithMany(face => face.Appearances)
+            .HasForeignKey(appearance => appearance.FaceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(appearance => appearance.FaceId);
+        builder.HasIndex(appearance => new { appearance.HostType, appearance.HostId });
+        builder.HasIndex(appearance => new { appearance.FaceId, appearance.HostType, appearance.HostId });
+        builder.HasIndex(appearance => appearance.GroupKey);
+        builder.HasIndex(appearance => appearance.SourceKey);
+        builder.HasIndex(appearance => appearance.SourceRunId);
     }
 }
 
@@ -838,3 +873,6 @@ public class ExtensionDataConfiguration : IEntityTypeConfiguration<ExtensionData
         builder.HasIndex(e => e.ExtensionId);
     }
 }
+
+
+
