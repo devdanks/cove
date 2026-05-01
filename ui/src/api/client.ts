@@ -21,7 +21,7 @@ import type {
   SegmentDisplayRule, SegmentDisplayRuleCreate, SegmentDisplayRuleUpdate,
   SegmentSpanQueryRequest,
   Detection, DetectionCreate, DetectionUpdate,
-  Face, FaceCreate, FaceUpdate, FaceLink, FaceMerge, FaceDeleteImpact, FaceSimilar,
+  Face, FaceCreate, FaceUpdate, FaceLink, FaceMerge, FaceDeleteImpact, FaceSuggestion, FaceSuggestionDecision, FaceSimilar,
   EntityEngagement, EntityFavorite, EntityEngagementBatchRequest, EntityRatings,
   EngagementInteraction, EngagementInteractionWrite,
   SceneHistory,
@@ -422,11 +422,13 @@ export const faces = {
   get: (id: number) => request<Face>(`/faces/${id}`),
   detections: (id: number) => request<Detection[]>(`/faces/${id}/detections`),
   deleteImpact: (id: number) => request<FaceDeleteImpact>(`/faces/${id}/delete-impact`),
+  suggestions: (id: number, maxResults = 5) => request<FaceSuggestion[]>(`/faces/${id}/suggestions${buildQuery(undefined, { maxResults })}`),
   create: (data: FaceCreate) => request<Face>("/faces", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: FaceUpdate) => request<Face>(`/faces/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/faces/${id}`, { method: "DELETE" }),
   link: (id: number, data: FaceLink) => request<Face>(`/faces/${id}/link`, { method: "POST", body: JSON.stringify(data) }),
   mergeInto: (id: number, data: FaceMerge) => request<Face>(`/faces/${id}/merge-into`, { method: "POST", body: JSON.stringify(data) }),
+  recordSuggestionDecision: (id: number, data: FaceSuggestionDecision) => request<void>(`/faces/${id}/suggestions/decision`, { method: "POST", body: JSON.stringify(data) }),
   similar: (id: number, opts?: { kindFamily?: string; k?: number }) =>
     request<FaceSimilar[]>(`/faces/${id}/similar${buildQuery(undefined, { kindFamily: opts?.kindFamily, k: opts?.k })}`),
 };
@@ -1253,4 +1255,25 @@ export const shareLinksApi = {
   create: (req: { entityKind: string; entityIds: string[]; expiresAt?: string; password?: string }) =>
     request<ShareLinkIssuedRow>("/share-links", { method: "POST", body: JSON.stringify(req) }),
   revoke: (id: string) => request<void>(`/share-links/${id}`, { method: "DELETE" }),
+};
+
+interface AiFaceCoverRepairRequest {
+  force?: boolean;
+  faceIds?: number[];
+}
+
+interface AiFaceCoverRepairResult {
+  scannedCount: number;
+  repairedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  errors: string[];
+}
+
+export const aiFaces = {
+  repairMissingCovers: (payload: AiFaceCoverRepairRequest = {}) =>
+    request<AiFaceCoverRepairResult>("/ext/ai-faces/repair/missing-covers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

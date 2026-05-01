@@ -17,7 +17,9 @@ public class FacesController(
     IEmbeddingService embeddingService,
     IBlobService blobService,
     IEnumerable<IFaceLifecycleParticipant> faceLifecycleParticipants,
-    ILogger<FacesController> logger) : ControllerBase
+    ILogger<FacesController> logger,
+    IEnumerable<IFaceSuggester>? faceSuggesters = null,
+    ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PaginatedResponse<FaceDto>>> List(
@@ -108,6 +110,54 @@ public class FacesController(
         return face is null
             ? NotFound()
             : Ok(await BuildDeleteImpactAsync(id, face.CoverBlobId is not null, cancellationToken));
+    }
+
+    [HttpGet("{id:int}/suggestions")]
+    [RequiresPermission(Permissions.FacesRead)]
+    [RequiresEntityAccess(EntityKinds.Face, Permissions.FacesRead)]
+    public async Task<ActionResult<IReadOnlyList<FaceSuggestionDto>>> GetSuggestions(
+        int id,
+        [FromQuery] int maxResults = 5,
+        CancellationToken cancellationToken = default)
+    {
+        var face = await db.Faces
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (face is null)
+            return NotFound();
+
+        if (face.PerformerId.HasValue)
+            return Ok(Array.Empty<FaceSuggestionDto>());
+
+        maxResults = Math.Clamp(maxResults, 1, 20);
+
+        HashSet<int>? blockedPerformerIds = null;
+        if (principalAccessor?.Current?.UserId is int userId)
+        {
+            blockedPerformerIds = (await db.FaceSuggestionDecisions
+                .AsNoTracking()
+                .Where(decision => decision.FaceId == id && decision.UserId == userId)
+                .Select(decision => decision.PerformerId)
+                .ToListAsync(cancellationToken))
+                .ToHashSet();
+        }
+
+        var suggestions = await Task.WhenAll((faceSuggesters ?? []).Select(suggester => suggester.SuggestForAsync(id, maxResults, cancellationToken)));
+        var deduped = suggestions
+            .SelectMany(items => items)
+            .Where(item => blockedPerformerIds is null || !blockedPerformerIds.Contains(item.PerformerId))
+            .GroupBy(item => item.PerformerId)
+            .Select(group => group
+                .OrderByDescending(item => item.Confidence)
+                .ThenByDescending(item => item.Evidence.Count)
+                .ThenBy(item => item.PerformerName)
+                .First())
+            .OrderByDescending(item => item.Confidence)
+            .ThenBy(item => item.PerformerName)
+            .Take(maxResults)
+            .ToList();
+
+        return Ok(deduped);
     }
 
     [HttpPost]
@@ -256,6 +306,51 @@ public class FacesController(
             .FirstAsync(item => item.Id == id, cancellationToken);
 
         return Ok(MapToDto(linked));
+    }
+
+    [HttpPost("{id:int}/suggestions/decision")]
+    [RequiresPermission(Permissions.FacesWrite)]
+    [RequiresEntityAccess(EntityKinds.Face, Permissions.FacesWrite)]
+    public async Task<IActionResult> RecordSuggestionDecision(int id, [FromBody] FaceSuggestionDecisionDto dto, CancellationToken cancellationToken)
+    {
+        if (principalAccessor?.Current?.UserId is not int userId)
+            return Unauthorized();
+
+        var normalizedDecision = dto.Decision.Trim().ToLowerInvariant();
+        if (normalizedDecision is not FaceSuggestionDecisionValues.Accept and not FaceSuggestionDecisionValues.Reject)
+            return ValidationProblem("Decision must be 'accept' or 'reject'.");
+
+        var face = await db.Faces.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (face is null)
+            return NotFound();
+
+        var performerExists = await db.Performers.AnyAsync(performer => performer.Id == dto.PerformerId, cancellationToken);
+        if (!performerExists)
+            return ValidationProblem($"Performer {dto.PerformerId} was not found.");
+
+        var decision = await db.FaceSuggestionDecisions
+            .FirstOrDefaultAsync(item => item.FaceId == id && item.PerformerId == dto.PerformerId && item.UserId == userId, cancellationToken);
+
+        if (decision is null)
+        {
+            db.FaceSuggestionDecisions.Add(new FaceSuggestionDecision
+            {
+                FaceId = id,
+                PerformerId = dto.PerformerId,
+                UserId = userId,
+                Decision = normalizedDecision,
+            });
+        }
+        else
+        {
+            decision.Decision = normalizedDecision;
+        }
+
+        if (normalizedDecision == FaceSuggestionDecisionValues.Accept)
+            face.PerformerId = dto.PerformerId;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
     }
 
     [HttpPost("{id:int}/merge-into")]

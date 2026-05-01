@@ -683,6 +683,23 @@ public record FaceDeleteImpactDto(
     bool HasCoverImage,
     int ReleasedMergedFaceCount);
 
+public record FaceSuggestionEvidenceDto(
+    int FaceId,
+    string? ThumbnailUrl,
+    float Similarity);
+
+public record FaceSuggestionDto(
+    int PerformerId,
+    string PerformerName,
+    string? CoverImageUrl,
+    float Confidence,
+    string Why,
+    IReadOnlyList<FaceSuggestionEvidenceDto> Evidence);
+
+public record FaceSuggestionDecisionDto(
+    int PerformerId,
+    string Decision);
+
 public record FaceSimilarDto(
     int Id,
     string? Label,

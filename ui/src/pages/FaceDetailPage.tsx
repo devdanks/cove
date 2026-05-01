@@ -6,6 +6,7 @@ import type { Detection, Face, FaceDeleteImpact, Performer } from "../api/types"
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { FaceSuggestionsPanel } from "../components/FaceSuggestionsPanel";
 import { formatDate } from "../components/shared";
 
 interface Props {
@@ -42,6 +43,12 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     enabled: canDeleteFace,
   });
 
+  const { data: faceSuggestions = [], isLoading: suggestionsLoading } = useQuery({
+    queryKey: ["face", id, "suggestions"],
+    queryFn: () => faces.suggestions(id),
+    enabled: canWriteFace && face != null && face.performerId == null,
+  });
+
   const [label, setLabel] = useState("");
   const [primarySourceKey, setPrimarySourceKey] = useState("");
   const [performerSearch, setPerformerSearch] = useState("");
@@ -74,6 +81,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   const invalidateFace = (updated?: Face) => {
     queryClient.invalidateQueries({ queryKey: ["face", id] });
     queryClient.invalidateQueries({ queryKey: ["face", id, "detections"] });
+    queryClient.invalidateQueries({ queryKey: ["face", id, "suggestions"] });
     queryClient.invalidateQueries({ queryKey: ["face", id, "similar"] });
     queryClient.invalidateQueries({ queryKey: ["faces"] });
     if (updated?.performerId != null) {
@@ -119,6 +127,13 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["faces"] });
       goBack();
+    },
+  });
+
+  const suggestionDecisionMutation = useMutation({
+    mutationFn: (data: { performerId: number; decision: "accept" | "reject" }) => faces.recordSuggestionDecision(id, data),
+    onSuccess: () => {
+      invalidateFace();
     },
   });
 
@@ -259,6 +274,19 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
 
               {canWriteFace ? (
                 <div className="mt-5 space-y-3 border-t border-border pt-4">
+                  {!face.performerId ? (
+                    <FaceSuggestionsPanel
+                      suggestions={faceSuggestions}
+                      isLoading={suggestionsLoading}
+                      disabled={suggestionDecisionMutation.isPending}
+                      canReadPerformers={canReadPerformers}
+                      onAccept={(performerId) => suggestionDecisionMutation.mutate({ performerId, decision: "accept" })}
+                      onReject={(performerId) => suggestionDecisionMutation.mutate({ performerId, decision: "reject" })}
+                      onNavigate={onNavigate}
+                    />
+                  ) : null}
+
+                  <div className={`${!face.performerId ? "border-t border-border pt-4" : ""} space-y-3`}>
                   <label className="block text-xs font-semibold uppercase tracking-wide text-muted">Link to performer</label>
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
@@ -288,6 +316,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
                       ))}
                     </div>
                   )}
+                  </div>
                 </div>
               ) : null}
             </div>

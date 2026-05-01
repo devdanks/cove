@@ -935,6 +935,39 @@ export interface FaceDeleteImpact {
   releasedMergedFaceCount: number;
 }
 
+export interface AiFaceCoverRepairRequest {
+  force?: boolean;
+  faceIds?: number[];
+}
+
+export interface AiFaceCoverRepairResult {
+  scannedCount: number;
+  repairedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  errors: string[];
+}
+
+export interface FaceSuggestionEvidence {
+  faceId: number;
+  thumbnailUrl?: string;
+  similarity: number;
+}
+
+export interface FaceSuggestion {
+  performerId: number;
+  performerName: string;
+  coverImageUrl?: string;
+  confidence: number;
+  why: string;
+  evidence: FaceSuggestionEvidence[];
+}
+
+export interface FaceSuggestionDecision {
+  performerId: number;
+  decision: "accept" | "reject";
+}
+
 export interface FaceSimilar {
   id: number;
   label?: string;
