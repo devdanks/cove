@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Cove.Api.Services;
 using Cove.Core.Auth;
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
@@ -33,7 +34,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var filter = new SceneFilter
         {
             Title = title, Rating = rating, Organized = organized, StudioId = studioId, GroupId = groupId, GalleryId = galleryId,
-            TagIds = ParseIntList(tagIds), PerformerIds = ParseIntList(performerIds)
+            TagIds = QueryParsing.ParseIntList(tagIds)?.ToList(), PerformerIds = QueryParsing.ParseIntList(performerIds)?.ToList()
         };
         var findFilter = new FindFilter
         {
@@ -784,7 +785,6 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
-    private static List<int>? ParseIntList(string? csv) => string.IsNullOrEmpty(csv) ? null : csv.Split(',').Select(int.Parse).ToList();
 }
 
 public record GenerateScreenshotDto(double? AtSeconds = null);

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Core.Auth;
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -32,7 +33,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         var filter = new ImageFilter
         {
             Title = title, Rating = rating, Organized = organized, StudioId = studioId,
-            TagIds = ParseIntList(tagIds), PerformerIds = ParseIntList(performerIds),
+            TagIds = QueryParsing.ParseIntList(tagIds)?.ToList(), PerformerIds = QueryParsing.ParseIntList(performerIds)?.ToList(),
             GalleryId = galleryId
         };
         var findFilter = new FindFilter
@@ -313,5 +314,4 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
     }
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
-    private static List<int>? ParseIntList(string? csv) => string.IsNullOrEmpty(csv) ? null : csv.Split(',').Select(int.Parse).ToList();
 }

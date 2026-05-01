@@ -276,7 +276,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         var actualChecksum = await ComputeSha256Async(zipPath, ct);
         if (!string.Equals(expectedChecksum, actualChecksum, StringComparison.OrdinalIgnoreCase))
         {
-            TryDeleteFileWithRetries(zipPath, ct);
+            await TryDeleteFileWithRetriesAsync(zipPath, ct);
             throw new InvalidOperationException(
                 $"Checksum validation failed for {extensionId} v{version}. Expected {expectedChecksum}, got {actualChecksum}.");
         }
@@ -305,7 +305,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         }
         finally
         {
-            TryDeleteFileWithRetries(zipPath, ct);
+            await TryDeleteFileWithRetriesAsync(zipPath, ct);
         }
 
         return extensionDir;
@@ -428,7 +428,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static void TryDeleteFileWithRetries(string filePath, CancellationToken ct)
+    private static async Task TryDeleteFileWithRetriesAsync(string filePath, CancellationToken ct)
     {
         if (!System.IO.File.Exists(filePath))
             return;
@@ -453,7 +453,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
                 authError = ex;
             }
 
-            Thread.Sleep(50 * attempt);
+            await Task.Delay(50 * attempt, ct);
         }
 
         if (ioError != null) throw ioError;

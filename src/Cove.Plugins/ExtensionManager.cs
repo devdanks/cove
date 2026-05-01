@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Cove.Core.Common;
 
 namespace Cove.Plugins;
 
@@ -75,8 +76,7 @@ public class ExtensionManager
                 if (File.Exists(manifestPath))
                 {
                     var json = File.ReadAllText(manifestPath);
-                    manifestFile = JsonSerializer.Deserialize<ExtensionManifestFile>(json,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    manifestFile = JsonSerializer.Deserialize<ExtensionManifestFile>(json, CoveJson.Default);
                 }
 
                 // Determine which DLL to load

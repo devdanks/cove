@@ -180,7 +180,13 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     [RequiresEntityAccess(EntityKinds.Tag, Permissions.TagsWrite)]
     public async Task<ActionResult<TagDetailDto>> Update(int id, [FromBody] TagUpdateDto dto, CancellationToken ct)
     {
-        var tag = await tagRepo.GetByIdWithRelationsAsync(id, ct);
+        var tag = tagRepo != null
+            ? await tagRepo.GetByIdWithRelationsAsync(id, ct)
+            : await db.Tags
+                .Include(t => t.Aliases)
+                .Include(t => t.ParentRelations)
+                .Include(t => t.ChildRelations)
+                .FirstOrDefaultAsync(t => t.Id == id, ct);
         if (tag == null) return NotFound();
 
         if (dto.Name != null) tag.Name = dto.Name;
@@ -206,10 +212,24 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         }
         if (dto.CustomFields != null) tag.CustomFields = dto.CustomFields;
 
-        await tagRepo.UpdateAsync(tag, ct);
+        if (tagRepo != null)
+        {
+            await tagRepo.UpdateAsync(tag, ct);
+        }
+        else
+        {
+            await db.SaveChangesAsync(ct);
+        }
         if (dto.Aliases != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Tag, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
-        var updated = await tagRepo.GetByIdWithRelationsAsync(id, ct);
+        var updated = tagRepo != null
+            ? await tagRepo.GetByIdWithRelationsAsync(id, ct)
+            : await db.Tags
+                .AsNoTracking()
+                .Include(t => t.Aliases)
+                .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent)
+                .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child)
+                .FirstOrDefaultAsync(t => t.Id == id, ct);
         return Ok(MapToDetailDto(updated!));
     }
 

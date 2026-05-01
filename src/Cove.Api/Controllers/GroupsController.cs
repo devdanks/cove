@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Core.Auth;
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -24,7 +25,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
         [FromQuery] int? studioId = null, [FromQuery] string? tagIds = null,
         CancellationToken ct = default)
     {
-        var filter = new GroupFilter { Name = name, Rating = rating, StudioId = studioId, TagIds = ParseIntList(tagIds) };
+        var filter = new GroupFilter { Name = name, Rating = rating, StudioId = studioId, TagIds = QueryParsing.ParseIntList(tagIds)?.ToList() };
         var findFilter = new FindFilter
         {
             Q = q, Page = page, PerPage = perPage, Sort = sort,
@@ -261,5 +262,4 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
     );
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
-    private static List<int>? ParseIntList(string? csv) => string.IsNullOrEmpty(csv) ? null : csv.Split(',').Select(int.Parse).ToList();
 }
