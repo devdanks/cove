@@ -1,0 +1,64 @@
+import { Bookmark } from "lucide-react";
+import type { DisplayMode } from "../../components/ListPage";
+import { DerivedSpanResults } from "./DerivedSpanResults";
+import { RawSegmentResults } from "./RawSegmentResults";
+import type { AppliedDerivedQuery, DerivedSpanItem, RawSegmentItem } from "./types";
+
+interface Props {
+  displayMode: DisplayMode;
+  isRawView: boolean;
+  rawItems: RawSegmentItem[];
+  spanItems: DerivedSpanItem[];
+  rawSegmentIds: number[];
+  appliedQuery: AppliedDerivedQuery | null;
+  isLoading: boolean;
+  canReadScenes: boolean;
+  onNavigate: (route: any) => void;
+  onViewRawSegments: (segmentIds: number[]) => void;
+  selectedIds: Set<string | number>;
+  onToggle: (id: string | number) => void;
+  selecting: boolean;
+}
+
+export function SegmentsPageList({
+  displayMode,
+  isRawView,
+  rawItems,
+  spanItems,
+  rawSegmentIds,
+  appliedQuery,
+  isLoading,
+  canReadScenes,
+  onNavigate,
+  onViewRawSegments,
+  selectedIds,
+  onToggle,
+  selecting,
+}: Props) {
+  const items = isRawView ? rawItems : spanItems;
+
+  return (
+    <>
+      {isRawView ? (
+        <RawSegmentResults displayMode={displayMode} items={rawItems} canReadScenes={canReadScenes} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} />
+      ) : (
+        <DerivedSpanResults displayMode={displayMode} items={spanItems} canReadScenes={canReadScenes} onNavigate={onNavigate} onViewRawSegments={onViewRawSegments} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} />
+      )}
+
+      {items.length === 0 && !isLoading ? (
+        <div className="py-16 text-center text-secondary">
+          <Bookmark className="mx-auto mb-3 h-12 w-12 text-muted opacity-50" />
+          <p>
+            {isRawView
+              ? rawSegmentIds.length > 0
+                ? "No raw segments matched the selected span contents."
+                : "No raw segments found for this scope."
+              : appliedQuery != null
+                ? "No derived spans matched the current query."
+                : "No spans found for this profile and scope."}
+          </p>
+        </div>
+      ) : null}
+    </>
+  );
+}

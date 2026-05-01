@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Fingerprint, Link2, Merge, Save, Search, Trash2 } from "lucide-react";
-import { faces, images, performers, scenes } from "../api/client";
-import type { Detection, Face, FaceDeleteImpact, Performer } from "../api/types";
+import { aiFaces, faces, images, performers, scenes } from "../api/client";
+import type { Detection, Face, FaceDeleteImpact, FaceSuggestion, Performer } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -12,6 +12,14 @@ import { formatDate } from "../components/shared";
 interface Props {
   id: number;
   onNavigate: (r: any) => void;
+}
+
+function isReferenceSuggestion(value: number | FaceSuggestion): value is FaceSuggestion {
+  return typeof value !== "number" && value.performerId < 0;
+}
+
+function readSuggestionPerformerId(value: number | FaceSuggestion) {
+  return typeof value === "number" ? value : value.performerId;
 }
 
 export function FaceDetailPage({ id, onNavigate }: Props) {
@@ -134,6 +142,17 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     mutationFn: (data: { performerId: number; decision: "accept" | "reject" }) => faces.recordSuggestionDecision(id, data),
     onSuccess: () => {
       invalidateFace();
+    },
+  });
+
+  const referenceSuggestionMutation = useMutation({
+    mutationFn: (data: { referenceSuggestionId: number; action: "import" | "reject" }) =>
+      data.action === "import"
+        ? aiFaces.importReferencePerformer(id, { referenceSuggestionId: data.referenceSuggestionId })
+        : aiFaces.rejectReferenceSuggestion(id, { referenceSuggestionId: data.referenceSuggestionId }),
+    onSuccess: () => {
+      invalidateFace();
+      queryClient.invalidateQueries({ queryKey: ["ai-faces", "reference", "status"] });
     },
   });
 
@@ -278,10 +297,24 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
                     <FaceSuggestionsPanel
                       suggestions={faceSuggestions}
                       isLoading={suggestionsLoading}
-                      disabled={suggestionDecisionMutation.isPending}
+                      disabled={suggestionDecisionMutation.isPending || referenceSuggestionMutation.isPending}
                       canReadPerformers={canReadPerformers}
-                      onAccept={(performerId) => suggestionDecisionMutation.mutate({ performerId, decision: "accept" })}
-                      onReject={(performerId) => suggestionDecisionMutation.mutate({ performerId, decision: "reject" })}
+                      onAccept={(value) => {
+                        if (isReferenceSuggestion(value)) {
+                          referenceSuggestionMutation.mutate({ referenceSuggestionId: value.performerId, action: "import" });
+                          return;
+                        }
+
+                        suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "accept" });
+                      }}
+                      onReject={(value) => {
+                        if (isReferenceSuggestion(value)) {
+                          referenceSuggestionMutation.mutate({ referenceSuggestionId: value.performerId, action: "reject" });
+                          return;
+                        }
+
+                        suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "reject" });
+                      }}
                       onNavigate={onNavigate}
                     />
                   ) : null}
