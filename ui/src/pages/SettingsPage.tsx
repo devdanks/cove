@@ -26,10 +26,11 @@ import {
   Users,
   KeyRound,
   FileText,
+  Layers,
   X,
 } from "lucide-react";
-import { system, jobs, metadata, database, plugins as pluginsApi, logs as logsApi } from "../api/client";
-import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry } from "../api/client";
+import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi } from "../api/client";
+import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, StashAiImportResult } from "../api/client";
 import type {
   JobInfo,
   PackageSource,
@@ -51,6 +52,9 @@ import { useExtensions } from "../extensions/ExtensionLoader";
 import { getScraperSiteKey } from "../components/sceneScrapeUtils";
 import { useAppConfig } from "../state/AppConfigContext";
 import { LOCATION_CHANGE_EVENT, buildCurrentUrl, navigateToUrl } from "../router/location";
+import { DisplayProfilesSettingsPanel } from "./settings/DisplayProfilesSettingsPanel";
+import { AiDataSettingsPanel } from "./settings/AiDataSettingsPanel";
+import { SortableList } from "../components/SortableList";
 import {
   DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS,
   formatBatchDownloadSummary,
@@ -63,12 +67,14 @@ import { defaultRatingSystemOptions, normalizeRatingOptions } from "../component
 import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 
-type SettingsTab = "tasks" | "library" | "interface" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
+type SettingsTab = "tasks" | "library" | "interface" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
 const primaryTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
   { key: "tasks", label: "Tasks", icon: PlayCircle },
   { key: "library", label: "Library", icon: FolderOpen },
   { key: "interface", label: "Interface", icon: Monitor },
+  { key: "display-profiles", label: "Display Profiles", icon: Layers },
+  { key: "ai-data", label: "AI Data", icon: Database },
   { key: "metadata-providers", label: "Metadata Providers", icon: SearchCode },
   { key: "extensions", label: "Extensions", icon: Plug },
   { key: "logs", label: "Logs", icon: ScrollText },
@@ -95,6 +101,8 @@ const tabDescriptions: Record<SettingsTab, string> = {
   tasks: "Scan, generate, and maintenance operations.",
   library: "Content locations, generated assets, and scan rules.",
   interface: "Language, custom title, navigation, and rating presentation.",
+  "display-profiles": "Manage resolved-span display profiles and the rules attached to each profile.",
+  "ai-data": "Inspect and safely purge AI-produced embeddings, detections, segments, tag provenance, and face-owned data.",
   security: "Authentication and session settings for the local instance.",
   users: "Manage local user accounts and their role assignments.",
   roles: "Define roles and the permissions they grant. Built-in roles are read-only.",
@@ -233,7 +241,9 @@ const languageOptions = [
 
 const menuItems = [
   { value: "scenes", label: "Scenes" },
+  { value: "segments", label: "Segments" },
   { value: "images", label: "Images" },
+  { value: "faces", label: "Faces" },
   { value: "performers", label: "Performers" },
   { value: "galleries", label: "Galleries" },
   { value: "studios", label: "Studios" },
@@ -404,6 +414,8 @@ export function SettingsPage() {
   const { authEnabled, user, hasPermission } = useAuth();
   const { getSettingsPanelsForTab, resolveComponent } = useExtensions();
   const canWriteSystemSettings = hasPermission("system.settings.write");
+  const canReadMarkers = hasPermission("markers.read");
+  const canWriteMarkers = hasPermission("markers.write");
   const libraryExtensionsPanels = getSettingsPanelsForTab("library", "extensions");
   const libraryStandalonePanels = getSettingsPanelsForTab("library");
   const queryClient = useQueryClient();
@@ -584,8 +596,10 @@ export function SettingsPage() {
   }, [authEnabled, hasPermission, user]);
 
   const visiblePrimaryTabs = useMemo(
-    () => (canWriteSystemSettings ? primaryTabs : primaryTabs.filter((tab) => limitedPrimaryTabKeys.has(tab.key))),
-    [canWriteSystemSettings],
+    () => (canWriteSystemSettings
+      ? primaryTabs
+      : primaryTabs.filter((tab) => limitedPrimaryTabKeys.has(tab.key) || (tab.key === "display-profiles" && canReadMarkers))),
+    [canReadMarkers, canWriteSystemSettings],
   );
 
   const visibleTabs = useMemo(() => [...visiblePrimaryTabs, ...visibleAuthTabs], [visibleAuthTabs, visiblePrimaryTabs]);
@@ -1240,9 +1254,18 @@ export function SettingsPage() {
             <ThemeSelector />
             </>
           ) : (
-            <LocalInterfacePanel serverRatingOptions={draftState?.ui.ratingSystemOptions} />
+            <LocalInterfacePanel
+              serverRatingOptions={draftState?.ui.ratingSystemOptions}
+              serverTrackActivity={draftState?.ui.trackActivity}
+            />
           )
         )}
+
+        {resolvedActiveTab === "display-profiles" && canReadMarkers && (
+          <DisplayProfilesSettingsPanel canWrite={canWriteMarkers} />
+        )}
+
+        {resolvedActiveTab === "ai-data" && <AiDataSettingsPanel />}
 
         {resolvedActiveTab === "security" && (
           <>
@@ -2022,7 +2045,7 @@ export function SettingsPage() {
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Video filters (brightness, contrast, saturation)</li>
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Gallery and image management</li>
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Performer, studio, tag, and group management</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Scene markers with scrubber integration</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Scene segments and detections with scrubber integration</li>
                   </ul>
                 </div>
               </div>
@@ -2109,21 +2132,40 @@ export function SettingsPage() {
   );
 }
 
-function LocalInterfacePanel({ serverRatingOptions }: { serverRatingOptions?: Partial<RatingSystemOptions> | null }) {
+function LocalInterfacePanel({
+  serverRatingOptions,
+  serverTrackActivity = true,
+}: {
+  serverRatingOptions?: Partial<RatingSystemOptions> | null;
+  serverTrackActivity?: boolean;
+}) {
   const { authEnabled, user } = useAuth();
   const accountBackedPreferences = supportsServerBackedUiPreferences(user);
   const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
   const [localRatingOverride, setLocalRatingOverride] = useState<RatingSystemOptions | null>(() => readStoredRatingOptionsOverride());
+  const [recordPlaybackHistory, setRecordPlaybackHistory] = useState<boolean>(user?.uiPreferences?.recordPlaybackHistory ?? true);
 
   useEffect(() => {
     setLocalRatingOverride(readStoredRatingOptionsOverride());
   }, [serverRatingOptions, user]);
+
+  useEffect(() => {
+    setRecordPlaybackHistory(user?.uiPreferences?.recordPlaybackHistory ?? true);
+  }, [user]);
 
   const effectiveRatingOptions = localRatingOverride ?? normalizeRatingOptions(serverRatingOptions ?? defaultRatingSystemOptions);
 
   const updateRatingOptions = (nextOptions: RatingSystemOptions | null) => {
     writeStoredRatingOptionsOverride(nextOptions);
     setLocalRatingOverride(nextOptions);
+  };
+
+  const updatePlaybackHistory = (checked: boolean) => {
+    setRecordPlaybackHistory(checked);
+    updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      recordPlaybackHistory: checked,
+    }));
   };
 
   return (
@@ -2181,6 +2223,28 @@ function LocalInterfacePanel({ serverRatingOptions }: { serverRatingOptions?: Pa
           </div>
         </div>
       </SectionCard>
+
+      {accountBackedPreferences ? (
+        <SectionCard
+          title={sharedProfilePreferences ? "Shared Playback History" : "Personal Playback History"}
+          description={sharedProfilePreferences
+            ? "This preference is stored in Cove's shared built-in profile and controls whether your playback sessions are written back to the server."
+            : "This preference follows your signed-in account and controls whether playback progress and watch history are written back to the server."}
+        >
+          <div className="space-y-3">
+            <CheckboxLabel
+              label="Record playback history"
+              checked={recordPlaybackHistory}
+              onChange={updatePlaybackHistory}
+            />
+            {!serverTrackActivity ? (
+              <p className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-secondary">
+                System-wide activity tracking is currently disabled, so playback history stays off until that setting is re-enabled.
+              </p>
+            ) : null}
+          </div>
+        </SectionCard>
+      ) : null}
 
       <ThemeSelector />
     </>
@@ -2626,7 +2690,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
         {/* Generate */}
         <TaskCard
           label="Generate"
-          description="Generate thumbnails, previews, sprites, markers, perceptual hashes, and MD5 checksums."
+          description="Generate thumbnails, previews, sprites, segments, perceptual hashes, and MD5 checksums."
           onRun={() => genMut.mutate()}
           isPending={genMut.isPending}
           expandable
@@ -2639,7 +2703,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
               <CheckboxLabel label="Thumbnails / screenshots" checked={!!genOpts.thumbnails} onChange={(c) => setGenOpts({ ...genOpts, thumbnails: c })} />
               <CheckboxLabel label="Video previews" checked={!!genOpts.previews} onChange={(c) => setGenOpts({ ...genOpts, previews: c })} />
               <CheckboxLabel label="Sprite sheets" checked={!!genOpts.sprites} onChange={(c) => setGenOpts({ ...genOpts, sprites: c })} />
-              <CheckboxLabel label="Marker previews" checked={!!genOpts.markers} onChange={(c) => setGenOpts({ ...genOpts, markers: c })} />
+              <CheckboxLabel label="Segment previews" checked={!!genOpts.markers} onChange={(c) => setGenOpts({ ...genOpts, markers: c })} />
               <CheckboxLabel label="Perceptual hashes (phash)" checked={!!genOpts.phashes} onChange={(c) => setGenOpts({ ...genOpts, phashes: c })} />
               <CheckboxLabel label="MD5 checksums" checked={!!genOpts.md5} onChange={(c) => setGenOpts({ ...genOpts, md5: c })} />
             </div>
@@ -2794,11 +2858,49 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
   const [importFilePath, setImportFilePath] = useState("");
   const [importOverwrite, setImportOverwrite] = useState(false);
   const [showImportOpts, setShowImportOpts] = useState(false);
+  const [stashAiImportStashDbPath, setStashAiImportStashDbPath] = useState("");
+  const [stashAiDataSource, setStashAiDataSource] = useState("");
+  const [showStashAiImportOpts, setShowStashAiImportOpts] = useState(false);
+  const [stashAiImportJobId, setStashAiImportJobId] = useState<string | null>(null);
   const [restoreBackupPath, setRestoreBackupPath] = useState("");
   const [restoreConfirmed, setRestoreConfirmed] = useState(false);
   const importMut = useMutation({
     mutationFn: () => metadata.import({ filePath: importFilePath, duplicateHandling: importOverwrite }),
     onSuccess: () => refetchJobs(),
+  });
+  const stashAiImportMut = useMutation({
+    mutationFn: async () => {
+      const stashDbPath = stashAiImportStashDbPath.trim();
+      const aiDataSource = stashAiDataSource.trim();
+      if (!stashDbPath) {
+        throw new Error("Stash database path is required.");
+      }
+      if (!aiDataSource) {
+        throw new Error("AI data source is required.");
+      }
+      return stashMigration.startAiImport(stashDbPath, aiDataSource);
+    },
+    onSuccess: ({ jobId }) => {
+      setStashAiImportJobId(jobId);
+      refetchJobs();
+    },
+  });
+  const stashAiImportJobQuery = useQuery({
+    queryKey: ["settings", "stash-ai-import-job", stashAiImportJobId],
+    queryFn: () => jobs.get(stashAiImportJobId!),
+    enabled: stashAiImportJobId !== null,
+    retry: false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "pending" || status === "running" ? 1000 : false;
+    },
+  });
+  const stashAiImportResultQuery = useQuery({
+    queryKey: ["settings", "stash-ai-import-result", stashAiImportJobId],
+    queryFn: () => stashMigration.aiImportResult(stashAiImportJobId!),
+    enabled: stashAiImportJobId !== null && stashAiImportJobQuery.data?.status === "completed",
+    retry: false,
+    refetchInterval: (query) => query.state.data ? false : 500,
   });
   const latestBackupQuery = useQuery({
     queryKey: ["settings", "latest-backup"],
@@ -2883,6 +2985,20 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
     : optimizeMut.isError
     ? { type: "error" as const, text: `Optimize failed: ${optimizeMut.error instanceof Error ? optimizeMut.error.message : "Unknown error"}` }
     : null;
+  const stashAiImportJob = stashAiImportJobQuery.data;
+  const stashAiImportResult: StashAiImportResult | null = stashAiImportResultQuery.data ?? null;
+  const stashAiImportPending = stashAiImportMut.isPending || stashAiImportJob?.status === "pending" || stashAiImportJob?.status === "running";
+  const stashAiImportStatus = stashAiImportResult
+    ? { type: "success" as const, text: `Imported ${stashAiImportResult.aiRuns} AI runs and ${stashAiImportResult.segments} segments.` }
+    : stashAiImportMut.isError
+    ? { type: "error" as const, text: `AI tag import failed: ${stashAiImportMut.error instanceof Error ? stashAiImportMut.error.message : "Unknown error"}` }
+    : stashAiImportResultQuery.isError
+    ? { type: "error" as const, text: `AI tag import result failed: ${stashAiImportResultQuery.error instanceof Error ? stashAiImportResultQuery.error.message : "Unknown error"}` }
+    : stashAiImportJob?.status === "failed"
+    ? { type: "error" as const, text: `AI tag import failed: ${stashAiImportJob.error ?? "Unknown error"}` }
+    : stashAiImportJob?.status === "cancelled"
+    ? { type: "error" as const, text: "AI tag import was cancelled." }
+    : null;
   const restoreStatus = restoreMut.isSuccess
     ? { type: "success" as const, text: `Restore completed from ${restoreBackupPath}. Reloading...` }
     : restoreMut.isError
@@ -2918,7 +3034,7 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
             <CheckboxLabel label="Screenshots" checked={!!cleanGenOpts.screenshots} onChange={(c) => setCleanGenOpts({ ...cleanGenOpts, screenshots: c })} />
             <CheckboxLabel label="Sprites" checked={!!cleanGenOpts.sprites} onChange={(c) => setCleanGenOpts({ ...cleanGenOpts, sprites: c })} />
             <CheckboxLabel label="Transcodes" checked={!!cleanGenOpts.transcodes} onChange={(c) => setCleanGenOpts({ ...cleanGenOpts, transcodes: c })} />
-            <CheckboxLabel label="Markers" checked={!!cleanGenOpts.markers} onChange={(c) => setCleanGenOpts({ ...cleanGenOpts, markers: c })} />
+            <CheckboxLabel label="Segments" checked={!!cleanGenOpts.markers} onChange={(c) => setCleanGenOpts({ ...cleanGenOpts, markers: c })} />
             <CheckboxLabel label="Image thumbnails" checked={!!cleanGenOpts.imageThumbnails} onChange={(c) => setCleanGenOpts({ ...cleanGenOpts, imageThumbnails: c })} />
             <CheckboxLabel label="Dry run" checked={!!cleanGenOpts.dryRun} onChange={(c) => setCleanGenOpts({ ...cleanGenOpts, dryRun: c })} />
           </div>
@@ -2966,6 +3082,48 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
               />
             </div>
             <CheckboxLabel label="Overwrite existing entries" checked={importOverwrite} onChange={setImportOverwrite} />
+          </div>
+        </TaskCard>
+
+        <TaskCard
+          label="Import AI Tag Data"
+          description="Import stash-ai-server AI runs and raw tag segments after an existing Stash migration."
+          onRun={() => stashAiImportMut.mutate()}
+          isPending={stashAiImportPending}
+          expandable
+          expanded={showStashAiImportOpts}
+          onToggleExpand={() => setShowStashAiImportOpts(!showStashAiImportOpts)}
+          statusMessage={stashAiImportStatus}
+        >
+          <div className="space-y-3 pt-3 border-t border-border/50">
+            <div>
+              <label className="block text-xs text-secondary mb-1">Stash database path</label>
+              <input
+                type="text"
+                value={stashAiImportStashDbPath}
+                onChange={(e) => setStashAiImportStashDbPath(e.target.value)}
+                placeholder="C:\\path\\to\\stash-go.sqlite"
+                className="w-full rounded border border-border bg-surface px-3 py-1.5 text-sm text-foreground"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-secondary mb-1">AI Overhaul data source</label>
+              <input
+                type="text"
+                value={stashAiDataSource}
+                onChange={(e) => setStashAiDataSource(e.target.value)}
+                placeholder="postgresql+psycopg://user:pass@host/db or C:\\path\\to\\stash-ai.sqlite"
+                className="w-full rounded border border-border bg-surface px-3 py-1.5 text-sm text-foreground"
+              />
+            </div>
+            <p className="text-xs text-secondary">
+              This only imports AI runs and raw tag segments. It expects the main Stash migration to have already imported your scenes and tags.
+            </p>
+            {stashAiImportJob && (
+              <p className="text-xs text-secondary">
+                Job status: {stashAiImportJob.status}{stashAiImportJob.subTask ? ` • ${stashAiImportJob.subTask}` : ""}
+              </p>
+            )}
           </div>
         </TaskCard>
 
@@ -3894,9 +4052,6 @@ function NavReorderList({
   enabledItems: string[];
   onChange: (items: string[]) => void;
 }) {
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [overIdx, setOverIdx] = useState<number | null>(null);
-
   // Build ordered list: enabled items first (in their order), then unchecked items
   const enabledSet = new Set(enabledItems);
   const ordered = [
@@ -3912,36 +4067,25 @@ function NavReorderList({
     }
   };
 
-  const handleDragEnd = () => {
-    if (dragIdx !== null && overIdx !== null && dragIdx !== overIdx) {
-      const item = ordered[dragIdx];
-      const reordered = ordered.filter((_, i) => i !== dragIdx);
-      reordered.splice(overIdx, 0, item);
-      // Only keep the enabled items in order
-      onChange(reordered.filter((i) => enabledSet.has(i.value)).map((i) => i.value));
-    }
-    setDragIdx(null);
-    setOverIdx(null);
-  };
-
   return (
-    <div className="space-y-1">
-      {ordered.map((item, idx) => {
+    <SortableList
+      items={ordered}
+      getKey={(item) => item.value}
+      onReorder={(nextItems) => {
+        onChange(nextItems.filter((item) => enabledSet.has(item.value)).map((item) => item.value));
+      }}
+      className="space-y-1"
+      renderItem={(item, { dragHandleProps, isDragging, isOver }) => {
         const isEnabled = enabledSet.has(item.value);
-        const isDragging = dragIdx === idx;
-        const isOver = overIdx === idx;
         return (
           <div
-            key={item.value}
-            draggable
-            onDragStart={() => setDragIdx(idx)}
-            onDragOver={(e) => { e.preventDefault(); setOverIdx(idx); }}
-            onDragEnd={handleDragEnd}
-            className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors cursor-grab active:cursor-grabbing select-none ${
+            className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors cursor-grab active:cursor-grabbing select-none ${
               isDragging ? "opacity-40 border-accent" : isOver ? "border-accent bg-accent/5" : "border-border bg-card"
             }`}
           >
-            <GripVertical className="w-4 h-4 text-muted shrink-0" />
+            <span {...dragHandleProps} className="inline-flex shrink-0 items-center text-muted">
+              <GripVertical className="h-4 w-4" />
+            </span>
             <input
               type="checkbox"
               checked={isEnabled}
@@ -3951,8 +4095,8 @@ function NavReorderList({
             <span className={`text-sm ${isEnabled ? "text-foreground" : "text-muted"}`}>{item.label}</span>
           </div>
         );
-      })}
-    </div>
+      }}
+    />
   );
 }
 
@@ -4161,7 +4305,9 @@ function ExtensionsPanel() {
     author?: string;
     url?: string;
     enabled: boolean;
+    kind: string;
     categories: string[];
+    dependencies: Record<string, string>;
     source: "native" | "legacy";
     hasUI: boolean;
     hasApi: boolean;
@@ -4186,7 +4332,9 @@ function ExtensionsPanel() {
         author: ext.author,
         url: ext.url,
         enabled: ext.enabled,
+        kind: ext.kind ?? "extension",
         categories: ext.categories,
+        dependencies: ext.dependencies,
         source: "native",
         hasUI: ext.hasUI,
         hasApi: ext.hasApi,
@@ -4208,7 +4356,9 @@ function ExtensionsPanel() {
         description: p.description,
         enabled: p.enabled,
         url: p.url,
+        kind: "extension",
         categories: [],
+        dependencies: {},
         source: "legacy",
         hasUI: false,
         hasApi: false,
@@ -4300,6 +4450,7 @@ function ExtensionsPanel() {
         <div className="space-y-2">
           {filtered.map((ext) => {
             const isExpanded = expandedId === ext.id;
+            const isBundle = ext.kind === "bundle";
             return (
               <div key={ext.id} className="bg-card/50 rounded-lg border border-border/50 overflow-hidden">
                 <div
@@ -4312,6 +4463,11 @@ function ExtensionsPanel() {
                       <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
                         {ext.name}
                         <span className="text-xs text-muted">v{ext.version}</span>
+                        {isBundle && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25">
+                            Bundle
+                          </span>
+                        )}
                         {ext.author && <span className="text-xs text-muted">by {ext.author}</span>}
                       </div>
                       {ext.description && (
@@ -4327,16 +4483,22 @@ function ExtensionsPanel() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleEnable(ext); }}
-                      className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
-                        ext.enabled
-                          ? "bg-green-600/20 text-green-400 hover:bg-green-600/30"
-                          : "bg-card/30 text-secondary hover:bg-card-hover/40"
-                      }`}
-                    >
-                      {ext.enabled ? "Enabled" : "Disabled"}
-                    </button>
+                    {isBundle ? (
+                      <span className="px-3 py-1 text-xs rounded font-medium bg-sky-500/15 text-sky-300 border border-sky-500/25">
+                        Bundle
+                      </span>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleEnable(ext); }}
+                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                          ext.enabled
+                            ? "bg-green-600/20 text-green-400 hover:bg-green-600/30"
+                            : "bg-card/30 text-secondary hover:bg-card-hover/40"
+                        }`}
+                      >
+                        {ext.enabled ? "Enabled" : "Disabled"}
+                      </button>
+                    )}
                     <span className="text-secondary text-xs">{isExpanded ? "▲" : "▼"}</span>
                   </div>
                 </div>
@@ -4348,17 +4510,35 @@ function ExtensionsPanel() {
                       {ext.url && (
                         <> · <a href={ext.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{ext.url}</a></>
                       )}
+                      {isBundle && <> · <span className="text-sky-300">Bundle package</span></>}
                       {ext.source === "legacy" && <> · <span className="text-yellow-500">Python extension</span></>}
                     </div>
 
                     {/* Capability badges */}
                     <div className="flex gap-1.5 flex-wrap">
+                      {isBundle && <ExtBadge label="Bundle" />}
                       {ext.hasUI && <ExtBadge label="UI" />}
                       {ext.hasApi && <ExtBadge label="API" />}
                       {ext.hasState && <ExtBadge label="Stateful" />}
                       {ext.hasJobs && <ExtBadge label="Jobs" />}
                       {ext.hasEvents && <ExtBadge label="Events" />}
                     </div>
+
+                    {Object.keys(ext.dependencies).length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-secondary mb-2">
+                          {isBundle ? "Included Extensions" : "Dependencies"}
+                        </div>
+                        <div className="space-y-1.5">
+                          {Object.entries(ext.dependencies).map(([depId, constraint]) => (
+                            <div key={depId} className="flex items-center justify-between bg-surface/50 rounded px-3 py-2 gap-3">
+                              <div className="text-sm font-medium truncate">{depId}</div>
+                              <div className="text-xs text-muted shrink-0">{constraint}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Jobs (only shown if extension has them) */}
                     {ext.jobs.length > 0 && (
@@ -4555,7 +4735,14 @@ function FindAndInstallExtensions() {
         <div className="mb-4 p-4 bg-surface rounded-lg border border-border">
           <div className="flex items-start justify-between mb-3">
             <div>
-              <h3 className="text-lg font-semibold">{selectedExtension.name}</h3>
+              <h3 className="text-lg font-semibold flex items-center gap-2 flex-wrap">
+                <span>{selectedExtension.name}</span>
+                {selectedExtension.kind === "bundle" && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25">
+                    Bundle
+                  </span>
+                )}
+              </h3>
               <div className="text-xs text-muted mt-0.5">
                 v{selectedExtension.version}
                 {selectedExtension.author && <> · by {selectedExtension.author}</>}
@@ -4570,6 +4757,11 @@ function FindAndInstallExtensions() {
           </div>
           {selectedExtension.description && (
             <p className="text-sm text-secondary mb-3">{selectedExtension.description}</p>
+          )}
+          {selectedExtension.kind === "bundle" && Object.keys(selectedExtension.dependencies).length > 0 && (
+            <div className="mb-3 p-2 bg-sky-500/10 border border-sky-500/20 rounded text-xs text-sky-100">
+              Installs {Object.keys(selectedExtension.dependencies).length} bundled extension{Object.keys(selectedExtension.dependencies).length !== 1 ? "s" : ""} in one step.
+            </div>
           )}
           {selectedExtension.categories.length > 0 && (
             <div className="flex gap-1 mb-3 flex-wrap">
@@ -4600,7 +4792,9 @@ function FindAndInstallExtensions() {
           {/* Dependencies */}
           {Object.keys(selectedExtension.dependencies).length > 0 && (
             <div className="mb-3 p-2 bg-card rounded border border-border/50">
-              <div className="text-xs font-medium text-muted mb-1">Dependencies</div>
+              <div className="text-xs font-medium text-muted mb-1">
+                {selectedExtension.kind === "bundle" ? "Included Extensions" : "Dependencies"}
+              </div>
               <div className="space-y-0.5">
                 {Object.entries(selectedExtension.dependencies).map(([depId, constraint]) => {
                   const isDepInstalled = installedIds.has(depId);
@@ -4665,7 +4859,7 @@ function FindAndInstallExtensions() {
                 className="px-4 py-1.5 text-sm bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 flex items-center gap-1.5"
               >
                 {installMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                Install v{selectedVersion || selectedExtension.version}
+                {selectedExtension.kind === "bundle" ? "Install Bundle" : `Install v${selectedVersion || selectedExtension.version}`}
               </button>
             ) : (
               <button
@@ -4674,7 +4868,7 @@ function FindAndInstallExtensions() {
                 className="px-4 py-1.5 text-sm bg-card border border-border text-muted hover:text-red-400 hover:border-red-500 rounded disabled:opacity-50 flex items-center gap-1.5"
               >
                 {uninstallMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                Uninstall
+                {selectedExtension.kind === "bundle" ? "Uninstall Bundle" : "Uninstall"}
               </button>
             )}
           </div>
@@ -4705,6 +4899,11 @@ function FindAndInstallExtensions() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-foreground">{ext.name}</span>
                     <span className="text-xs text-muted">v{ext.version}</span>
+                    {ext.kind === "bundle" && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25">
+                        Bundle
+                      </span>
+                    )}
                     {ext.author && <span className="text-xs text-muted">by {ext.author}</span>}
                     {isInstalled && (
                       <span className="text-xs px-1.5 py-0.5 rounded bg-green-600/20 text-green-400">Installed</span>

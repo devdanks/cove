@@ -220,7 +220,18 @@ async function requestOptional<T>(path: string, options?: RequestInit): Promise<
   if (res.status === 204) return undefined as T;
   return res.json();
 }
-
+async function requestForm<T>(path: string, body: FormData, options?: Omit<RequestInit, "body">): Promise<T> {
+  const res = await authedFetch(`${API_BASE}${path}`, {
+    ...options,
+    body,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API Error ${res.status}: ${text}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
 function buildQuery(filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>): string {
   const params = new URLSearchParams();
   if (filter?.q) params.set("q", filter.q);
@@ -1269,11 +1280,33 @@ interface AiFaceCoverRepairResult {
   failedCount: number;
   errors: string[];
 }
+interface AiFaceReferencePackStatus {
+  packId: string;
+  sourceEndpoint?: string | null;
+  performerCount: number;
+  embeddingDim: number;
+  importedAt: string;
+  sourceCreatedAt?: string | null;
+}
 
+interface AiFaceReferenceImportResponse {
+  jobId: string;
+}
 export const aiFaces = {
   repairMissingCovers: (payload: AiFaceCoverRepairRequest = {}) =>
     request<AiFaceCoverRepairResult>("/ext/ai-faces/repair/missing-covers", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  referenceStatus: () => request<AiFaceReferencePackStatus | null>("/ext/ai-faces/reference/status"),
+  clearReferencePack: () => request<void>("/ext/ai-faces/reference", { method: "DELETE" }),
+  importReferencePack: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return requestForm<AiFaceReferenceImportResponse>("/ext/ai-faces/reference/import", formData, { method: "POST" });
+  },
+  rejectReferenceSuggestion: (faceId: number, data: { referenceSuggestionId: number }) =>
+    request<void>(`/ext/ai-faces/reference/faces/${faceId}/reject`, { method: "POST", body: JSON.stringify(data) }),
+  importReferencePerformer: (faceId: number, data: { referenceSuggestionId: number }) =>
+    request<void>(`/ext/ai-faces/reference/faces/${faceId}/import-performer`, { method: "POST", body: JSON.stringify(data) }),
 };

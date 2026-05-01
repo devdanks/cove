@@ -56,7 +56,7 @@ const ENTITY_LIST_ROUTES: Record<string, string> = {
   gallery: "galleries",
   image: "images",
   group: "groups",
-  marker: "markers",
+  marker: "scenes",
 };
 
 type SimpleScopeKind = (typeof SIMPLE_SCOPE_KINDS)[number];
