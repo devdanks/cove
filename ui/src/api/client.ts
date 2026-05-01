@@ -2,14 +2,29 @@ import type {
   MeResponse,
   Scene, SceneCreate, SceneUpdate,
   Performer, PerformerCreate, PerformerUpdate,
-  Tag, TagDetail, TagCreate, TagUpdate,
+  Tag, TagDetail, TagCreate, TagUpdate, TagSegmentWall,
   TagGraphNode, TagGraphResponse,
   Studio, StudioCreate, StudioUpdate,
   Gallery, GalleryCreate, GalleryUpdate, GalleryChapter, GalleryChapterCreate, GalleryChapterUpdate,
   Image, ImageCreate, ImageUpdate,
   Group, GroupCreate, GroupUpdate,
-  SceneMarkerSummary, SceneMarkerCreate, SceneMarkerUpdate,
-  SceneMarkerWall,
+  GroupItem, GroupItemCreate, GroupItemsFromSpans, GroupItemsReorder, GroupItemUpdate,
+  GroupPlaybackManifest,
+  AiDataPurgeResult,
+  AiDataSelector,
+  AiDataSummary,
+  AffinityHostType,
+  Segment, SegmentCreate, SegmentRecord, SegmentUpdate,
+  SegmentDistinctValue,
+  ResolvedSpanDetail, ResolvedSpanList, SceneResolvedSpans, SegmentDisplayProfile,
+  SegmentDisplayProfileCreate, SegmentDisplayProfilePreviewRequest, SegmentDisplayProfileUpdate,
+  SegmentDisplayRule, SegmentDisplayRuleCreate, SegmentDisplayRuleUpdate,
+  SegmentSpanQueryRequest,
+  Detection, DetectionCreate, DetectionUpdate,
+  Face, FaceCreate, FaceUpdate, FaceLink, FaceMerge, FaceDeleteImpact, FaceSimilar,
+  EntityEngagement, EntityFavorite, EntityEngagementBatchRequest, EntityRatings,
+  EngagementInteraction, EngagementInteractionWrite,
+  SceneHistory,
   PaginatedResponse, Stats, SystemStatus, CoveConfig, JobInfo,
   ScraperSummary,
   DownloaderDescriptor,
@@ -71,6 +86,9 @@ import type {
   DownloaderPreflightRequest,
   DownloaderPreflightResponse,
   UserUiPreferences,
+  PlaybackIntervalsRequest,
+  SegmentSpanSearchRequest,
+  SegmentSpanSearchResponse,
 } from "./types";
 
 const API_BASE = "/api";
@@ -175,6 +193,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+function normalizeApiPath(path: string): string {
+  const normalized = path.trim();
+  if (normalized.startsWith(`${API_BASE}/`)) {
+    return normalized.slice(API_BASE.length);
+  }
+
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
 async function requestOptional<T>(path: string, options?: RequestInit): Promise<T | null> {
   const res = await authedFetch(`${API_BASE}${path}`, {
     ...options,
@@ -211,6 +238,24 @@ function buildQuery(filter?: FindFilter, extra?: Record<string, string | number 
   return qs ? `?${qs}` : "";
 }
 
+
+function buildAiDataQuery(selector?: AiDataSelector): string {
+  if (!selector) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (selector.sourceKey) params.set("sourceKey", selector.sourceKey);
+  if (selector.sourceRunId) params.set("sourceRunId", selector.sourceRunId);
+  if (selector.model) params.set("model", selector.model);
+  if (selector.modality) params.set("modality", selector.modality);
+  if (selector.hostType) params.set("hostType", selector.hostType);
+  if (selector.hostId != null) params.set("hostId", String(selector.hostId));
+  if (selector.kinds && selector.kinds.length > 0) params.set("kinds", selector.kinds.join(","));
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
 function normalizeCriterionPayload<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((item) => normalizeCriterionPayload(item)) as T;
@@ -231,10 +276,35 @@ function normalizeCriterionPayload<T>(value: T): T {
   return value;
 }
 
-function buildMediaUrl(path: string, version?: string, max?: number): string {
+function buildMediaUrl(
+  path: string,
+  version?: string,
+  max?: number,
+  extra?: Record<string, string | number | undefined>,
+): string {
   const params = new URLSearchParams();
   if (typeof max === "number" && max > 0) params.set("max", String(max));
   if (version) params.set("v", version);
+  if (extra) {
+    for (const [key, value] of Object.entries(extra)) {
+      if (value !== undefined && value !== "") {
+        params.set(key, String(value));
+      }
+    }
+  }
+
+  const shareToken = authStore.getShareToken();
+  const sharePassword = authStore.getSharePassword();
+  const accessToken = authStore.getAccessToken();
+  if (shareToken) {
+    params.set("share_token", shareToken);
+    if (sharePassword) {
+      params.set("share_password", sharePassword);
+    }
+  } else if (accessToken) {
+    params.set("access_token", accessToken);
+  }
+
   const query = params.toString();
   return `${API_BASE}${path}${query ? `?${query}` : ""}`;
 }
@@ -259,9 +329,7 @@ export const scenes = {
   resetO: (id: number) => request<void>(`/scenes/${id}/o/reset`, { method: "POST" }),
   deletePlay: (id: number) => request<void>(`/scenes/${id}/play`, { method: "DELETE" }),
   resetPlay: (id: number) => request<void>(`/scenes/${id}/play/reset`, { method: "POST" }),
-  getHistory: (id: number) => request<{ playHistory: string[]; oHistory: string[] }>(`/scenes/${id}/history`),
-  saveActivity: (id: number, data: { resumeTime?: number; playDuration?: number }) =>
-    request<void>(`/scenes/${id}/activity`, { method: "POST", body: JSON.stringify(data) }),
+  getHistory: (id: number) => request<SceneHistory>(`/scenes/${id}/history`),
   searchMetadataServer: (id: number, term?: string, endpoint?: string) =>
     request<MetadataServerSceneMatch[]>(`/scenes/${id}/metadata-server/search${buildQuery(undefined, { term, endpoint })}`),
   importFromMetadataServer: (id: number, data: MetadataServerSceneImportRequest) =>
@@ -274,21 +342,36 @@ export const scenes = {
     request<{ jobId: string }>(`/scenes/${id}/rescan`, { method: "POST" }),
   assignFile: (id: number, fileId: number) =>
     request<void>(`/scenes/${id}/assign-file`, { method: "POST", body: JSON.stringify({ fileId }) }),
-  streamUrl: (id: number) => `${API_BASE}/stream/scene/${id}`,
-  screenshotUrl: (id: number, version?: string) => `${API_BASE}/stream/scene/${id}/screenshot${version ? `?v=${encodeURIComponent(version)}` : ""}`,
-  previewUrl: (id: number) => `${API_BASE}/stream/scene/${id}/preview`,
-  captionUrl: (sceneId: number, captionId: number) => `${API_BASE}/stream/scene/${sceneId}/caption/${captionId}`,
-  transcodeUrl: (id: number, resolution?: string) => `${API_BASE}/stream/scene/${id}/transcode${resolution ? `?resolution=${resolution}` : ""}`,
-  hlsMasterUrl: (id: number) => `${API_BASE}/stream/scene/${id}/hls/master.m3u8`,
+  streamUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}`),
+  screenshotUrl: (id: number, version?: string) => buildMediaUrl(`/stream/scene/${id}/screenshot`, version),
+  previewUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview`),
+  captionUrl: (sceneId: number, captionId: number) => buildMediaUrl(`/stream/scene/${sceneId}/caption/${captionId}`),
+  transcodeUrl: (id: number, resolution?: string) => buildMediaUrl(`/stream/scene/${id}/transcode`, undefined, undefined, { resolution }),
+  hlsMasterUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/hls/master.m3u8`),
   getResolutions: (id: number) => request<string[]>(`/stream/scene/${id}/resolutions`),
-  markers: {
-    list: (sceneId: number) => request<SceneMarkerSummary[]>(`/scenes/${sceneId}/markers`),
-    create: (sceneId: number, data: SceneMarkerCreate) =>
-      request<SceneMarkerSummary>(`/scenes/${sceneId}/markers`, { method: "POST", body: JSON.stringify(data) }),
-    update: (sceneId: number, id: number, data: SceneMarkerUpdate) =>
-      request<SceneMarkerSummary>(`/scenes/${sceneId}/markers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  segments: {
+    list: (sceneId: number) => request<Segment[]>(`/scenes/${sceneId}/segments`),
+    create: (sceneId: number, data: SegmentCreate) =>
+      request<Segment>(`/scenes/${sceneId}/segments`, { method: "POST", body: JSON.stringify(data) }),
+    update: (sceneId: number, id: number, data: SegmentUpdate) =>
+      request<Segment>(`/scenes/${sceneId}/segments/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (sceneId: number, id: number) =>
-      request<void>(`/scenes/${sceneId}/markers/${id}`, { method: "DELETE" }),
+      request<void>(`/scenes/${sceneId}/segments/${id}`, { method: "DELETE" }),
+    spans: (sceneId: number, profile?: number) =>
+      request<SceneResolvedSpans>(`/scenes/${sceneId}/segments/spans${buildQuery(undefined, { profile })}`),
+    querySpans: (sceneId: number, data: SegmentSpanQueryRequest) =>
+      request<ResolvedSpanList>(`/scenes/${sceneId}/segments/spans/query`, { method: "POST", body: JSON.stringify(data) }),
+    spanDetail: (sceneId: number, spanKey: string, profile?: number) =>
+      request<ResolvedSpanDetail>(`/scenes/${sceneId}/spans/${encodeURIComponent(spanKey)}${buildQuery(undefined, { profile })}`),
+  },
+  detections: {
+    list: (sceneId: number) => request<Detection[]>(`/scenes/${sceneId}/detections`),
+    create: (sceneId: number, data: DetectionCreate) =>
+      request<Detection>(`/scenes/${sceneId}/detections`, { method: "POST", body: JSON.stringify(data) }),
+    update: (sceneId: number, id: number, data: DetectionUpdate) =>
+      request<Detection>(`/scenes/${sceneId}/detections/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    delete: (sceneId: number, id: number) =>
+      request<void>(`/scenes/${sceneId}/detections/${id}`, { method: "DELETE" }),
   },
   findDuplicates: (distance = 0, durationDiff?: number) => {
     const params = new URLSearchParams();
@@ -298,20 +381,69 @@ export const scenes = {
   },
 };
 
-// ===== Markers (top-level) =====
-export const markers = {
-  wall: (opts?: { q?: string; tagId?: number; count?: number }) => {
-    const params = new URLSearchParams();
-    if (opts?.q) params.set("q", opts.q);
-    if (opts?.tagId) params.set("tagId", String(opts.tagId));
-    if (opts?.count) params.set("count", String(opts.count));
-    const qs = params.toString();
-    return request<SceneMarkerWall[]>(`/markers/wall${qs ? `?${qs}` : ""}`);
-  },
-  bulkUpdate: (data: { ids: number[]; primaryTagId?: number; tagMode?: string; tagIds?: number[] }) =>
-    request<SceneMarkerSummary[]>("/markers/bulk", { method: "POST", body: JSON.stringify(data) }),
-  bulkDelete: (ids: number[]) =>
-    request<{ deleted: number }>("/markers/destroy", { method: "POST", body: JSON.stringify({ ids }) }),
+export const playback = {
+  recordIntervals: (data: PlaybackIntervalsRequest) =>
+    request<void>("/playback/intervals", { method: "POST", body: JSON.stringify(data) }),
+};
+
+export const segmentLibrary = {
+  list: (opts?: {
+    q?: string;
+    ids?: string;
+    sceneId?: number;
+    sceneIds?: string;
+    excludeSceneIds?: string;
+    sceneTitle?: string;
+    tagId?: number;
+    tagIds?: string;
+    kind?: string;
+    sourceKey?: string;
+    tagged?: boolean;
+    minConfidence?: number;
+    minDurationSec?: number;
+    sort?: string;
+    direction?: "asc" | "desc";
+    page?: number;
+    perPage?: number;
+  }) =>
+    request<PaginatedResponse<SegmentRecord>>(`/segments${buildQuery(undefined, opts)}`),
+  get: (id: number) => requestOptional<SegmentRecord>(`/segments/${id}`),
+  distinctSourceKeys: () => request<SegmentDistinctValue[]>("/segments/source-keys/distinct"),
+  distinctKinds: () => request<SegmentDistinctValue[]>("/segments/kinds/distinct"),
+};
+
+// ===== Faces =====
+export const faces = {
+  list: (opts?: { q?: string; performerId?: number; merged?: boolean; page?: number; perPage?: number }) =>
+    request<PaginatedResponse<Face>>(`/faces${buildQuery({ page: opts?.page, perPage: opts?.perPage, q: opts?.q }, {
+      performerId: opts?.performerId,
+      merged: opts?.merged,
+    })}`),
+  get: (id: number) => request<Face>(`/faces/${id}`),
+  detections: (id: number) => request<Detection[]>(`/faces/${id}/detections`),
+  deleteImpact: (id: number) => request<FaceDeleteImpact>(`/faces/${id}/delete-impact`),
+  create: (data: FaceCreate) => request<Face>("/faces", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: FaceUpdate) => request<Face>(`/faces/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: number) => request<void>(`/faces/${id}`, { method: "DELETE" }),
+  link: (id: number, data: FaceLink) => request<Face>(`/faces/${id}/link`, { method: "POST", body: JSON.stringify(data) }),
+  mergeInto: (id: number, data: FaceMerge) => request<Face>(`/faces/${id}/merge-into`, { method: "POST", body: JSON.stringify(data) }),
+  similar: (id: number, opts?: { kindFamily?: string; k?: number }) =>
+    request<FaceSimilar[]>(`/faces/${id}/similar${buildQuery(undefined, { kindFamily: opts?.kindFamily, k: opts?.k })}`),
+};
+
+export const entityEngagement = {
+  get: (hostType: AffinityHostType, hostId: number) => requestOptional<EntityEngagement>(`/engagement/${hostType}/${hostId}`),
+  getRatings: (hostType: AffinityHostType, hostId: number) => request<EntityRatings>(`/engagement/${hostType}/${hostId}/ratings`),
+  batch: (data: EntityEngagementBatchRequest) =>
+    request<EntityEngagement[]>("/engagement/batch", { method: "POST", body: JSON.stringify(data) }),
+  setFavorite: (hostType: AffinityHostType, hostId: number, data: EntityFavorite) =>
+    request<EntityEngagement>(`/engagement/${hostType}/${hostId}/favorite`, { method: "PUT", body: JSON.stringify(data) }),
+  setRating: (hostType: AffinityHostType, hostId: number, data: { value: number | null; aspect?: string }) =>
+    request<EntityEngagement>(`/engagement/${hostType}/${hostId}/rating`, { method: "PUT", body: JSON.stringify(data) }),
+  recordInteraction: (data: EngagementInteractionWrite) =>
+    request<void>("/engagement/interactions", { method: "POST", body: JSON.stringify(data) }),
+  getInteractions: (options?: { hostType?: string; hostId?: number; limit?: number }) =>
+    request<EngagementInteraction[]>(`/engagement/interactions${buildQuery(undefined, options)}`),
 };
 
 // ===== Performers =====
@@ -354,6 +486,7 @@ export const tags = {
   graph: (req: FilteredQueryRequest<TagFilterCriteria>) =>
     request<TagGraphResponse>("/tags/graph", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
   get: (id: number) => request<TagDetail>(`/tags/${id}`),
+  segments: (id: number, count = 100) => request<TagSegmentWall[]>(`/tags/${id}/segments${buildQuery(undefined, { count })}`),
   create: (data: TagCreate) => request<TagDetail>("/tags", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: TagUpdate) => request<TagDetail>(`/tags/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkTagUpdate) => request<void>("/tags/bulk", { method: "POST", body: JSON.stringify(data) }),
@@ -455,8 +588,17 @@ export const images = {
   incrementO: (id: number) => request<number>(`/images/${id}/o`, { method: "POST" }),
   decrementO: (id: number) => request<number>(`/images/${id}/o`, { method: "DELETE" }),
   resetO: (id: number) => request<number>(`/images/${id}/o/reset`, { method: "POST" }),
-  imageUrl: (id: number) => `${API_BASE}/stream/image/${id}`,
-  thumbnailUrl: (id: number, max?: number) => `${API_BASE}/stream/image/${id}/thumbnail${max ? `?max=${encodeURIComponent(String(max))}` : ""}`,
+  detections: {
+    list: (imageId: number) => request<Detection[]>(`/images/${imageId}/detections`),
+    create: (imageId: number, data: DetectionCreate) =>
+      request<Detection>(`/images/${imageId}/detections`, { method: "POST", body: JSON.stringify(data) }),
+    update: (imageId: number, id: number, data: DetectionUpdate) =>
+      request<Detection>(`/images/${imageId}/detections/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    delete: (imageId: number, id: number) =>
+      request<void>(`/images/${imageId}/detections/${id}`, { method: "DELETE" }),
+  },
+  imageUrl: (id: number) => buildMediaUrl(`/stream/image/${id}`),
+  thumbnailUrl: (id: number, max?: number) => buildMediaUrl(`/stream/image/${id}/thumbnail`, undefined, max),
 };
 
 // ===== Groups =====
@@ -479,6 +621,48 @@ export const groups = {
     request<void>(`/groups/${id}/subgroups/${subGroupId}`, { method: "DELETE" }),
   reorderSubGroups: (id: number, subGroupIds: number[]) =>
     request<void>(`/groups/${id}/subgroups/reorder`, { method: "PUT", body: JSON.stringify({ subGroupIds }) }),
+  items: {
+    list: (groupId: number) => request<GroupItem[]>(`/groups/${groupId}/items`),
+    create: (groupId: number, data: GroupItemCreate) =>
+      request<GroupItem>(`/groups/${groupId}/items`, { method: "POST", body: JSON.stringify(data) }),
+    update: (groupId: number, itemId: number, data: GroupItemUpdate) =>
+      request<GroupItem>(`/groups/${groupId}/items/${itemId}`, { method: "PUT", body: JSON.stringify(data) }),
+    delete: (groupId: number, itemId: number) =>
+      request<void>(`/groups/${groupId}/items/${itemId}`, { method: "DELETE" }),
+    reorder: (groupId: number, data: GroupItemsReorder) =>
+      request<void>(`/groups/${groupId}/items/reorder`, { method: "PUT", body: JSON.stringify(data) }),
+    fromSpans: (groupId: number, data: GroupItemsFromSpans) =>
+      request<GroupItem[]>(`/groups/${groupId}/items/from-spans`, { method: "POST", body: JSON.stringify(data) }),
+    playbackManifest: (groupId: number) =>
+      request<GroupPlaybackManifest>(`/groups/${groupId}/playback-manifest`),
+  },
+};
+
+export const segmentDisplayProfiles = {
+  list: () => request<SegmentDisplayProfile[]>("/segment-display-profiles"),
+  get: (id: number) => request<SegmentDisplayProfile>(`/segment-display-profiles/${id}`),
+  create: (data: SegmentDisplayProfileCreate) =>
+    request<SegmentDisplayProfile>("/segment-display-profiles", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: SegmentDisplayProfileUpdate) =>
+    request<SegmentDisplayProfile>(`/segment-display-profiles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: number) => request<void>(`/segment-display-profiles/${id}`, { method: "DELETE" }),
+  setDefault: (id: number) => request<SegmentDisplayProfile>(`/segment-display-profiles/${id}/default`, { method: "PUT" }),
+  preview: (data: SegmentDisplayProfilePreviewRequest) =>
+    request<ResolvedSpanList>("/segment-display-profiles/preview", { method: "POST", body: JSON.stringify(data) }),
+  rules: {
+    list: (profileId: number) => request<SegmentDisplayRule[]>(`/segment-display-profiles/${profileId}/rules`),
+    create: (profileId: number, data: SegmentDisplayRuleCreate) =>
+      request<SegmentDisplayRule>(`/segment-display-profiles/${profileId}/rules`, { method: "POST", body: JSON.stringify(data) }),
+    update: (profileId: number, ruleId: number, data: SegmentDisplayRuleUpdate) =>
+      request<SegmentDisplayRule>(`/segment-display-profiles/${profileId}/rules/${ruleId}`, { method: "PUT", body: JSON.stringify(data) }),
+    delete: (profileId: number, ruleId: number) =>
+      request<void>(`/segment-display-profiles/${profileId}/rules/${ruleId}`, { method: "DELETE" }),
+  },
+};
+
+export const segmentSpans = {
+  search: (data: SegmentSpanSearchRequest) =>
+    request<SegmentSpanSearchResponse>("/segments/spans/search", { method: "POST", body: JSON.stringify(data) }),
 };
 
 // ===== Entity Images =====
@@ -573,6 +757,11 @@ export const jobs = {
   history: () => request<JobInfo[]>("/jobs/history"),
   get: (id: string) => request<JobInfo>(`/jobs/${id}`),
   cancel: (id: string) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
+};
+
+export const aiData = {
+  summary: (selector?: AiDataSelector) => request<AiDataSummary>(`/ai-data/summary${buildAiDataQuery(selector)}`),
+  purge: (selector: AiDataSelector) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(selector) }),
 };
 
 // ===== Metadata Tasks =====
@@ -709,9 +898,14 @@ export interface StashImportResult {
   images: number;
   galleries: number;
 }
+export interface StashAiImportResult {
+  aiRuns: number;
+  segments: number;
+}
 export interface StashImportOptions {
   coveGeneratedPath?: string;
   migrateGeneratedContent?: boolean;
+  aiDataSource?: string;
 }
 export const stashMigration = {
   preview: (stashDbPath: string) =>
@@ -728,9 +922,17 @@ export const stashMigration = {
         stashDbPath,
         generatedPath: options?.coveGeneratedPath,
         migrateGeneratedContent: options?.migrateGeneratedContent ?? true,
+        aiDataSource: options?.aiDataSource,
       }),
     }),
   importResult: (jobId: string) => requestOptional<StashImportResult>(`/stash-migration/import/${jobId}`),
+  startAiImport: (stashDbPath: string, aiDataSource: string) =>
+    request<{ jobId: string }>("/stash-migration/import-ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stashDbPath, aiDataSource }),
+    }),
+  aiImportResult: (jobId: string) => requestOptional<StashAiImportResult>(`/stash-migration/import-ai/${jobId}`),
 };
 
 // ===== Logs =====
@@ -792,6 +994,11 @@ export const plugins = {
 // ===== Extensions =====
 export const extensions = {
   getManifest: () => request<ExtensionManifest>("/extensions/manifest"),
+  invokeAction: <T = unknown>(apiEndpoint: string, payload: unknown) =>
+    request<T>(normalizeApiPath(apiEndpoint), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   list: (category?: string) =>
     request<ExtensionInfo[]>(category ? `/extensions?category=${encodeURIComponent(category)}` : "/extensions"),
   enable: (id: string) => request<void>(`/extensions/${encodeURIComponent(id)}/enable`, { method: "POST" }),

@@ -20,7 +20,6 @@ export interface Scene {
   tags: Tag[];
   performers: PerformerSummary[];
   files: VideoFile[];
-  markers: SceneMarkerSummary[];
   groups: GroupSummary[];
   galleries: GallerySummary[];
   remoteIds: SceneRemoteId[];
@@ -181,14 +180,26 @@ export interface Tag {
   imagePath?: string;
   favorite: boolean;
   ignoreAutoTag: boolean;
+  showAsSegment?: boolean | null;
+  segmentColorOverride?: string | null;
+  segmentLaneOverride?: number | null;
   aliases: string[];
   sceneCount?: number;
-  sceneMarkerCount?: number;
+  segmentCount?: number;
   imageCount?: number;
   galleryCount?: number;
   groupCount?: number;
   performerCount?: number;
   studioCount?: number;
+  provenance?: TagProvenance[];
+}
+
+export interface TagProvenance {
+  sourceKey: string;
+  sourceRunId?: string;
+  modelKey?: string;
+  confidence?: number;
+  appliedAt: string;
 }
 
 export interface TagDetail extends Tag {
@@ -201,7 +212,7 @@ export interface TagDetail extends Tag {
   galleryCount: number;
   studioCount: number;
   groupCount: number;
-  markerCount: number;
+  segmentCount: number;
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -217,7 +228,7 @@ export interface TagGraphNode {
   childIds: number[];
   totalUsageCount: number;
   sceneCount: number;
-  sceneMarkerCount: number;
+  segmentCount: number;
   imageCount: number;
   galleryCount: number;
   groupCount: number;
@@ -242,6 +253,9 @@ export interface TagCreate {
   description?: string;
   favorite?: boolean;
   ignoreAutoTag?: boolean;
+  showAsSegment?: boolean | null;
+  segmentColorOverride?: string | null;
+  segmentLaneOverride?: number | null;
   aliases?: string[];
   parentIds?: number[];
   childIds?: number[];
@@ -450,6 +464,7 @@ export interface Group {
   urls: string[];
   tags: Tag[];
   sceneCount: number;
+  isCompilation?: boolean;
   subGroupCount: number;
   containingGroupCount: number;
   customFields?: Record<string, unknown>;
@@ -461,6 +476,83 @@ export interface GroupSummary {
   id: number;
   name: string;
   sceneIndex: number;
+}
+
+export type GroupItemKind = "scene" | "sceneRange";
+
+export interface GroupItem {
+  id: number;
+  groupId: number;
+  orderIndex: number;
+  kind: GroupItemKind;
+  sceneId: number;
+  sceneTitle?: string;
+  startSec?: number;
+  endSec?: number;
+  title?: string;
+  notes?: string;
+  sourceSpanKey?: string;
+  sourceProfileId?: number;
+  sourceQueryJson?: string;
+  snapshotAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GroupItemCreate {
+  orderIndex: number;
+  kind: GroupItemKind;
+  sceneId: number;
+  startSec?: number;
+  endSec?: number;
+  title?: string;
+  notes?: string;
+  sourceSpanKey?: string;
+  sourceProfileId?: number;
+  sourceQueryJson?: string;
+}
+
+export interface GroupItemUpdate {
+  orderIndex: number;
+  kind: GroupItemKind;
+  startSec?: number;
+  endSec?: number;
+  title?: string;
+  notes?: string;
+}
+
+export interface GroupItemsReorder {
+  ids: number[];
+}
+
+export interface GroupItemSpanInput {
+  spanKey?: string;
+  sceneId?: number;
+  startSec?: number;
+  endSec?: number;
+  title?: string;
+  profileId?: number;
+  derivedQuery?: SegmentSpanDerivedQuery;
+}
+
+export interface GroupItemsFromSpans {
+  spans: GroupItemSpanInput[];
+}
+
+export interface GroupPlaybackManifestItem {
+  groupItemId: number;
+  sceneId: number;
+  sceneTitle?: string;
+  src: string;
+  startSec: number;
+  endSec?: number;
+  durationSec?: number;
+  posterPath?: string;
+  title?: string;
+}
+
+export interface GroupPlaybackManifest {
+  items: GroupPlaybackManifestItem[];
 }
 
 export interface GallerySummary {
@@ -514,41 +606,471 @@ export interface Fingerprint {
   value: string;
 }
 
-export interface SceneMarkerSummary {
+export interface TagSegmentWall {
   id: number;
-  title: string;
-  seconds: number;
-  endSeconds?: number;
-  primaryTagId: number;
-  primaryTagName: string;
-}
-
-export interface SceneMarkerWall {
-  id: number;
-  title: string;
-  seconds: number;
-  endSeconds?: number;
-  primaryTagId: number;
-  primaryTagName: string;
+  title?: string;
+  startSec: number;
+  endSec?: number;
+  kind: string;
+  sourceKey: string;
+  confidence?: number;
   sceneId: number;
   sceneTitle: string;
-  scenePath: string;
-  tags: { id: number; name: string }[];
 }
 
-export interface SceneMarkerCreate {
-  title: string;
-  seconds: number;
-  endSeconds?: number;
-  primaryTagId: number;
-  tagIds?: number[];
-}
+export type SegmentHostType = "scene" | "image" | "audio";
+export type DetectionHostType = "scene" | "image";
+export type AffinityHostType = "scene" | "image" | "performer" | "face" | "tag" | "studio" | "gallery" | "group";
+export type InteractionHostType = AffinityHostType | "segment" | "search" | "collection";
 
-export interface SceneMarkerUpdate {
+export interface Segment {
+  id: number;
+  hostType: SegmentHostType;
+  hostId: number;
+  startSec: number;
+  endSec?: number;
+  tagId?: number;
+  tagName?: string;
+  kind?: string;
+  refId?: number;
+  payload?: unknown;
+  sourceKey: string;
+  sourceRunId?: string;
+  confidence?: number;
   title?: string;
-  seconds?: number;
-  endSeconds?: number;
-  primaryTagId?: number;
+  colorHint?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SegmentRecord extends Segment {
+  hostTitle?: string;
+}
+
+export interface SegmentCreate {
+  startSec: number;
+  endSec?: number;
+  tagId?: number;
+  kind?: string;
+  refId?: number;
+  payload?: unknown;
+  sourceKey?: string;
+  sourceRunId?: string;
+  confidence?: number;
+  title?: string;
+  colorHint?: string;
+}
+
+export interface SegmentUpdate extends SegmentCreate {
+  sourceKey: string;
+}
+
+export interface ResolvedSpan {
+  spanKey: string;
+  hostType: SegmentHostType;
+  hostId: number;
+  startSec: number;
+  endSec: number;
+  sourceKey?: string;
+  kind?: string;
+  tagId?: number;
+  tagName?: string;
+  colorHint?: string;
+  lane?: number;
+  collapsedToInstant: boolean;
+  segmentIds: number[];
+}
+
+export interface ResolvedSpanInterval {
+  startSec: number;
+  endSec: number;
+}
+
+export interface ResolvedSpanDetail {
+  span: ResolvedSpan;
+  sceneId: number;
+  sceneTitle?: string;
+  intervals: ResolvedSpanInterval[];
+  profileId: number;
+  profileVersion: number;
+}
+
+export interface SceneResolvedSpans {
+  spans: ResolvedSpan[];
+  profileId: number;
+  profileVersion: number;
+}
+
+export interface ResolvedSpanList {
+  spans: ResolvedSpan[];
+}
+
+export interface SegmentDerivedQueryOperandDescriptor {
+  sourceKey?: string;
+  kind?: string;
+  tagIds?: number[];
+  performerIds?: number[];
+  faceIds?: number[];
+  minConfidence?: number;
+}
+
+export interface SegmentDerivedQueryDescriptor {
+  operator: SegmentSpanOperator;
+  operands: SegmentDerivedQueryOperandDescriptor[];
+  mergeGapSec?: number;
+  minDurationSec?: number;
+}
+
+export type SegmentSpanOperator = "union" | "intersection" | "difference";
+
+export interface SegmentSpanOperand {
+  sourceKey?: string;
+  kind?: string;
+  tagIds?: number[];
+  refIds?: number[];
+  minConfidence?: number;
+}
+
+export interface SegmentSpanQueryRequest {
+  profile?: number;
+  operator: SegmentSpanOperator;
+  operands: SegmentSpanOperand[];
+  mergeGapSec?: number;
+  minDurationSec?: number;
+}
+
+export interface SegmentDisplayProfile {
+  id: number;
+  name: string;
+  description?: string;
+  userId?: number;
+  isSystem: boolean;
+  isDefault: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SegmentDisplayProfileCreate {
+  name: string;
+  description?: string;
+  isDefault: boolean;
+}
+
+export interface SegmentDisplayProfileUpdate {
+  name: string;
+  description?: string;
+}
+
+export interface SegmentSpanDerivedQuery {
+  operator: SegmentSpanOperator;
+  operands: SegmentSpanOperand[];
+  mergeGapSec?: number;
+  minDurationSec?: number;
+}
+
+export interface SegmentSpanSearchRequest {
+  profile?: number;
+  derivedQuery?: SegmentSpanDerivedQuery;
+  page?: number;
+  perPage?: number;
+  sort?: string;
+  direction?: "asc" | "desc";
+  q?: string;
+  sceneTitle?: string;
+  sceneIds?: number[];
+  excludeSceneIds?: number[];
+}
+
+export interface SegmentSpanSearchResultItem {
+  span: ResolvedSpan;
+  sceneId: number;
+  sceneTitle?: string;
+  sceneUpdatedAt?: string;
+  profileId: number;
+}
+
+export interface SegmentSpanSearchResponse {
+  items: SegmentSpanSearchResultItem[];
+  totalCount: number;
+  page: number;
+  perPage: number;
+}
+
+export interface SegmentDistinctValue {
+  value: string;
+  count: number;
+}
+
+export interface SegmentDisplayRule {
+  id: number;
+  sourceKey?: string;
+  kind?: string;
+  tagId?: number;
+  tagName?: string;
+  tagCategory?: string;
+  hostType?: SegmentHostType;
+  visible: boolean;
+  minConfidence?: number;
+  minDurationSec?: number;
+  mergeGapSec?: number;
+  collapseToInstant: boolean;
+  colorOverride?: string;
+  lane?: number;
+  priority?: number;
+  userId?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SegmentDisplayRuleCreate {
+  sourceKey?: string;
+  kind?: string;
+  tagId?: number;
+  tagCategory?: string;
+  hostType?: SegmentHostType;
+  visible: boolean;
+  minConfidence?: number;
+  minDurationSec?: number;
+  mergeGapSec?: number;
+  collapseToInstant: boolean;
+  colorOverride?: string;
+  lane?: number;
+  priority?: number;
+}
+
+export interface SegmentDisplayRuleUpdate extends SegmentDisplayRuleCreate {}
+
+export interface SegmentDisplayProfilePreviewRequest {
+  sceneId: number;
+  rules: SegmentDisplayRuleCreate[];
+}
+
+export interface Detection {
+  id: number;
+  hostType: DetectionHostType;
+  hostId: number;
+  observedAtSec?: number;
+  frameWidth: number;
+  frameHeight: number;
+  class: string;
+  score: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  extra?: unknown;
+  refKind?: string;
+  refId?: number;
+  groupKey?: string;
+  sourceKey: string;
+  sourceRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DetectionCreate {
+  observedAtSec?: number;
+  frameWidth: number;
+  frameHeight: number;
+  class: string;
+  score: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  extra?: unknown;
+  refKind?: string;
+  refId?: number;
+  groupKey?: string;
+  sourceKey?: string;
+  sourceRunId?: string;
+}
+
+export interface DetectionUpdate extends DetectionCreate {
+  sourceKey: string;
+}
+
+export interface Face {
+  id: number;
+  label?: string;
+  performerId?: number;
+  performerName?: string;
+  coverImageUrl?: string;
+  mergedIntoFaceId?: number;
+  detectionCount: number;
+  sceneCount: number;
+  imageCount: number;
+  primarySourceKey?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FaceCreate {
+  label?: string;
+  performerId?: number;
+  primarySourceKey?: string;
+}
+
+export interface FaceUpdate {
+  label?: string;
+  performerId?: number;
+  primarySourceKey?: string;
+}
+
+export interface FaceLink {
+  performerId?: number;
+}
+
+export interface FaceMerge {
+  targetFaceId: number;
+}
+
+
+export interface FaceDeleteImpact {
+  detectionCount: number;
+  embeddingCount: number;
+  segmentCount: number;
+  hasCoverImage: boolean;
+  releasedMergedFaceCount: number;
+}
+
+export interface FaceSimilar {
+  id: number;
+  label?: string;
+  performerId?: number;
+  performerName?: string;
+  coverImageUrl?: string;
+  distance: number;
+}
+
+export type AiDataKind = "embedding" | "detection" | "segment" | "tagApplication" | "face";
+
+export interface AiDataSelector {
+  sourceKey?: string;
+  sourceRunId?: string;
+  model?: string;
+  modality?: string;
+  hostType?: string;
+  hostId?: number;
+  kinds?: AiDataKind[];
+}
+
+export interface AiDataSummaryItem {
+  kind: string;
+  detail?: string;
+  sourceKey: string;
+  sourceRunId?: string;
+  model?: string;
+  hostType: string;
+  count: number;
+}
+
+export interface AiDataSummary {
+  items: AiDataSummaryItem[];
+  totals: Record<string, number>;
+  totalCount: number;
+}
+
+export interface AiDataPurgeResult {
+  removedCounts: Record<string, number>;
+}
+
+export interface EntityEngagement {
+  hostId: number;
+  isFavorite: boolean;
+  rating?: number;
+  resumeTime: number;
+  playDuration: number;
+  playCount: number;
+  lastPlayedAt?: string;
+  oCount: number;
+  completeCount: number;
+}
+
+export interface EntityRatings {
+  hostId: number;
+  ratings: Record<string, number>;
+}
+
+export interface EntityFavorite {
+  isFavorite: boolean;
+}
+
+export interface EngagementInteractionWrite {
+  hostType: InteractionHostType;
+  hostId?: number;
+  kind: string;
+  positionSec?: number;
+  durationSec?: number;
+  sessionId?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface EngagementInteraction {
+  id: number;
+  hostType: InteractionHostType;
+  hostId?: number;
+  kind: string;
+  at: string;
+  positionSec?: number;
+  durationSec?: number;
+  sessionId?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface SceneInteractionEvent {
+  kind: string;
+  at: string;
+  meta?: unknown;
+}
+
+export interface PlaybackIntervalInput {
+  startSec: number;
+  endSec: number;
+}
+
+export interface PlaybackIntervalsRequest {
+  hostType: string;
+  hostId: number;
+  sessionId: string;
+  mediaDurationSec: number;
+  currentPositionSec: number;
+  state: string;
+  intervals: PlaybackIntervalInput[];
+}
+
+export interface PlaybackInterval {
+  startSec: number;
+  endSec: number;
+  recordedAt: string;
+}
+
+export interface ScenePlaybackSession {
+  sessionId: string;
+  startedAt: string;
+  lastSeenAt: string;
+  endedAt?: string | null;
+  state: string;
+  mediaDurationSec: number;
+  totalWatchedSec: number;
+  lastPositionSec?: number | null;
+  isCompleted: boolean;
+  intervals: PlaybackInterval[];
+}
+
+export interface SceneHistory {
+  playHistory: string[];
+  oHistory: string[];
+  events?: SceneInteractionEvent[];
+  allTimeWatchedIntervals?: PlaybackInterval[];
+  totalDistinctWatchedSec?: number;
+  sessions?: ScenePlaybackSession[];
+}
+
+export interface EntityEngagementBatchRequest {
+  hostType: AffinityHostType;
+  hostIds: number[];
 }
 
 export interface PaginatedResponse<T> {
@@ -601,6 +1123,7 @@ export interface UserThemePreferences {
 export interface UserUiPreferences {
   theme?: UserThemePreferences | null;
   ratingSystemOptions?: RatingSystemOptions | null;
+  recordPlaybackHistory?: boolean | null;
 }
 
 export interface MeResponse {
@@ -1174,7 +1697,6 @@ export interface SceneFilterCriteria {
   studiosCriterion?: MultiIdCriterion;
   groupsCriterion?: MultiIdCriterion;
   organizedCriterion?: BoolCriterion;
-  hasMarkersCriterion?: BoolCriterion;
   interactiveCriterion?: BoolCriterion;
   pathCriterion?: StringCriterion;
   fingerprintCriterion?: FingerprintCriterion;
@@ -1253,7 +1775,6 @@ export interface PerformerFilterCriteria {
   piercingsCriterion?: StringCriterion;
   aliasesCriterion?: StringCriterion;
   deathDateCriterion?: DateCriterion;
-  markerCountCriterion?: IntCriterion;
   playCountCriterion?: IntCriterion;
   oCounterCriterion?: IntCriterion;
   groupsCriterion?: MultiIdCriterion;
@@ -1267,8 +1788,6 @@ export interface TagFilterCriteria {
   favoriteCriterion?: BoolCriterion;
   sceneCountCriterion?: IntCriterion;
   sceneCountIncludesChildren?: boolean;
-  markerCountCriterion?: IntCriterion;
-  markerCountIncludesChildren?: boolean;
   performerCountCriterion?: IntCriterion;
   performerCountIncludesChildren?: boolean;
   parentsCriterion?: MultiIdCriterion;
@@ -1680,6 +2199,7 @@ export interface ExtensionInfo {
   categories: string[];
   minCoveVersion?: string;
   dependencies: Record<string, string>;
+  kind: string;
   source: string;
   installedAt?: string;
   jobs: { id: string; name: string; description?: string }[];
@@ -1700,6 +2220,7 @@ export interface RegistryExtensionSummary {
   description?: string;
   author?: string;
   iconUrl?: string;
+  kind?: string;
   categories: string[];
   updatedAt?: string;
   minCoveVersion?: string;
