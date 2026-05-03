@@ -1,10 +1,11 @@
 import { useState, useMemo, useCallback, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { images } from "../api/client";
-import type { FindFilter, Image, ImageFilterCriteria } from "../api/types";
+import type { EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { RatingBanner } from "../components/Rating";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen, Search, Download } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
@@ -17,6 +18,7 @@ import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useWallColumns } from "../hooks/useWallColumns";
+import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
 import {
@@ -94,6 +96,7 @@ export function ImagesPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const { engagementById } = useEntityEngagementBatch("image", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
@@ -104,7 +107,13 @@ export function ImagesPage({ onNavigate }: Props) {
   const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
 
   const lightboxImages: LightboxImage[] = useMemo(
-    () => items.map((img) => ({ id: img.id, src: images.imageUrl(img.id), title: getImageDisplayTitle(img) })),
+    () => items.map((img) => ({
+      id: img.id,
+      src: images.imageUrl(img.id),
+      title: getImageDisplayTitle(img),
+      interactionSource: "imagesPage",
+      interactionMeta: { pageKey: "images" },
+    })),
     [items],
   );
 
@@ -229,6 +238,7 @@ export function ImagesPage({ onNavigate }: Props) {
               Edit
             </button>
           )}
+          <ExtensionSelectionActions entityType="image" selectedIds={selectedIds} />
           {canDeleteImage && (
             <button
               onClick={() => { if (confirm(`Delete ${selectedIds.size} image(s)?`)) bulkDeleteMut.mutate(); }}
@@ -248,6 +258,7 @@ export function ImagesPage({ onNavigate }: Props) {
             <ImageCard
               key={img.id}
               image={img}
+              engagement={engagementById.get(img.id)}
               onPreview={() => {
                 if (selecting) { toggle(img.id); return; }
                 setLightboxIndex(idx);
@@ -309,9 +320,11 @@ export function ImagesPage({ onNavigate }: Props) {
   );
 }
 
-function ImageCard({ image, onPreview, onDetails, onNavigate, selected, onSelect, selecting, onQuickView }: { image: Image; onPreview: () => void; onDetails: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onQuickView?: () => void }) {
+function ImageCard({ image, engagement, onPreview, onDetails, onNavigate, selected, onSelect, selecting, onQuickView }: { image: Image; engagement?: EntityEngagement; onPreview: () => void; onDetails: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onQuickView?: () => void }) {
   const thumbnailUrl = images.thumbnailUrl(image.id);
   const displayTitle = getImageDisplayTitle(image);
+  const rating = engagement?.rating ?? image.rating;
+  const favoriteCount = engagement?.oCount ?? image.oCounter;
 
   return (
     <div
@@ -326,7 +339,7 @@ function ImageCard({ image, onPreview, onDetails, onNavigate, selected, onSelect
           loading="lazy"
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
-        <RatingBanner rating={image.rating} />
+        <RatingBanner rating={rating} />
         {onQuickView && (
           <button
             onClick={(e) => { e.stopPropagation(); onQuickView(); }}
@@ -347,7 +360,7 @@ function ImageCard({ image, onPreview, onDetails, onNavigate, selected, onSelect
           {displayTitle}
         </p>
       </div>
-      {(image.performers.length > 0 || image.tags.length > 0 || image.oCounter > 0 || image.galleryCount > 0 || image.organized) && (
+      {(image.performers.length > 0 || image.tags.length > 0 || favoriteCount > 0 || image.galleryCount > 0 || image.organized) && (
         <div className="flex items-center justify-center gap-1 px-1.5 pb-1.5 border-t border-border/50 pt-1">
           {image.tags.length > 0 && (
             <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={image.tags.length} title="Tags" preferBelow>
@@ -371,8 +384,8 @@ function ImageCard({ image, onPreview, onDetails, onNavigate, selected, onSelect
               <GalleriesPopoverContent filter={{ imageId: image.id }} />
             </PopoverButton>
           )}
-          {image.oCounter > 0 && (
-            <FavoriteCounter count={image.oCounter} />
+          {favoriteCount > 0 && (
+            <FavoriteCounter count={favoriteCount} />
           )}
           {image.organized && (
             <span className="text-muted" title="Organized">

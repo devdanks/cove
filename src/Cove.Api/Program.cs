@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
+using System.Data.Common;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -10,33 +11,47 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Cove.Api.Hubs;
+using Cove.Api.Startup;
 using Cove.Api.Services;
 using Cove.Core.Entities.Galleries;
 using Cove.Core.Events;
 using Cove.Core.Interfaces;
 using Cove.Data;
+using Cove.Data.Services;
 using Cove.Plugins;
 
 // Ensure enough threads for async I/O under concurrent load
 ThreadPool.SetMinThreads(Environment.ProcessorCount * 4, Environment.ProcessorCount * 4);
 
-Log.Logger = new LoggerConfiguration()
-    .WriteTo.Console()
-    .CreateBootstrapLogger();
-
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+    var isIntegrationTest = builder.Environment.IsEnvironment("IntegrationTest");
+    var isIntegrationStartupTest = builder.Environment.IsEnvironment("IntegrationStartup");
+    var isTestHarness = isIntegrationTest || isIntegrationStartupTest;
 
-    // Serilog
-    builder.Host.UseSerilog((context, services, configuration) => configuration
-        .ReadFrom.Configuration(context.Configuration)
-        .ReadFrom.Services(services)
-        .Enrich.FromLogContext()
-        .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
-        .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
-        .WriteTo.Console()
-        .WriteTo.Sink(new SignalRLogSink()));
+    if (isTestHarness)
+    {
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Warning()
+            .CreateLogger();
+    }
+    else
+    {
+        Log.Logger = new LoggerConfiguration()
+            .WriteTo.Console()
+            .CreateBootstrapLogger();
+
+        // Serilog
+        builder.Host.UseSerilog((context, services, configuration) => configuration
+            .ReadFrom.Configuration(context.Configuration)
+            .ReadFrom.Services(services)
+            .Enrich.FromLogContext()
+            .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
+            .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
+            .WriteTo.Console()
+            .WriteTo.Sink(new SignalRLogSink()));
+    }
 
     // Bind configuration
     var coveConfig = builder.Configuration.GetSection("Cove");
@@ -75,6 +90,7 @@ try
     // Application services
     builder.Services.AddSingleton<IThumbnailService, ThumbnailService>();
     builder.Services.AddSingleton<IFingerprintService, FingerprintService>();
+    builder.Services.AddSingleton<IFaceSuggester, EmptyFaceSuggester>();
     builder.Services.AddScoped<IScanService, ScanService>();
     builder.Services.AddScoped<IStreamService, StreamService>();
     builder.Services.AddScoped<IAutoTagService, AutoTagService>();
@@ -92,6 +108,8 @@ try
     builder.Services.AddSingleton<DownloaderService>();
     builder.Services.AddSingleton<ITranscodeService, TranscodeService>();
     builder.Services.AddScoped<StashMigrationService>();
+    builder.Services.AddScoped<ITagProvenanceService, TagProvenanceService>();
+    builder.Services.AddScoped<AiDataPurgeService>();
     builder.Services.AddHttpClient("scraper", client =>
     {
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
@@ -257,6 +275,23 @@ try
                     QueueLimit = 0,
                 });
         });
+
+        options.AddPolicy("interactions", httpContext =>
+        {
+            var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var authHeader = httpContext.Request.Headers.Authorization.ToString();
+            var key = !string.IsNullOrWhiteSpace(authHeader) ? authHeader : ip;
+
+            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(key, _ =>
+                new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 240,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                });
+        });
     });
 
     // CORS - allow frontend dev server
@@ -301,203 +336,246 @@ try
     // (When auth is disabled the filter short-circuits and treats requests as anonymous-allowed.)
     app.UseMiddleware<Cove.Api.Middleware.CurrentPrincipalMiddleware>();
 
+    app.MapGet("/health", async (CoveContext db, CancellationToken ct) =>
+    {
+        try
+        {
+            var canConnect = await db.Database.CanConnectAsync(ct);
+            return canConnect
+                ? Results.Ok(new { status = "ok" })
+                : Results.Problem("Database connectivity check failed.", statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+    }).AllowAnonymous();
+
     app.MapControllers();
     app.MapHub<JobHub>("/hubs/jobs");
     app.MapHub<LogHub>("/hubs/logs");
     extensionManager.MapEndpoints(app);
 
-    // Serve SPA static files (production)
-    // When running as a single-file executable, wwwroot is embedded as managed resources.
-    // Fall back to the embedded file provider when the physical wwwroot folder is absent.
-    var webRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-    IFileProvider? spaFileProvider = null;
-    if (Directory.Exists(webRootPath))
+    if (!isTestHarness)
     {
-        app.UseDefaultFiles();
-        app.UseStaticFiles();
-    }
-    else
-    {
-        spaFileProvider = new ManifestEmbeddedFileProvider(
-            typeof(Program).Assembly, "wwwroot");
-        app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = spaFileProvider });
-        app.UseStaticFiles(new StaticFileOptions { FileProvider = spaFileProvider });
-    }
+        // Serve SPA static files (production)
+        // When running as a single-file executable, wwwroot is embedded as managed resources.
+        // Fall back to the embedded file provider when the physical wwwroot folder is absent.
+        var webRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        IFileProvider? spaFileProvider = null;
+        if (Directory.Exists(webRootPath))
+        {
+            app.UseDefaultFiles();
+            app.UseStaticFiles();
+        }
+        else
+        {
+            spaFileProvider = new ManifestEmbeddedFileProvider(
+                typeof(Program).Assembly, "wwwroot");
+            app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = spaFileProvider });
+            app.UseStaticFiles(new StaticFileOptions { FileProvider = spaFileProvider });
+        }
 
-    if (spaFileProvider != null)
-    {
-        app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = spaFileProvider });
-    }
-    else
-    {
-        app.MapFallbackToFile("index.html");
+        if (spaFileProvider != null)
+        {
+            app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = spaFileProvider });
+        }
+        else
+        {
+            app.MapFallbackToFile("index.html");
+        }
     }
 
     var port = coveConfig.GetValue<int?>("Port") ?? 9999;
-    app.Urls.Add($"http://0.0.0.0:{port}");
+    if (!isTestHarness)
+        app.Urls.Add($"http://0.0.0.0:{port}");
 
     // Initialize SignalR log sink with hub context
     SignalRLogSink.SetHubContext(app.Services.GetRequiredService<IHubContext<LogHub>>());
 
-    // Start hosted services (including managed PostgreSQL) before database creation.
+    if (isIntegrationTest)
+    {
+        app.Run();
+        return;
+    }
+
     await app.StartAsync();
 
-    // Load saved user config (cove-config.json) and apply on top of appsettings.json
-    var configSvc = app.Services.GetRequiredService<ConfigService>();
-    var savedConfig = await configSvc.LoadSavedConfigAsync();
-    if (savedConfig != null)
+    if (!isIntegrationTest)
     {
-        await configSvc.SaveConfigAsync(savedConfig); // applies to live IOptions
-        Log.Information("Loaded user configuration from {Path}", configSvc.ConfigPath);
-    }
-
-    // Auto-migrate database + pre-warm EF Core and connection pool
-    using (var scope = app.Services.CreateScope())
-    {
-        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
-
-        // Determine if this is a brand-new database or an existing one that predates migrations.
-        var canConnect = await db.Database.CanConnectAsync();
-        var hasMigrationHistory = false;
-        if (canConnect)
+        if (!isTestHarness)
         {
-            // Check if __EFMigrationsHistory table exists (indicates migrations-aware DB)
-            var conn = db.Database.GetDbConnection();
-            await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='__EFMigrationsHistory'";
-            hasMigrationHistory = await cmd.ExecuteScalarAsync() != null;
-            await conn.CloseAsync();
-        }
-
-        var hasTables = false;
-        if (canConnect && !hasMigrationHistory)
-        {
-            // Check if core tables exist (pre-migration database)
-            var conn = db.Database.GetDbConnection();
-            await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='scenes'";
-            hasTables = await cmd.ExecuteScalarAsync() != null;
-            await conn.CloseAsync();
-        }
-
-        if (hasTables && !hasMigrationHistory)
-        {
-            // Existing database created with EnsureCreatedAsync — baseline it.
-            // Mark the initial migration as already applied so MigrateAsync only runs future migrations.
-            Log.Information("Existing database detected — baselining migration history");
-            var conn = db.Database.GetDbConnection();
-            await conn.OpenAsync();
-
-            await using var createHistory = conn.CreateCommand();
-            createHistory.CommandText = """
-                CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
-                    "MigrationId" character varying(150) NOT NULL,
-                    "ProductVersion" character varying(32) NOT NULL,
-                    CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
-                )
-            """;
-            await createHistory.ExecuteNonQueryAsync();
-
-            await using var insertBaseline = conn.CreateCommand();
-            insertBaseline.CommandText = """
-                INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-                VALUES ('20260419000753_InitialCreate', '10.0.5')
-                ON CONFLICT DO NOTHING
-            """;
-            await insertBaseline.ExecuteNonQueryAsync();
-            await conn.CloseAsync();
-
-            // Still run compatibility patches for pre-migration databases
-            await EnsureColumnsAsync(db);
-
-            Log.Information("Migration history baselined — future migrations will apply automatically");
-        }
-
-        // Check for pending migrations
-        var pendingMigrations = (await db.Database.GetPendingMigrationsAsync()).ToArray();
-
-        if (pendingMigrations.Length > 0)
-        {
-            Log.Information("Applying {Count} pending migration(s): {Migrations}",
-                pendingMigrations.Length, string.Join(", ", pendingMigrations));
-
-            // Automatic backup before migration
-            var backupSvc = scope.ServiceProvider.GetRequiredService<IBackupService>();
-            var backup = await backupSvc.CreateBackupAsync("pre_migration");
-            Log.Information("Pre-migration backup created at {Path}", backup.BackupPath);
-
-            await db.Database.MigrateAsync();
-            Log.Information("Database migrations applied successfully");
-        }
-        else if (!hasTables && !hasMigrationHistory)
-        {
-            // Brand new database — apply all migrations from scratch
-            Log.Information("New database detected — applying all migrations");
-            await db.Database.MigrateAsync();
-            Log.Information("Database created via migrations");
-        }
-        else
-        {
-            Log.Information("Database is up to date");
-        }
-
-        // Compatibility columns must exist before any startup queries touch the model.
-        await EnsureColumnsAsync(db);
-
-        // Fix oshash values: Go uses %016x (zero-padded 16 chars), ensure all values match
-        await NormalizeOshashValuesAsync(db);
-
-        // Pre-warm: compile EF Core query cache, prime connection pool, JIT hot paths
-        _ = await db.Scenes.CountAsync();
-        _ = await db.Scenes.AsNoTracking()
-            .OrderBy(s => s.Id)
-            .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
-            .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
-            .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
-            .Take(1).AsSplitQuery().ToListAsync();
-        Log.Information("EF Core and connection pool pre-warmed");
-    }
-
-    // Initialize extensions after database is ready
-    await extensionManager.InitializeAllAsync(app.Services);
-
-    // Collect extension-contributed permissions and content policies (auth integration).
-    {
-        var permissionRegistry = app.Services.GetRequiredService<Cove.Core.Auth.IPermissionRegistry>();
-        foreach (var ext in extensionManager.Extensions)
-        {
-            if (ext is Cove.Sdk.IPermissionContributor pc)
+            // Load saved user config (cove-config.json) and apply on top of appsettings.json
+            var configSvc = app.Services.GetRequiredService<ConfigService>();
+            var savedConfig = await configSvc.LoadSavedConfigAsync();
+            if (savedConfig != null)
             {
-                try
-                {
-                    var contributed = pc.ContributePermissions().ToList();
-                    permissionRegistry.RegisterExtensionPermissions(ext.Id, contributed);
-                    Log.Information("Extension {Id} contributed {Count} permission(s)", ext.Id, contributed.Count);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "Extension {Id} failed to contribute permissions", ext.Id);
-                }
-            }
-            if (ext is Cove.Sdk.IContentPolicyContributor cp)
-            {
-                try
-                {
-                    var policies = cp.ContributePolicies();
-                    Log.Information("Extension {Id} contributed {Count} content policy/policies", ext.Id, policies.Count);
-                    // Policies are recorded for audit/inspection. Full enforcement at the EF
-                    // query-filter layer is part of Schema C Stage 2; v1 stores them so the
-                    // surface is documented and the auth services can consult them.
-                    Cove.Core.Auth.ContentPolicyRegistry.Register(ext.Id, policies);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "Extension {Id} failed to contribute content policies", ext.Id);
-                }
+                await configSvc.SaveConfigAsync(savedConfig); // applies to live IOptions
+                Log.Information("Loaded user configuration from {Path}", configSvc.ConfigPath);
             }
         }
+
+        // Auto-migrate database + pre-warm EF Core and connection pool
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+
+            var isPostgresProvider = string.Equals(
+                db.Database.ProviderName,
+                "Npgsql.EntityFrameworkCore.PostgreSQL",
+                StringComparison.Ordinal);
+
+            if (isPostgresProvider)
+            {
+                // Determine if this is a brand-new database or an existing one that predates migrations.
+                var canConnect = await db.Database.CanConnectAsync();
+                var hasMigrationHistory = false;
+                if (canConnect)
+                {
+                    // Check if __EFMigrationsHistory table exists (indicates migrations-aware DB)
+                    var conn = db.Database.GetDbConnection();
+                    await conn.OpenAsync();
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='__EFMigrationsHistory'";
+                    hasMigrationHistory = await cmd.ExecuteScalarAsync() != null;
+                    await conn.CloseAsync();
+                }
+
+                var hasTables = false;
+                if (canConnect && !hasMigrationHistory)
+                {
+                    // Check if core tables exist (pre-migration database)
+                    var conn = db.Database.GetDbConnection();
+                    await conn.OpenAsync();
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='scenes'";
+                    hasTables = await cmd.ExecuteScalarAsync() != null;
+                    await conn.CloseAsync();
+                }
+
+                if (hasTables && !hasMigrationHistory)
+                {
+                    // Existing database created with EnsureCreatedAsync — baseline it.
+                    // Mark the initial migration as already applied so MigrateAsync only runs future migrations.
+                    Log.Information("Existing database detected — baselining migration history");
+                    var conn = db.Database.GetDbConnection();
+                    await conn.OpenAsync();
+
+                    await using var createHistory = conn.CreateCommand();
+                    createHistory.CommandText = """
+                        CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+                            "MigrationId" character varying(150) NOT NULL,
+                            "ProductVersion" character varying(32) NOT NULL,
+                            CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+                        )
+                    """;
+                    await createHistory.ExecuteNonQueryAsync();
+
+                    await using var insertBaseline = conn.CreateCommand();
+                    insertBaseline.CommandText = """
+                        INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+                        VALUES ('20260419000753_InitialCreate', '10.0.5')
+                        ON CONFLICT DO NOTHING
+                    """;
+                    await insertBaseline.ExecuteNonQueryAsync();
+                    await conn.CloseAsync();
+
+                    // Still run compatibility patches for pre-migration databases
+                    await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(db);
+
+                    Log.Information("Migration history baselined — future migrations will apply automatically");
+                }
+
+                // Check for pending migrations
+                var pendingMigrations = (await db.Database.GetPendingMigrationsAsync()).ToArray();
+
+                if (pendingMigrations.Length > 0)
+                {
+                    Log.Information("Applying {Count} pending migration(s): {Migrations}",
+                        pendingMigrations.Length, string.Join(", ", pendingMigrations));
+
+                    // Automatic backup before migration
+                    var backupSvc = scope.ServiceProvider.GetRequiredService<IBackupService>();
+                    var backup = await backupSvc.CreateBackupAsync("pre_migration");
+                    Log.Information("Pre-migration backup created at {Path}", backup.BackupPath);
+
+                    await db.Database.MigrateAsync();
+                    Log.Information("Database migrations applied successfully");
+                }
+                else if (!hasTables && !hasMigrationHistory)
+                {
+                    // Brand new database — apply all migrations from scratch
+                    Log.Information("New database detected — applying all migrations");
+                    await db.Database.MigrateAsync();
+                    Log.Information("Database created via migrations");
+                }
+                else
+                {
+                    Log.Information("Database is up to date");
+                }
+            }
+            else
+            {
+                await db.Database.EnsureCreatedAsync();
+            }
+
+            // Compatibility columns must exist before any startup queries touch the model.
+            await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(db);
+
+            // Fix oshash values: Go uses %016x (zero-padded 16 chars), ensure all values match
+            await SchemaCompatibilityBootstrap.NormalizeOshashAndIndexesAsync(db);
+
+            // Pre-warm: compile EF Core query cache, prime connection pool, JIT hot paths
+            _ = await db.Scenes.CountAsync();
+            _ = await db.Scenes.AsNoTracking()
+                .OrderBy(s => s.Id)
+                .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
+                .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
+                .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
+                .Take(1).AsSplitQuery().ToListAsync();
+            Log.Information("EF Core and connection pool pre-warmed");
+        }
+
+        // Initialize extensions after database is ready
+        await extensionManager.InitializeAllAsync(app.Services);
+
+        // Collect extension-contributed permissions and content policies (auth integration).
+        {
+            var permissionRegistry = app.Services.GetRequiredService<Cove.Core.Auth.IPermissionRegistry>();
+            foreach (var ext in extensionManager.Extensions)
+            {
+                if (ext is Cove.Sdk.IPermissionContributor pc)
+                {
+                    try
+                    {
+                        var contributed = pc.ContributePermissions().ToList();
+                        permissionRegistry.RegisterExtensionPermissions(ext.Id, contributed);
+                        Log.Information("Extension {Id} contributed {Count} permission(s)", ext.Id, contributed.Count);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Extension {Id} failed to contribute permissions", ext.Id);
+                    }
+                }
+                if (ext is Cove.Sdk.IContentPolicyContributor cp)
+                {
+                    try
+                    {
+                        var policies = cp.ContributePolicies();
+                        Log.Information("Extension {Id} contributed {Count} content policy/policies", ext.Id, policies.Count);
+                        // Policies are recorded for audit/inspection. Full enforcement at the EF
+                        // query-filter layer is part of Schema C Stage 2; v1 stores them so the
+                        // surface is documented and the auth services can consult them.
+                        Cove.Core.Auth.ContentPolicyRegistry.Register(ext.Id, policies);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Extension {Id} failed to contribute content policies", ext.Id);
+                    }
+                }
+            }
+        }
+
     }
 
     Log.Information("Cove starting on port {Port}", port);
@@ -509,211 +587,15 @@ try
 catch (Exception ex)
 {
     Log.Fatal(ex, "Application terminated unexpectedly");
+
+    if (string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "IntegrationTest", StringComparison.Ordinal))
+        throw;
 }
 finally
 {
     await Log.CloseAndFlushAsync();
 }
 
-static async Task EnsureColumnsAsync(CoveContext db)
+public partial class Program
 {
-    var conn = db.Database.GetDbConnection();
-    await conn.OpenAsync();
-
-    async Task<string?> GetRelationKindAsync(string relation)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"""
-            SELECT c.relkind
-            FROM pg_class c
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public' AND c.relname = '{relation}'
-            LIMIT 1
-            """;
-        var kind = await cmd.ExecuteScalarAsync();
-        return kind?.ToString();
-    }
-
-    async Task AddColumnIfMissing(string table, string column, string type, string? defaultValue = null)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT column_name FROM information_schema.columns WHERE table_name='{table}' AND column_name='{column}'";
-        var exists = await cmd.ExecuteScalarAsync();
-        if (exists != null) return;
-
-        var def = defaultValue != null ? $" DEFAULT {defaultValue}" : "";
-        await using var alter = conn.CreateCommand();
-        alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {type}{def}";
-        await alter.ExecuteNonQueryAsync();
-    }
-
-    async Task EnsureTableExists(string table, string createSql)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='{table}'";
-        var exists = await cmd.ExecuteScalarAsync();
-        if (exists != null) return;
-
-        await using var create = conn.CreateCommand();
-        create.CommandText = createSql;
-        await create.ExecuteNonQueryAsync();
-    }
-
-    // Gallery and scene cover image support
-    await AddColumnIfMissing("scenes", "ImageBlobId", "text");
-    await AddColumnIfMissing("galleries", "ImageBlobId", "text");
-    await AddColumnIfMissing("galleries", "CoverImageId", "integer");
-    await AddColumnIfMissing("scrape_attempts", "CandidateResultsJson", "text");
-
-    // Remote ID support added after the initial database schema.
-    await EnsureTableExists("SceneRemoteId", """
-        CREATE TABLE IF NOT EXISTS "SceneRemoteId" (
-            "Id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            "SceneId" integer NOT NULL REFERENCES "scenes"("Id") ON DELETE CASCADE,
-            "Endpoint" text NOT NULL,
-            "RemoteId" text NOT NULL
-        )
-    """);
-    await EnsureTableExists("PerformerRemoteId", """
-        CREATE TABLE IF NOT EXISTS "PerformerRemoteId" (
-            "Id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            "PerformerId" integer NOT NULL REFERENCES "performers"("Id") ON DELETE CASCADE,
-            "Endpoint" text NOT NULL,
-            "RemoteId" text NOT NULL
-        )
-    """);
-    await EnsureTableExists("TagRemoteId", """
-        CREATE TABLE IF NOT EXISTS "TagRemoteId" (
-            "Id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            "TagId" integer NOT NULL REFERENCES "tags"("Id") ON DELETE CASCADE,
-            "Endpoint" text NOT NULL,
-            "RemoteId" text NOT NULL
-        )
-    """);
-    await EnsureTableExists("StudioRemoteId", """
-        CREATE TABLE IF NOT EXISTS "StudioRemoteId" (
-            "Id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            "StudioId" integer NOT NULL REFERENCES "studios"("Id") ON DELETE CASCADE,
-            "Endpoint" text NOT NULL,
-            "RemoteId" text NOT NULL
-        )
-    """);
-
-    var remoteIdIndexCommands = new[]
-    {
-        new { Relation = "SceneRemoteId", Sql = "CREATE INDEX IF NOT EXISTS \"IX_SceneRemoteId_SceneId\" ON \"SceneRemoteId\" (\"SceneId\")" },
-        new { Relation = "PerformerRemoteId", Sql = "CREATE INDEX IF NOT EXISTS \"IX_PerformerRemoteId_PerformerId\" ON \"PerformerRemoteId\" (\"PerformerId\")" },
-        new { Relation = "TagRemoteId", Sql = "CREATE INDEX IF NOT EXISTS \"IX_TagRemoteId_TagId\" ON \"TagRemoteId\" (\"TagId\")" },
-        new { Relation = "StudioRemoteId", Sql = "CREATE INDEX IF NOT EXISTS \"IX_StudioRemoteId_StudioId\" ON \"StudioRemoteId\" (\"StudioId\")" },
-    };
-
-    foreach (var indexCommand in remoteIdIndexCommands)
-    {
-        var relationKind = await GetRelationKindAsync(indexCommand.Relation);
-        if (relationKind is not ("r" or "p"))
-        {
-            Log.Information("Skipping compatibility index bootstrap for relation {Relation} (kind={Kind})", indexCommand.Relation, relationKind ?? "missing");
-            continue;
-        }
-
-        await using var createIndex = conn.CreateCommand();
-        createIndex.CommandText = indexCommand.Sql;
-        await createIndex.ExecuteNonQueryAsync();
-    }
-
-    // Extension key-value storage (added after initial schema)
-    await EnsureTableExists("extension_data", """
-        CREATE TABLE IF NOT EXISTS "extension_data" (
-            "ExtensionId" text NOT NULL,
-            "Key" text NOT NULL,
-            "Value" text NOT NULL,
-            "UpdatedAt" timestamp with time zone NOT NULL DEFAULT now(),
-            PRIMARY KEY ("ExtensionId", "Key")
-        )
-    """);
-
-    await using (var extIndex = conn.CreateCommand())
-    {
-        extIndex.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_extension_data_ExtensionId\" ON \"extension_data\" (\"ExtensionId\")";
-        await extIndex.ExecuteNonQueryAsync();
-    }
-
-    // Video captions support
-    // Create the table if it does not exist before checking for missing columns.
-    await EnsureTableExists("VideoCaptions", """
-        CREATE TABLE IF NOT EXISTS "VideoCaptions" (
-            "Id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            "FileId" integer NOT NULL REFERENCES "files"("Id") ON DELETE CASCADE,
-            "LanguageCode" text NOT NULL DEFAULT '00',
-            "CaptionType" text NOT NULL DEFAULT 'vtt',
-            "Filename" text NOT NULL
-        )
-    """);
-
-    await AddColumnIfMissing("VideoCaptions", "Id", "integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY");
-
-    // FK indexes on the files table for faster lookups (e.g. streaming by SceneId)
-    var fileIndexCommands = new[]
-    {
-        """CREATE INDEX IF NOT EXISTS "IX_files_SceneId" ON "files" ("SceneId")""",
-        """CREATE INDEX IF NOT EXISTS "IX_files_ImageId" ON "files" ("ImageId")""",
-    };
-    foreach (var sql in fileIndexCommands)
-    {
-        await using var indexCmd = conn.CreateCommand();
-        indexCmd.CommandText = sql;
-        await indexCmd.ExecuteNonQueryAsync();
-    }
-
-    await conn.CloseAsync();
-}
-
-/// <summary>
-/// Normalize oshash fingerprint values to match Go's fmt.Sprintf("%016x") format:
-/// zero-padded to exactly 16 hex characters. Previously the C# implementation
-/// used unpadded hex which caused metadata-server matching failures.
-/// </summary>
-static async Task NormalizeOshashValuesAsync(CoveContext db)
-{
-    var conn = db.Database.GetDbConnection();
-    await conn.OpenAsync();
-
-    // Fix oshash values â€” SQLite uses substr/replace for zero-padding
-    await using var cmd = conn.CreateCommand();
-    cmd.CommandText = """
-        UPDATE "FileFingerprints"
-        SET "Value" = substr('0000000000000000' || "Value", -16, 16)
-        WHERE "Type" = 'oshash' AND length("Value") < 16
-    """;
-    var affected = await cmd.ExecuteNonQueryAsync();
-
-    // Ensure join table indexes exist for filter performance (EF migrations may not create them for existing DBs)
-    var indexCommands = new[]
-    {
-        "CREATE INDEX IF NOT EXISTS \"IX_scene_tags_TagId\" ON \"scene_tags\" (\"TagId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_scene_performers_PerformerId\" ON \"scene_performers\" (\"PerformerId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_image_tags_TagId\" ON \"image_tags\" (\"TagId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_image_performers_PerformerId\" ON \"image_performers\" (\"PerformerId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_image_galleries_GalleryId\" ON \"image_galleries\" (\"GalleryId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_gallery_tags_TagId\" ON \"gallery_tags\" (\"TagId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_gallery_performers_PerformerId\" ON \"gallery_performers\" (\"PerformerId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_performer_tags_TagId\" ON \"performer_tags\" (\"TagId\")",
-        "CREATE INDEX IF NOT EXISTS \"IX_FileFingerprints_Type_Value\" ON \"FileFingerprints\" (\"Type\", \"Value\")",
-    };
-
-    foreach (var sql in indexCommands)
-    {
-        try
-        {
-            await using var idxCmd = conn.CreateCommand();
-            idxCmd.CommandText = sql;
-            await idxCmd.ExecuteNonQueryAsync();
-        }
-        catch { /* index may already exist */ }
-    }
-
-    await conn.CloseAsync();
-
-    if (affected > 0)
-        Log.Information("Normalized {Count} oshash fingerprint values to 16-char padded format", affected);
 }

@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Cove.Core.Common;
 
 namespace Cove.Plugins;
 
@@ -66,7 +65,10 @@ public class ExtensionManager
     {
         if (!Directory.Exists(extensionsDir)) return;
 
-        foreach (var dir in Directory.GetDirectories(extensionsDir))
+        var extensionDirectories = Directory.GetDirectories(extensionsDir);
+        ExtensionLoadContext.PreloadSharedAssemblies(extensionsDir, extensionDirectories);
+
+        foreach (var dir in extensionDirectories)
         {
             try
             {
@@ -76,7 +78,31 @@ public class ExtensionManager
                 if (File.Exists(manifestPath))
                 {
                     var json = File.ReadAllText(manifestPath);
-                    manifestFile = JsonSerializer.Deserialize<ExtensionManifestFile>(json, CoveJson.Default);
+                    manifestFile = JsonSerializer.Deserialize<ExtensionManifestFile>(json,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                    if (manifestFile != null)
+                    {
+                        _manifestFiles[manifestFile.Id] = manifestFile;
+
+                        if (string.Equals(manifestFile.Kind, "bundle", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var source = manifestFile.RegistryUrl != null ? "registry" : "local";
+                            var existingInstall = _installations.GetValueOrDefault(manifestFile.Id);
+                            _installations[manifestFile.Id] = new ExtensionInstallation
+                            {
+                                ExtensionId = manifestFile.Id,
+                                Version = manifestFile.Version,
+                                Enabled = existingInstall?.Enabled ?? true,
+                                Source = source,
+                                InstalledAt = existingInstall?.InstalledAt ?? DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow,
+                                ManifestJson = json,
+                                Categories = manifestFile.Categories.Count > 0 ? string.Join(",", manifestFile.Categories) : null,
+                            };
+                            continue;
+                        }
+                    }
                 }
 
                 // Determine which DLL to load
@@ -327,7 +353,7 @@ public class ExtensionManager
                 if (install == null)
                 {
                     await ext.OnInstallAsync(services, ct);
-                    await SaveInstallationAsync(services, ext, ct);
+                    await SaveInstallationAsync(services, ext.Id, ct);
                     _logger?.LogInformation("Extension {Id} installed (v{Version})", ext.Id, ext.Version);
                 }
 
@@ -364,10 +390,20 @@ public class ExtensionManager
     /// </summary>
     public async Task<bool> InitializeExtensionAsync(string id, IServiceProvider services, CancellationToken ct = default)
     {
-        if (!_extensionMap.TryGetValue(id, out var ext)) return false;
-
         _lastServiceProvider = services;
         _logger ??= services.GetService<ILogger<ExtensionManager>>();
+
+        if (!_extensionMap.TryGetValue(id, out var ext))
+        {
+            if (_installations.TryGetValue(id, out var install) && IsManifestOnlyExtension(id))
+            {
+                install.UpdatedAt = DateTime.UtcNow;
+                await PersistInstallationStateAsync(id, ct);
+                return true;
+            }
+
+            return false;
+        }
 
         if (ext is IStatefulExtension stateful)
         {
@@ -416,6 +452,14 @@ public class ExtensionManager
 
         if (!_extensionMap.TryGetValue(id, out var ext))
         {
+            if (_installations.ContainsKey(id) && IsManifestOnlyExtension(id))
+            {
+                _manifestFiles.Remove(id);
+                _installations.Remove(id);
+                await RemoveInstallationStateAsync(id, ct);
+                return true;
+            }
+
             // It may still exist as a stale installation record.
             _installations.Remove(id);
             await RemoveInstallationStateAsync(id, ct);
@@ -552,6 +596,37 @@ public class ExtensionManager
     /// <summary>Get the installation record for an extension.</summary>
     public ExtensionInstallation? GetInstallation(string id) =>
         _installations.TryGetValue(id, out var inst) ? inst : null;
+
+    /// <summary>Get the manifest metadata for an extension or bundle.</summary>
+    public ExtensionManifestFile? GetManifestFile(string id)
+    {
+        if (_manifestFiles.TryGetValue(id, out var manifest))
+            return manifest;
+
+        if (_installations.TryGetValue(id, out var install) && !string.IsNullOrWhiteSpace(install.ManifestJson))
+        {
+            try
+            {
+                manifest = JsonSerializer.Deserialize<ExtensionManifestFile>(install.ManifestJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (manifest != null)
+                {
+                    _manifestFiles[id] = manifest;
+                    return manifest;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Returns true when the installation is metadata-only and has no runtime DLL.</summary>
+    public bool IsManifestOnlyExtension(string id) =>
+        string.Equals(GetManifestFile(id)?.Kind, "bundle", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Get all installation records.</summary>
     public IReadOnlyDictionary<string, ExtensionInstallation> Installations => _installations;
@@ -813,7 +888,7 @@ public class ExtensionManager
         }
     }
 
-    private async Task SaveInstallationAsync(IServiceProvider services, IExtension ext, CancellationToken ct)
+    private async Task SaveInstallationAsync(IServiceProvider services, string extensionId, CancellationToken ct)
     {
         try
         {
@@ -821,7 +896,7 @@ public class ExtensionManager
             var db = scope.ServiceProvider.GetService<DbContext>();
             if (db?.Database is null) return;
 
-            var install = _installations.GetValueOrDefault(ext.Id);
+            var install = _installations.GetValueOrDefault(extensionId);
             if (install == null) return;
 
             await db.Database.ExecuteSqlRawAsync("""
@@ -841,15 +916,14 @@ public class ExtensionManager
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Could not save extension installation state for {Id}", ext.Id);
+            _logger?.LogWarning(ex, "Could not save extension installation state for {Id}", extensionId);
         }
     }
 
     private async Task PersistInstallationStateAsync(string extensionId, CancellationToken ct)
     {
         if (_lastServiceProvider == null) return;
-        if (!_extensionMap.TryGetValue(extensionId, out var ext)) return;
-        await SaveInstallationAsync(_lastServiceProvider, ext, ct);
+        await SaveInstallationAsync(_lastServiceProvider, extensionId, ct);
     }
 
     private async Task RemoveInstallationStateAsync(string extensionId, CancellationToken ct)
@@ -1026,6 +1100,14 @@ public class ExtensionManager
 
 internal sealed class ExtensionLoadContext : AssemblyLoadContext
 {
+    private static readonly HashSet<string> SharedAssemblyNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "AI.Extensions.Abstractions",
+    };
+
+    private static readonly object SharedAssemblyGate = new();
+    private static readonly Dictionary<string, string> PreferredSharedAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly AssemblyDependencyResolver _resolver;
 
     public ExtensionLoadContext(string mainAssemblyPath)
@@ -1041,6 +1123,13 @@ internal sealed class ExtensionLoadContext : AssemblyLoadContext
         if (defaultAssembly != null)
             return defaultAssembly;
 
+        if (SharedAssemblyNames.Contains(assemblyName.Name ?? string.Empty))
+        {
+            var sharedAssembly = TryLoadSharedAssembly(assemblyName);
+            if (sharedAssembly != null)
+                return sharedAssembly;
+        }
+
         var path = _resolver.ResolveAssemblyToPath(assemblyName);
         return path != null ? LoadFromAssemblyPath(path) : null;
     }
@@ -1049,6 +1138,73 @@ internal sealed class ExtensionLoadContext : AssemblyLoadContext
     {
         var path = _resolver.ResolveUnmanagedDllToPath(unmanagedDllName);
         return path != null ? LoadUnmanagedDllFromPath(path) : IntPtr.Zero;
+    }
+
+    internal static void PreloadSharedAssemblies(string extensionsRoot, IEnumerable<string> extensionDirectories)
+    {
+        foreach (var assemblyName in SharedAssemblyNames)
+        {
+            var preferredSourcePath = extensionDirectories
+                .Select(dir => Path.Combine(dir, $"{assemblyName}.dll"))
+                .Where(File.Exists)
+                .Select(path => new FileInfo(path))
+                .OrderByDescending(static file => file.LastWriteTimeUtc)
+                .ThenByDescending(static file => file.Length)
+                .ThenBy(static file => file.FullName, StringComparer.OrdinalIgnoreCase)
+                .Select(static file => file.FullName)
+                .FirstOrDefault();
+
+            if (preferredSourcePath is null)
+            {
+                continue;
+            }
+
+            lock (SharedAssemblyGate)
+            {
+                if (!PreferredSharedAssemblyPaths.ContainsKey(assemblyName))
+                {
+                    PreferredSharedAssemblyPaths[assemblyName] = CreateSharedShadowCopy(extensionsRoot, assemblyName, preferredSourcePath);
+                }
+            }
+
+            _ = TryLoadSharedAssembly(new AssemblyName(assemblyName));
+        }
+    }
+
+    private static Assembly? TryLoadSharedAssembly(AssemblyName assemblyName)
+    {
+        var assemblyKey = assemblyName.Name ?? string.Empty;
+        if (!PreferredSharedAssemblyPaths.TryGetValue(assemblyKey, out var preferredPath) || !File.Exists(preferredPath))
+        {
+            return null;
+        }
+
+        lock (SharedAssemblyGate)
+        {
+            var defaultAssembly = AssemblyLoadContext.Default.Assemblies
+                .FirstOrDefault(a => AssemblyName.ReferenceMatchesDefinition(a.GetName(), assemblyName));
+            if (defaultAssembly != null)
+            {
+                return defaultAssembly;
+            }
+
+            return AssemblyLoadContext.Default.LoadFromAssemblyPath(preferredPath);
+        }
+    }
+
+    private static string CreateSharedShadowCopy(string extensionsRoot, string assemblyName, string sourcePath)
+    {
+        var sharedDir = Path.Combine(
+            extensionsRoot,
+            ".load-cache",
+            "__shared",
+            assemblyName,
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(sharedDir);
+
+        var destinationPath = Path.Combine(sharedDir, Path.GetFileName(sourcePath));
+        File.Copy(sourcePath, destinationPath, overwrite: true);
+        return destinationPath;
     }
 }
 

@@ -16,13 +16,12 @@ import type {
   AiDataSummary,
   AffinityHostType,
   Segment, SegmentCreate, SegmentRecord, SegmentUpdate,
-  SegmentDistinctValue,
   ResolvedSpanDetail, ResolvedSpanList, SceneResolvedSpans, SegmentDisplayProfile,
-  SegmentDisplayProfileCreate, SegmentDisplayProfilePreviewRequest, SegmentDisplayProfileUpdate,
+  SegmentDisplayProfileCreate, SegmentDisplayProfileUpdate,
   SegmentDisplayRule, SegmentDisplayRuleCreate, SegmentDisplayRuleUpdate,
-  SegmentSpanQueryRequest,
+  SegmentSpanQueryRequest, SegmentSpanSearchRequest, SegmentSpanSearchResponse,
   Detection, DetectionCreate, DetectionUpdate,
-  Face, FaceCreate, FaceUpdate, FaceLink, FaceMerge, FaceDeleteImpact, FaceSuggestion, FaceSuggestionDecision, FaceSimilar,
+  Face, FaceCreate, FaceUpdate, FaceLink, FaceMerge, FaceIgnore, FaceDeleteImpact, FaceSimilar, FaceSuggestion,
   EntityEngagement, EntityFavorite, EntityEngagementBatchRequest, EntityRatings,
   EngagementInteraction, EngagementInteractionWrite,
   SceneHistory,
@@ -88,8 +87,6 @@ import type {
   DownloaderPreflightResponse,
   UserUiPreferences,
   PlaybackIntervalsRequest,
-  SegmentSpanSearchRequest,
-  SegmentSpanSearchResponse,
 } from "./types";
 
 const API_BASE = "/api";
@@ -221,18 +218,7 @@ async function requestOptional<T>(path: string, options?: RequestInit): Promise<
   if (res.status === 204) return undefined as T;
   return res.json();
 }
-async function requestForm<T>(path: string, body: FormData, options?: Omit<RequestInit, "body">): Promise<T> {
-  const res = await authedFetch(`${API_BASE}${path}`, {
-    ...options,
-    body,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API Error ${res.status}: ${text}`);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json();
-}
+
 function buildQuery(filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>): string {
   const params = new URLSearchParams();
   if (filter?.q) params.set("q", filter.q);
@@ -249,7 +235,6 @@ function buildQuery(filter?: FindFilter, extra?: Record<string, string | number 
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
-
 
 function buildAiDataQuery(selector?: AiDataSelector): string {
   if (!selector) {
@@ -401,10 +386,8 @@ export const playback = {
 export const segmentLibrary = {
   list: (opts?: {
     q?: string;
-    ids?: string;
     sceneId?: number;
     sceneIds?: string;
-    excludeSceneIds?: string;
     sceneTitle?: string;
     tagId?: number;
     tagIds?: string;
@@ -417,32 +400,52 @@ export const segmentLibrary = {
     direction?: "asc" | "desc";
     page?: number;
     perPage?: number;
+    ids?: string;
+    excludeSceneIds?: string;
   }) =>
     request<PaginatedResponse<SegmentRecord>>(`/segments${buildQuery(undefined, opts)}`),
   get: (id: number) => requestOptional<SegmentRecord>(`/segments/${id}`),
-  distinctSourceKeys: () => request<SegmentDistinctValue[]>("/segments/source-keys/distinct"),
-  distinctKinds: () => request<SegmentDistinctValue[]>("/segments/kinds/distinct"),
+  distinctSourceKeys: () => request<{ value: string; count: number }[]>("/segments/source-keys/distinct"),
+  distinctKinds: () => request<{ value: string; count: number }[]>("/segments/kinds/distinct"),
 };
 
 // ===== Faces =====
-export const faces = {
-  list: (opts?: { q?: string; performerId?: number; merged?: boolean; page?: number; perPage?: number }) =>
+export const faces: {
+  list: (opts?: { q?: string; performerId?: number; ignored?: boolean; merged?: boolean; page?: number; perPage?: number }) => Promise<PaginatedResponse<Face>>;
+  get: (id: number) => Promise<Face>;
+  detections: (id: number) => Promise<Detection[]>;
+  deleteImpact: (id: number) => Promise<FaceDeleteImpact>;
+  create: (data: FaceCreate) => Promise<Face>;
+  update: (id: number, data: FaceUpdate) => Promise<Face>;
+  delete: (id: number) => Promise<void>;
+  link: (id: number, data: FaceLink) => Promise<Face>;
+  mergeInto: (id: number, data: FaceMerge) => Promise<Face>;
+  setIgnored: (id: number, data: FaceIgnore) => Promise<Face>;
+  similar: (id: number, opts?: { kindFamily?: string; k?: number }) => Promise<FaceSimilar[]>;
+  suggestions: (id: number, maxResults?: number) => Promise<FaceSuggestion[]>;
+  recordSuggestionDecision: (id: number, data: { performerId: number; decision: "accept" | "reject" }) => Promise<void>;
+} = {
+  list: (opts?: { q?: string; performerId?: number; ignored?: boolean; merged?: boolean; page?: number; perPage?: number }) =>
     request<PaginatedResponse<Face>>(`/faces${buildQuery({ page: opts?.page, perPage: opts?.perPage, q: opts?.q }, {
       performerId: opts?.performerId,
+      ignored: opts?.ignored,
       merged: opts?.merged,
     })}`),
   get: (id: number) => request<Face>(`/faces/${id}`),
   detections: (id: number) => request<Detection[]>(`/faces/${id}/detections`),
   deleteImpact: (id: number) => request<FaceDeleteImpact>(`/faces/${id}/delete-impact`),
-  suggestions: (id: number, maxResults = 5) => request<FaceSuggestion[]>(`/faces/${id}/suggestions${buildQuery(undefined, { maxResults })}`),
   create: (data: FaceCreate) => request<Face>("/faces", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: FaceUpdate) => request<Face>(`/faces/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/faces/${id}`, { method: "DELETE" }),
   link: (id: number, data: FaceLink) => request<Face>(`/faces/${id}/link`, { method: "POST", body: JSON.stringify(data) }),
   mergeInto: (id: number, data: FaceMerge) => request<Face>(`/faces/${id}/merge-into`, { method: "POST", body: JSON.stringify(data) }),
-  recordSuggestionDecision: (id: number, data: FaceSuggestionDecision) => request<void>(`/faces/${id}/suggestions/decision`, { method: "POST", body: JSON.stringify(data) }),
+  setIgnored: (id: number, data: FaceIgnore) => request<Face>(`/faces/${id}/ignore`, { method: "POST", body: JSON.stringify(data) }),
   similar: (id: number, opts?: { kindFamily?: string; k?: number }) =>
     request<FaceSimilar[]>(`/faces/${id}/similar${buildQuery(undefined, { kindFamily: opts?.kindFamily, k: opts?.k })}`),
+  suggestions: (id: number, maxResults?: number) =>
+    request<FaceSuggestion[]>(`/faces/${id}/suggestions${buildQuery(undefined, { maxResults })}`),
+  recordSuggestionDecision: (id: number, data: { performerId: number; decision: "accept" | "reject" }) =>
+    request<void>(`/faces/${id}/suggestions/decision`, { method: "POST", body: JSON.stringify(data) }),
 };
 
 export const entityEngagement = {
@@ -518,6 +521,11 @@ export const tags = {
     request<{ draftId: string | null }>(`/tags/${id}/metadata-server/submit-draft`, { method: "POST", body: JSON.stringify({ endpoint }) }),
   batchTagMetadataServer: (data: MetadataServerTagBatchTagRequest) =>
     request<{ jobId: string; itemCount: number }>("/tags/metadata-server/batch-tag", { method: "POST", body: JSON.stringify(data) }),
+};
+
+export const aiData = {
+  summary: (selector?: AiDataSelector) => request<AiDataSummary>(`/ai-data/summary${buildAiDataQuery(selector)}`),
+  purge: (request_: AiDataPurgeRequest) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(request_) }),
 };
 
 // ===== Studios =====
@@ -661,8 +669,8 @@ export const segmentDisplayProfiles = {
     request<SegmentDisplayProfile>(`/segment-display-profiles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/segment-display-profiles/${id}`, { method: "DELETE" }),
   setDefault: (id: number) => request<SegmentDisplayProfile>(`/segment-display-profiles/${id}/default`, { method: "PUT" }),
-  preview: (data: SegmentDisplayProfilePreviewRequest) =>
-    request<ResolvedSpanList>("/segment-display-profiles/preview", { method: "POST", body: JSON.stringify(data) }),
+  preview: (data: import("./types").SegmentDisplayProfilePreviewRequest) =>
+    request<import("./types").ResolvedSpanList>("/segment-display-profiles/preview", { method: "POST", body: JSON.stringify(data) }),
   rules: {
     list: (profileId: number) => request<SegmentDisplayRule[]>(`/segment-display-profiles/${profileId}/rules`),
     create: (profileId: number, data: SegmentDisplayRuleCreate) =>
@@ -773,9 +781,11 @@ export const jobs = {
   cancel: (id: string) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
 };
 
-export const aiData = {
-  summary: (selector?: AiDataSelector) => request<AiDataSummary>(`/ai-data/summary${buildAiDataQuery(selector)}`),
-  purge: (requestBody: AiDataPurgeRequest) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(requestBody) }),
+export const aiFaces = {
+  rejectReferenceSuggestion: (faceId: number, data: { referenceSuggestionId: number }) =>
+    request<void>(`/ext/ai-faces/reference/faces/${faceId}/reject`, { method: "POST", body: JSON.stringify(data) }),
+  importReferencePerformer: (faceId: number, data: { referenceSuggestionId: number }) =>
+    request<void>(`/ext/ai-faces/reference/faces/${faceId}/import-performer`, { method: "POST", body: JSON.stringify(data) }),
 };
 
 // ===== Metadata Tasks =====
@@ -1268,11 +1278,3 @@ export const shareLinksApi = {
     request<ShareLinkIssuedRow>("/share-links", { method: "POST", body: JSON.stringify(req) }),
   revoke: (id: string) => request<void>(`/share-links/${id}`, { method: "DELETE" }),
 };
-
-export const aiFaces = {
-  rejectReferenceSuggestion: (faceId: number, data: { referenceSuggestionId: number }) =>
-    request<void>(`/ext/ai-faces/reference/faces/${faceId}/reject`, { method: "POST", body: JSON.stringify(data) }),
-  importReferencePerformer: (faceId: number, data: { referenceSuggestionId: number }) =>
-    request<void>(`/ext/ai-faces/reference/faces/${faceId}/import-performer`, { method: "POST", body: JSON.stringify(data) }),
-};
-

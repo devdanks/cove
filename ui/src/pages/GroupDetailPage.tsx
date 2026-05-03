@@ -1,28 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups, scenes } from "../api/client";
-import type { FindFilter, Group, Scene } from "../api/types";
+import type { FindFilter, Group, GroupItem, Scene, SegmentDerivedQueryDescriptor, SegmentSpanDerivedQuery } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, ChevronDown, ChevronUp, Clapperboard, Film, Layers, Link as LinkIcon, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Clapperboard, ExternalLink, Film, GripVertical, Layers, Link as LinkIcon, Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { GroupEditModal } from "./GroupEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { GroupTile, SceneCard } from "../components/EntityCards";
+import { CompilationPlayer } from "../components/CompilationPlayer";
+import { DetailSkeleton } from "../components/DetailSkeleton";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { DetailListToolbar } from "../components/DetailListToolbar";
+import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
+import { SortableList } from "../components/SortableList";
 
 interface Props {
   id: number;
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "subGroups" | "containingGroups" | (string & {});
+type TabKey = "items" | "containingGroups" | "metadata" | "edit" | (string & {});
 
 export function GroupDetailPage({ id, onNavigate }: Props) {
   const { data: group, isLoading } = useQuery({
@@ -32,37 +36,39 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const { hasPermission } = useAuth();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>("scenes");
+  const [activeTab, setActiveTab] = useState<TabKey>("items");
   const { allTabs: groupTabs, renderExtensionTab } = useExtensionTabs("group", [
-    { key: "scenes", label: "Scenes" },
-    { key: "subGroups", label: "Sub-Groups" },
+    { key: "items", label: "Items" },
     { key: "containingGroups", label: "Containing Groups" },
+    { key: "metadata", label: "Metadata" },
+    { key: "edit", label: "Edit" },
   ], id);
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "asc", sort: "date" });
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "groups" }, onNavigate);
+  const canReadGroups = canReadEntity("group", hasPermission);
+  const canReadScenes = canReadEntity("scene", hasPermission);
   const canWriteGroup = canWriteEntity("group", hasPermission);
   const canDeleteGroup = canDeleteEntity("group", hasPermission);
   const canReadStudios = canReadEntity("studio", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
+  const { data: groupItems = [], isLoading: groupItemsLoading } = useQuery({
+    queryKey: ["group-items", id],
+    queryFn: () => groups.items.list(id),
+    enabled: canReadGroups,
+  });
+  const { data: playbackManifest, isLoading: playbackManifestLoading } = useQuery({
+    queryKey: ["group", id, "playback-manifest"],
+    queryFn: () => groups.items.playbackManifest(id),
+    enabled: canReadScenes,
+  });
+  const hasPlaybackItems = (playbackManifest?.items.length ?? 0) > 0;
+  const hasCompilationItems = groupItems.some((item) => item.kind === "sceneRange");
 
   useEffect(() => {
     if (group) document.title = `${group.name} | Cove`;
     return () => { document.title = "Cove"; };
   }, [group]);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const el = (e.target as HTMLElement).tagName;
-      if (el === "INPUT" || el === "TEXTAREA" || el === "SELECT") return;
-      switch (e.key) {
-        case "e": if (canWriteGroup) setEditing((v) => !v); break;
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [canWriteGroup]);
 
   const deleteMut = useMutation({
     mutationFn: () => groups.delete(id),
@@ -72,17 +78,42 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  const tabs = filterItemsByPermission(groupTabs.map(t => ({
-    ...t,
-    count: t.key === "scenes" ? group?.sceneCount
-      : t.key === "subGroups" ? group?.subGroupCount
-      : t.key === "containingGroups" ? group?.containingGroupCount
-      : undefined,
-  })), {
-    scenes: "scenes.read",
-    subGroups: "groups.read",
-    containingGroups: "groups.read",
-  }, hasPermission);
+  const tabs = useMemo(() => {
+    const countedTabs = groupTabs.map((tab) => ({
+      ...tab,
+      count:
+        tab.key === "items"
+          ? groupItems.length + (group?.subGroupCount ?? 0)
+          : tab.key === "containingGroups"
+            ? group?.containingGroupCount
+            : undefined,
+    }));
+
+    return filterItemsByPermission(countedTabs, {
+      items: canReadScenes || canReadGroups ? "groups.read" : "__denied__",
+      containingGroups: "groups.read",
+      metadata: "groups.read",
+      edit: "groups.read",
+    }, hasPermission).filter((tab) => tab.key !== "items" || canReadScenes || canReadGroups);
+  }, [canReadGroups, canReadScenes, group?.containingGroupCount, group?.subGroupCount, groupItems.length, groupTabs, hasPermission]);
+
+  const groupKeyboardShortcuts = useMemo(() => ([
+    {
+      key: "i",
+      description: "Open items",
+      handler: () => setActiveTab("items"),
+    },
+    {
+      key: "m",
+      description: "Open metadata",
+      handler: () => setActiveTab("metadata"),
+    },
+    {
+      key: "e",
+      description: canWriteGroup ? "Open edit actions" : "Open edit tab",
+      handler: () => setActiveTab("edit"),
+    },
+  ]), [canWriteGroup]);
 
   useEffect(() => {
     if (tabs.length > 0 && !tabs.some((tab) => tab.key === activeTab)) {
@@ -92,8 +123,8 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
 
   if (isLoading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-accent" />
+      <div className="px-1 py-2">
+        <DetailSkeleton />
       </div>
     );
   }
@@ -102,105 +133,135 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     return <div className="py-16 text-center text-secondary">Group not found</div>;
   }
 
-  return (
-    <div className="min-h-screen">
-      <div className="relative overflow-hidden border-b border-border detail-hero-gradient">
-        <div className="mx-auto max-w-7xl px-4 py-8">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <button
-              onClick={goBack}
-              className="flex items-center gap-1 text-sm text-secondary hover:text-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" /> {backLabel}
-            </button>
-            <div className="flex items-center gap-2">
-              <ExtensionSlot slot="group-detail-actions" context={{ group, onNavigate }} />
-              {canWriteGroup ? <button
-                onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
-              >
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </button> : null}
-              {canDeleteGroup ? <button
-                onClick={() => setConfirmDelete(true)}
-                className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:border-red-500 hover:text-red-300"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Delete
-              </button> : null}
-            </div>
-          </div>
+  const itemsContent = (
+    <div className="space-y-6">
+      {canReadScenes ? (
+        <GroupScenesPanel
+          groupId={id}
+          filter={sceneFilter}
+          setFilter={setSceneFilter}
+          onNavigate={onNavigate}
+          groupItems={groupItems}
+          groupItemsLoading={groupItemsLoading}
+          canWriteGroup={canWriteGroup}
+        />
+      ) : (
+        <EmptyPanel icon={<Film className="h-12 w-12" />} message="Scene playback and scene list access are unavailable for this group." />
+      )}
 
-          <div className="flex flex-col gap-6 md:flex-row md:items-end">
-            <div className="flex flex-shrink-0 gap-3">
-              {group.frontImagePath ? (
-                <img
-                  src={group.frontImagePath}
-                  alt={`${group.name} front cover`}
-                  className="h-40 w-auto max-w-[200px] rounded-xl border border-border object-cover shadow-xl shadow-black/35"
-                />
-              ) : (
-                <div className="flex h-40 w-28 items-center justify-center rounded-xl border border-border bg-card shadow-xl shadow-black/35">
-                  <Layers className="h-14 w-14 text-accent" />
-                </div>
-              )}
-              {group.backImagePath && (
-                <img
-                  src={group.backImagePath}
-                  alt={`${group.name} back cover`}
-                  className="h-40 w-auto max-w-[200px] rounded-xl border border-border object-cover shadow-xl shadow-black/35"
-                />
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-2xl sm:text-3xl md:text-4xl font-bold text-foreground">{group.name}</h1>
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-secondary">
-                {group.aliases && <span>Aliases: {group.aliases}</span>}
-                {group.date && <span>{formatDate(group.date)}</span>}
-                {group.director && <span>Director: {group.director}</span>}
-                {group.duration && <span className="flex items-center gap-1"><Clapperboard className="h-4 w-4" /> {formatDuration(group.duration)}</span>}
-                {group.studioName && group.studioId && (canReadStudios ? (
-                  <button onClick={() => onNavigate({ page: "studio", id: group.studioId })} className="text-accent hover:underline">
-                    {group.studioName}
-                  </button>
-                ) : <span>{group.studioName}</span>)}
-              </div>
-              {group.synopsis && (
-                <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{group.synopsis}</p>
-              )}
-              {canReadTags && group.tags.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  {group.tags.map((tag) => (
-                    <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+      {canReadGroups ? (
+        <section className="rounded-2xl border border-border bg-card/70 p-5">
+          <GroupSubGroupsPanel groupId={id} onNavigate={onNavigate} canWriteGroup={canWriteGroup} />
+        </section>
+      ) : null}
+    </div>
+  );
 
-          {/* Tabs */}
-          <div className="mx-auto max-w-7xl mt-6 flex gap-1 border-b border-border">
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                  activeTab === tab.key
-                    ? "border-b-2 border-accent text-accent"
-                    : "text-secondary hover:text-foreground"
-                }`}
-              >
-                {tab.label}
-                {tab.count !== undefined && (
-                  <span className={`min-w-[20px] rounded-full px-1.5 py-0.5 text-center text-xs ${
-                    activeTab === tab.key ? "bg-accent/20 text-accent" : "bg-surface text-muted"
-                  }`}>{tab.count}</span>
-                )}
-              </button>
+  const containingGroupsContent = (
+    <section className="rounded-2xl border border-border bg-card/70 p-5">
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Containing Groups</h2>
+        <p className="mt-1 text-sm text-secondary">Browse the parent collections that already include this group.</p>
+      </div>
+      <GroupContainingGroupsPanel groupId={id} onNavigate={onNavigate} />
+    </section>
+  );
+
+  const metadataContent = (
+    <div className="space-y-6">
+      <section className="rounded-2xl border border-border bg-card/70 p-5">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted">Metadata</h2>
+        <dl className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <MetadataField label="Scene Count" value={group.sceneCount} />
+          <MetadataField label="Sub-Group Count" value={group.subGroupCount} />
+          <MetadataField label="Containing Groups" value={group.containingGroupCount} />
+          <MetadataField label="Created" value={formatDate(group.createdAt)} />
+          <MetadataField label="Updated" value={formatDate(group.updatedAt)} />
+          <MetadataField label="Aliases" value={group.aliases || "Not set"} />
+        </dl>
+      </section>
+
+      {group.urls.length > 0 ? (
+        <section className="rounded-2xl border border-border bg-card/70 p-5">
+          <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted">
+            <LinkIcon className="h-4 w-4" /> URLs
+          </h2>
+          <div className="space-y-1 text-sm">
+            {group.urls.map((url, index) => (
+              <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="block truncate text-accent hover:underline">
+                {url}
+              </a>
             ))}
           </div>
+        </section>
+      ) : null}
+
+      <CustomFieldsDisplay customFields={group.customFields} />
+      <ExtensionSlot slot="group-detail-sidebar-bottom" context={{ group, onNavigate }} />
+    </div>
+  );
+
+  const editContent = (
+    <section className="rounded-2xl border border-border bg-card/70 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Edit Group</h2>
+          <p className="mt-1 text-sm text-secondary">
+            {canWriteGroup
+              ? "Open the group editor modal, adjust collection metadata, or remove the group entirely."
+              : "You have read access to this group, but not write access."}
+          </p>
         </div>
       </div>
 
+      <div className="mt-5 flex flex-wrap gap-2">
+        {canWriteGroup ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+          >
+            <Pencil className="h-4 w-4" />
+            Edit metadata
+          </button>
+        ) : null}
+        {canDeleteGroup ? (
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-200 transition-colors hover:border-red-400"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete group
+          </button>
+        ) : null}
+        {hasPlaybackItems ? (
+          <button
+            type="button"
+            onClick={() => onNavigate({ page: "compilation", id })}
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+          >
+            <Play className="h-4 w-4" />
+            {hasCompilationItems ? "Open standalone compilation" : "Open standalone group player"}
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+
+  const activeContent =
+    activeTab === "items"
+      ? itemsContent
+      : activeTab === "containingGroups"
+        ? containingGroupsContent
+        : activeTab === "metadata"
+          ? metadataContent
+          : activeTab === "edit"
+            ? editContent
+            : renderExtensionTab(activeTab, id, onNavigate);
+
+  return (
+    <div>
       <GroupEditModal group={group} open={editing} onClose={() => setEditing(false)} />
       <ConfirmDialog
         open={confirmDelete}
@@ -210,82 +271,226 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         onCancel={() => setConfirmDelete(false)}
       />
 
-      <div className="px-4 py-6">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="min-w-0">
-            {activeTab === "scenes" && (
-              <GroupScenesPanel groupId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
-            )}
-            {activeTab === "subGroups" && (
-              <GroupSubGroupsPanel groupId={id} onNavigate={onNavigate} canWriteGroup={canWriteGroup} />
-            )}
-            {activeTab === "containingGroups" && (
-              <GroupContainingGroupsPanel groupId={id} onNavigate={onNavigate} />
-            )}
-            {renderExtensionTab(activeTab, id, onNavigate)}
-
-            <ExtensionSlot slot="group-detail-main-bottom" context={{ group, onNavigate }} />
+      <MediaDetailLayout
+        title={group.name}
+        subtitle={
+          <div className="flex flex-wrap items-center gap-3 text-sm text-secondary">
+            {group.aliases ? <span>Aliases: {group.aliases}</span> : null}
+            {group.date ? <span>{formatDate(group.date)}</span> : null}
+            {group.director ? <span>Director: {group.director}</span> : null}
+            {group.duration ? <span className="inline-flex items-center gap-1"><Clapperboard className="h-4 w-4" /> {formatDuration(group.duration)}</span> : null}
+            {group.studioName && group.studioId ? (
+              canReadStudios ? (
+                <button onClick={() => onNavigate({ page: "studio", id: group.studioId })} className="text-accent hover:underline">
+                  {group.studioName}
+                </button>
+              ) : (
+                <span>{group.studioName}</span>
+              )
+            ) : null}
           </div>
+        }
+        backLabel={backLabel}
+        onGoBack={goBack}
+        mediaAspectRatio="auto"
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={(key) => setActiveTab(key as TabKey)}
+        keyboardShortcuts={groupKeyboardShortcuts}
+        actions={
+          <>
+            <ExtensionSlot slot="group-detail-actions" context={{ group, onNavigate }} />
+            {hasPlaybackItems ? (
+              <button
+                type="button"
+                onClick={() => onNavigate({ page: "compilation", id })}
+                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
+                title={hasCompilationItems ? "Standalone Compilation" : "Standalone Player"}
+              >
+                <Play className="h-4 w-4" />
+              </button>
+            ) : null}
+            {canWriteGroup ? (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
+                title="Edit"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            ) : null}
+            {canDeleteGroup ? (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="inline-flex items-center justify-center rounded p-1 text-red-300 transition hover:bg-red-500/10 hover:text-red-200"
+                title="Delete"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            ) : null}
+          </>
+        }
+      >
+        {activeContent}
+        <ExtensionSlot slot="group-detail-main-bottom" context={{ group, onNavigate }} />
+      </MediaDetailLayout>
 
-          <aside className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-4">
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Metadata</h2>
-              <dl className="space-y-2 text-sm">
-                <div>
-                  <dt className="text-muted">Scene Count</dt>
-                  <dd className="text-foreground">{group.sceneCount}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted">Created</dt>
-                  <dd className="text-foreground">{formatDate(group.createdAt)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted">Updated</dt>
-                  <dd className="text-foreground">{formatDate(group.updatedAt)}</dd>
-                </div>
-              </dl>
-            </div>
-
-            {group.urls.length > 0 && (
-              <div className="rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted">
-                  <LinkIcon className="h-4 w-4" /> URLs
-                </h2>
-                <div className="space-y-1 text-sm">
-                  {group.urls.map((url, index) => (
-                    <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="block truncate text-accent hover:underline">
-                      {url}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <CustomFieldsDisplay customFields={group.customFields} />
-            <ExtensionSlot slot="group-detail-sidebar-bottom" context={{ group, onNavigate }} />
-          </aside>
-        </div>
-
-        <ExtensionSlot slot="group-detail-bottom" context={{ group, onNavigate }} />
-      </div>
+      <ExtensionSlot slot="group-detail-bottom" context={{ group, onNavigate }} />
     </div>
   );
 }
 
-function GroupScenesPanel({ groupId, filter, setFilter, onNavigate }: {
+function MetadataField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border bg-surface/50 px-4 py-3">
+      <dt className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</dt>
+      <dd className="mt-1 text-sm text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, groupItemsLoading, canWriteGroup }: {
   groupId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
+  groupItems?: GroupItem[];
+  groupItemsLoading?: boolean;
+  canWriteGroup?: boolean;
 }) {
+  const queryClient = useQueryClient();
   const [zoomLevel, setZoomLevel] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const { data: groupScenes, isLoading } = useQuery({
     queryKey: ["group-scenes", groupId, filter],
     queryFn: () => scenes.find(filter, { groupId: String(groupId) }),
   });
+  const deleteItemMutation = useMutation({
+    mutationFn: (itemId: number) => groups.items.delete(groupId, itemId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["group-items", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["group", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+    },
+  });
+  const reorderItemMutation = useMutation({
+    mutationFn: (ids: number[]) => groups.items.reorder(groupId, { ids }),
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ["group-items", groupId] });
+      const previousItems = queryClient.getQueryData<GroupItem[]>(["group-items", groupId]) ?? [];
+      const itemsById = new Map(previousItems.map((item) => [item.id, item]));
+      const nextItems = ids
+        .map((itemId, index) => {
+          const item = itemsById.get(itemId);
+          return item ? { ...item, orderIndex: index } : undefined;
+        })
+        .filter((item): item is GroupItem => item != null);
+
+      queryClient.setQueryData(["group-items", groupId], nextItems);
+      return { previousItems };
+    },
+    onError: (_error, _ids, context) => {
+      if (context?.previousItems) {
+        queryClient.setQueryData(["group-items", groupId], context.previousItems);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["group-items", groupId] });
+    },
+  });
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(groupScenes?.items ?? []);
   const selecting = selectedIds.size > 0;
+
+  if (groupItemsLoading) {
+    return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading group items..." />;
+  }
+
+  if (groupItems && groupItems.length > 0) {
+    const orderedItems = [...groupItems].sort((left, right) => left.orderIndex - right.orderIndex || left.id - right.id);
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-4">
+          <div>
+            <div className="text-sm font-semibold text-foreground">Group Items</div>
+            <div className="mt-1 text-sm text-secondary">This tab now reads the ordered playback items directly from the new group item API.</div>
+          </div>
+          <div className="text-xs text-muted">{orderedItems.length} item{orderedItems.length === 1 ? "" : "s"}</div>
+        </div>
+
+        <SortableList
+          items={orderedItems}
+          getKey={(item) => item.id}
+          onReorder={(nextItems) => reorderItemMutation.mutate(nextItems.map((item) => item.id))}
+          disabled={!canWriteGroup || reorderItemMutation.isPending}
+          className="space-y-2"
+          renderItem={(item, { dragHandleProps, isDragging, isOver }) => {
+            const label = item.title || item.sceneTitle || `Scene #${item.sceneId}`;
+            return (
+              <div className={`rounded-xl border bg-card/80 p-4 transition-colors ${isDragging ? "border-accent opacity-40" : isOver ? "border-accent bg-accent/5" : "border-border"}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    {canWriteGroup ? (
+                      <span {...dragHandleProps} className="mt-0.5 inline-flex shrink-0 cursor-grab items-center text-muted active:cursor-grabbing">
+                        <GripVertical className="h-4 w-4" />
+                      </span>
+                    ) : null}
+                    <div>
+                      <div className="text-sm font-medium text-foreground">{label}</div>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary">
+                        <span>#{item.orderIndex + 1}</span>
+                        <span>{item.kind === "sceneRange" ? formatDurationRange(item.startSec, item.endSec) : "Full scene"}</span>
+                        {item.sourceSpanKey ? <span>Span snapshot</span> : null}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onNavigate({ page: "scene", id: item.sceneId, seekTo: item.startSec ?? 0 })}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open scene
+                    </button>
+                    {item.sourceSpanKey ? (
+                      <button
+                        type="button"
+                        onClick={() => onNavigate({
+                          page: "scene-span",
+                          id: item.sceneId,
+                          spanKey: item.sourceSpanKey,
+                          profileId: item.sourceProfileId,
+                          derivedQueryDescriptor: parseGroupItemDerivedQueryDescriptor(item.sourceQueryJson),
+                        })}
+                        className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+                      >
+                        Open span
+                      </button>
+                    ) : null}
+                    {canWriteGroup ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => deleteItemMutation.mutate(item.id)}
+                          disabled={deleteItemMutation.isPending}
+                          className="rounded-lg border border-red-400/30 px-3 py-2 text-sm text-red-200 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            );
+          }}
+        />
+      </div>
+    );
+  }
 
   if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
   if (!groupScenes || groupScenes.items.length === 0) return <EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes in this group" />;
@@ -322,6 +527,35 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate }: {
   );
 }
 
+function parseGroupItemDerivedQueryDescriptor(sourceQueryJson?: string): SegmentDerivedQueryDescriptor | undefined {
+  if (!sourceQueryJson) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(sourceQueryJson) as SegmentSpanDerivedQuery;
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.operands) || typeof parsed.operator !== "string") {
+      return undefined;
+    }
+
+    return {
+      operator: parsed.operator,
+      mergeGapSec: typeof parsed.mergeGapSec === "number" ? parsed.mergeGapSec : undefined,
+      minDurationSec: typeof parsed.minDurationSec === "number" ? parsed.minDurationSec : undefined,
+      operands: parsed.operands
+        .filter((operand) => operand != null && typeof operand === "object")
+        .map((operand) => ({
+          sourceKey: operand.sourceKey,
+          kind: operand.kind,
+          tagIds: Array.isArray(operand.tagIds) ? operand.tagIds.filter((value): value is number => Number.isInteger(value) && value > 0) : undefined,
+          faceIds: Array.isArray(operand.refIds) ? operand.refIds.filter((value): value is number => Number.isInteger(value) && value > 0) : undefined,
+          minConfidence: typeof operand.minConfidence === "number" ? operand.minConfidence : undefined,
+        })),
+    };
+  } catch {
+    return undefined;
+  }
+}
 function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: number; onNavigate: (r: any) => void; canWriteGroup: boolean }) {
   const queryClient = useQueryClient();
   const { data: subGroups, isLoading } = useQuery({
@@ -349,22 +583,26 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
 
   const reorderMut = useMutation({
     mutationFn: (ids: number[]) => groups.reorderSubGroups(groupId, ids),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["group-subgroups", groupId] }),
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ["group-subgroups", groupId] });
+      const previousGroups = queryClient.getQueryData<Group[]>(["group-subgroups", groupId]) ?? [];
+      const groupsById = new Map(previousGroups.map((group) => [group.id, group]));
+      const nextGroups = ids
+        .map((groupIdToMove) => groupsById.get(groupIdToMove))
+        .filter((group): group is Group => group != null);
+
+      queryClient.setQueryData(["group-subgroups", groupId], nextGroups);
+      return { previousGroups };
+    },
+    onError: (_error, _ids, context) => {
+      if (context?.previousGroups) {
+        queryClient.setQueryData(["group-subgroups", groupId], context.previousGroups);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["group-subgroups", groupId] });
+    },
   });
-
-  const moveUp = (idx: number) => {
-    if (!subGroups || idx <= 0) return;
-    const ids = subGroups.map((g) => g.id);
-    [ids[idx - 1], ids[idx]] = [ids[idx], ids[idx - 1]];
-    reorderMut.mutate(ids);
-  };
-
-  const moveDown = (idx: number) => {
-    if (!subGroups || idx >= subGroups.length - 1) return;
-    const ids = subGroups.map((g) => g.id);
-    [ids[idx], ids[idx + 1]] = [ids[idx + 1], ids[idx]];
-    reorderMut.mutate(ids);
-  };
 
   const existingIds = new Set(subGroups?.map((g) => g.id) ?? []);
   const availableResults = (searchResults?.items ?? []).filter((g) => g.id !== groupId && !existingIds.has(g.id));
@@ -421,14 +659,20 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
       )}
 
       {subGroups && subGroups.length > 0 ? (
-        <div className="space-y-2">
-          {subGroups.map((g, idx) => (
-            <div key={g.id} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 group">
-              {canWriteGroup ? <div className="flex flex-col gap-0.5">
-                <button onClick={() => moveUp(idx)} disabled={idx === 0} className="p-0.5 rounded hover:bg-surface disabled:opacity-20 text-muted"><ChevronUp className="w-3.5 h-3.5" /></button>
-                <button onClick={() => moveDown(idx)} disabled={idx === subGroups.length - 1} className="p-0.5 rounded hover:bg-surface disabled:opacity-20 text-muted"><ChevronDown className="w-3.5 h-3.5" /></button>
-              </div> : null}
-              <span className="text-xs text-muted w-6 text-center">{idx + 1}</span>
+        <SortableList
+          items={subGroups}
+          getKey={(item) => item.id}
+          onReorder={(nextGroups) => reorderMut.mutate(nextGroups.map((item) => item.id))}
+          disabled={!canWriteGroup || reorderMut.isPending}
+          className="space-y-2"
+          renderItem={(g, { dragHandleProps, index, isDragging, isOver }) => (
+            <div className={`group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-colors ${isDragging ? "border-accent opacity-40" : isOver ? "border-accent bg-accent/5" : "border-border"}`}>
+              {canWriteGroup ? (
+                <span {...dragHandleProps} className="inline-flex shrink-0 cursor-grab items-center text-muted active:cursor-grabbing">
+                  <GripVertical className="h-4 w-4" />
+                </span>
+              ) : null}
+              <span className="w-6 text-center text-xs text-muted">{index + 1}</span>
               <button onClick={() => onNavigate({ page: "group", id: g.id })} className="flex-1 text-left text-sm font-medium text-foreground hover:text-accent">{g.name}</button>
               <span className="text-xs text-muted">{g.sceneCount} scenes</span>
               {canWriteGroup ? <button
@@ -438,8 +682,8 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
                 <X className="w-3.5 h-3.5" />
               </button> : null}
             </div>
-          ))}
-        </div>
+          )}
+        />
       ) : (
         <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No sub-groups" />
       )}
@@ -513,4 +757,22 @@ function EmptyPanel({ icon, message }: { icon: React.ReactNode; message: string 
       <p>{message}</p>
     </div>
   );
+}
+
+function formatDurationRange(startSec?: number, endSec?: number) {
+  if (startSec == null || endSec == null) {
+    return "Range unavailable";
+  }
+
+  return `${formatDurationValue(startSec)} - ${formatDurationValue(endSec)}`;
+}
+
+function formatDurationValue(value: number) {
+  const totalSeconds = Math.max(0, Math.floor(value));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
 }

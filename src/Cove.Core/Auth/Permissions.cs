@@ -22,6 +22,11 @@ public static class Permissions
     public const string PerformersDelete = "performers.delete";
     public const string PerformersScrape = "performers.scrape";
 
+    // Faces
+    public const string FacesRead = "faces.read";
+    public const string FacesWrite = "faces.write";
+    public const string FacesDelete = "faces.delete";
+
     // Tags
     public const string TagsRead = "tags.read";
     public const string TagsWrite = "tags.write";
@@ -73,6 +78,10 @@ public static class Permissions
     public const string JobsRun = "jobs.run";
     public const string JobsCancel = "jobs.cancel";
 
+    // AI core
+    public const string EmbeddingsRead = "embeddings.read";
+    public const string AiRunsRead = "airuns.read";
+
     // Extensions
     public const string ExtensionsRead = "extensions.read";
     public const string ExtensionsInstall = "extensions.install";
@@ -121,6 +130,10 @@ public static class Permissions
         new(PerformersDelete, "Performers", "Delete performer rows.", Dangerous: true, Implies: [PerformersRead]),
         new(PerformersScrape, "Performers", "Run scrapers against performers.", Implies: [PerformersRead]),
 
+        new(FacesRead, "Faces", "View detected and curated faces."),
+        new(FacesWrite, "Faces", "Create or edit faces, merge them, and link them to performers.", Implies: [FacesRead]),
+        new(FacesDelete, "Faces", "Delete faces.", Dangerous: true, Implies: [FacesRead]),
+
         new(TagsRead, "Tags", "View tags."),
         new(TagsWrite, "Tags", "Create or edit tags.", Implies: [TagsRead]),
         new(TagsDelete, "Tags", "Delete tags.", Dangerous: true, Implies: [TagsRead]),
@@ -142,9 +155,9 @@ public static class Permissions
         new(GroupsWrite, "Groups", "Create or edit groups.", Implies: [GroupsRead]),
         new(GroupsDelete, "Groups", "Delete groups.", Dangerous: true, Implies: [GroupsRead]),
 
-        new(MarkersRead, "Markers", "View scene markers."),
-        new(MarkersWrite, "Markers", "Create or edit scene markers.", Implies: [MarkersRead]),
-        new(MarkersDelete, "Markers", "Delete scene markers.", Implies: [MarkersRead]),
+        new(MarkersRead, "Segments", "View segments and detections."),
+        new(MarkersWrite, "Segments", "Create or edit segments and detections.", Implies: [MarkersRead]),
+        new(MarkersDelete, "Segments", "Delete segments and detections.", Implies: [MarkersRead]),
 
         new(FilesRead, "Files", "List orphan/raw files in the library."),
         new(FilesWrite, "Files", "Move files or edit raw-file metadata/fingerprints.", Dangerous: true, Implies: [FilesRead]),
@@ -161,6 +174,9 @@ public static class Permissions
         new(JobsRead, "Jobs", "View job queue and history."),
         new(JobsRun, "Jobs", "Submit new jobs.", Implies: [JobsRead]),
         new(JobsCancel, "Jobs", "Cancel running jobs.", Implies: [JobsRead]),
+
+        new(EmbeddingsRead, "AI", "View embeddings and similarity-search results."),
+        new(AiRunsRead, "AI", "View AI run provenance and summaries."),
 
         new(ExtensionsRead, "Extensions", "View installed extensions and registry."),
         new(ExtensionsInstall, "Extensions", "Install or update extensions.", Dangerous: true, Implies: [ExtensionsRead]),
@@ -194,6 +210,7 @@ public static class Permissions
     [
         ScenesWrite, ScenesScrape,
         PerformersWrite, PerformersScrape,
+        FacesWrite, FacesDelete,
         TagsWrite, StudiosWrite,
         GalleriesWrite, ImagesWrite, GroupsWrite,
         MarkersWrite, MarkersDelete,
@@ -211,6 +228,7 @@ public static class Permissions
     [
         ScenesRead, PerformersRead, TagsRead, StudiosRead,
         GalleriesRead, ImagesRead, GroupsRead, MarkersRead,
+        FacesRead, EmbeddingsRead, AiRunsRead,
         SavedFiltersRead, JobsRead, ExtensionsRead, SystemRead,
         StreamRead,
     ];

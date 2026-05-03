@@ -1,12 +1,25 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { FaceSuggestionsPanel } from "../components/FaceSuggestionsPanel";
-import type { FaceSuggestion } from "../api/types";
+import type { Face, FaceSuggestion } from "../api/types";
+
+const testFace: Face = {
+  id: 1,
+  ignored: false,
+  detectionCount: 0,
+  appearanceCount: 0,
+  frameSampleCount: 0,
+  sceneCount: 0,
+  imageCount: 0,
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+};
 
 describe("FaceSuggestionsPanel", () => {
   it("renders the empty state when there are no suggestions", () => {
     render(
       <FaceSuggestionsPanel
+        face={testFace}
         suggestions={[]}
         isLoading={false}
         disabled={false}
@@ -17,8 +30,8 @@ describe("FaceSuggestionsPanel", () => {
       />,
     );
 
-    expect(screen.getByText("Suggested performers")).toBeInTheDocument();
-    expect(screen.getByText("No suggestions yet - run AI.Faces.")).toBeInTheDocument();
+    expect(screen.getByText("Suggested matches")).toBeInTheDocument();
+    expect(screen.getByText("No suggestions are available for this face yet.")).toBeInTheDocument();
   });
 
   it("renders populated suggestions and forwards accept/reject actions", () => {
@@ -41,6 +54,7 @@ describe("FaceSuggestionsPanel", () => {
 
     render(
       <FaceSuggestionsPanel
+        face={testFace}
         suggestions={suggestions}
         isLoading={false}
         disabled={false}
@@ -56,12 +70,48 @@ describe("FaceSuggestionsPanel", () => {
     expect(screen.getByText("92%")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Accept" }));
-    expect(onAccept).toHaveBeenCalledWith(12);
+    expect(onAccept).toHaveBeenCalledWith(suggestions[0]);
 
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
-    expect(onReject).toHaveBeenCalledWith(12);
+    expect(onReject).toHaveBeenCalledWith(suggestions[0]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open evidence face 51" }));
+    fireEvent.click(screen.getByRole("link", { name: /Face 51/i }));
     expect(onNavigate).toHaveBeenCalledWith({ page: "face", id: 51 });
+  });
+
+  it("renders reference-only suggestions with import and dismiss actions", () => {
+    const onAccept = vi.fn();
+    const onReject = vi.fn();
+    const suggestion: FaceSuggestion = {
+      performerId: -7,
+      performerName: "Reference Jane",
+      coverImageUrl: undefined,
+      confidence: 0.81,
+      why: "Nearest imported reference identity.",
+      evidence: [],
+    };
+
+    render(
+      <FaceSuggestionsPanel
+        face={testFace}
+        suggestions={[suggestion]}
+        isLoading={false}
+        disabled={false}
+        canReadPerformers
+        onAccept={onAccept}
+        onReject={onReject}
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Reference")).toBeInTheDocument();
+    expect(screen.getByText("Nearest imported reference identity.")).toBeInTheDocument();
+    expect(screen.getByText("This is a reference-pack only match. Review it side by side before importing.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Import performer" }));
+    expect(onAccept).toHaveBeenCalledWith(suggestion);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onReject).toHaveBeenCalledWith(suggestion);
   });
 });

@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Maximize,
   Minimize,
@@ -7,9 +8,16 @@ import {
   Repeat,
   Repeat1,
   SkipBack,
+  SkipForward,
+  Subtitles,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { scenes } from "../api/client";
 import type { Detection } from "../api/types";
 import { createPlaybackTracker, type PlaybackTrackingTarget } from "../utils/interactionTracking";
+
+function generateUuid() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
@@ -20,6 +28,10 @@ import { createPlaybackTracker, type PlaybackTrackingTarget } from "../utils/int
     return value.toString(16);
   });
 }
+
+const VOLUME_KEY = "cove-video-player-volume";
+const MUTED_KEY = "cove-video-player-muted";
+const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 function roundPlaybackTime(value: number) {
   return Math.round(value * 1000) / 1000;
@@ -242,7 +254,9 @@ export function VideoPlayer({
 
   useEffect(() => {
     const v = videoRef.current;
-    const nextTime = clip ? clip.start : resumeTime;
+    const nextTime = clip
+      ? Math.min(Math.max(resumeTime ?? clip.start, clip.start), clip.end ?? duration)
+      : resumeTime;
     if (v && nextTime != null) {
       v.currentTime = nextTime;
       setCurTime(roundPlaybackTime(nextTime));

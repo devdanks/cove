@@ -7,6 +7,9 @@ public class Tag : BaseEntity
     public string? Description { get; set; }
     public bool Favorite { get; set; }
     public bool IgnoreAutoTag { get; set; }
+    public bool? ShowAsSegment { get; set; }
+    public string? SegmentColorOverride { get; set; }
+    public int? SegmentLaneOverride { get; set; }
 
     // Image stored as blob reference
     public string? ImageBlobId { get; set; }

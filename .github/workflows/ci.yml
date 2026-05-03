@@ -22,8 +22,46 @@ jobs:
       - name: Build
         run: dotnet build src/Cove.slnx -c Release --no-restore
 
+      - name: Test (Non-Integration)
+        run: dotnet test src/Cove.Tests/Cove.Tests.csproj -c Release --no-build --verbosity normal --filter "FullyQualifiedName!~Cove.Tests.Integration"
+
+      - name: Test (Integration smoke)
+        run: dotnet test src/Cove.Tests/Cove.Tests.csproj -c Release --no-build --verbosity normal --filter "FullyQualifiedName~Cove.Tests.Integration"
+
+  performance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      COVE_PERF_PG_HOST: 127.0.0.1
+      COVE_PERF_PG_PORT: 5432
+      COVE_PERF_PG_USER: postgres
+      COVE_PERF_PG_PASSWORD: postgres
+      COVE_PERF_PG_ADMIN_DB: postgres
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore src/Cove.PerformanceTests/Cove.PerformanceTests.csproj
+
       - name: Test
-        run: dotnet test src/Cove.Tests/Cove.Tests.csproj -c Release --no-build --verbosity normal
+        run: dotnet test src/Cove.PerformanceTests/Cove.PerformanceTests.csproj -c Release --verbosity normal
 
   frontend:
     runs-on: ubuntu-latest

@@ -52,7 +52,7 @@ public class Scene : BaseEntity
     public ICollection<SceneTag> SceneTags { get; set; } = [];
     public ICollection<ScenePerformer> ScenePerformers { get; set; } = [];
     public ICollection<SceneGallery> SceneGalleries { get; set; } = [];
-    public ICollection<SceneGroup> SceneGroups { get; set; } = [];
+    public ICollection<GroupItem> GroupItems { get; set; } = [];
     public ICollection<SceneRemoteId> RemoteIds { get; set; } = [];
     public ICollection<ScenePlayHistory> PlayHistory { get; set; } = [];
     public ICollection<SceneOHistory> OHistory { get; set; } = [];
@@ -89,15 +89,6 @@ public class SceneGallery
     public int GalleryId { get; set; }
     public Scene? Scene { get; set; }
     public Gallery? Gallery { get; set; }
-}
-
-public class SceneGroup
-{
-    public int SceneId { get; set; }
-    public int GroupId { get; set; }
-    public int SceneIndex { get; set; }
-    public Scene? Scene { get; set; }
-    public Group? Group { get; set; }
 }
 
 public class SceneRemoteId

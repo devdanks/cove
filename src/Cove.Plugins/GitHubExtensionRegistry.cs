@@ -105,6 +105,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             meta.Author ??= source.Author;
             meta.Url ??= source.Url;
             meta.IconUrl ??= source.IconUrl;
+            meta.Kind ??= source.Kind;
             meta.Categories ??= source.Categories;
             meta.MinCoveVersion ??= source.MinCoveVersion;
             meta.Dependencies ??= source.Dependencies;
@@ -207,6 +208,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             Description = meta.Description,
             Author = meta.Author,
             IconUrl = meta.IconUrl,
+            Kind = meta.Kind ?? "extension",
             Url = meta.Url,
             Categories = meta.Categories ?? [],
             UpdatedAt = validVersions.Max(v => v.ReleasedAt) ?? meta.UpdatedAt,
@@ -378,6 +380,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
                 Description = meta.Description,
                 Author = meta.Author,
                 IconUrl = meta.IconUrl,
+                Kind = meta.Kind ?? "extension",
                 Categories = meta.Categories ?? [],
                 UpdatedAt = latest.ReleasedAt ?? meta.UpdatedAt,
                 MinCoveVersion = latest.MinCoveVersion ?? meta.MinCoveVersion,
@@ -490,6 +493,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         public string? Description { get; set; }
         public string? Author { get; set; }
         public string? IconUrl { get; set; }
+        public string? Kind { get; set; }
         public string? Url { get; set; }
         public string? RepositoryUrl { get; set; }
         public List<string>? Categories { get; set; }
@@ -510,6 +514,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         public string? Author { get; set; }
         public string? Url { get; set; }
         public string? IconUrl { get; set; }
+        public string? Kind { get; set; }
         public string? MinCoveVersion { get; set; }
         public List<string>? Categories { get; set; }
         public Dictionary<string, string>? Dependencies { get; set; }

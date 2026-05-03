@@ -7,8 +7,21 @@ namespace Cove.Api.Startup;
 
 internal static class SchemaCompatibilityBootstrap
 {
+    private static int _ensureCompatibilitySchemaInvocationCount;
+
+    internal static int EnsureCompatibilitySchemaInvocationCount
+        => System.Threading.Volatile.Read(ref _ensureCompatibilitySchemaInvocationCount);
+
+    internal static void ResetTestState()
+        => System.Threading.Interlocked.Exchange(ref _ensureCompatibilitySchemaInvocationCount, 0);
+
     public static async Task EnsureCompatibilitySchemaAsync(CoveContext db)
     {
+        System.Threading.Interlocked.Increment(ref _ensureCompatibilitySchemaInvocationCount);
+
+        if (!string.Equals(db.Database.ProviderName, "Npgsql.EntityFrameworkCore.PostgreSQL", StringComparison.Ordinal))
+            return;
+
         var conn = db.Database.GetDbConnection();
         await conn.OpenAsync();
 
@@ -555,6 +568,9 @@ internal static class SchemaCompatibilityBootstrap
 
     public static async Task NormalizeOshashAndIndexesAsync(CoveContext db)
     {
+        if (!string.Equals(db.Database.ProviderName, "Npgsql.EntityFrameworkCore.PostgreSQL", StringComparison.Ordinal))
+            return;
+
         var conn = db.Database.GetDbConnection();
         await conn.OpenAsync();
 

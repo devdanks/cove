@@ -1,4 +1,5 @@
 import { createRouteLinkProps } from "./cardNavigation";
+import type { Route } from "../router/location";
 
 export function RouteCardLinkOverlay({
   route,
@@ -7,7 +8,7 @@ export function RouteCardLinkOverlay({
   disabled,
   selectionSafeZone,
 }: {
-  route: { page: string; id: number };
+  route: Route;
   onClick: () => void;
   label: string;
   disabled?: boolean;

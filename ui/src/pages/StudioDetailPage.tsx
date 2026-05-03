@@ -20,6 +20,7 @@ import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 
@@ -60,7 +61,7 @@ type TabKey = "scenes" | "performers" | "galleries" | "images" | "studios" | "gr
 
 export function StudioDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: studio, isLoading } = useQuery({
     queryKey: ["studio", id],
@@ -89,6 +90,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "studios" }, onNavigate);
   const canWriteStudio = canWriteEntity("studio", hasPermission);
+  const canEngageStudio = canReadEntity("studio", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeleteStudio = canDeleteEntity("studio", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
   const canAutoTagStudio = hasPermission("library.autotag") && canWriteStudio;
@@ -101,6 +103,16 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
     studios: "studios.read",
     groups: "groups.read",
   }, hasPermission);
+
+  const {
+    favorite: studioFavorite,
+    rating: studioRating,
+    setFavorite: setStudioFavorite,
+    setRating: setStudioRating,
+  } = useEntityEngagement("studio", id, {
+    fallbackFavorite: studio?.favorite,
+    fallbackRating: studio?.rating,
+  });
 
   useEffect(() => {
     if (studio) document.title = `${studio.name} | Cove`;
@@ -125,12 +137,12 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       switch (e.key) {
         case "e": if (canWriteStudio) setEditing((v) => !v); break;
-        case "f": if (studio && canWriteStudio) updateMut.mutate({ favorite: !studio.favorite }); break;
+        case "f": if (studio && canEngageStudio) setStudioFavorite(!studioFavorite); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canWriteStudio, studio]);
+  }, [canEngageStudio, canWriteStudio, studio, studioFavorite, setStudioFavorite]);
 
   useEffect(() => {
     if (visibleStudioTabs.length > 0 && !visibleStudioTabs.some((tab) => tab.key === activeTab)) {
@@ -147,7 +159,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   });
 
   const updateMut = useMutation({
-    mutationFn: (data: { favorite?: boolean; rating?: number; organized?: boolean }) => studios.update(id, data),
+    mutationFn: (data: { organized?: boolean }) => studios.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["studio", id] });
       queryClient.invalidateQueries({ queryKey: ["studios"] });
@@ -261,19 +273,19 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
                     <p className="mt-1 text-sm text-secondary">Also known as: {studio.aliases.join(", ")}</p>
                   )}
                 </div>
-                {canWriteStudio ? (
+                {canEngageStudio ? (
                   <button
-                    onClick={() => updateMut.mutate({ favorite: !studio.favorite })}
+                    onClick={() => setStudioFavorite(!studioFavorite)}
                     className={`rounded-full p-2 transition-colors ${
-                      studio.favorite
+                      studioFavorite
                         ? "bg-red-500/15 text-red-500"
                         : "bg-card text-muted hover:text-red-400"
                     }`}
-                    title={studio.favorite ? "Remove from favorites" : "Add to favorites"}
+                    title={studioFavorite ? "Remove from favorites" : "Add to favorites"}
                   >
-                    <Heart className={`h-6 w-6 ${studio.favorite ? "fill-current" : ""}`} />
+                    <Heart className={`h-6 w-6 ${studioFavorite ? "fill-current" : ""}`} />
                   </button>
-                ) : studio.favorite ? (
+                ) : studioFavorite ? (
                   <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite studio">
                     <Heart className="h-6 w-6 fill-current" />
                   </span>
@@ -297,7 +309,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
                 ) : null}
               </div>
 
-              <InteractiveRating value={studio.rating} onChange={(value) => updateMut.mutate({ rating: value })} readOnly={!canWriteStudio} />
+              <InteractiveRating value={studioRating} onChange={(value) => setStudioRating(value)} readOnly={!canEngageStudio} />
 
               <div className="mt-4 flex flex-wrap gap-3">
                 <CountCard label="Scenes" value={studio.sceneCount} icon={<Film className="h-4 w-4" />} />

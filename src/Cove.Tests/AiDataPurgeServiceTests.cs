@@ -8,6 +8,7 @@ using Cove.Data;
 
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Cove.Tests;
@@ -378,17 +379,61 @@ public sealed class AiDataPurgeServiceTests
         Assert.Single(await db.Segments.ToListAsync());
     }
 
+    [Fact]
+    public async Task DeleteEmbeddingsAsync_LargeMatchSet_DeletesInMultipleBatches()
+    {
+        var saveChangesCounter = new SaveChangesCounterInterceptor();
+        await using var environment = await CreateEnvironmentAsync(saveChangesCounter);
+        var db = environment.Context;
+
+        var image = new Image { Title = "Batch Image" };
+        db.Images.Add(image);
+        await db.SaveChangesAsync();
+
+        var embeddings = Enumerable.Range(0, 12_000)
+            .Select(_ => new Embedding
+            {
+                HostType = EmbeddingHostType.Image,
+                HostId = image.Id,
+                Kind = "clip.image",
+                Modality = EmbeddingModality.Visual,
+                Dim = 2,
+                Vector = new Pgvector.Vector(new float[] { 0.1f, 0.2f }),
+                SourceKey = "ext:ai.visual",
+                SourceRunId = "batch-run",
+            })
+            .ToList();
+
+        db.Embeddings.AddRange(embeddings);
+        await db.SaveChangesAsync();
+
+        saveChangesCounter.Reset();
+
+        var service = CreateService(db);
+        var removed = await service.DeleteEmbeddingsAsync(new AiDataSelectorDto("ext:ai.visual", "batch-run", null, null, null, null, null));
+
+        Assert.Equal(12_000, removed);
+        Assert.Equal(0, await db.Embeddings.CountAsync());
+        Assert.Equal(3, saveChangesCounter.SaveChangesCalls);
+    }
+
     private static AiDataPurgeService CreateService(CoveContext context)
         => new(context, [], new StubBlobService(), NullLogger<AiDataPurgeService>.Instance);
 
-    private static async Task<TestEnvironment> CreateEnvironmentAsync()
+    private static async Task<TestEnvironment> CreateEnvironmentAsync(params IInterceptor[] interceptors)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<CoveContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<CoveContext>()
+            .UseSqlite(connection);
+
+        if (interceptors.Length > 0)
+        {
+            optionsBuilder.AddInterceptors(interceptors);
+        }
+
+        var options = optionsBuilder.Options;
 
         var context = new AiDataTestContext(options);
         await context.Database.EnsureCreatedAsync();
@@ -422,6 +467,22 @@ public sealed class AiDataPurgeServiceTests
 
         public Task DeleteBlobAsync(string blobId, CancellationToken ct = default)
             => Task.CompletedTask;
+    }
+
+    private sealed class SaveChangesCounterInterceptor : SaveChangesInterceptor
+    {
+        public int SaveChangesCalls { get; private set; }
+
+        public void Reset() => SaveChangesCalls = 0;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            SaveChangesCalls++;
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 
     private sealed class TestEnvironment(SqliteConnection connection, AiDataTestContext context) : IAsyncDisposable

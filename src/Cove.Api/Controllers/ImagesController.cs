@@ -13,7 +13,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.ImagesRead)]
-public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
 {
     private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
     private static string GetVisibleBasename(string path, string basename) => string.IsNullOrWhiteSpace(basename) ? System.IO.Path.GetFileName(path) : basename;
@@ -64,7 +64,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
     {
         var image = await imageRepo.GetByIdWithRelationsAsync(id, ct);
         if (image == null) return NotFound();
-        return Ok(MapToDto(image));
+        return Ok(await MapToDtoWithProvenanceAsync(image, ct));
     }
 
     [HttpPost]
@@ -93,8 +93,13 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             image.ImageGalleries = dto.GalleryIds.Select(gid => new ImageGallery { GalleryId = gid }).ToList();
 
         image = await imageRepo.AddAsync(image, ct);
+        if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
+        {
+            await tagProvenanceService.SyncTagSetAsync(AffinityHostType.Image, image.Id, [], dto.TagIds, cancellationToken: ct);
+            await db.SaveChangesAsync(ct);
+        }
         var result = await imageRepo.GetByIdWithRelationsAsync(image.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = image.Id }, MapToDto(result!));
+        return CreatedAtAction(nameof(GetById), new { id = image.Id }, await MapToDtoWithProvenanceAsync(result!, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -104,6 +109,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
     {
         var image = await imageRepo.GetByIdWithRelationsAsync(id, ct);
         if (image == null) return NotFound();
+        var previousTagIds = dto.TagIds != null ? image.ImageTags.Select(imageTag => imageTag.TagId).ToArray() : [];
 
         if (dto.Title != null) image.Title = dto.Title;
         if (dto.Code != null) image.Code = dto.Code;
@@ -136,9 +142,19 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         }
         if (dto.CustomFields != null) image.CustomFields = dto.CustomFields;
 
+        if (dto.TagIds != null && tagProvenanceService != null)
+        {
+            await tagProvenanceService.SyncTagSetAsync(
+                AffinityHostType.Image,
+                id,
+                previousTagIds,
+                image.ImageTags.Select(imageTag => imageTag.TagId).ToArray(),
+                cancellationToken: ct);
+        }
+
         await imageRepo.UpdateAsync(image, ct);
         var updated = await imageRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDtoWithProvenanceAsync(updated!, ct));
     }
 
     [HttpDelete("{id:int}")]
@@ -148,16 +164,32 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
     {
         var img = await imageRepo.GetByIdAsync(id, ct);
         if (img == null) return NotFound();
+        if (tagProvenanceService != null)
+            await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Image, id, ct);
         await imageRepo.DeleteAsync(id, ct);
         return NoContent();
     }
 
-    private ImageDto MapToDto(Image i, int? galleryCount = null) => new(
+    private async Task<ImageDto> MapToDtoWithProvenanceAsync(Image image, CancellationToken cancellationToken = default)
+    {
+        var tagIds = image.ImageTags
+            .Where(imageTag => imageTag.Tag != null)
+            .Select(imageTag => imageTag.Tag!.Id)
+            .Distinct()
+            .ToArray();
+        var provenanceLookup = tagProvenanceService == null
+            ? null
+            : await tagProvenanceService.GetLookupAsync(AffinityHostType.Image, image.Id, tagIds, cancellationToken);
+
+        return MapToDto(image, null, provenanceLookup);
+    }
+
+    private ImageDto MapToDto(Image i, int? galleryCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
         i.Rating, i.Organized, i.OCounter, i.StudioId, i.Studio?.Name,
         i.Date?.ToString("yyyy-MM-dd"),
         i.Urls.Select(u => u.Url).ToList(),
-        i.ImageTags.Where(it => it.Tag != null).Select(it => new TagDto(it.Tag!.Id, it.Tag.Name, it.Tag.Description, it.Tag.Favorite, it.Tag.IgnoreAutoTag, [])).ToList(),
+        i.ImageTags.Where(it => it.Tag != null).Select(it => new TagDto(it.Tag!.Id, it.Tag.Name, it.Tag.Description, it.Tag.Favorite, it.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, it.Tag!.Id))).ToList(),
         i.ImagePerformers.Where(ip => ip.Performer != null).Select(ip => new PerformerSummaryDto(ip.Performer!.Id, ip.Performer.Name, ip.Performer.Disambiguation, ip.Performer.Gender?.ToString(), ip.Performer.Birthdate?.ToString("yyyy-MM-dd"), ip.Performer.Favorite, ip.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ip.Performer.Id, ip.Performer.UpdatedAt) : null)).ToList(),
         galleryCount ?? i.GalleryCount,
         i.ImageGalleries?.Select(ig => ig.GalleryId).ToList() ?? [],
@@ -256,6 +288,8 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
 
         foreach (var image in images)
         {
+            var previousTagIds = dto.TagIds != null ? image.ImageTags.Select(imageTag => imageTag.TagId).ToArray() : [];
+
             if (dto.Rating.HasValue) image.Rating = dto.Rating;
             if (dto.Organized.HasValue) image.Organized = dto.Organized.Value;
             if (dto.StudioId.HasValue) image.StudioId = dto.StudioId;
@@ -274,6 +308,16 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             else if (dto.TagIds != null && dto.TagMode == BulkUpdateMode.Remove)
             {
                 image.ImageTags = image.ImageTags.Where(it => !dto.TagIds.Contains(it.TagId)).ToList();
+            }
+
+            if (dto.TagIds != null && tagProvenanceService != null)
+            {
+                await tagProvenanceService.SyncTagSetAsync(
+                    AffinityHostType.Image,
+                    image.Id,
+                    previousTagIds,
+                    image.ImageTags.Select(imageTag => imageTag.TagId).ToArray(),
+                    cancellationToken: ct);
             }
 
             if (dto.PerformerIds != null && dto.PerformerMode == BulkUpdateMode.Set)
@@ -314,4 +358,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
     }
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
+
+    private static List<TagProvenanceDto> GetTagProvenance(IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup, int tagId)
+        => provenanceLookup != null && provenanceLookup.TryGetValue(tagId, out var provenance) ? provenance : [];
 }

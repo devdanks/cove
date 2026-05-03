@@ -96,10 +96,35 @@ public class PostgresConfig
 
 public class InterfaceConfig
 {
-    public static readonly string[] DefaultMenuItems =
+    public static readonly string[] LegacyDefaultMenuItems =
     [
         "scenes",
         "images",
+        "performers",
+        "galleries",
+        "studios",
+        "tags",
+        "groups"
+    ];
+
+    public static readonly string[] SegmentsDefaultMenuItems =
+    [
+        "scenes",
+        "segments",
+        "images",
+        "performers",
+        "galleries",
+        "studios",
+        "tags",
+        "groups"
+    ];
+
+    public static readonly string[] DefaultMenuItems =
+    [
+        "scenes",
+        "segments",
+        "images",
+        "faces",
         "performers",
         "galleries",
         "studios",

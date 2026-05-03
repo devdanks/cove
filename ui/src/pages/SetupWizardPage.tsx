@@ -38,10 +38,12 @@ export function SetupWizardPage({ config, onComplete }: Props) {
   const [stashImportJobId, setStashImportJobId] = useState<string | null>(null);
   const [coveGeneratedPath, setCoveGeneratedPath] = useState(config.generatedPath ?? "");
   const [migrateGeneratedContent, setMigrateGeneratedContent] = useState(true);
+  const [aiDataSource, setAiDataSource] = useState("");
   const queryClient = useQueryClient();
   const stashImportOptions: StashImportOptions = {
     coveGeneratedPath: coveGeneratedPath.trim() || undefined,
     migrateGeneratedContent,
+    aiDataSource: aiDataSource.trim() || undefined,
   };
 
   const stashPreviewMut = useMutation({
@@ -281,6 +283,19 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                         className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none disabled:opacity-60"
                       />
                       <span className="block mt-1 text-xs text-muted">This updates Cove's generated-assets destination before the import runs. Stash's source path is still read from config.yml.</span>
+                    </label>
+
+                    <label className="block text-sm text-secondary">
+                      <span className="block mb-1 font-medium text-foreground">AI Overhaul data source</span>
+                      <input
+                        type="text"
+                        value={aiDataSource}
+                        onChange={(e) => setAiDataSource(e.target.value)}
+                        placeholder="postgresql+psycopg://postgres:postgres@localhost:5432/stash_ai_server or C:\\AI\\app.db"
+                        disabled={isStashImportActive}
+                        className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none disabled:opacity-60"
+                      />
+                      <span className="block mt-1 text-xs text-muted">Optional. If provided, Cove also imports stash-ai-server AI runs and raw tag segments. SQLite paths, PostgreSQL URLs, and Npgsql connection strings are accepted.</span>
                     </label>
                   </div>
                 </details>

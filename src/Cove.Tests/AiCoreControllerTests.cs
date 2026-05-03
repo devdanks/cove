@@ -10,7 +10,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
 using Pgvector;
 
 namespace Cove.Tests;
@@ -27,7 +26,7 @@ public class AiCoreControllerTests
         await context.SaveChangesAsync();
 
         var embeddingService = new EmbeddingService(context, []);
-        var controller = new FacesController(context, embeddingService, new StubBlobService([]), [], NullLogger<FacesController>.Instance);
+        var controller = new FacesController(context, embeddingService);
 
         var firstCreate = await controller.Create(new FaceCreateDto("Lead", null, false, "ext:ai.faces"), CancellationToken.None);
         var firstCreated = Assert.IsType<CreatedAtActionResult>(firstCreate.Result);
@@ -143,7 +142,7 @@ public class AiCoreControllerTests
         await context.SaveChangesAsync();
 
         var embeddingService = new EmbeddingService(context, []);
-        var controller = new FacesController(context, embeddingService, new StubBlobService([]), [], NullLogger<FacesController>.Instance);
+        var controller = new FacesController(context, embeddingService);
 
         var result = await controller.GetDetections(face.Id, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -169,7 +168,7 @@ public class AiCoreControllerTests
         await context.SaveChangesAsync();
 
         var embeddingService = new EmbeddingService(context, []);
-        var controller = new FacesController(context, embeddingService, new StubBlobService([]), [], NullLogger<FacesController>.Instance);
+        var controller = new FacesController(context, embeddingService);
 
         var result = await controller.GetById(face.Id, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -178,97 +177,6 @@ public class AiCoreControllerTests
         Assert.NotNull(dto.CoverImageUrl);
         Assert.StartsWith($"/api/faces/{face.Id}/image?max=640&v=", dto.CoverImageUrl, StringComparison.Ordinal);
         Assert.DoesNotContain("/api/entity-images/", dto.CoverImageUrl, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task FacesController_Delete_CascadesOwnedArtifactsAndLifecycleCleanup()
-    {
-        await using var scope = await CreateContextAsync();
-        var context = scope.Context;
-
-        var face = new Face
-        {
-            Label = "Lead",
-            CoverBlobId = "blob-1",
-            PrimarySourceKey = "face-1",
-        };
-        var mergedFace = new Face
-        {
-            Label = "Merged",
-            PrimarySourceKey = "face-2",
-        };
-
-        context.Faces.AddRange(face, mergedFace);
-        await context.SaveChangesAsync();
-
-        mergedFace.MergedIntoFaceId = face.Id;
-        context.Detections.Add(new Detection
-        {
-            HostType = DetectionHostType.Image,
-            HostId = 10,
-            FrameWidth = 100,
-            FrameHeight = 100,
-            Class = "face",
-            Score = 0.95f,
-            X = 0.1f,
-            Y = 0.2f,
-            W = 0.3f,
-            H = 0.4f,
-            RefKind = "face",
-            RefId = face.Id,
-            SourceKey = "ext:ai.faces",
-        });
-        context.Embeddings.Add(new Embedding
-        {
-            HostType = EmbeddingHostType.Face,
-            HostId = face.Id,
-            Kind = "face.arcface",
-            KindFamily = "face.arcface",
-            Modality = EmbeddingModality.Face,
-            IsSemantic = true,
-            Dim = 3,
-            Vector = new Vector(new[] { 1f, 0f, 0f }),
-            SourceKey = "ext:ai.faces",
-        });
-        context.Segments.Add(new Segment
-        {
-            HostType = SegmentHostType.Image,
-            HostId = 10,
-            StartSec = 0,
-            EndSec = 1,
-            Kind = "face",
-            RefId = face.Id,
-            SourceKey = "ext:ai.faces",
-        });
-        await context.SaveChangesAsync();
-
-        var blobService = new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>
-        {
-            ["blob-1"] = ([1, 2, 3], "image/jpeg"),
-        });
-        var participant = new StubFaceLifecycleParticipant();
-        var embeddingService = new EmbeddingService(context, []);
-        var controller = new FacesController(context, embeddingService, blobService, [participant], NullLogger<FacesController>.Instance);
-
-        var deleteImpactResult = await controller.GetDeleteImpact(face.Id, CancellationToken.None);
-        var deleteImpactOk = Assert.IsType<OkObjectResult>(deleteImpactResult.Result);
-        var deleteImpact = Assert.IsType<FaceDeleteImpactDto>(deleteImpactOk.Value);
-        Assert.Equal(1, deleteImpact.DetectionCount);
-        Assert.Equal(1, deleteImpact.EmbeddingCount);
-        Assert.Equal(1, deleteImpact.SegmentCount);
-        Assert.True(deleteImpact.HasCoverImage);
-        Assert.Equal(1, deleteImpact.ReleasedMergedFaceCount);
-
-        var deleteResult = await controller.Delete(face.Id, CancellationToken.None);
-
-        Assert.IsType<NoContentResult>(deleteResult);
-        Assert.Contains(face.Id, participant.DeletedFaceIds);
-        Assert.Contains("blob-1", blobService.DeletedBlobIds);
-        Assert.Empty(await context.Faces.Where(item => item.Id == face.Id).ToListAsync());
-        Assert.Empty(await context.Detections.Where(item => item.RefId == face.Id).ToListAsync());
-        Assert.Empty(await context.Embeddings.Where(item => item.HostType == EmbeddingHostType.Face && item.HostId == face.Id).ToListAsync());
-        Assert.Empty(await context.Segments.Where(item => item.RefId == face.Id).ToListAsync());
-        Assert.Null((await context.Faces.SingleAsync(item => item.Id == mergedFace.Id)).MergedIntoFaceId);
     }
 
     [Fact]
@@ -310,6 +218,30 @@ public class AiCoreControllerTests
         await using var output = new MemoryStream();
         await file.FileStream.CopyToAsync(output);
         Assert.Equal(bytes, output.ToArray());
+    }
+
+    [Fact]
+    public async Task FacesController_GetSuggestions_ReturnsEmptyListWhenNoSuggestersRegistered()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+
+        var face = new Face
+        {
+            Label = "Lead",
+            PrimarySourceKey = "ext:ai.faces",
+        };
+        context.Faces.Add(face);
+        await context.SaveChangesAsync();
+
+        var embeddingService = new EmbeddingService(context, []);
+        var controller = new FacesController(context, embeddingService, new StubBlobService([]), [], NullLogger<FacesController>.Instance);
+
+        var result = await controller.GetSuggestions(face.Id, 5, CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var suggestions = Assert.IsAssignableFrom<IReadOnlyList<FaceSuggestionDto>>(ok.Value);
+
+        Assert.Empty(suggestions);
     }
 
     [Fact]
@@ -468,8 +400,6 @@ public class AiCoreControllerTests
 
     private sealed class StubBlobService(Dictionary<string, (byte[] Bytes, string ContentType)> blobs) : IBlobService
     {
-        public List<string> DeletedBlobIds { get; } = [];
-
         public Task<string> StoreBlobAsync(Stream data, string contentType, CancellationToken ct = default)
             => throw new NotSupportedException();
 
@@ -483,22 +413,7 @@ public class AiCoreControllerTests
         }
 
         public Task DeleteBlobAsync(string blobId, CancellationToken ct = default)
-        {
-            DeletedBlobIds.Add(blobId);
-            blobs.Remove(blobId);
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class StubFaceLifecycleParticipant : IFaceLifecycleParticipant
-    {
-        public List<int> DeletedFaceIds { get; } = [];
-
-        public Task OnDeletingAsync(Face face, CancellationToken cancellationToken = default)
-        {
-            DeletedFaceIds.Add(face.Id);
-            return Task.CompletedTask;
-        }
+            => Task.CompletedTask;
     }
 
     private sealed class StubThumbnailService : IThumbnailService

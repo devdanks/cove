@@ -71,13 +71,17 @@ function normalizeRatingSystemOptions(options: RatingSystemOptions | null | unde
 function normalizeUiPreferences(preferences: UserUiPreferences | null | undefined): UserUiPreferences | null {
   const theme = normalizeThemePreferences(preferences?.theme);
   const ratingSystemOptions = normalizeRatingSystemOptions(preferences?.ratingSystemOptions);
-  if (!theme && !ratingSystemOptions) {
+  const recordPlaybackHistory = typeof preferences?.recordPlaybackHistory === "boolean"
+    ? preferences.recordPlaybackHistory
+    : null;
+  if (!theme && !ratingSystemOptions && recordPlaybackHistory == null) {
     return null;
   }
 
   return {
     theme,
     ratingSystemOptions,
+    recordPlaybackHistory,
   };
 }
 

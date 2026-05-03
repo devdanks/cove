@@ -167,7 +167,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
             .OrderBy(r => r.OrderIndex)
             .Include(r => r.SubGroup!).ThenInclude(g => g.Urls)
             .Include(r => r.SubGroup!).ThenInclude(g => g.GroupTags).ThenInclude(gt => gt.Tag)
-            .Include(r => r.SubGroup!).ThenInclude(g => g.SceneGroups)
+            .Include(r => r.SubGroup!).ThenInclude(g => g.GroupItems)
             .ToListAsync(ct);
         return Ok(relations.Where(r => r.SubGroup != null).Select(r => MapToDto(r.SubGroup!)).ToList());
     }
@@ -181,7 +181,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
             .OrderBy(r => r.OrderIndex)
             .Include(r => r.ContainingGroup!).ThenInclude(g => g.Urls)
             .Include(r => r.ContainingGroup!).ThenInclude(g => g.GroupTags).ThenInclude(gt => gt.Tag)
-            .Include(r => r.ContainingGroup!).ThenInclude(g => g.SceneGroups)
+            .Include(r => r.ContainingGroup!).ThenInclude(g => g.GroupItems)
             .ToListAsync(ct);
         return Ok(relations.Where(r => r.ContainingGroup != null).Select(r => MapToDto(r.ContainingGroup!)).ToList());
     }
@@ -252,7 +252,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
         g.Rating, g.StudioId, g.Studio?.Name, g.Director, g.Synopsis,
         g.Urls.Select(u => u.Url).ToList(),
         g.GroupTags.Where(gt => gt.Tag != null).Select(gt => new TagDto(gt.Tag!.Id, gt.Tag.Name, gt.Tag.Description, gt.Tag.Favorite, gt.Tag.IgnoreAutoTag, [])).ToList(),
-        g.SceneGroups?.Count ?? 0,
+        g.GroupItems.Select(item => item.SceneId).Distinct().Count(),
+        g.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange),
         g.SubGroupRelations?.Count ?? 0,
         g.ContainingGroupRelations?.Count ?? 0,
         g.CustomFields,

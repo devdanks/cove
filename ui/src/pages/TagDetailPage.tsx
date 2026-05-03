@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, groups, images, markers, metadata, performers, scenes, studios, tags, entityImages } from "../api/client";
-import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerTagMatch, Performer, Scene, SceneMarkerWall, Studio, TagDetail as TagDetailModel } from "../api/types";
+import { galleries, groups, images, metadata, performers, scenes, studios, tags, entityImages } from "../api/client";
+import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerTagMatch, Performer, Scene, Studio, TagDetail as TagDetailModel, TagSegmentWall } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, Bookmark, Building2, ChevronDown, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowLeft, Building2, ChevronDown, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { TagEditModal } from "./TagEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -20,8 +20,9 @@ import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useAuth } from "../auth/AuthContext";
-import { canDeleteEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
+import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 
 const PERFORMER_SORT = PERFORMER_SORT_OPTIONS;
 const IMAGE_SORT = [
@@ -50,11 +51,11 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "performers" | "images" | "galleries" | "markers" | "studios" | "groups" | (string & {});
+type TabKey = "scenes" | "performers" | "images" | "galleries" | "segments" | "studios" | "groups" | (string & {});
 
 export function TagDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: tag, isLoading } = useQuery({
     queryKey: ["tag", id],
@@ -69,7 +70,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     { key: "performers", label: "Performers", count: tag?.performerCount },
     { key: "images", label: "Images", count: tag?.imageCount },
     { key: "galleries", label: "Galleries", count: tag?.galleryCount },
-    { key: "markers", label: "Markers", count: tag?.markerCount },
+    { key: "segments", label: "Segments", count: tag?.segmentCount },
     { key: "studios", label: "Studios", count: tag?.studioCount },
     { key: "groups", label: "Groups", count: tag?.groupCount },
   ], id);
@@ -82,6 +83,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "tags" }, onNavigate);
   const canWriteTag = canWriteEntity("tag", hasPermission);
+  const canEngageTag = canReadEntity("tag", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeleteTag = canDeleteEntity("tag", hasPermission);
   const canAutoTagTag = hasPermission("library.autotag") && canWriteTag;
   const visibleTagTabs = filterItemsByPermission(tagTabs, {
@@ -89,10 +91,14 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     performers: "performers.read",
     images: "images.read",
     galleries: "galleries.read",
-    markers: "markers.read",
+    segments: "scenes.read",
     studios: "studios.read",
     groups: "groups.read",
   }, hasPermission);
+
+  const { favorite: tagFavorite, setFavorite: setTagFavorite } = useEntityEngagement("tag", id, {
+    fallbackFavorite: tag?.favorite,
+  });
 
   useEffect(() => {
     if (tag) document.title = `${tag.name} | Cove`;
@@ -106,12 +112,12 @@ export function TagDetailPage({ id, onNavigate }: Props) {
       if (el === "INPUT" || el === "TEXTAREA" || el === "SELECT") return;
       switch (e.key) {
         case "e": if (canWriteTag) setEditing((v) => !v); break;
-        case "f": if (tag && canWriteTag) updateMut.mutate({ favorite: !tag.favorite }); break;
+        case "f": if (tag && canEngageTag) setTagFavorite(!tagFavorite); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canWriteTag, tag]);
+  }, [canEngageTag, canWriteTag, tag, tagFavorite, setTagFavorite]);
 
   useEffect(() => {
     if (visibleTagTabs.length > 0 && !visibleTagTabs.some((tab) => tab.key === activeTab)) {
@@ -125,11 +131,6 @@ export function TagDetailPage({ id, onNavigate }: Props) {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
       goBack();
     },
-  });
-
-  const updateMut = useMutation({
-    mutationFn: (data: { favorite?: boolean }) => tags.update(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tag", id] }),
   });
 
   const autoTagMut = useMutation({
@@ -221,19 +222,19 @@ export function TagDetailPage({ id, onNavigate }: Props) {
                     <p className="mt-1 text-sm text-secondary">Also known as: {tag.aliases.join(", ")}</p>
                   )}
                 </div>
-                {canWriteTag ? (
+                {canEngageTag ? (
                   <button
-                    onClick={() => updateMut.mutate({ favorite: !tag.favorite })}
+                    onClick={() => setTagFavorite(!tagFavorite)}
                     className={`rounded-full p-2 transition-colors ${
-                      tag.favorite
+                      tagFavorite
                         ? "bg-red-500/15 text-red-500"
                         : "bg-card text-muted hover:text-red-400"
                     }`}
-                    title={tag.favorite ? "Remove from favorites" : "Add to favorites"}
+                    title={tagFavorite ? "Remove from favorites" : "Add to favorites"}
                   >
-                    <Heart className={`h-6 w-6 ${tag.favorite ? "fill-current" : ""}`} />
+                    <Heart className={`h-6 w-6 ${tagFavorite ? "fill-current" : ""}`} />
                   </button>
-                ) : tag.favorite ? (
+                ) : tagFavorite ? (
                   <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite tag">
                     <Heart className="h-6 w-6 fill-current" />
                   </span>
@@ -253,12 +254,52 @@ export function TagDetailPage({ id, onNavigate }: Props) {
                 <CountCard label="Performers" value={tag.performerCount} icon={<UserRound className="h-4 w-4" />} />
                 <CountCard label="Images" value={tag.imageCount} icon={<ImageIcon className="h-4 w-4" />} />
                 <CountCard label="Galleries" value={tag.galleryCount} icon={<FolderOpen className="h-4 w-4" />} />
-                <CountCard label="Markers" value={tag.markerCount} icon={<Bookmark className="h-4 w-4" />} />
+                <CountCard label="Segments" value={tag.segmentCount} icon={<Layers className="h-4 w-4" />} />
                 <CountCard label="Studios" value={tag.studioCount} icon={<Building2 className="h-4 w-4" />} />
                 <CountCard label="Groups" value={tag.groupCount} icon={<Layers className="h-4 w-4" />} />
                 {extensionCounts.map((ec) => (
                   <CountCard key={ec.key} label={ec.label} value={ec.count} icon={ec.icon === "music" ? <Music className="h-4 w-4" /> : undefined} />
                 ))}
+              </div>
+              <div className="mt-4 rounded-xl border border-border bg-card/70 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold uppercase tracking-wide text-muted">Player bar</div>
+                    <div className="mt-2 text-sm text-foreground">{formatPlayerBarSummary(tag)}</div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-secondary">
+                      {tag.showAsSegment === true ? <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-emerald-300">Always visible</span> : null}
+                      {tag.showAsSegment === false ? <span className="rounded-full bg-red-500/15 px-2 py-1 text-red-300">Never visible</span> : null}
+                      {tag.showAsSegment == null ? <span className="rounded-full bg-surface px-2 py-1 text-secondary">Uses display profiles</span> : null}
+                      {tag.segmentColorOverride ? (
+                        <span className="inline-flex items-center gap-2 rounded-full bg-surface px-2 py-1 text-secondary">
+                          <span className="h-2.5 w-2.5 rounded-full border border-white/20" style={{ backgroundColor: tag.segmentColorOverride }} />
+                          {tag.segmentColorOverride}
+                        </span>
+                      ) : null}
+                      {tag.segmentLaneOverride != null ? <span className="rounded-full bg-surface px-2 py-1 text-secondary">Lane {tag.segmentLaneOverride}</span> : null}
+                    </div>
+                  </div>
+                  {canWriteTag ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onNavigate({ page: "settings" })}
+                        className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+                      >
+                        <Layers className="h-4 w-4" />
+                        Open display profiles
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditing(true)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+                      >
+                        <Pencil className="h-4 w-4" />
+                        Edit player bar
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
                 {tag.ignoreAutoTag && <span className="rounded bg-yellow-500/15 px-1.5 py-0.5 text-yellow-400">Ignores Auto-Tag</span>}
@@ -362,8 +403,8 @@ export function TagDetailPage({ id, onNavigate }: Props) {
           {activeTab === "galleries" && (
             <TagGalleriesPanel tagId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
           )}
-          {activeTab === "markers" && (
-            <TagMarkersPanel tagId={id} onNavigate={onNavigate} />
+          {activeTab === "segments" && (
+            <TagSegmentsPanel tagId={id} onNavigate={onNavigate} />
           )}
           {activeTab === "studios" && (
             <TagStudiosPanel tagId={id} filter={studioFilter} setFilter={setStudioFilter} onNavigate={onNavigate} />
@@ -548,6 +589,18 @@ function CountCard({ label, value, icon }: { label: string; value: number; icon:
   );
 }
 
+function formatPlayerBarSummary(tag: TagDetailModel) {
+  if (tag.showAsSegment === true) {
+    return "This tag is forced visible on the player bar for all display profiles.";
+  }
+
+  if (tag.showAsSegment === false) {
+    return "This tag is suppressed on the player bar for all display profiles.";
+  }
+
+  return "This tag inherits its player-bar behavior from the active display profile rules.";
+}
+
 function TagScenesPanel({ tagId, filter, setFilter, onNavigate }: {
   tagId: number;
   filter: FindFilter;
@@ -676,40 +729,40 @@ function TagGalleriesPanel({ tagId, filter, setFilter, onNavigate }: {
   );
 }
 
-function TagMarkersPanel({ tagId, onNavigate }: { tagId: number; onNavigate: (r: any) => void }) {
+function TagSegmentsPanel({ tagId, onNavigate }: { tagId: number; onNavigate: (r: any) => void }) {
   const { data, isLoading } = useQuery({
-    queryKey: ["tag-markers", tagId],
-    queryFn: () => markers.wall({ tagId, count: 100 }),
+    queryKey: ["tag-segments", tagId],
+    queryFn: () => tags.segments(tagId, 100),
   });
 
-  if (isLoading) return <LoadingPanel icon={<Bookmark className="h-10 w-10" />} message="Loading markers..." />;
-  if (!data || data.length === 0) return <EmptyPanel icon={<Bookmark className="h-12 w-12" />} message="No markers with this tag" />;
+  if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading segments..." />;
+  if (!data || data.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No segments with this tag" />;
 
   return (
     <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
-      {data.map((marker) => {
-        const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: marker.sceneId }, () => onNavigate({ page: "scene", id: marker.sceneId }));
+      {data.map((segment: TagSegmentWall) => {
+        const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: segment.sceneId }, () => onNavigate({ page: "scene", id: segment.sceneId }));
 
         return (
           <a
-            key={marker.id}
+            key={segment.id}
             {...linkProps}
             className="group text-left"
           >
             <div className="relative aspect-video overflow-hidden rounded-lg border border-border bg-card shadow-md shadow-black/30">
               <img
-                src={scenes.screenshotUrl(marker.sceneId)}
-                alt={marker.title}
+                src={scenes.screenshotUrl(segment.sceneId)}
+                alt={segment.title || segment.kind}
                 className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                 loading="lazy"
               />
               <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[11px] text-white">
-                {formatDuration(marker.seconds)}
+                {formatDuration(segment.startSec)}
               </span>
             </div>
             <div className="pt-2">
-              <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">{marker.title}</p>
-              <p className="mt-0.5 truncate text-xs text-secondary">{marker.sceneTitle || "Untitled Scene"}</p>
+              <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">{segment.title || segment.kind}</p>
+              <p className="mt-0.5 truncate text-xs text-secondary">{segment.sceneTitle || "Untitled Scene"}</p>
             </div>
           </a>
         );

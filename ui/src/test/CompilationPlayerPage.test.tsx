@@ -1,6 +1,6 @@
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { VideoPlayer } from "../pages/SceneDetailPage";
+import { VideoPlayer } from "../components/VideoPlayer";
 
 const playMock = vi.fn(() => Promise.resolve());
 const pauseMock = vi.fn();

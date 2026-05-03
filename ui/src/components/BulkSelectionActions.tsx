@@ -9,6 +9,7 @@ import { BulkEditDialog, SCENE_BULK_FIELDS, IMAGE_BULK_FIELDS, GALLERY_BULK_FIEL
 import { BatchDownloadOptionsDialog } from "./BatchDownloadOptionsDialog";
 import { IdentifyDialog } from "./IdentifyDialog";
 import { SceneQueue } from "./SceneQueue";
+import { ExtensionSelectionActions } from "./ExtensionSelectionActions";
 import {
   DEFAULT_BATCH_DOWNLOAD_OPTIONS,
   formatBatchDownloadSummary,
@@ -183,6 +184,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           Play
         </button>
       )}
+      <ExtensionSelectionActions entityType={entityType} selectedIds={selectedIds} />
       {canDelete && (
         <button
           onClick={() => { if (confirm(`Delete ${selectedIds.size} item(s)?`)) bulkDeleteMut.mutate(); }}

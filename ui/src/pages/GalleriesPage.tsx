@@ -1,19 +1,20 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries } from "../api/client";
-import type { FindFilter, Gallery, GalleryCreate, GalleryFilterCriteria } from "../api/types";
+import type { EntityEngagement, FindFilter, Gallery, GalleryCreate, GalleryFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { InteractiveRatingField, RatingBanner } from "../components/Rating";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { FolderOpen, Image, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
 import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent } from "../components/EntityCards";
 import { GALLERY_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GALLERY_BULK_FIELDS } from "../components/BulkEditDialog";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
-import { createNestedRouteLinkProps } from "../components/cardNavigation";
-import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
+import { createNestedRouteLinkProps, createRouteLinkProps } from "../components/cardNavigation";
+import { CardSelectionToggle } from "../components/RouteCardLinkOverlay";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { WallMediaCard } from "../components/WallMediaCard";
@@ -72,6 +73,7 @@ export function GalleriesPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const { engagementById } = useEntityEngagementBatch("gallery", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
@@ -208,7 +210,7 @@ export function GalleriesPage({ onNavigate }: Props) {
       {displayMode === "grid" ? (
         <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 200px), 1fr))" }}>
           {items.map((g) => (
-            <GalleryCard key={g.id} gallery={g} onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "gallery", id: g.id })} onNavigate={onNavigate} selected={selectedIds.has(g.id)} onSelect={() => toggle(g.id)} selecting={selecting} />
+            <GalleryCard key={g.id} gallery={g} engagement={engagementById.get(g.id)} onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "gallery", id: g.id })} onNavigate={onNavigate} selected={selectedIds.has(g.id)} onSelect={() => toggle(g.id)} selecting={selecting} />
           ))}
         </div>
       ) : displayMode === "list" ? (
@@ -221,6 +223,7 @@ export function GalleriesPage({ onNavigate }: Props) {
                 <GalleryWallCard
                   key={gallery.id}
                   gallery={gallery}
+                  engagement={engagementById.get(gallery.id)}
                   onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })}
                   selected={selectedIds.has(gallery.id)}
                   onSelect={() => toggle(gallery.id)}
@@ -251,19 +254,19 @@ export function GalleriesPage({ onNavigate }: Props) {
   );
 }
 
-function GalleryWallCard({ gallery, onClick, selected, onSelect, selecting }: { gallery: Gallery; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+function GalleryWallCard({ gallery, engagement, onClick, selected, onSelect, selecting }: { gallery: Gallery; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+  const rating = engagement?.rating ?? gallery.rating;
   return (
     <WallMediaCard
-      onClick={selecting ? onClick : undefined}
+      onClick={onClick}
       title={gallery.title || "Untitled"}
       imageSrc={gallery.coverPath}
       aspectRatio="16 / 9"
       fallback={<FolderOpen className="w-10 h-10 text-muted opacity-30" />}
       className={`${selected ? "border-accent ring-2 ring-accent" : ""} group`.trim()}
     >
-      <RouteCardLinkOverlay route={{ page: "gallery", id: gallery.id }} onClick={onClick} label={`Open gallery ${gallery.title || "Untitled"}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-      <RatingBanner rating={gallery.rating} />
+      <RatingBanner rating={rating} />
       {gallery.studioName && (
         <div className="absolute top-1 right-1 text-xs bg-black/70 px-1.5 py-0.5 rounded text-white truncate max-w-[80%]">
           {gallery.studioName}
@@ -273,18 +276,18 @@ function GalleryWallCard({ gallery, onClick, selected, onSelect, selecting }: { 
   );
 }
 
-function GalleryCard({ gallery, onClick, onNavigate, selected, onSelect, selecting }: { gallery: Gallery; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card bg-card rounded overflow-hidden border hover:border-accent/60 transition-all cursor-pointer group relative ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}>
-      <RouteCardLinkOverlay route={{ page: "gallery", id: gallery.id }} onClick={onClick} label={`Open gallery ${gallery.title || "Untitled"}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
+function GalleryCard({ gallery, engagement, onClick, onNavigate, selected, onSelect, selecting }: { gallery: Gallery; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+  const rating = engagement?.rating ?? gallery.rating;
+  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, onClick);
+  const cardContent = (
+    <>
       <div className="aspect-video bg-surface flex items-center justify-center relative overflow-hidden">
-        <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
         {gallery.coverPath ? (
           <img src={gallery.coverPath} alt={gallery.title || ""} className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
         ) : (
           <FolderOpen className="w-10 h-10 text-muted opacity-30" />
         )}
-        <RatingBanner rating={gallery.rating} />
+        <RatingBanner rating={rating} />
         {gallery.studioName && (
           <div className="absolute top-1 right-1 text-xs bg-black/70 px-1.5 py-0.5 rounded text-white truncate max-w-[80%]">
             {gallery.studioName}
@@ -295,6 +298,19 @@ function GalleryCard({ gallery, onClick, onNavigate, selected, onSelect, selecti
         <h3 className="font-medium text-sm truncate text-foreground">{gallery.title || "Untitled"}</h3>
         {gallery.date && <div className="text-xs text-secondary">{gallery.date}</div>}
       </div>
+    </>
+  );
+
+  return (
+    <div onClick={selecting ? onClick : undefined} className={`entity-card bg-card rounded overflow-hidden border hover:border-accent/60 transition-all cursor-pointer group relative ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}>
+      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+      {selecting ? (
+        cardContent
+      ) : (
+        <a {...linkProps} aria-label={`Open gallery ${gallery.title || "Untitled"}`} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          {cardContent}
+        </a>
+      )}
       <GalleryCardPopovers gallery={gallery} onNavigate={onNavigate} />
     </div>
   );

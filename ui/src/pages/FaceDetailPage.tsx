@@ -1,12 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Fingerprint, Link2, Merge, Save, Search, Trash2 } from "lucide-react";
-import { aiFaces, faces, images, performers, scenes } from "../api/client";
+import { ChevronLeft, ChevronRight, Fingerprint, Image as ImageIcon, Link2, Merge, Pencil, Save, Search, Trash2, Video } from "lucide-react";
+import { faces, images, performers, scenes } from "../api/client";
 import type { Detection, Face, FaceDeleteImpact, FaceSuggestion, Performer } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FaceSuggestionsPanel } from "../components/FaceSuggestionsPanel";
+import { FaceCompareDialog } from "../components/FaceCompareDialog";
+import { DetailSkeleton } from "../components/DetailSkeleton";
+import { EditModal } from "../components/EditModal";
+import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { MetadataPanel } from "../components/MetadataPanel";
 import { formatDate } from "../components/shared";
 
 interface Props {
@@ -14,9 +21,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-function isReferenceSuggestion(value: number | FaceSuggestion): value is FaceSuggestion {
-  return typeof value !== "number" && value.performerId < 0;
-}
+type FaceTab = "overview" | "detections" | "similar";
 
 function readSuggestionPerformerId(value: number | FaceSuggestion) {
   return typeof value === "number" ? value : value.performerId;
@@ -24,10 +29,11 @@ function readSuggestionPerformerId(value: number | FaceSuggestion) {
 
 export function FaceDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canWriteFace = canWriteEntity("face", hasPermission);
   const canDeleteFace = canDeleteEntity("face", hasPermission);
   const canReadPerformers = canReadEntity("performer", hasPermission);
+  const canEngageFace = canReadEntity("face", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const { backLabel, goBack } = useBackNavigation({ page: "faces" }, onNavigate);
 
   const { data: face, isLoading } = useQuery({
@@ -56,11 +62,30 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     queryFn: () => faces.suggestions(id),
     enabled: canWriteFace && face != null && face.performerId == null,
   });
+  const { data: faceNavigationPage } = useQuery({
+    queryKey: ["faces", "navigation"],
+    queryFn: () => faces.list({ page: 1, perPage: 500, merged: false }),
+  });
 
   const [label, setLabel] = useState("");
   const [primarySourceKey, setPrimarySourceKey] = useState("");
   const [performerSearch, setPerformerSearch] = useState("");
   const [mergeSearch, setMergeSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<FaceTab>("overview");
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [comparingSuggestion, setComparingSuggestion] = useState<FaceSuggestion | null>(null);
+  const labelInputRef = useRef<HTMLInputElement | null>(null);
+  const mergeInputRef = useRef<HTMLInputElement | null>(null);
+
+  const {
+    favorite: faceFavorite,
+    setFavorite: setFaceFavorite,
+    favoritePending: faceFavoritePending,
+  } = useEntityEngagement("face", id, {
+    enabled: canEngageFace,
+  });
 
   useEffect(() => {
     if (!face) {
@@ -70,6 +95,22 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     setLabel(face.label ?? "");
     setPrimarySourceKey(face.primarySourceKey ?? "");
   }, [face]);
+
+  useEffect(() => {
+    if (!isEditModalOpen) {
+      return;
+    }
+
+    window.setTimeout(() => labelInputRef.current?.focus(), 0);
+  }, [isEditModalOpen]);
+
+  useEffect(() => {
+    if (!isMergeModalOpen) {
+      return;
+    }
+
+    window.setTimeout(() => mergeInputRef.current?.focus(), 0);
+  }, [isMergeModalOpen]);
 
   const performerSearchTerm = performerSearch.trim();
   const mergeSearchTerm = mergeSearch.trim();
@@ -106,8 +147,10 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         label: data.label,
         performerId: face?.performerId,
         primarySourceKey: data.primarySourceKey,
+        ignored: face?.ignored ?? false,
       }),
     onSuccess: (updated) => {
+      setIsEditModalOpen(false);
       invalidateFace(updated);
     },
   });
@@ -123,6 +166,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   const mergeMutation = useMutation({
     mutationFn: (targetFaceId: number) => faces.mergeInto(id, { targetFaceId }),
     onSuccess: (updated) => {
+      setIsMergeModalOpen(false);
       invalidateFace(updated);
       if (updated.mergedIntoFaceId != null) {
         onNavigate({ page: "face", id: updated.mergedIntoFaceId });
@@ -145,17 +189,6 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  const referenceSuggestionMutation = useMutation({
-    mutationFn: (data: { referenceSuggestionId: number; action: "import" | "reject" }) =>
-      data.action === "import"
-        ? aiFaces.importReferencePerformer(id, { referenceSuggestionId: data.referenceSuggestionId })
-        : aiFaces.rejectReferenceSuggestion(id, { referenceSuggestionId: data.referenceSuggestionId }),
-    onSuccess: () => {
-      invalidateFace();
-      queryClient.invalidateQueries({ queryKey: ["ai-faces", "reference", "status"] });
-    },
-  });
-
   const normalizedLabel = label.trim() || undefined;
   const normalizedPrimarySourceKey = primarySourceKey.trim() || undefined;
   const hasMetadataChanges = useMemo(() => {
@@ -168,7 +201,73 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
 
   const mergeCandidates = (mergeMatchesQuery.data?.items ?? []).filter((candidate) => candidate.id !== id);
   const performerMatches = performerMatchesQuery.data?.items ?? [];
+  const orderedNavigationFaces = useMemo(
+    () => [...(faceNavigationPage?.items ?? [])].sort((left, right) => left.id - right.id),
+    [faceNavigationPage?.items],
+  );
+  const navigationIndex = orderedNavigationFaces.findIndex((candidate) => candidate.id === id);
+  const previousFace = navigationIndex > 0 ? orderedNavigationFaces[navigationIndex - 1] : undefined;
+  const nextFace = navigationIndex >= 0 ? orderedNavigationFaces[navigationIndex + 1] : undefined;
   const title = face?.label?.trim() || face?.performerName || `Face #${id}`;
+  const tabs = useMemo(() => [
+    { key: "overview", label: "Overview" },
+    { key: "detections", label: "Detections", count: faceDetections.length },
+    { key: "similar", label: "Similar Faces", count: similarFaces.length },
+  ], [faceDetections.length, similarFaces.length]);
+
+  const faceKeyboardShortcuts = useMemo(() => [
+    {
+      key: "e",
+      description: "Edit face metadata",
+      handler: () => {
+        if (!canWriteFace) {
+          return;
+        }
+
+        setIsEditModalOpen(true);
+      },
+    },
+    {
+      key: "m",
+      description: "Open merge face dialog",
+      handler: () => {
+        if (!canWriteFace) {
+          return;
+        }
+
+        setIsMergeModalOpen(true);
+      },
+    },
+    {
+      key: "o",
+      description: "Toggle favorite",
+      handler: () => {
+        if (!canEngageFace) {
+          return;
+        }
+
+        setFaceFavorite(!faceFavorite);
+      },
+    },
+    {
+      key: "[",
+      description: "Open previous face",
+      handler: () => {
+        if (previousFace) {
+          onNavigate({ page: "face", id: previousFace.id });
+        }
+      },
+    },
+    {
+      key: "]",
+      description: "Open next face",
+      handler: () => {
+        if (nextFace) {
+          onNavigate({ page: "face", id: nextFace.id });
+        }
+      },
+    },
+  ], [canEngageFace, canWriteFace, faceFavorite, nextFace, onNavigate, previousFace, setFaceFavorite]);
 
   useEffect(() => {
     if (!face) {
@@ -183,8 +282,8 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
 
   if (isLoading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-accent" />
+      <div className="px-1 py-2">
+        <DetailSkeleton />
       </div>
     );
   }
@@ -193,317 +292,402 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     return <div className="py-16 text-center text-secondary">Face not found</div>;
   }
 
-  return (
+  const deleteImpactSummary = deleteImpactLoading
+    ? "Loading delete impact..."
+    : deleteImpact
+      ? describeFaceDeleteImpact(deleteImpact)
+      : "Delete this face cluster and remove the AI artifacts it owns.";
+
+  const overviewContent = (
     <div className="space-y-6">
-      <button
-        type="button"
-        onClick={goBack}
-        className="inline-flex items-center gap-2 rounded-lg border border-border bg-card/70 px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        {backLabel}
-      </button>
+      {face.mergedIntoFaceId != null ? (
+        <section className="rounded-2xl border border-border bg-card/70 p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Merged State</h2>
+          <p className="mt-2 text-sm text-secondary">This face has already been merged into another primary face cluster.</p>
+          <button
+            type="button"
+            onClick={() => onNavigate({ page: "face", id: face.mergedIntoFaceId })}
+            className="mt-3 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+          >
+            Open face #{face.mergedIntoFaceId}
+          </button>
+        </section>
+      ) : null}
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(280px,360px),1fr]">
-        <div className="overflow-hidden rounded-3xl border border-border bg-card/80 shadow-sm">
-          <div className="aspect-square bg-surface/70">
-            {face.coverImageUrl ? (
-              <img src={face.coverImageUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr),minmax(18rem,0.85fr)]">
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-border bg-card/70 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Linked Performer</h2>
+                <p className="mt-1 text-sm text-secondary">Keep the cluster linked to a performer and review the best candidate matches here.</p>
+              </div>
+              {face.performerId ? <StatusPill icon={<Link2 className="h-3 w-3" />} label="Linked" tone="accent" /> : null}
+            </div>
+
+            {face.performerId ? (
+              <div className="mt-4 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => canReadPerformers && onNavigate({ page: "performer", id: face.performerId })}
+                  className={`text-left text-base font-medium ${canReadPerformers ? "text-accent hover:underline" : "text-foreground"}`}
+                >
+                  {face.performerName || `Performer #${face.performerId}`}
+                </button>
+                {canWriteFace ? (
+                  <button
+                    type="button"
+                    onClick={() => linkMutation.mutate(undefined)}
+                    disabled={linkMutation.isPending}
+                    className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {linkMutation.isPending ? "Saving..." : "Unlink performer"}
+                  </button>
+                ) : null}
+              </div>
             ) : (
-              <div className="flex h-full items-center justify-center text-muted">
-                <Fingerprint className="h-16 w-16" />
-              </div>
+              <p className="mt-4 text-sm text-secondary">No performer is linked to this face cluster yet.</p>
             )}
-          </div>
-          <div className="space-y-4 p-5">
-            <div>
-              <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
-              <p className="mt-1 text-sm text-secondary">Face cluster #{face.id}</p>
-            </div>
 
-            <div className="flex flex-wrap gap-2 text-xs">
-              {face.mergedIntoFaceId && <StatusPill icon={<Merge className="h-3 w-3" />} label={`Merged into #${face.mergedIntoFaceId}`} tone="muted" />}
-              {face.performerId && <StatusPill icon={<Link2 className="h-3 w-3" />} label="Linked performer" tone="accent" />}
-            </div>
+            {canWriteFace ? (
+              <div className="mt-5 space-y-3 border-t border-border pt-4">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-muted">Link to performer</label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                  <input
+                    type="text"
+                    value={performerSearch}
+                    onChange={(event) => setPerformerSearch(event.target.value)}
+                    placeholder="Search performers"
+                    className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+                {performerSearchTerm.length < 2 ? (
+                  <p className="text-xs text-secondary">Type at least two characters to search performers.</p>
+                ) : performerMatchesQuery.isLoading ? (
+                  <p className="text-xs text-secondary">Searching performers...</p>
+                ) : performerMatches.length === 0 ? (
+                  <p className="text-xs text-secondary">No performers matched that search.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {performerMatches.map((performer) => (
+                      <PerformerCandidateRow
+                        key={performer.id}
+                        performer={performer}
+                        onSelect={() => linkMutation.mutate(performer.id)}
+                        disabled={linkMutation.isPending}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </section>
 
-            <div className="grid grid-cols-3 gap-3 text-center text-xs">
-              <MetricCard label="Detections" value={face.detectionCount} />
-              <MetricCard label="Scenes" value={face.sceneCount} />
-              <MetricCard label="Images" value={face.imageCount} />
-            </div>
-
-            <dl className="space-y-2 text-sm text-secondary">
+          {!face.performerId && canWriteFace ? (
+            <section className="space-y-4">
               <div className="flex items-start justify-between gap-3">
-                <dt className="text-muted">Primary source</dt>
-                <dd className="text-right text-foreground">{face.primarySourceKey || "Unknown"}</dd>
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Suggested Matches</h2>
+                  <p className="mt-1 text-sm text-secondary">Review suggested performer links before accepting or rejecting them.</p>
+                </div>
+                <StatusPill icon={<Link2 className="h-3 w-3" />} label={`${faceSuggestions.length} candidates`} tone="muted" />
               </div>
-              <div className="flex items-start justify-between gap-3">
-                <dt className="text-muted">Created</dt>
-                <dd className="text-right text-foreground">{formatDate(face.createdAt)}</dd>
+              <div>
+                <FaceSuggestionsPanel
+                  face={face}
+                  suggestions={faceSuggestions}
+                  isLoading={suggestionsLoading}
+                  disabled={suggestionDecisionMutation.isPending}
+                  canReadPerformers={canReadPerformers}
+                  onAccept={(value) => suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "accept" })}
+                  onReject={(value) => suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "reject" })}
+                  onCompare={(value) => setComparingSuggestion(value)}
+                  onNavigate={onNavigate}
+                />
               </div>
-              <div className="flex items-start justify-between gap-3">
-                <dt className="text-muted">Updated</dt>
-                <dd className="text-right text-foreground">{formatDate(face.updatedAt)}</dd>
-              </div>
-            </dl>
-          </div>
+            </section>
+          ) : null}
         </div>
 
         <div className="space-y-6">
-          {face.mergedIntoFaceId != null ? (
-            <section className="rounded-2xl border border-border bg-card/70 p-5">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Merged State</h2>
-              <p className="mt-2 text-sm text-secondary">This face has already been merged into another primary face cluster.</p>
-              <button
-                type="button"
-                onClick={() => onNavigate({ page: "face", id: face.mergedIntoFaceId })}
-                className="mt-3 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-              >
-                Open face #{face.mergedIntoFaceId}
-              </button>
-            </section>
-          ) : null}
-
-          <section className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-2xl border border-border bg-card/70 p-5">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Linked Performer</h2>
-              {face.performerId ? (
-                <div className="mt-3 space-y-3">
-                  <button
-                    type="button"
-                    onClick={() => canReadPerformers && onNavigate({ page: "performer", id: face.performerId })}
-                    className={`text-left text-base font-medium ${canReadPerformers ? "text-accent hover:underline" : "text-foreground"}`}
-                  >
-                    {face.performerName || `Performer #${face.performerId}`}
-                  </button>
-                  {canWriteFace ? (
-                    <button
-                      type="button"
-                      onClick={() => linkMutation.mutate(undefined)}
-                      disabled={linkMutation.isPending}
-                      className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {linkMutation.isPending ? "Saving..." : "Unlink performer"}
-                    </button>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-secondary">No performer is linked to this face cluster yet.</p>
-              )}
-
-              {canWriteFace ? (
-                <div className="mt-5 space-y-3 border-t border-border pt-4">
-                  {!face.performerId ? (
-                    <FaceSuggestionsPanel
-                      suggestions={faceSuggestions}
-                      isLoading={suggestionsLoading}
-                      disabled={suggestionDecisionMutation.isPending || referenceSuggestionMutation.isPending}
-                      canReadPerformers={canReadPerformers}
-                      onAccept={(value) => {
-                        if (isReferenceSuggestion(value)) {
-                          referenceSuggestionMutation.mutate({ referenceSuggestionId: value.performerId, action: "import" });
-                          return;
-                        }
-
-                        suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "accept" });
-                      }}
-                      onReject={(value) => {
-                        if (isReferenceSuggestion(value)) {
-                          referenceSuggestionMutation.mutate({ referenceSuggestionId: value.performerId, action: "reject" });
-                          return;
-                        }
-
-                        suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "reject" });
-                      }}
-                      onNavigate={onNavigate}
-                    />
-                  ) : null}
-
-                  <div className={`${!face.performerId ? "border-t border-border pt-4" : ""} space-y-3`}>
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-muted">Link to performer</label>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                    <input
-                      type="text"
-                      value={performerSearch}
-                      onChange={(event) => setPerformerSearch(event.target.value)}
-                      placeholder="Search performers"
-                      className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-accent"
-                    />
-                  </div>
-                  {performerSearchTerm.length < 2 ? (
-                    <p className="text-xs text-secondary">Type at least two characters to search performers.</p>
-                  ) : performerMatchesQuery.isLoading ? (
-                    <p className="text-xs text-secondary">Searching performers...</p>
-                  ) : performerMatches.length === 0 ? (
-                    <p className="text-xs text-secondary">No performers matched that search.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {performerMatches.map((performer) => (
-                        <PerformerCandidateRow
-                          key={performer.id}
-                          performer={performer}
-                          onSelect={() => linkMutation.mutate(performer.id)}
-                          disabled={linkMutation.isPending}
-                        />
-                      ))}
-                    </div>
-                  )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="rounded-2xl border border-border bg-card/70 p-5">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Face Controls</h2>
-              {canWriteFace ? (
-                <div className="mt-3 space-y-4">
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
-                    Label
-                    <input
-                      type="text"
-                      value={label}
-                      onChange={(event) => setLabel(event.target.value)}
-                      placeholder="Optional face label"
-                      className="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
-                    Primary source key
-                    <input
-                      type="text"
-                      value={primarySourceKey}
-                      onChange={(event) => setPrimarySourceKey(event.target.value)}
-                      placeholder="detector.source"
-                      className="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => updateMutation.mutate({ label: normalizedLabel, primarySourceKey: normalizedPrimarySourceKey })}
-                    disabled={!hasMetadataChanges || updateMutation.isPending}
-                    className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Save className="h-4 w-4" />
-                    {updateMutation.isPending ? "Saving..." : "Save metadata"}
-                  </button>
-
-                  <div className="border-t border-border pt-4">
-                    <label className="block text-xs font-semibold uppercase tracking-wide text-muted">Merge into another face</label>
-                    <div className="relative mt-2">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                      <input
-                        type="text"
-                        value={mergeSearch}
-                        onChange={(event) => setMergeSearch(event.target.value)}
-                        placeholder="Search primary faces"
-                        className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-accent"
-                      />
-                    </div>
-                    {mergeSearchTerm.length < 2 ? (
-                      <p className="mt-2 text-xs text-secondary">Type at least two characters to search merge targets.</p>
-                    ) : mergeMatchesQuery.isLoading ? (
-                      <p className="mt-2 text-xs text-secondary">Searching faces...</p>
-                    ) : mergeCandidates.length === 0 ? (
-                      <p className="mt-2 text-xs text-secondary">No merge targets matched that search.</p>
-                    ) : (
-                      <div className="mt-3 space-y-2">
-                        {mergeCandidates.map((candidate) => (
-                          <FaceCandidateRow
-                            key={candidate.id}
-                            face={candidate}
-                            onSelect={() => mergeMutation.mutate(candidate.id)}
-                            disabled={mergeMutation.isPending}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {canDeleteFace ? (
-                    <div className="space-y-3 border-t border-border pt-4">
-                      <div className="space-y-1 text-xs text-secondary">
-                        <div className="font-semibold uppercase tracking-wide text-muted">Delete face cluster</div>
-                        <p>
-                          {deleteImpactLoading
-                            ? "Loading delete impact..."
-                            : deleteImpact
-                              ? describeFaceDeleteImpact(deleteImpact)
-                              : "Delete this face cluster and remove the AI artifacts it owns."}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (window.confirm(buildFaceDeleteConfirmation(title, deleteImpact))) {
-                            deleteMutation.mutate();
-                          }
-                        }}
-                        disabled={deleteMutation.isPending}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-200 transition-colors hover:border-red-400 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        {deleteMutation.isPending ? "Deleting..." : "Delete face"}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-secondary">You have read access to this face cluster, but not write access.</p>
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-border bg-card/70 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Detections</h2>
-                <p className="mt-1 text-sm text-secondary">Detections that currently resolve to this face cluster.</p>
-              </div>
-              <div className="text-xs text-muted">{faceDetections.length} item{faceDetections.length === 1 ? "" : "s"}</div>
-            </div>
-
-            {detectionsLoading ? (
-              <div className="mt-4 text-sm text-secondary">Loading detections...</div>
-            ) : faceDetections.length === 0 ? (
-              <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-secondary">
-                No detections currently point to this face cluster.
-              </div>
-            ) : (
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {faceDetections.map((detection) => (
-                  <FaceDetectionCard key={detection.id} detection={detection} onNavigate={onNavigate} />
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-2xl border border-border bg-card/70 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Similar Faces</h2>
-                <p className="mt-1 text-sm text-secondary">Nearest neighbors from the face embedding index.</p>
-              </div>
-              <div className="text-xs text-muted">{similarFaces.length} match{similarFaces.length === 1 ? "" : "es"}</div>
-            </div>
-
-            {similarLoading ? (
-              <div className="mt-4 text-sm text-secondary">Loading similar faces...</div>
-            ) : similarFaces.length === 0 ? (
-              <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-secondary">
-                No similar faces are available for this cluster yet.
-              </div>
-            ) : (
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {similarFaces.map((candidate) => (
-                  <SimilarFaceCard key={candidate.id} face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
-                ))}
-              </div>
-            )}
-          </section>
+          <MetadataPanel
+            title="Cluster Details"
+            items={[
+              { label: "Face ID", value: `#${face.id}` },
+              { label: "Primary source", value: face.primarySourceKey || "Unknown" },
+              { label: "Created", value: formatDate(face.createdAt) },
+              { label: "Updated", value: formatDate(face.updatedAt) },
+              { label: "Detections", value: face.detectionCount },
+              { label: "Scenes", value: face.sceneCount },
+              { label: "Images", value: face.imageCount },
+              { label: "Performer", value: face.performerName || "Unlinked" },
+            ]}
+          />
         </div>
       </section>
     </div>
+  );
+
+  const detectionsContent = (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Appears In</h2>
+          <p className="mt-1 text-sm text-secondary">Scenes and images where this face has been detected.</p>
+        </div>
+        <div className="text-xs text-muted">{faceDetections.length} detection{faceDetections.length === 1 ? "" : "s"}</div>
+      </div>
+
+      {detectionsLoading ? (
+        <div className="text-sm text-secondary">Loading detections...</div>
+      ) : faceDetections.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-secondary">
+          No detections currently point to this face cluster.
+        </div>
+      ) : (
+        <FaceDetectionsByHost detections={faceDetections} onNavigate={onNavigate} />
+      )}
+    </section>
+  );
+
+  const similarFacesContent = (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Similar Faces</h2>
+          <p className="mt-1 text-sm text-secondary">Nearest neighbors from the face embedding index.</p>
+        </div>
+        <div className="text-xs text-muted">{similarFaces.length} match{similarFaces.length === 1 ? "" : "es"}</div>
+      </div>
+
+      {similarLoading ? (
+        <div className="text-sm text-secondary">Loading similar faces...</div>
+      ) : similarFaces.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-secondary">
+          No similar faces are available for this cluster yet.
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {similarFaces.map((candidate) => (
+            <SimilarFaceCard key={candidate.id} face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+
+  const activeTabContent = activeTab === "overview"
+    ? overviewContent
+    : activeTab === "detections"
+      ? detectionsContent
+      : similarFacesContent;
+
+  const faceActions = (
+    <>
+      {previousFace ? (
+        <button
+          type="button"
+          onClick={() => onNavigate({ page: "face", id: previousFace.id })}
+          className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Prev Face
+        </button>
+      ) : null}
+      {nextFace ? (
+        <button
+          type="button"
+          onClick={() => onNavigate({ page: "face", id: nextFace.id })}
+          className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
+        >
+          Next Face
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      ) : null}
+      {canWriteFace ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setIsEditModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
+          >
+            <Pencil className="h-4 w-4" />
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsMergeModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
+          >
+            <Merge className="h-4 w-4" />
+            Merge
+          </button>
+        </>
+      ) : null}
+      {canDeleteFace ? (
+        <button
+          type="button"
+          onClick={() => setIsDeleteDialogOpen(true)}
+          disabled={deleteMutation.isPending}
+          className="inline-flex items-center gap-2 rounded-full border border-red-500/40 px-3 py-2 text-xs font-medium text-red-200 transition hover:border-red-400 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Trash2 className="h-4 w-4" />
+          {deleteMutation.isPending ? "Deleting..." : "Delete"}
+        </button>
+      ) : null}
+    </>
+  );
+
+  return (
+    <>
+      <EntityHeroLayout
+        backLabel={backLabel}
+        onGoBack={goBack}
+        imageUrl={face.coverImageUrl}
+        imageAlt={title}
+        imageFallback={<Fingerprint className="h-14 w-14" />}
+        title={title}
+        aliases={`Face cluster #${face.id} · Primary source ${face.primarySourceKey || "Unknown"}`}
+        counts={[
+          { key: "detections", label: "Detections", value: face.detectionCount },
+          { key: "scenes", label: "Scenes", value: face.sceneCount },
+          { key: "images", label: "Images", value: face.imageCount },
+        ]}
+        metaRow={(
+          <>
+            <span>Created {formatDate(face.createdAt)}</span>
+            <span>Updated {formatDate(face.updatedAt)}</span>
+          </>
+        )}
+        favorite={canEngageFace ? faceFavorite : undefined}
+        onFavoriteToggle={canEngageFace && !faceFavoritePending ? () => setFaceFavorite(!faceFavorite) : undefined}
+        actions={faceActions}
+      >
+        <div className="mb-4 border-b border-border">
+          <div className="flex flex-wrap gap-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key as FaceTab)}
+                className={`px-2.5 py-2 text-sm transition-colors border-b-2 cursor-pointer ${activeTab === tab.key ? "border-accent text-accent" : "border-transparent text-secondary hover:text-foreground"}`}
+              >
+                {tab.label}
+                {typeof tab.count === "number" ? <span className="ml-1 text-xs text-muted">({tab.count})</span> : null}
+              </button>
+            ))}
+          </div>
+        </div>
+        {activeTabContent}
+      </EntityHeroLayout>
+
+      <EditModal open={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title={`Edit ${title}`}>
+        <div className="space-y-4 py-5">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
+            Label
+            <input
+              ref={labelInputRef}
+              type="text"
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="Optional face label"
+              className="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
+            />
+          </label>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
+            Primary source key
+            <input
+              type="text"
+              value={primarySourceKey}
+              onChange={(event) => setPrimarySourceKey(event.target.value)}
+              placeholder="detector.source"
+              className="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
+            />
+          </label>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => updateMutation.mutate({ label: normalizedLabel, primarySourceKey: normalizedPrimarySourceKey })}
+              disabled={!hasMetadataChanges || updateMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Save className="h-4 w-4" />
+              {updateMutation.isPending ? "Saving..." : "Save metadata"}
+            </button>
+          </div>
+        </div>
+      </EditModal>
+
+      <EditModal open={isMergeModalOpen} onClose={() => setIsMergeModalOpen(false)} title={`Merge ${title}`}>
+        <div className="space-y-4 py-5">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-muted">Merge into another face</label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              ref={mergeInputRef}
+              type="text"
+              value={mergeSearch}
+              onChange={(event) => setMergeSearch(event.target.value)}
+              placeholder="Search primary faces"
+              className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-accent"
+            />
+          </div>
+          {mergeSearchTerm.length < 2 ? (
+            <p className="text-sm text-secondary">Type at least two characters to search merge targets.</p>
+          ) : mergeMatchesQuery.isLoading ? (
+            <p className="text-sm text-secondary">Searching faces...</p>
+          ) : mergeCandidates.length === 0 ? (
+            <p className="text-sm text-secondary">No merge targets matched that search.</p>
+          ) : (
+            <div className="space-y-2">
+              {mergeCandidates.map((candidate) => (
+                <FaceCandidateRow
+                  key={candidate.id}
+                  face={candidate}
+                  onSelect={() => mergeMutation.mutate(candidate.id)}
+                  disabled={mergeMutation.isPending}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </EditModal>
+
+      <ConfirmDialog
+        open={isDeleteDialogOpen}
+        title={`Delete ${title}?`}
+        message={`${deleteImpactSummary} This cannot be undone.`}
+        confirmLabel="Delete face"
+        onCancel={() => setIsDeleteDialogOpen(false)}
+        onConfirm={() => {
+          setIsDeleteDialogOpen(false);
+          deleteMutation.mutate();
+        }}
+      />
+
+      <FaceCompareDialog
+        open={comparingSuggestion != null}
+        face={face ?? null}
+        suggestion={comparingSuggestion}
+        disabled={suggestionDecisionMutation.isPending}
+        canReadPerformers={canReadPerformers}
+        onClose={() => setComparingSuggestion(null)}
+        onConfirm={(value) => {
+          if ("performerId" in value) {
+            suggestionDecisionMutation.mutate({ performerId: value.performerId, decision: "accept" });
+          }
+          setComparingSuggestion(null);
+        }}
+        onReject={(value) => {
+          if ("performerId" in value) {
+            suggestionDecisionMutation.mutate({ performerId: value.performerId, decision: "reject" });
+          }
+          setComparingSuggestion(null);
+        }}
+        onNavigate={onNavigate}
+      />
+    </>
   );
 }
 
@@ -517,15 +701,6 @@ function StatusPill({ icon, label, tone }: { icon: React.ReactNode; label: strin
       {icon}
       {label}
     </span>
-  );
-}
-
-function MetricCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-xl border border-border bg-surface/60 px-3 py-3">
-      <div className="text-lg font-semibold text-foreground">{value}</div>
-      <div className="mt-1 text-[11px] uppercase tracking-wide text-muted">{label}</div>
-    </div>
   );
 }
 
@@ -618,6 +793,59 @@ function FaceDetectionCard({ detection, onNavigate }: { detection: Detection; on
   );
 }
 
+function FaceDetectionsByHost({ detections, onNavigate }: { detections: Detection[]; onNavigate: (r: any) => void }) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, { hostType: "scene" | "image"; hostId: number; detections: Detection[] }>();
+    for (const d of detections) {
+      const key = `${d.hostType}:${d.hostId}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.detections.push(d);
+      } else {
+        map.set(key, { hostType: d.hostType as "scene" | "image", hostId: d.hostId, detections: [d] });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.detections.length - a.detections.length);
+  }, [detections]);
+
+  return (
+    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {grouped.map((group) => {
+        const hostKey = `${group.hostType}-${group.hostId}`;
+        const previewUrl = group.hostType === "image"
+          ? images.thumbnailUrl(group.hostId, 480)
+          : scenes.screenshotUrl(group.hostId);
+        const open = () => onNavigate({ page: group.hostType, id: group.hostId });
+        const Icon = group.hostType === "image" ? ImageIcon : Video;
+        const bestScore = Math.max(...group.detections.map((d) => d.score));
+        return (
+          <article key={hostKey} className="overflow-hidden rounded-2xl border border-border bg-surface/60">
+            <button type="button" onClick={open} className="block aspect-video w-full bg-surface/80" aria-label={`Open ${group.hostType} ${group.hostId}`}>
+              <img
+                src={previewUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+                onError={(event) => { (event.target as HTMLImageElement).style.visibility = "hidden"; }}
+              />
+            </button>
+            <div className="flex items-center justify-between gap-2 p-3 text-sm">
+              <button type="button" onClick={open} className="flex min-w-0 items-center gap-2 text-left text-foreground hover:text-accent">
+                <Icon className="h-4 w-4 shrink-0 text-muted" />
+                <span className="truncate">{group.hostType === "image" ? "Image" : "Scene"} #{group.hostId}</span>
+              </button>
+              <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
+                <span>{group.detections.length}x</span>
+                <span>{Math.round(bestScore * 100)}%</span>
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function formatDetectionSubtitle(detection: Detection) {
   if (detection.hostType === "scene" && detection.observedAtSec != null) {
     return `Scene frame at ${formatDetectionTime(detection.observedAtSec)}`;
@@ -633,18 +861,6 @@ function formatDetectionTime(totalSeconds: number) {
   return hours > 0
     ? `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
     : `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function buildFaceDeleteConfirmation(title: string, deleteImpact?: FaceDeleteImpact) {
-  return [
-    `Delete ${title}?`,
-    "",
-    deleteImpact
-      ? describeFaceDeleteImpact(deleteImpact)
-      : "Delete this face cluster and remove the AI artifacts it owns.",
-    "",
-    "This cannot be undone.",
-  ].join("\n");
 }
 
 function describeFaceDeleteImpact(deleteImpact: FaceDeleteImpact) {

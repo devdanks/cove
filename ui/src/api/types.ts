@@ -891,12 +891,22 @@ export interface DetectionUpdate extends DetectionCreate {
   sourceKey: string;
 }
 
+export interface FaceTopSuggestion {
+  performerId: number;
+  performerName: string;
+  coverImageUrl?: string;
+  confidence: number;
+  localPerformerId?: number;
+  externalUrl?: string;
+}
+
 export interface Face {
   id: number;
   label?: string;
   performerId?: number;
   performerName?: string;
   coverImageUrl?: string;
+  ignored: boolean;
   mergedIntoFaceId?: number;
   detectionCount: number;
   sceneCount: number;
@@ -904,17 +914,22 @@ export interface Face {
   primarySourceKey?: string;
   createdAt: string;
   updatedAt: string;
+  appearanceCount: number;
+  frameSampleCount: number;
+  topSuggestion?: FaceTopSuggestion;
 }
 
 export interface FaceCreate {
   label?: string;
   performerId?: number;
+  ignored?: boolean;
   primarySourceKey?: string;
 }
 
 export interface FaceUpdate {
   label?: string;
   performerId?: number;
+  ignored: boolean;
   primarySourceKey?: string;
 }
 
@@ -926,6 +941,9 @@ export interface FaceMerge {
   targetFaceId: number;
 }
 
+export interface FaceIgnore {
+  ignored: boolean;
+}
 
 export interface FaceDeleteImpact {
   detectionCount: number;
@@ -948,6 +966,15 @@ export interface AiFaceCoverRepairResult {
   errors: string[];
 }
 
+export interface FaceSimilar {
+  id: number;
+  label?: string;
+  performerId?: number;
+  performerName?: string;
+  coverImageUrl?: string;
+  distance: number;
+}
+
 export interface FaceSuggestionEvidence {
   faceId: number;
   thumbnailUrl?: string;
@@ -961,20 +988,8 @@ export interface FaceSuggestion {
   confidence: number;
   why: string;
   evidence: FaceSuggestionEvidence[];
-}
-
-export interface FaceSuggestionDecision {
-  performerId: number;
-  decision: "accept" | "reject";
-}
-
-export interface FaceSimilar {
-  id: number;
-  label?: string;
-  performerId?: number;
-  performerName?: string;
-  coverImageUrl?: string;
-  distance: number;
+  localPerformerId?: number;
+  externalUrl?: string;
 }
 
 export type AiDataKind = "embedding" | "detection" | "segment" | "tagApplication" | "face";
@@ -987,10 +1002,6 @@ export interface AiDataSelector {
   hostType?: string;
   hostId?: number;
   kinds?: AiDataKind[];
-}
-
-export interface AiDataPurgeRequest extends AiDataSelector {
-  dryRun?: boolean;
 }
 
 export interface AiDataSummaryItem {
@@ -1011,6 +1022,10 @@ export interface AiDataSummary {
 
 export interface AiDataPurgeResult {
   removedCounts: Record<string, number>;
+}
+
+export interface AiDataPurgeRequest extends AiDataSelector {
+  dryRun?: boolean;
 }
 
 export interface EntityEngagement {

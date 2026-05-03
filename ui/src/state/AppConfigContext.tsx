@@ -4,7 +4,7 @@ import { system } from "../api/client";
 import { authStore, hasPermission } from "../auth/authStore";
 import type { CoveConfig, SystemStatus } from "../api/types";
 
-const defaultMenuItems = ["scenes", "images", "markers", "performers", "galleries", "studios", "tags", "groups"];
+const defaultMenuItems = ["scenes", "images", "performers", "galleries", "studios", "tags", "groups"];
 const defaultIdentifyDefaults = {
   createTags: true,
   createPerformers: true,

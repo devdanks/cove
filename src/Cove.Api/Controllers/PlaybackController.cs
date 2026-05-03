@@ -11,6 +11,7 @@ namespace Cove.Api.Controllers;
 public class PlaybackController(IUserEngagementService engagementService, ICurrentPrincipalAccessor principalAccessor) : ControllerBase
 {
     [HttpPost("intervals")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("interactions")]
     public async Task<IActionResult> RecordIntervals([FromBody] PlaybackIntervalsRequestDto dto, CancellationToken ct)
     {
         if (principalAccessor.Current?.UserId is null)

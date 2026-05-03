@@ -18,20 +18,22 @@ const extensionRuntimeFileNames = new Map<string, string>(
   ])
 );
 
-function buildExtensionImportMap() {
+function buildExtensionImportMap(useDevRuntimeModules: boolean) {
   return Object.fromEntries(
     extensionRuntimeModules.flatMap((definition) => {
-      const target = `/${extensionRuntimeFileNames.get(`extension-runtime-${definition.id}`)!}`;
+      const target = useDevRuntimeModules
+        ? `/src/generated/extensions/runtime/${extensionRuntimeVersion}/${definition.sourceFileName}`
+        : `/${extensionRuntimeFileNames.get(`extension-runtime-${definition.id}`)!}`;
       return [definition.specifier, ...definition.legacySpecifiers].map((specifier) => [specifier, target]);
     })
   );
 }
 
-function extensionRuntimeImportMapPlugin() {
+function extensionRuntimeImportMapPlugin(useDevRuntimeModules: boolean) {
   return {
     name: "extension-runtime-import-map",
     transformIndexHtml() {
-      const importMap = JSON.stringify({ imports: buildExtensionImportMap() }, null, 2);
+      const importMap = JSON.stringify({ imports: buildExtensionImportMap(useDevRuntimeModules) }, null, 2);
       return [
         {
           tag: "meta",
@@ -54,50 +56,55 @@ function extensionRuntimeImportMapPlugin() {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), extensionRuntimeImportMapPlugin()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      "/api": {
-        target: "http://localhost:9999",
-        changeOrigin: true,
-      },
-      "/hubs": {
-        target: "http://localhost:9999",
-        changeOrigin: true,
-        ws: true,
+export default defineConfig(({ command }) => {
+  const useDevRuntimeModules = command === "serve";
+
+  return {
+    plugins: [react(), tailwindcss(), extensionRuntimeImportMapPlugin(useDevRuntimeModules)],
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
       },
     },
-  },
-  build: {
-    outDir: "../src/Cove.Api/wwwroot",
-    emptyOutDir: true,
-    rollupOptions: {
-      preserveEntrySignatures: "strict",
-      input: {
-        index: path.resolve(__dirname, "./index.html"),
-        ...extensionRuntimeEntries,
-      },
-      output: {
-        entryFileNames: (chunkInfo) => extensionRuntimeFileNames.get(chunkInfo.name) ?? "assets/[name]-[hash].js",
-        manualChunks: {
-          vendor: ["react", "react-dom", "@tanstack/react-query"],
-          icons: ["lucide-react"],
-          signalr: ["@microsoft/signalr"],
+    server: {
+      host: "127.0.0.1",
+      port: 5173,
+      proxy: {
+        "/api": {
+          target: "http://localhost:9999",
+          changeOrigin: true,
+        },
+        "/hubs": {
+          target: "http://localhost:9999",
+          changeOrigin: true,
+          ws: true,
         },
       },
     },
-  },
-  test: {
-    globals: true,
-    environment: "jsdom",
-    setupFiles: "./src/test/setup.ts",
-    css: true,
-  },
+    build: {
+      outDir: "../src/Cove.Api/wwwroot",
+      emptyOutDir: true,
+      rollupOptions: {
+        preserveEntrySignatures: "strict",
+        input: {
+          index: path.resolve(__dirname, "./index.html"),
+          ...extensionRuntimeEntries,
+        },
+        output: {
+          entryFileNames: (chunkInfo) => extensionRuntimeFileNames.get(chunkInfo.name) ?? "assets/[name]-[hash].js",
+          manualChunks: {
+            vendor: ["react", "react-dom", "@tanstack/react-query"],
+            icons: ["lucide-react"],
+            signalr: ["@microsoft/signalr"],
+          },
+        },
+      },
+    },
+    test: {
+      globals: true,
+      environment: "jsdom",
+      setupFiles: "./src/test/setup.ts",
+      css: true,
+    },
+  };
 });

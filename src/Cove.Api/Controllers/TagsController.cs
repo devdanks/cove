@@ -18,14 +18,14 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 {
     private sealed record TagUsageCounts(
         int SceneCount,
-        int SceneMarkerCount,
+        int SegmentCount,
         int ImageCount,
         int GalleryCount,
         int GroupCount,
         int PerformerCount,
         int StudioCount)
     {
-        public int TotalUsageCount => SceneCount + SceneMarkerCount + ImageCount + GalleryCount + GroupCount + PerformerCount + StudioCount;
+        public int TotalUsageCount => SceneCount + SegmentCount + ImageCount + GalleryCount + GroupCount + PerformerCount + StudioCount;
     }
 
     private sealed record GraphRelation(int ParentId, int ChildId);
@@ -48,7 +48,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         };
 
         var (items, totalCount) = await tagRepo.FindAsync(filter, findFilter, ct);
-        var dtos = MapTagListDtos(items);
+    var segmentCountsByTagId = await LoadSceneSegmentCountsAsync(items.Select(tag => tag.Id), ct);
+    var dtos = MapTagListDtos(items, segmentCountsByTagId);
         return Ok(new PaginatedResponse<TagListDto>(dtos, totalCount, page, perPage));
     }
 
@@ -58,7 +59,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new TagFilter();
         var (items, totalCount) = await tagRepo.FindAsync(filter, findFilter, ct);
-        var dtos = MapTagListDtos(items);
+        var segmentCountsByTagId = await LoadSceneSegmentCountsAsync(items.Select(tag => tag.Id), ct);
+        var dtos = MapTagListDtos(items, segmentCountsByTagId);
         return Ok(new PaginatedResponse<TagListDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -98,12 +100,13 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             parentIdsByTagId[relation.ChildId].Add(relation.ParentId);
         }
 
+        var segmentCountsByTagId = await LoadSceneSegmentCountsAsync(ids, ct);
         var graphItems = items
             .Select(tag =>
             {
                 var usageCounts = new TagUsageCounts(
                     tag.SceneCount,
-                    tag.SceneMarkerCount,
+                    segmentCountsByTagId.GetValueOrDefault(tag.Id),
                     tag.ImageCount,
                     tag.GalleryCount,
                     tag.GroupCount,
@@ -120,7 +123,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                     childIdsByTagId[tag.Id],
                     usageCounts.TotalUsageCount,
                     usageCounts.SceneCount,
-                    usageCounts.SceneMarkerCount,
+                    usageCounts.SegmentCount,
                     usageCounts.ImageCount,
                     usageCounts.GalleryCount,
                     usageCounts.GroupCount,
@@ -149,7 +152,38 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             .FirstOrDefaultAsync(t => t.Id == id, ct);
         if (tag == null) return NotFound();
 
-        return Ok(MapToDetailDto(tag));
+        return Ok(await MapToDetailDtoAsync(tag, ct));
+    }
+
+    [HttpGet("{id:int}/segments")]
+    public async Task<ActionResult<IReadOnlyList<TagSegmentWallDto>>> GetSegments(int id, [FromQuery] int count = 100, CancellationToken ct = default)
+    {
+        var exists = await db.Tags.AsNoTracking().AnyAsync(tag => tag.Id == id, ct);
+        if (!exists)
+            return NotFound();
+
+        count = Math.Clamp(count, 1, 250);
+
+        var segments = await (
+            from segment in db.Segments.AsNoTracking()
+            join scene in db.Scenes.AsNoTracking() on segment.HostId equals scene.Id
+            where segment.HostType == SegmentHostType.Scene && segment.TagId == id
+            orderby segment.UpdatedAt descending, segment.Id descending
+            select new TagSegmentWallDto(
+                segment.Id,
+                segment.Title,
+                segment.StartSec,
+                segment.EndSec,
+                segment.Kind ?? "segment",
+                segment.SourceKey,
+                segment.Confidence,
+                scene.Id,
+                scene.Title ?? $"Scene #{scene.Id}")
+        )
+            .Take(count)
+            .ToListAsync(ct);
+
+        return Ok(segments);
     }
 
     [HttpPost]
@@ -162,7 +196,11 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var tag = new Tag
         {
             Name = dto.Name, SortName = dto.SortName, Description = dto.Description,
-            Favorite = dto.Favorite, IgnoreAutoTag = dto.IgnoreAutoTag
+            Favorite = dto.Favorite,
+            IgnoreAutoTag = dto.IgnoreAutoTag,
+            ShowAsSegment = dto.ShowAsSegment,
+            SegmentColorOverride = NormalizeOptionalText(dto.SegmentColorOverride),
+            SegmentLaneOverride = dto.SegmentLaneOverride,
         };
         if (dto.Aliases?.Count > 0) tag.Aliases = dto.Aliases.Select(a => new TagAlias { Alias = a }).ToList();
         if (dto.ParentIds?.Count > 0) tag.ParentRelations = dto.ParentIds.Select(pid => new TagParent { ParentId = pid }).ToList();
@@ -172,7 +210,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (dto.Aliases?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Tag, tag.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await tagRepo.GetByIdWithRelationsAsync(tag.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = tag.Id }, MapToDetailDto(result!));
+        return CreatedAtAction(nameof(GetById), new { id = tag.Id }, await MapToDetailDtoAsync(result!, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -194,6 +232,9 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (dto.Description != null) tag.Description = dto.Description;
         if (dto.Favorite.HasValue) tag.Favorite = dto.Favorite.Value;
         if (dto.IgnoreAutoTag.HasValue) tag.IgnoreAutoTag = dto.IgnoreAutoTag.Value;
+        tag.ShowAsSegment = dto.ShowAsSegment;
+        tag.SegmentColorOverride = NormalizeOptionalText(dto.SegmentColorOverride);
+        tag.SegmentLaneOverride = dto.SegmentLaneOverride;
 
         if (dto.Aliases != null)
         {
@@ -230,7 +271,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent)
                 .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child)
                 .FirstOrDefaultAsync(t => t.Id == id, ct);
-        return Ok(MapToDetailDto(updated!));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     [HttpGet("{id:int}/metadata-server/search")]
@@ -293,7 +334,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
         await tagRepo.UpdateAsync(tag, ct);
         var updated = await tagRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDetailDto(updated!));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]
@@ -396,23 +437,38 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         return ids.Distinct().ToList();
     }
 
-    private static TagDetailDto MapToDetailDto(Tag t, int? sceneCount = null, int? performerCount = null, int? imageCount = null, int? galleryCount = null, int? studioCount = null, int? groupCount = null, int? markerCount = null) => new(
-        t.Id, t.Name, t.SortName, t.Description, t.Favorite, t.IgnoreAutoTag,
-        t.Aliases.Select(a => a.Alias).ToList(),
-        t.ParentRelations.Where(pr => pr.Parent != null).Select(pr => new TagDto(pr.Parent!.Id, pr.Parent.Name, pr.Parent.Description, pr.Parent.Favorite, pr.Parent.IgnoreAutoTag, [])).ToList(),
-        t.ChildRelations.Where(cr => cr.Child != null).Select(cr => new TagDto(cr.Child!.Id, cr.Child.Name, cr.Child.Description, cr.Child.Favorite, cr.Child.IgnoreAutoTag, [])).ToList(),
-        sceneCount ?? t.SceneCount,
-        performerCount ?? t.PerformerCount,
-        imageCount ?? t.ImageCount,
-        galleryCount ?? t.GalleryCount,
-        studioCount ?? t.StudioCount,
-        groupCount ?? t.GroupCount,
-        markerCount ?? t.SceneMarkerCount,
-        t.CustomFields,
-        t.CreatedAt.ToString("o"), t.UpdatedAt.ToString("o")
-    );
+    private async Task<TagDetailDto> MapToDetailDtoAsync(Tag t, CancellationToken ct)
+    {
+        var segmentCount = await db.Segments
+            .AsNoTracking()
+            .CountAsync(segment => segment.HostType == SegmentHostType.Scene && segment.TagId == t.Id, ct);
 
-    private static List<TagListDto> MapTagListDtos(IReadOnlyList<Tag> items)
+        return new TagDetailDto(
+            t.Id,
+            t.Name,
+            t.SortName,
+            t.Description,
+            t.Favorite,
+            t.IgnoreAutoTag,
+            t.Aliases.Select(a => a.Alias).ToList(),
+            t.ParentRelations.Where(pr => pr.Parent != null).Select(pr => new TagDto(pr.Parent!.Id, pr.Parent.Name, pr.Parent.Description, pr.Parent.Favorite, pr.Parent.IgnoreAutoTag, [], pr.Parent.ShowAsSegment, pr.Parent.SegmentColorOverride, pr.Parent.SegmentLaneOverride)).ToList(),
+            t.ChildRelations.Where(cr => cr.Child != null).Select(cr => new TagDto(cr.Child!.Id, cr.Child.Name, cr.Child.Description, cr.Child.Favorite, cr.Child.IgnoreAutoTag, [], cr.Child.ShowAsSegment, cr.Child.SegmentColorOverride, cr.Child.SegmentLaneOverride)).ToList(),
+            t.SceneCount,
+            t.PerformerCount,
+            t.ImageCount,
+            t.GalleryCount,
+            t.StudioCount,
+            t.GroupCount,
+            segmentCount,
+            t.CustomFields,
+            t.CreatedAt.ToString("o"),
+            t.UpdatedAt.ToString("o"),
+            t.ShowAsSegment,
+            t.SegmentColorOverride,
+            t.SegmentLaneOverride);
+    }
+
+    private static List<TagListDto> MapTagListDtos(IReadOnlyList<Tag> items, IReadOnlyDictionary<int, int> segmentCountsByTagId)
     {
         if (items.Count == 0) return [];
 
@@ -426,14 +482,34 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 t.IgnoreAutoTag,
                 t.Aliases.Select(a => a.Alias).ToList(),
                 t.SceneCount,
-                t.SceneMarkerCount,
+                segmentCountsByTagId.GetValueOrDefault(t.Id),
                 t.ImageCount,
                 t.GalleryCount,
                 t.GroupCount,
                 t.PerformerCount,
                 t.StudioCount,
-                t.ImageBlobId != null ? EntityImageUrls.Tag(t.Id, t.UpdatedAt) : null);
+                t.ImageBlobId != null ? EntityImageUrls.Tag(t.Id, t.UpdatedAt) : null,
+                t.ShowAsSegment,
+                t.SegmentColorOverride,
+                t.SegmentLaneOverride);
         }).ToList();
+    }
+
+    private static string? NormalizeOptionalText(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<Dictionary<int, int>> LoadSceneSegmentCountsAsync(IEnumerable<int> tagIds, CancellationToken ct)
+    {
+        var ids = tagIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return [];
+
+        return await db.Segments
+            .AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
+            .GroupBy(segment => segment.TagId!.Value)
+            .Select(group => new { TagId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.TagId, item => item.Count, ct);
     }
 
     // ===== Bulk Operations =====
@@ -563,7 +639,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
         await db.SaveChangesAsync(ct);
         var result = await tagRepo.GetByIdWithRelationsAsync(target.Id, ct);
-        return Ok(MapToDetailDto(result!));
+        return Ok(await MapToDetailDtoAsync(result!, ct));
     }
 
     // ===== Marker Wall =====
@@ -572,12 +648,33 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<List<string>>> GetMarkerStrings([FromQuery] string? q, [FromQuery] string? sort, CancellationToken ct)
     {
-        var query = db.SceneMarkers.AsNoTracking().Select(m => m.Title).Distinct();
+        var query = db.Segments
+            .AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Title != null && segment.Title != string.Empty)
+            .Select(segment => segment.Title!)
+            .Distinct();
         if (!string.IsNullOrEmpty(q))
-            query = query.Where(t => EF.Functions.ILike(t, $"%{q}%"));
+        {
+            if (db.Database.ProviderName?.Contains("Npgsql", StringComparison.Ordinal) == true)
+            {
+                query = query.Where(title => EF.Functions.ILike(title, $"%{q}%"));
+            }
+            else
+            {
+                var normalizedQuery = q.ToUpperInvariant();
+                query = query.Where(title => title.ToUpper().Contains(normalizedQuery));
+            }
+        }
 
         var result = sort == "count"
-            ? await db.SceneMarkers.AsNoTracking().GroupBy(m => m.Title).OrderByDescending(g => g.Count()).Select(g => g.Key).Take(100).ToListAsync(ct)
+            ? await db.Segments
+                .AsNoTracking()
+                .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Title != null && segment.Title != string.Empty)
+                .GroupBy(segment => segment.Title!)
+                .OrderByDescending(group => group.Count())
+                .Select(group => group.Key)
+                .Take(100)
+                .ToListAsync(ct)
             : await query.OrderBy(t => t).Take(100).ToListAsync(ct);
 
         return Ok(result);

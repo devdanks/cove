@@ -32,7 +32,6 @@ const baseScene = {
   performers: [],
   groups: [],
   galleries: [],
-  markers: [],
   tags: [],
   studioName: null,
   studioId: null,
@@ -187,4 +186,5 @@ describe("DetailsTab performers", () => {
     expect(screen.getByRole("link", { name: /Alice Example/i }).className).toContain("w-full");
     expect(screen.getByRole("link", { name: /Beth Example/i }).className).toContain("w-full");
   });
+
 });

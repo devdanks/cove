@@ -4,13 +4,14 @@ export type NavVisibilityUser = {
   readGrantedEntityKinds?: string[];
 };
 
-export type EntityResource = "scene" | "image" | "performer" | "gallery" | "studio" | "tag" | "group" | "marker";
-export type NavPage = "scenes" | "images" | "markers" | "galleries" | "performers" | "studios" | "tags" | "groups";
+export type EntityResource = "scene" | "image" | "performer" | "gallery" | "studio" | "tag" | "group" | "marker" | "face";
+export type NavPage = "scenes" | "segments" | "images" | "faces" | "galleries" | "performers" | "studios" | "tags" | "groups";
 
 const READ_PERMISSIONS: Record<EntityResource, string> = {
   scene: "scenes.read",
   image: "images.read",
   performer: "performers.read",
+  face: "faces.read",
   gallery: "galleries.read",
   studio: "studios.read",
   tag: "tags.read",
@@ -22,6 +23,7 @@ const WRITE_PERMISSIONS: Record<EntityResource, string> = {
   scene: "scenes.write",
   image: "images.write",
   performer: "performers.write",
+  face: "faces.write",
   gallery: "galleries.write",
   studio: "studios.write",
   tag: "tags.write",
@@ -33,6 +35,7 @@ const DELETE_PERMISSIONS: Record<EntityResource, string> = {
   scene: "scenes.delete",
   image: "images.delete",
   performer: "performers.delete",
+  face: "faces.delete",
   gallery: "galleries.delete",
   studio: "studios.delete",
   tag: "tags.delete",
@@ -42,8 +45,9 @@ const DELETE_PERMISSIONS: Record<EntityResource, string> = {
 
 const NAV_PAGE_RESOURCE: Record<NavPage, EntityResource> = {
   scenes: "scene",
+  segments: "marker",
   images: "image",
-  markers: "marker",
+  faces: "face",
   galleries: "gallery",
   performers: "performer",
   studios: "studio",

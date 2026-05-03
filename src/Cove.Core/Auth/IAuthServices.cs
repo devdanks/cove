@@ -73,7 +73,8 @@ public sealed record UserRatingSystemOptionsDto(
 
 public sealed record UserUiPreferencesDto(
     UserThemePreferencesDto? Theme,
-    UserRatingSystemOptionsDto? RatingSystemOptions);
+    UserRatingSystemOptionsDto? RatingSystemOptions,
+    bool? RecordPlaybackHistory);
 
 public sealed record CreateUserRequest(
     string Username,

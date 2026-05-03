@@ -23,6 +23,8 @@ public sealed class BootstrapAuthService : IHostedService
     private readonly IPermissionRegistry _registry;
     private readonly CoveConfiguration _config;
     private readonly ILogger<BootstrapAuthService> _log;
+    private CancellationTokenSource? _bootstrapCts;
+    private Task? _bootstrapTask;
 
     public BootstrapAuthService(
         IServiceProvider services,
@@ -36,32 +38,33 @@ public sealed class BootstrapAuthService : IHostedService
         _log = log;
     }
 
-    public async Task StartAsync(CancellationToken ct)
+    public Task StartAsync(CancellationToken ct)
     {
-        // Run after the DB migration step in Program.Main; small delay loop to avoid races.
-        for (var i = 0; i < 30; i++)
+        _bootstrapCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _bootstrapTask = Task.Run(() => BootstrapWhenReadyAsync(_bootstrapCts.Token), CancellationToken.None);
+        return Task.CompletedTask;
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_bootstrapCts != null)
+            await _bootstrapCts.CancelAsync();
+
+        if (_bootstrapTask == null)
+            return;
+
+        try
         {
-            try
-            {
-                using var scope = _services.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
-                if (await db.Database.CanConnectAsync(ct))
-                {
-                    var hasMigrationsTable = false;
-                    var conn = db.Database.GetDbConnection();
-                    await conn.OpenAsync(ct);
-                    await using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='roles'";
-                        hasMigrationsTable = await cmd.ExecuteScalarAsync(ct) != null;
-                    }
-                    await conn.CloseAsync();
-                    if (hasMigrationsTable) break;
-                }
-            }
-            catch { /* still spinning up */ }
-            await Task.Delay(1000, ct);
+            await _bootstrapTask.WaitAsync(cancellationToken);
         }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task BootstrapWhenReadyAsync(CancellationToken ct)
+    {
+        await WaitForAuthSchemaAsync(ct);
 
         try
         {
@@ -84,7 +87,43 @@ public sealed class BootstrapAuthService : IHostedService
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    private async Task WaitForAuthSchemaAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = _services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+                if (await db.Database.CanConnectAsync(ct))
+                {
+                    var connection = db.Database.GetDbConnection();
+                    var shouldClose = connection.State != System.Data.ConnectionState.Open;
+                    if (shouldClose)
+                        await connection.OpenAsync(ct);
+
+                    try
+                    {
+                        await using var cmd = connection.CreateCommand();
+                        cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='roles'";
+                        if (await cmd.ExecuteScalarAsync(ct) != null)
+                            return;
+                    }
+                    finally
+                    {
+                        if (shouldClose)
+                            await connection.CloseAsync();
+                    }
+                }
+            }
+            catch
+            {
+                // Database and schema may still be starting up.
+            }
+
+            await Task.Delay(1000, ct);
+        }
+    }
 
     private async Task UpsertPermissionsAsync(CoveContext db, CancellationToken ct)
     {

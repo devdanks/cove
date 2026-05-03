@@ -99,6 +99,9 @@ public sealed class CovePrincipal
             case PermissionKeys.PerformersRead:
                 entityKind = EntityKinds.Performer;
                 return true;
+            case PermissionKeys.FacesRead:
+                entityKind = EntityKinds.Face;
+                return true;
             case PermissionKeys.TagsRead:
                 entityKind = EntityKinds.Tag;
                 return true;

@@ -10,11 +10,14 @@ import {
   ZoomOut,
   Maximize2,
 } from "lucide-react";
+import { trackInteraction } from "../utils/interactionTracking";
 
 export interface LightboxImage {
   id: number;
   src: string;
   title?: string;
+  interactionSource?: string;
+  interactionMeta?: Record<string, unknown>;
 }
 
 export interface LightboxProps {
@@ -43,9 +46,28 @@ export function Lightbox({
   const panStart = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const slideshowTimer = useRef<ReturnType<typeof setInterval>>(undefined);
+  const trackedOpen = useRef(false);
+  const lastTrackedIndex = useRef<number | null>(null);
 
   const count = images.length;
   const current = images[index];
+
+  const trackCurrentImageInteraction = useCallback((kind: string, extraMeta?: Record<string, unknown>) => {
+    if (!current) {
+      return;
+    }
+
+    trackInteraction({
+      hostType: "image",
+      hostId: current.id,
+      kind,
+      meta: {
+        source: current.interactionSource ?? "lightbox",
+        ...(current.interactionMeta ?? {}),
+        ...(extraMeta ?? {}),
+      },
+    });
+  }, [current]);
 
   // Sync index when initialIndex or open changes
   useEffect(() => {
@@ -54,8 +76,32 @@ export function Lightbox({
       setZoom(1);
       setPan({ x: 0, y: 0 });
       setPlaying(false);
+      trackedOpen.current = false;
+      lastTrackedIndex.current = null;
     }
   }, [open, initialIndex]);
+
+  useEffect(() => {
+    if (!open || !current) {
+      return;
+    }
+
+    if (!trackedOpen.current) {
+      trackedOpen.current = true;
+      lastTrackedIndex.current = index;
+      trackCurrentImageInteraction("openLightbox", { index: index + 1, count });
+      return;
+    }
+
+    if (lastTrackedIndex.current !== null && lastTrackedIndex.current !== index) {
+      trackCurrentImageInteraction("navigate", {
+        fromIndex: lastTrackedIndex.current + 1,
+        toIndex: index + 1,
+        count,
+      });
+      lastTrackedIndex.current = index;
+    }
+  }, [count, current, index, open, trackCurrentImageInteraction]);
 
   // Lock body scroll
   useEffect(() => {
@@ -89,24 +135,42 @@ export function Lightbox({
   const toggleZoom = useCallback(() => {
     if (zoom > 1) {
       resetView();
-    } else {
-      setZoom(2);
+      trackCurrentImageInteraction("zoom", { action: "toggle", zoom: 1 });
+      return;
     }
-  }, [zoom, resetView]);
+
+    setZoom(2);
+    trackCurrentImageInteraction("zoom", { action: "toggle", zoom: 2 });
+  }, [resetView, trackCurrentImageInteraction, zoom]);
 
   const handleZoomIn = useCallback(() => {
-    setZoom((z) => Math.min(z + 0.5, 5));
-  }, []);
+    const nextZoom = Math.min(zoom + 0.5, 5);
+    setZoom(nextZoom);
+    if (nextZoom !== zoom) {
+      trackCurrentImageInteraction("zoom", { action: "in", zoom: nextZoom });
+    }
+  }, [trackCurrentImageInteraction, zoom]);
 
   const handleZoomOut = useCallback(() => {
-    setZoom((z) => {
-      const next = Math.max(z - 0.5, 1);
-      if (next === 1) setPan({ x: 0, y: 0 });
-      return next;
-    });
-  }, []);
+    const nextZoom = Math.max(zoom - 0.5, 1);
+    setZoom(nextZoom);
+    if (nextZoom === 1) {
+      setPan({ x: 0, y: 0 });
+    }
+    if (nextZoom !== zoom) {
+      trackCurrentImageInteraction("zoom", { action: "out", zoom: nextZoom });
+    }
+  }, [trackCurrentImageInteraction, zoom]);
 
   const handleFitScreen = useCallback(() => resetView(), [resetView]);
+
+  const handleClose = useCallback(() => {
+    if (open) {
+      trackCurrentImageInteraction("closeLightbox", { index: index + 1, count });
+    }
+
+    onClose();
+  }, [count, index, onClose, open, trackCurrentImageInteraction]);
 
   // Slideshow
   useEffect(() => {
@@ -133,7 +197,7 @@ export function Lightbox({
           break;
         case "Escape":
           e.preventDefault();
-          onClose();
+          handleClose();
           break;
         case " ":
           e.preventDefault();
@@ -143,7 +207,7 @@ export function Lightbox({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, goPrev, goNext, onClose, toggleSlideshow]);
+  }, [goNext, goPrev, handleClose, open, toggleSlideshow]);
 
   // Scroll wheel zoom
   const handleWheel = useCallback(
@@ -204,7 +268,7 @@ export function Lightbox({
       ref={containerRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/90"
       onClick={(e) => {
-        if (e.target === containerRef.current) onClose();
+        if (e.target === containerRef.current) handleClose();
       }}
     >
       {/* Top bar */}
@@ -245,7 +309,7 @@ export function Lightbox({
             {playing ? <Pause size={20} /> : <Play size={20} />}
           </button>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
             aria-label="Close"
           >
@@ -281,7 +345,7 @@ export function Lightbox({
         className="relative flex h-[85vh] w-[90vw] items-center justify-center overflow-hidden select-none"
         onClick={(e) => {
           if (e.target === e.currentTarget) {
-            onClose();
+            handleClose();
           }
         }}
         onWheel={handleWheel}

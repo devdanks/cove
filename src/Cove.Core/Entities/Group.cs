@@ -19,10 +19,35 @@ public class Group : BaseEntity
     public Studio? Studio { get; set; }
     public ICollection<GroupUrl> Urls { get; set; } = [];
     public ICollection<GroupTag> GroupTags { get; set; } = [];
-    public ICollection<SceneGroup> SceneGroups { get; set; } = [];
+    public ICollection<GroupItem> GroupItems { get; set; } = [];
     public ICollection<GroupRelation> ContainingGroupRelations { get; set; } = [];
     public ICollection<GroupRelation> SubGroupRelations { get; set; } = [];
     public Dictionary<string, object>? CustomFields { get; set; }
+}
+
+public enum GroupItemKind
+{
+    Scene = 1,
+    SceneRange = 2,
+}
+
+public class GroupItem : BaseEntity
+{
+    public int GroupId { get; set; }
+    public int OrderIndex { get; set; }
+    public GroupItemKind Kind { get; set; }
+    public int SceneId { get; set; }
+    public double? StartSec { get; set; }
+    public double? EndSec { get; set; }
+    public string? Title { get; set; }
+    public string? Notes { get; set; }
+    public string? SourceSpanKey { get; set; }
+    public int? SourceProfileId { get; set; }
+    public string? SourceQueryJson { get; set; }
+    public DateTime? SnapshotAt { get; set; }
+
+    public Group? Group { get; set; }
+    public Scene? Scene { get; set; }
 }
 
 public class GroupUrl

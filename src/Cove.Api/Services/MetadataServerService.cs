@@ -210,6 +210,7 @@ query Me {
     private readonly CoveConfiguration _config;
     private readonly CoveContext _db;
     private readonly IBlobService _blobService;
+    private readonly ITagProvenanceService _tagProvenanceService;
     private readonly ILogger<MetadataServerService> _logger;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -217,12 +218,13 @@ query Me {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public MetadataServerService(HttpClient httpClient, CoveConfiguration config, CoveContext db, IBlobService blobService, ILogger<MetadataServerService> logger)
+    public MetadataServerService(HttpClient httpClient, CoveConfiguration config, CoveContext db, IBlobService blobService, ITagProvenanceService tagProvenanceService, ILogger<MetadataServerService> logger)
     {
         _httpClient = httpClient;
         _config = config;
         _db = db;
         _blobService = blobService;
+        _tagProvenanceService = tagProvenanceService;
         _logger = logger;
     }
 
@@ -1118,6 +1120,7 @@ query Me {
                 if (!alreadyLinkedTag)
                 {
                     scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, Tag = tag });
+                    await _tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, "metadata", cancellationToken: ct);
                 }
             }
         }

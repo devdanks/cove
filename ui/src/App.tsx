@@ -11,11 +11,23 @@ import { SetupWizardPage } from "./pages/SetupWizardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { useKeySequence } from "./hooks/useKeySequence";
-import { LOCATION_CHANGE_EVENT, Route, buildCurrentUrl, buildRoutePath, navigateToUrl, parseCurrentRoute, parseLegacyHashRoute, syncRouteHistory } from "./router/location";
+import { LOCATION_CHANGE_EVENT, Route, buildCurrentUrl, buildRoutePath, buildRouteUrl, navigateToUrl, parseCurrentRoute, parseLegacyHashRoute, readStoredRoute, resolveCurrentRoute, syncRouteHistory } from "./router/location";
+
+function normalizeRoute(route: Route): Route {
+  if (route.page === "markers") {
+    return route.id != null ? { page: "segment", id: route.id } : { page: "segments" };
+  }
+
+  return route;
+}
 
 const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
   scenes: "scenes.read",
   scene: "scenes.read",
+  "scene-span": "markers.read",
+  segments: "markers.read",
+  segment: "markers.read",
+  face: "faces.read",
   performers: "performers.read",
   performer: "performers.read",
   studios: "studios.read",
@@ -26,9 +38,10 @@ const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
   gallery: "galleries.read",
   groups: "groups.read",
   group: "groups.read",
+  compilation: "groups.read",
   images: "images.read",
   image: "images.read",
-  markers: "markers.read",
+  faces: "faces.read",
   sceneparser: "scenes.read",
   logs: "system.read",
   stats: "system.read",
@@ -36,6 +49,7 @@ const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
 
 // Lazy-loaded page components for code splitting
 const ScenesPage = lazy(() => import("./pages/ScenesPage").then(m => ({ default: m.ScenesPage })));
+const SegmentsPage = lazy(() => import("./pages/SegmentsPage").then(m => ({ default: m.SegmentsPage })));
 const PerformersPage = lazy(() => import("./pages/PerformersPage").then(m => ({ default: m.PerformersPage })));
 const StudiosPage = lazy(() => import("./pages/StudiosPage").then(m => ({ default: m.StudiosPage })));
 const TagsPage = lazy(() => import("./pages/TagsPage").then(m => ({ default: m.TagsPage })));
@@ -45,14 +59,18 @@ const ImagesPage = lazy(() => import("./pages/ImagesPage").then(m => ({ default:
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
 const SceneDetailPage = lazy(() => import("./pages/SceneDetailPage").then(m => ({ default: m.SceneDetailPage })));
+const SegmentDetailPage = lazy(() => import("./pages/SegmentDetailPage").then(m => ({ default: m.SegmentDetailPage })));
+const ResolvedSpanPlayPage = lazy(() => import("./pages/ResolvedSpanPlayPage").then(m => ({ default: m.ResolvedSpanPlayPage })));
 const PerformerDetailPage = lazy(() => import("./pages/PerformerDetailPage").then(m => ({ default: m.PerformerDetailPage })));
 const StudioDetailPage = lazy(() => import("./pages/StudioDetailPage").then(m => ({ default: m.StudioDetailPage })));
 const TagDetailPage = lazy(() => import("./pages/TagDetailPage").then(m => ({ default: m.TagDetailPage })));
 const GalleryDetailPage = lazy(() => import("./pages/GalleryDetailPage").then(m => ({ default: m.GalleryDetailPage })));
 const GroupDetailPage = lazy(() => import("./pages/GroupDetailPage").then(m => ({ default: m.GroupDetailPage })));
+const CompilationPlayerPage = lazy(() => import("./pages/CompilationPlayerPage").then(m => ({ default: m.CompilationPlayerPage })));
 const ImageDetailPage = lazy(() => import("./pages/ImageDetailPage").then(m => ({ default: m.ImageDetailPage })));
+const FacesPage = lazy(() => import("./pages/FacesPage").then(m => ({ default: m.FacesPage })));
+const FaceDetailPage = lazy(() => import("./pages/FaceDetailPage").then(m => ({ default: m.FaceDetailPage })));
 const LogsPage = lazy(() => import("./pages/LogsPage").then(m => ({ default: m.LogsPage })));
-const SceneMarkersPage = lazy(() => import("./pages/SceneMarkersPage").then(m => ({ default: m.SceneMarkersPage })));
 
 const SceneFilenameParserPage = lazy(() => import("./pages/SceneFilenameParserPage").then(m => ({ default: m.SceneFilenameParserPage })));
 const HomePage = lazy(() => import("./pages/HomePage").then(m => ({ default: m.HomePage })));
@@ -60,14 +78,22 @@ const HomePage = lazy(() => import("./pages/HomePage").then(m => ({ default: m.H
 export default function App() {
   const [route, setRoute] = useState<Route>(() => {
     const legacyRoute = parseLegacyHashRoute(window.location.hash);
-    return legacyRoute ?? parseCurrentRoute();
+    return normalizeRoute(legacyRoute ?? resolveCurrentRoute());
   });
 
   useEffect(() => {
     const legacyRoute = parseLegacyHashRoute(window.location.hash);
     if (legacyRoute) {
-      navigateToUrl(buildCurrentUrl(buildRoutePath(legacyRoute), window.location.search), { replace: true });
-      setRoute(legacyRoute);
+      const normalizedLegacyRoute = normalizeRoute(legacyRoute);
+      navigateToUrl(buildCurrentUrl(buildRoutePath(normalizedLegacyRoute), window.location.search), { replace: true, state: normalizedLegacyRoute });
+      setRoute(normalizedLegacyRoute);
+    } else {
+      const currentRoute = resolveCurrentRoute();
+      const normalizedCurrentRoute = normalizeRoute(currentRoute);
+      if (normalizedCurrentRoute.page !== currentRoute.page || normalizedCurrentRoute.id !== currentRoute.id) {
+        navigateToUrl(buildCurrentUrl(buildRoutePath(normalizedCurrentRoute), window.location.search), { replace: true, state: normalizedCurrentRoute });
+        setRoute(normalizedCurrentRoute);
+      }
     }
     // Redirect /home to / (canonical home URL)
     if (window.location.pathname === "/home") {
@@ -80,7 +106,14 @@ export default function App() {
   useEffect(() => {
     const handleLocationChange = (event: Event) => {
       syncRouteHistory(event.type === "popstate" ? "history" : "push");
-      setRoute(parseCurrentRoute());
+      const currentUrl = buildCurrentUrl(window.location.pathname, window.location.search);
+      // Recover route from history.state first, then from session-scoped route history.
+      // This keeps derived-query provenance available even if a navigation path only preserved the URL.
+      const rawState = event instanceof PopStateEvent ? event.state : window.history.state;
+      const stateRoute = rawState && typeof rawState === "object" && typeof (rawState as Route).page === "string"
+        ? rawState as Route
+        : undefined;
+      setRoute(normalizeRoute(stateRoute ?? readStoredRoute(currentUrl) ?? parseCurrentRoute()));
     };
     window.addEventListener("popstate", handleLocationChange);
     window.addEventListener(LOCATION_CHANGE_EVENT, handleLocationChange);
@@ -91,12 +124,14 @@ export default function App() {
   }, []);
 
   const navigate = useCallback((r: Route) => {
-    const currentPath = window.location.pathname;
-    const nextPath = buildRoutePath(r);
-    if (currentPath === nextPath) {
+    const currentUrl = buildCurrentUrl(window.location.pathname, window.location.search);
+    const nextUrl = buildRouteUrl(r);
+    if (currentUrl === nextUrl) {
       window.dispatchEvent(new CustomEvent("cove-page-reset", { detail: r.page }));
     } else {
-      navigateToUrl(nextPath);
+      // Store the full route (including non-URL-serializable fields) in history.state
+      // so the location change handler can recover it without URL round-tripping.
+      navigateToUrl(nextUrl, { state: r });
       setRoute(r);
     }
   }, []);
@@ -121,9 +156,10 @@ export default function App() {
   const globalBindings = useMemo(() => [
     { keys: "g h", action: () => navigate({ page: "home" }) },
     { keys: "g s", action: () => navigate({ page: "scenes" }) },
+    { keys: "g m", action: () => navigate({ page: "segments" }) },
+    { keys: "g f", action: () => navigate({ page: "faces" }) },
     { keys: "g i", action: () => navigate({ page: "images" }) },
     { keys: "g v", action: () => navigate({ page: "groups" }) },
-    { keys: "g k", action: () => navigate({ page: "markers" }) },
     { keys: "g l", action: () => navigate({ page: "galleries" }) },
     { keys: "g p", action: () => navigate({ page: "performers" }) },
     { keys: "g u", action: () => navigate({ page: "studios" }) },
@@ -308,7 +344,14 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
     <>
       {route.page === "home" && <HomePage onNavigate={navigate} />}
       {route.page === "scenes" && <ScenesPage onNavigate={navigate} />}
-      {route.page === "scene" && route.id !== undefined && <SceneDetailPage id={route.id} onNavigate={navigate} />}
+      {route.page === "scene" && route.id !== undefined && <SceneDetailPage id={route.id} initialSeekTo={route.seekTo} onNavigate={navigate} />}
+      {route.page === "scene-span" && route.id !== undefined && route.spanKey !== undefined && (
+        <ResolvedSpanPlayPage sceneId={route.id} spanKey={route.spanKey} profileId={route.profileId} derivedQueryDescriptor={route.derivedQueryDescriptor} onNavigate={navigate} />
+      )}
+      {route.page === "segments" && <SegmentsPage onNavigate={navigate} />}
+      {route.page === "segment" && route.id !== undefined && <SegmentDetailPage id={route.id} onNavigate={navigate} />}
+      {route.page === "faces" && <FacesPage onNavigate={navigate} />}
+      {route.page === "face" && route.id !== undefined && <FaceDetailPage id={route.id} onNavigate={navigate} />}
       {route.page === "performers" && <PerformersPage onNavigate={navigate} />}
       {route.page === "performer" && route.id !== undefined && <PerformerDetailPage id={route.id} onNavigate={navigate} />}
       {route.page === "studios" && <StudiosPage onNavigate={navigate} />}
@@ -319,12 +362,12 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
       {route.page === "gallery" && route.id !== undefined && <GalleryDetailPage id={route.id} onNavigate={navigate} />}
       {route.page === "groups" && <GroupsPage onNavigate={navigate} />}
       {route.page === "group" && route.id !== undefined && <GroupDetailPage id={route.id} onNavigate={navigate} />}
+      {route.page === "compilation" && route.id !== undefined && <CompilationPlayerPage id={route.id} onNavigate={navigate} />}
       {route.page === "images" && <ImagesPage onNavigate={navigate} />}
       {route.page === "image" && route.id !== undefined && <ImageDetailPage id={route.id} onNavigate={navigate} />}
       {route.page === "settings" && <SettingsPage />}
       {route.page === "stats" && <StatsPage onNavigate={navigate} />}
       {route.page === "logs" && <LogsPage />}
-      {route.page === "markers" && <SceneMarkersPage onNavigate={navigate} />}
       {route.page === "sceneparser" && <SceneFilenameParserPage onNavigate={navigate} />}
     </>
   );

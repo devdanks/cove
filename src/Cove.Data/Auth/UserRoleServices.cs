@@ -267,12 +267,13 @@ public sealed class UserService : IUserService
 
         var theme = NormalizeThemePreferences(preferences.Theme);
         var ratingSystemOptions = NormalizeRatingSystemOptions(preferences.RatingSystemOptions);
-        if (theme is null && ratingSystemOptions is null)
+        var recordPlaybackHistory = preferences.RecordPlaybackHistory;
+        if (theme is null && ratingSystemOptions is null && recordPlaybackHistory is null)
         {
             return null;
         }
 
-        return new UserUiPreferencesDto(theme, ratingSystemOptions);
+        return new UserUiPreferencesDto(theme, ratingSystemOptions, recordPlaybackHistory);
     }
 
     private static UserThemePreferencesDto? NormalizeThemePreferences(UserThemePreferencesDto? theme)

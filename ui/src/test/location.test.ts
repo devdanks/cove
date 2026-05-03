@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getPreviousInternalRoute, syncRouteHistory } from "../router/location";
+import { buildRouteUrl, getPreviousInternalRoute, parseCurrentRoute, syncRouteHistory } from "../router/location";
 
 const sessionEntries = new Map<string, string>();
 
@@ -22,6 +22,18 @@ beforeEach(() => {
 });
 
 describe("route history", () => {
+  it("parses and rebuilds scene seek timestamps", () => {
+    window.history.replaceState(null, "", "/scene/42?t=91.5");
+
+    expect(parseCurrentRoute()).toEqual({
+      page: "scene",
+      id: 42,
+      seekTo: 91.5,
+    });
+
+    expect(buildRouteUrl({ page: "scene", id: 42, seekTo: 91.5 })).toBe("/scene/42?t=91.5");
+  });
+
   it("keeps back labels aligned with browser back navigation after a popstate-style move", () => {
     window.history.replaceState(null, "", "/performers");
     syncRouteHistory("push");

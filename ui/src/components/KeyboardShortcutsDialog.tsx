@@ -12,9 +12,9 @@ const sections: ShortcutSection[] = [
     shortcuts: [
       { keys: "/", description: "Focus page filter or global search" },
       { keys: "g s", description: "Go to Scenes" },
+      { keys: "g m", description: "Go to Segments" },
       { keys: "g i", description: "Go to Images" },
       { keys: "g v", description: "Go to Groups" },
-      { keys: "g k", description: "Go to Markers" },
       { keys: "g l", description: "Go to Galleries" },
       { keys: "g p", description: "Go to Performers" },
       { keys: "g u", description: "Go to Studios" },
@@ -44,6 +44,11 @@ const sections: ShortcutSection[] = [
     title: "Scene Detail",
     shortcuts: [
       { keys: ",", description: "Toggle theater mode" },
+      { keys: "s", description: "Open segments" },
+      { keys: "d", description: "Open detections" },
+      { keys: "i", description: "Open file info" },
+      { keys: "h", description: "Open history" },
+      { keys: "o", description: "Add favorite" },
     ],
   },
   {

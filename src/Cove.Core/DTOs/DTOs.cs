@@ -28,7 +28,6 @@ public record SceneDto(
 public record SceneRemoteIdDto(string Endpoint, string RemoteId);
 
 public record SceneGroupInputDto(int GroupId, int SceneIndex = 0);
-
 public record SceneCreateDto(
     string? Title, string? Code, string? Details, string? Director,
     string? Date, int? Rating, bool Organized, int? StudioId,
@@ -656,7 +655,10 @@ public record FaceDto(
     int ImageCount,
     string? PrimarySourceKey,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    int AppearanceCount = 0,
+    int FrameSampleCount = 0,
+    FaceTopSuggestionDto? TopSuggestion = null);
 
 public record FaceCreateDto(
     string? Label,
@@ -683,6 +685,10 @@ public record FaceDeleteImpactDto(
     bool HasCoverImage,
     int ReleasedMergedFaceCount);
 
+public record FaceSuggestionDecisionDto(
+    int PerformerId,
+    string Decision);
+
 public record FaceSuggestionEvidenceDto(
     int FaceId,
     string? ThumbnailUrl,
@@ -694,11 +700,9 @@ public record FaceSuggestionDto(
     string? CoverImageUrl,
     float Confidence,
     string Why,
-    IReadOnlyList<FaceSuggestionEvidenceDto> Evidence);
-
-public record FaceSuggestionDecisionDto(
-    int PerformerId,
-    string Decision);
+    IReadOnlyList<FaceSuggestionEvidenceDto> Evidence,
+    int? LocalPerformerId = null,
+    string? ExternalUrl = null);
 
 public record FaceSimilarDto(
     int Id,

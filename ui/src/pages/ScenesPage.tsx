@@ -21,6 +21,7 @@ import { StringListEditor } from "../components/StringListEditor";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { StudioSelector } from "../components/StudioSelector";
+import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
 import {
@@ -295,6 +296,7 @@ export function ScenesPage({ onNavigate }: Props) {
             <Play className="w-3 h-3" />
             Play
           </button>
+          <ExtensionSelectionActions entityType="scene" selectedIds={selectedIds} />
           {canDeleteScene && (
             <button
               onClick={() => { if (confirm(`Delete ${selectedIds.size} scene(s)?`)) bulkDeleteMut.mutate(); }}

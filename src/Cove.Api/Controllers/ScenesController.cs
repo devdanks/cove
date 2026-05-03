@@ -15,9 +15,10 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.ScenesRead)]
-public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
 {
     private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
+    private bool HasUserScopedEngagement => principalAccessor?.Current?.UserId != null;
     private static string GetVisibleBasename(string path, string basename) => string.IsNullOrWhiteSpace(basename) ? System.IO.Path.GetFileName(path) : basename;
 
     [HttpGet]
@@ -44,7 +45,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         };
 
         var (items, totalCount) = await sceneRepo.FindAsync(filter, findFilter, ct);
-        var dtos = items.Select(MapListToDto).ToList();
+        var engagement = await engagementService.GetSceneSnapshotsAsync(items.Select(scene => scene.Id), ct);
+        var dtos = items.Select(scene => MapListToDto(scene, engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList();
         return Ok(new PaginatedResponse<SceneDto>(dtos, totalCount, page, perPage));
     }
 
@@ -61,7 +63,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new SceneFilter();
         var (items, totalCount) = await sceneRepo.FindAsync(filter, findFilter, ct);
-        var dtos = items.Select(MapListToDto).ToList();
+        var engagement = await engagementService.GetSceneSnapshotsAsync(items.Select(scene => scene.Id), ct);
+        var dtos = items.Select(scene => MapListToDto(scene, engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList();
         var result = new PaginatedResponse<SceneDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage);
 
         memoryCache.Set(cacheKey, result, TimeSpan.FromSeconds(1));
@@ -74,7 +77,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
         if (scene == null) return NotFound();
-        return Ok(MapToDto(scene));
+        var engagement = (await engagementService.GetSceneSnapshotsAsync([id], ct)).GetValueOrDefault(id);
+        return Ok(await MapToDtoWithProvenanceAsync(scene, engagement, HasUserScopedEngagement, ct));
     }
 
     [HttpPost]
@@ -95,12 +99,28 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             scene.ScenePerformers = dto.PerformerIds.Select(id => new ScenePerformer { PerformerId = id }).ToList();
         if (dto.GalleryIds?.Count > 0)
             scene.SceneGalleries = dto.GalleryIds.Select(id => new SceneGallery { GalleryId = id }).ToList();
+        if (dto.Groups?.Count > 0)
+            scene.GroupItems = dto.Groups.Select(group => new GroupItem
+            {
+                GroupId = group.GroupId,
+                OrderIndex = group.SceneIndex,
+                Kind = GroupItemKind.Scene,
+            }).ToList();
 
         scene = await sceneRepo.AddAsync(scene, ct);
+        if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
+        {
+            await tagProvenanceService.SyncTagSetAsync(AffinityHostType.Scene, scene.Id, [], dto.TagIds, cancellationToken: ct);
+            await db.SaveChangesAsync(ct);
+        }
         if (dto.Urls?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Scene, scene.Id, IdentifierSchemes.Url, dto.Urls, null, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetSceneRatingAsync(scene.Id, dto.Rating, cancellationToken: ct);
+
         var result = await sceneRepo.GetByIdWithRelationsAsync(scene.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = scene.Id }, MapToDto(result!));
+        var engagement = (await engagementService.GetSceneSnapshotsAsync([scene.Id], ct)).GetValueOrDefault(scene.Id);
+        return CreatedAtAction(nameof(GetById), new { id = scene.Id }, await MapToDtoWithProvenanceAsync(result!, engagement, HasUserScopedEngagement, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -110,6 +130,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
         if (scene == null) return NotFound();
+        var previousTagIds = dto.TagIds != null ? scene.SceneTags.Select(sceneTag => sceneTag.TagId).ToArray() : [];
 
         if (dto.Title != null) scene.Title = dto.Title;
         if (dto.Code != null) scene.Code = dto.Code;
@@ -144,16 +165,28 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         }
         if (dto.Groups != null)
         {
-            scene.SceneGroups.Clear();
-            scene.SceneGroups = dto.Groups.Select(g => new SceneGroup { GroupId = g.GroupId, SceneIndex = g.SceneIndex, SceneId = id }).ToList();
+            ReplaceWholeSceneGroupItems(scene, dto.Groups);
         }
         if (dto.CustomFields != null) scene.CustomFields = dto.CustomFields;
+
+        if (dto.TagIds != null && tagProvenanceService != null)
+        {
+            await tagProvenanceService.SyncTagSetAsync(
+                AffinityHostType.Scene,
+                id,
+                previousTagIds,
+                scene.SceneTags.Select(sceneTag => sceneTag.TagId).ToArray(),
+                cancellationToken: ct);
+        }
 
         await sceneRepo.UpdateAsync(scene, ct);
         if (dto.Urls != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Scene, id, IdentifierSchemes.Url, dto.Urls, null, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetSceneRatingAsync(id, dto.Rating, cancellationToken: ct);
         var updated = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        var engagement = (await engagementService.GetSceneSnapshotsAsync([id], ct)).GetValueOrDefault(id);
+        return Ok(await MapToDtoWithProvenanceAsync(updated!, engagement, HasUserScopedEngagement, ct));
     }
 
     [HttpDelete("{id:int}")]
@@ -172,6 +205,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
                     System.IO.File.Delete(path);
             }
         }
+        if (tagProvenanceService != null)
+            await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Scene, id, ct);
         await sceneRepo.DeleteAsync(id, ct);
         return NoContent();
     }
@@ -187,6 +222,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             var scene = await sceneRepo.GetByIdAsync(id, ct);
             if (scene != null)
             {
+                if (tagProvenanceService != null)
+                    await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Scene, id, ct);
                 await sceneRepo.DeleteAsync(id, ct);
                 deletedCount++;
             }
@@ -216,7 +253,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
         await db.SaveChangesAsync(ct);
         var updated = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDtoWithProvenanceAsync(updated!, cancellationToken: ct));
     }
 
     [HttpPost("{id:int}/metadata-server/submit-fingerprints")]
@@ -265,14 +302,33 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         return Ok(new { success = true });
     }
 
-    private SceneDto MapToDto(Scene s) => new(
+    private async Task<SceneDto> MapToDtoWithProvenanceAsync(Scene scene, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, CancellationToken cancellationToken = default)
+    {
+        var tagIds = scene.SceneTags
+            .Where(sceneTag => sceneTag.Tag != null)
+            .Select(sceneTag => sceneTag.Tag!.Id)
+            .Distinct()
+            .ToArray();
+        var provenanceLookup = tagProvenanceService == null
+            ? null
+            : await tagProvenanceService.GetLookupAsync(AffinityHostType.Scene, scene.Id, tagIds, cancellationToken);
+
+        return MapToDto(scene, engagement, preferUserSnapshot, provenanceLookup);
+    }
+
+    private SceneDto MapToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
-        s.Date?.ToString("yyyy-MM-dd"), s.Rating, s.Organized, s.StudioId, s.Studio?.Name,
-        s.ResumeTime, s.PlayDuration, s.PlayCount, s.LastPlayedAt?.ToString("o"),
-        s.OCounter,
+        s.Date?.ToString("yyyy-MM-dd"),
+        preferUserSnapshot ? engagement?.Rating : engagement?.Rating ?? s.Rating,
+        s.Organized, s.StudioId, s.Studio?.Name,
+        preferUserSnapshot ? engagement?.ResumeTime ?? 0d : engagement?.ResumeTime ?? s.ResumeTime,
+        preferUserSnapshot ? engagement?.PlayDuration ?? 0d : engagement?.PlayDuration ?? s.PlayDuration,
+        preferUserSnapshot ? engagement?.PlayCount ?? 0 : engagement?.PlayCount ?? s.PlayCount,
+        preferUserSnapshot ? engagement?.LastPlayedAt?.ToString("o") : engagement?.LastPlayedAt?.ToString("o") ?? s.LastPlayedAt?.ToString("o"),
+        preferUserSnapshot ? engagement?.OCount ?? 0 : engagement?.OCount ?? s.OCounter,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
-        s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
+        s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
         s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
         s.Files.Select(f => new VideoFileDto(
             f.Id,
@@ -289,19 +345,23 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             f.Size,
             f.Fingerprints.Select(fp => new FingerprintDto(fp.Type, fp.Value)).ToList(),
             f.Captions.Select(c => new CaptionDto(c.Id, c.LanguageCode, c.CaptionType, c.Filename)).ToList())).ToList(),
-        s.SceneMarkers.Select(m => new SceneMarkerSummaryDto(m.Id, m.Title, m.Seconds, m.EndSeconds, m.PrimaryTagId, m.PrimaryTag?.Name ?? "")).ToList(),
-        s.SceneGroups.Where(sg => sg.Group != null).Select(sg => new GroupSummaryDto(sg.Group!.Id, sg.Group.Name, sg.SceneIndex)).ToList(),
+        MapWholeSceneGroups(s),
         s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
         s.RemoteIds.Select(remoteId => new SceneRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
         s.CustomFields,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
 
-    private SceneDto MapListToDto(Scene s) => new(
+    private SceneDto MapListToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
-        s.Date?.ToString("yyyy-MM-dd"), s.Rating, s.Organized, s.StudioId, s.Studio?.Name,
-        s.ResumeTime, s.PlayDuration, s.PlayCount, s.LastPlayedAt?.ToString("o"),
-        s.OCounter,
+        s.Date?.ToString("yyyy-MM-dd"),
+        preferUserSnapshot ? engagement?.Rating : engagement?.Rating ?? s.Rating,
+        s.Organized, s.StudioId, s.Studio?.Name,
+        preferUserSnapshot ? engagement?.ResumeTime ?? 0d : engagement?.ResumeTime ?? s.ResumeTime,
+        preferUserSnapshot ? engagement?.PlayDuration ?? 0d : engagement?.PlayDuration ?? s.PlayDuration,
+        preferUserSnapshot ? engagement?.PlayCount ?? 0 : engagement?.PlayCount ?? s.PlayCount,
+        preferUserSnapshot ? engagement?.LastPlayedAt?.ToString("o") : engagement?.LastPlayedAt?.ToString("o") ?? s.LastPlayedAt?.ToString("o"),
+        preferUserSnapshot ? engagement?.OCount ?? 0 : engagement?.OCount ?? s.OCounter,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
@@ -321,114 +381,25 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             f.Size,
             [],
             [])).ToList(),
-        s.SceneMarkers.Select(m => new SceneMarkerSummaryDto(m.Id, m.Title, m.Seconds, m.EndSeconds, m.PrimaryTagId, m.PrimaryTag?.Name ?? "")).ToList(),
-        s.SceneGroups.Where(sg => sg.Group != null).Select(sg => new GroupSummaryDto(sg.Group!.Id, sg.Group.Name, sg.SceneIndex)).ToList(),
+        MapWholeSceneGroups(s),
         s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
         [],
         null,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
 
-    // ===== Scene Markers =====
-
-    [HttpGet("{sceneId:int}/markers")]
-    public async Task<ActionResult<List<SceneMarkerSummaryDto>>> GetMarkers(int sceneId, CancellationToken ct)
-    {
-        var scene = await sceneRepo.GetByIdAsync(sceneId, ct);
-        if (scene == null) return NotFound();
-
-        var markers = await db.SceneMarkers
-            .Include(m => m.PrimaryTag)
-            .Where(m => m.SceneId == sceneId)
-            .OrderBy(m => m.Seconds)
-            .Select(m => new SceneMarkerSummaryDto(m.Id, m.Title, m.Seconds, m.EndSeconds, m.PrimaryTagId, m.PrimaryTag!.Name))
-            .ToListAsync(ct);
-
-        return Ok(markers);
-    }
-
-    [HttpPost("{sceneId:int}/markers")]
-    [RequiresPermission(Permissions.MarkersWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
-    public async Task<ActionResult<SceneMarkerSummaryDto>> CreateMarker(int sceneId, [FromBody] SceneMarkerCreateDto dto, CancellationToken ct)
-    {
-        var scene = await sceneRepo.GetByIdAsync(sceneId, ct);
-        if (scene == null) return NotFound();
-
-        var marker = new SceneMarker
-        {
-            Title = dto.Title,
-            Seconds = dto.Seconds,
-            EndSeconds = dto.EndSeconds,
-            PrimaryTagId = dto.PrimaryTagId,
-            SceneId = sceneId
-        };
-
-        if (dto.TagIds?.Count > 0)
-            marker.SceneMarkerTags = dto.TagIds.Select(tid => new SceneMarkerTag { TagId = tid }).ToList();
-
-        db.SceneMarkers.Add(marker);
-        await db.SaveChangesAsync(ct);
-
-        await db.Entry(marker).Reference(m => m.PrimaryTag).LoadAsync(ct);
-        return CreatedAtAction(nameof(GetMarkers), new { sceneId },
-            new SceneMarkerSummaryDto(marker.Id, marker.Title, marker.Seconds, marker.EndSeconds, marker.PrimaryTagId, marker.PrimaryTag?.Name ?? ""));
-    }
-
-    [HttpPut("{sceneId:int}/markers/{markerId:int}")]
-    [RequiresPermission(Permissions.MarkersWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
-    [RequiresEntityAccess("marker", Permissions.MarkersWrite, RouteValueName = "markerId")]
-    public async Task<ActionResult<SceneMarkerSummaryDto>> UpdateMarker(int sceneId, int markerId, [FromBody] SceneMarkerUpdateDto dto, CancellationToken ct)
-    {
-        var marker = await db.SceneMarkers.Include(m => m.PrimaryTag).Include(m => m.SceneMarkerTags).FirstOrDefaultAsync(m => m.Id == markerId && m.SceneId == sceneId, ct);
-        if (marker == null) return NotFound();
-
-        if (dto.Title != null) marker.Title = dto.Title;
-        if (dto.Seconds.HasValue) marker.Seconds = dto.Seconds.Value;
-        if (dto.EndSeconds.HasValue) marker.EndSeconds = dto.EndSeconds;
-        if (dto.PrimaryTagId.HasValue) marker.PrimaryTagId = dto.PrimaryTagId.Value;
-        if (dto.TagIds != null)
-        {
-            marker.SceneMarkerTags.Clear();
-            foreach (var tid in dto.TagIds)
-                marker.SceneMarkerTags.Add(new SceneMarkerTag { TagId = tid, SceneMarkerId = markerId });
-        }
-
-        await db.SaveChangesAsync(ct);
-
-        if (dto.PrimaryTagId.HasValue) await db.Entry(marker).Reference(m => m.PrimaryTag).LoadAsync(ct);
-        return Ok(new SceneMarkerSummaryDto(marker.Id, marker.Title, marker.Seconds, marker.EndSeconds, marker.PrimaryTagId, marker.PrimaryTag?.Name ?? ""));
-    }
-
-    [HttpDelete("{sceneId:int}/markers/{markerId:int}")]
-    [RequiresPermission(Permissions.MarkersDelete)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersDelete, RouteValueName = "sceneId")]
-    [RequiresEntityAccess("marker", Permissions.MarkersDelete, RouteValueName = "markerId")]
-    public async Task<IActionResult> DeleteMarker(int sceneId, int markerId, CancellationToken ct)
-    {
-        var marker = await db.SceneMarkers.FirstOrDefaultAsync(m => m.Id == markerId && m.SceneId == sceneId, ct);
-        if (marker == null) return NotFound();
-
-        db.SceneMarkers.Remove(marker);
-        await db.SaveChangesAsync(ct);
-        return NoContent();
-    }
+    private static List<TagProvenanceDto> GetTagProvenance(IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup, int tagId)
+        => provenanceLookup != null && provenanceLookup.TryGetValue(tagId, out var provenance) ? provenance : [];
 
     // ===== Activity Tracking =====
 
     [HttpPost("{id:int}/play")]
-    [RequiresPermission(Permissions.ScenesWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
+    [RequiresPermission(Permissions.ScenesRead)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
     public async Task<IActionResult> RecordPlay(int id, CancellationToken ct)
     {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        scene.PlayCount++;
-        scene.LastPlayedAt = DateTime.UtcNow;
-        db.Set<ScenePlayHistory>().Add(new ScenePlayHistory { SceneId = id, PlayedAt = DateTime.UtcNow });
-        await sceneRepo.UpdateAsync(scene, ct);
+        var snapshot = await engagementService.RecordScenePlayAsync(id, ct);
+        if (snapshot == null) return NotFound();
         return NoContent();
     }
 
@@ -437,12 +408,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> DeletePlay(int id, CancellationToken ct)
     {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        var last = await db.Set<ScenePlayHistory>().Where(h => h.SceneId == id).OrderByDescending(h => h.PlayedAt).FirstOrDefaultAsync(ct);
-        if (last != null) { db.Set<ScenePlayHistory>().Remove(last); scene.PlayCount = Math.Max(0, scene.PlayCount - 1); }
-        await sceneRepo.UpdateAsync(scene, ct);
+        var snapshot = await engagementService.DeleteScenePlayAsync(id, ct);
+        if (snapshot == null) return NotFound();
         return NoContent();
     }
 
@@ -451,42 +418,28 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> ResetPlayCount(int id, CancellationToken ct)
     {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        scene.PlayCount = 0;
-        scene.PlayDuration = 0;
-        scene.LastPlayedAt = null;
-        db.Set<ScenePlayHistory>().RemoveRange(db.Set<ScenePlayHistory>().Where(h => h.SceneId == id));
-        await sceneRepo.UpdateAsync(scene, ct);
+        var snapshot = await engagementService.ResetScenePlayAsync(id, ct);
+        if (snapshot == null) return NotFound();
         return NoContent();
     }
 
     [HttpPost("{id:int}/o")]
-    [RequiresPermission(Permissions.ScenesWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
+    [RequiresPermission(Permissions.ScenesRead)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
     public async Task<ActionResult<int>> IncrementO(int id, CancellationToken ct)
     {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        scene.OCounter++;
-        db.Set<SceneOHistory>().Add(new SceneOHistory { SceneId = id, OccurredAt = DateTime.UtcNow });
-        await sceneRepo.UpdateAsync(scene, ct);
-        return Ok(scene.OCounter);
+        var snapshot = await engagementService.IncrementSceneOAsync(id, ct);
+        if (snapshot == null) return NotFound();
+        return Ok(snapshot.OCount);
     }
 
     [HttpDelete("{id:int}/o")]
-    [RequiresPermission(Permissions.ScenesWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
+    [RequiresPermission(Permissions.ScenesRead)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
     public async Task<IActionResult> DecrementO(int id, CancellationToken ct)
     {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        var last = await db.Set<SceneOHistory>().Where(h => h.SceneId == id).OrderByDescending(h => h.OccurredAt).FirstOrDefaultAsync(ct);
-        if (last != null) { db.Set<SceneOHistory>().Remove(last); scene.OCounter = Math.Max(0, scene.OCounter - 1); }
-        await sceneRepo.UpdateAsync(scene, ct);
+        var snapshot = await engagementService.DecrementSceneOAsync(id, ct);
+        if (snapshot == null) return NotFound();
         return NoContent();
     }
 
@@ -495,45 +448,18 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> ResetO(int id, CancellationToken ct)
     {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        scene.OCounter = 0;
-        db.Set<SceneOHistory>().RemoveRange(db.Set<SceneOHistory>().Where(h => h.SceneId == id));
-        await sceneRepo.UpdateAsync(scene, ct);
+        var snapshot = await engagementService.ResetSceneOAsync(id, ct);
+        if (snapshot == null) return NotFound();
         return NoContent();
     }
 
     [HttpGet("{id:int}/history")]
-    [RequiresPermission(Permissions.ScenesWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
+    [RequiresPermission(Permissions.ScenesRead)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
     public async Task<ActionResult<SceneHistoryDto>> GetHistory(int id, CancellationToken ct)
     {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        var playHistory = await db.Set<ScenePlayHistory>()
-            .Where(h => h.SceneId == id).OrderByDescending(h => h.PlayedAt)
-            .Select(h => h.PlayedAt.ToString("o")).ToListAsync(ct);
-        var oHistory = await db.Set<SceneOHistory>()
-            .Where(h => h.SceneId == id).OrderByDescending(h => h.OccurredAt)
-            .Select(h => h.OccurredAt.ToString("o")).ToListAsync(ct);
-
-        return Ok(new SceneHistoryDto(playHistory, oHistory));
-    }
-
-    [HttpPost("{id:int}/activity")]
-    [RequiresPermission(Permissions.ScenesWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
-    public async Task<IActionResult> SaveActivity(int id, [FromBody] SceneActivityDto dto, CancellationToken ct)
-    {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        if (dto.ResumeTime.HasValue) scene.ResumeTime = dto.ResumeTime.Value;
-        if (dto.PlayDuration.HasValue) scene.PlayDuration += dto.PlayDuration.Value;
-        await sceneRepo.UpdateAsync(scene, ct);
-        return NoContent();
+        var history = await engagementService.GetSceneHistoryAsync(id, ct);
+        return history is null ? NotFound() : Ok(history);
     }
 
     [HttpPost("{id:int}/activity/reset")]
@@ -541,13 +467,36 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
     public async Task<IActionResult> ResetActivity(int id, CancellationToken ct)
     {
-        var scene = await sceneRepo.GetByIdAsync(id, ct);
-        if (scene == null) return NotFound();
-
-        scene.ResumeTime = 0;
-        scene.PlayDuration = 0;
-        await sceneRepo.UpdateAsync(scene, ct);
+        var snapshot = await engagementService.ResetSceneActivityAsync(id, ct);
+        if (snapshot == null) return NotFound();
         return NoContent();
+    }
+
+    [HttpPost("{id:int}/rating")]
+    [RequiresPermission(Permissions.ScenesRead)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
+    public async Task<ActionResult<int?>> SetRating(int id, [FromBody] SceneRatingDto dto, CancellationToken ct)
+    {
+        var snapshot = await engagementService.SetSceneRatingAsync(id, dto.Value, dto.Aspect, ct);
+        return snapshot is null ? NotFound() : Ok(snapshot.Rating);
+    }
+
+    [HttpGet("{id:int}/ratings")]
+    [RequiresPermission(Permissions.ScenesRead)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
+    public async Task<ActionResult<EntityRatingsDto>> GetRatings(int id, CancellationToken ct)
+    {
+        var ratings = await engagementService.GetRatingsByAspectAsync(AffinityHostType.Scene, id, ct);
+        return ratings is null ? NotFound() : Ok(new EntityRatingsDto(id, ratings));
+    }
+
+    [HttpDelete("{id:int}/rating")]
+    [RequiresPermission(Permissions.ScenesRead)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
+    public async Task<IActionResult> ClearRating(int id, [FromQuery] string aspect = "overall", CancellationToken ct = default)
+    {
+        var snapshot = await engagementService.SetSceneRatingAsync(id, null, aspect, ct);
+        return snapshot is null ? NotFound() : NoContent();
     }
 
     // ===== Scene Wall/Discovery =====
@@ -566,7 +515,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             query = query.Where(s => s.Title != null && EF.Functions.ILike(s.Title, $"%{q}%"));
 
         var scenes = await query.OrderBy(_ => EF.Functions.Random()).Take(count).ToListAsync(ct);
-        return Ok(scenes.Select(MapToDto).ToList());
+        var engagement = await engagementService.GetSceneSnapshotsAsync(scenes.Select(scene => scene.Id), ct);
+        return Ok(scenes.Select(scene => MapToDto(scene, engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList());
     }
 
     [HttpGet("duplicates")]
@@ -598,7 +548,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
                 .ToListAsync(ct);
 
             if (scenes.Count > 1)
-                result.Add(scenes.Select(MapToDto).ToList());
+                result.Add(scenes.Select(scene => MapToDto(scene)).ToList());
         }
         return Ok(result);
     }
@@ -613,12 +563,14 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var scenes = await db.Scenes
             .Include(s => s.SceneTags)
             .Include(s => s.ScenePerformers)
-            .Include(s => s.SceneGroups)
+            .Include(s => s.GroupItems)
             .Where(s => dto.Ids.Contains(s.Id))
             .ToListAsync(ct);
 
         foreach (var scene in scenes)
         {
+            var previousTagIds = dto.TagIds != null ? scene.SceneTags.Select(sceneTag => sceneTag.TagId).ToArray() : [];
+
             if (dto.Rating.HasValue) scene.Rating = dto.Rating;
             if (dto.Organized.HasValue) scene.Organized = dto.Organized.Value;
             if (dto.StudioId.HasValue) scene.StudioId = dto.StudioId;
@@ -642,6 +594,16 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
                 scene.SceneTags = scene.SceneTags.Where(st => !dto.TagIds.Contains(st.TagId)).ToList();
             }
 
+            if (dto.TagIds != null && tagProvenanceService != null)
+            {
+                await tagProvenanceService.SyncTagSetAsync(
+                    AffinityHostType.Scene,
+                    scene.Id,
+                    previousTagIds,
+                    scene.SceneTags.Select(sceneTag => sceneTag.TagId).ToArray(),
+                    cancellationToken: ct);
+            }
+
             if (dto.PerformerIds != null && dto.PerformerMode == BulkUpdateMode.Set)
             {
                 scene.ScenePerformers.Clear();
@@ -660,24 +622,67 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
             if (dto.GroupIds != null && dto.GroupMode == BulkUpdateMode.Set)
             {
-                scene.SceneGroups.Clear();
-                scene.SceneGroups = dto.GroupIds.Select(g => new SceneGroup { GroupId = g.GroupId, SceneIndex = g.SceneIndex, SceneId = scene.Id }).ToList();
+                ReplaceWholeSceneGroupItems(scene, dto.GroupIds);
             }
             else if (dto.GroupIds != null && dto.GroupMode == BulkUpdateMode.Add)
             {
-                var existing = scene.SceneGroups.Select(sg => sg.GroupId).ToHashSet();
+                var existing = scene.GroupItems
+                    .Where(item => item.Kind == GroupItemKind.Scene)
+                    .Select(item => item.GroupId)
+                    .ToHashSet();
                 foreach (var g in dto.GroupIds.Where(g => !existing.Contains(g.GroupId)))
-                    scene.SceneGroups.Add(new SceneGroup { GroupId = g.GroupId, SceneIndex = g.SceneIndex, SceneId = scene.Id });
+                    scene.GroupItems.Add(new GroupItem
+                    {
+                        GroupId = g.GroupId,
+                        OrderIndex = g.SceneIndex,
+                        Kind = GroupItemKind.Scene,
+                        SceneId = scene.Id,
+                    });
             }
             else if (dto.GroupIds != null && dto.GroupMode == BulkUpdateMode.Remove)
             {
                 var removeIds = dto.GroupIds.Select(g => g.GroupId).ToHashSet();
-                scene.SceneGroups = scene.SceneGroups.Where(sg => !removeIds.Contains(sg.GroupId)).ToList();
+                RemoveWholeSceneGroupItems(scene, scene.GroupItems.Where(item => item.Kind == GroupItemKind.Scene && removeIds.Contains(item.GroupId)).ToList());
             }
         }
 
         await db.SaveChangesAsync(ct);
         return Ok(new { updated = scenes.Count });
+    }
+
+    private static List<GroupSummaryDto> MapWholeSceneGroups(Scene scene)
+        => scene.GroupItems
+            .Where(item => item.Kind == GroupItemKind.Scene && item.Group != null)
+            .OrderBy(item => item.OrderIndex)
+            .Select(item => new GroupSummaryDto(item.Group!.Id, item.Group.Name, item.OrderIndex))
+            .ToList();
+
+    private void ReplaceWholeSceneGroupItems(Scene scene, IEnumerable<SceneGroupInputDto> groups)
+    {
+        RemoveWholeSceneGroupItems(scene, scene.GroupItems.Where(item => item.Kind == GroupItemKind.Scene).ToList());
+        foreach (var group in groups)
+        {
+            scene.GroupItems.Add(new GroupItem
+            {
+                GroupId = group.GroupId,
+                OrderIndex = group.SceneIndex,
+                Kind = GroupItemKind.Scene,
+                SceneId = scene.Id,
+            });
+        }
+    }
+
+    private void RemoveWholeSceneGroupItems(Scene scene, IReadOnlyCollection<GroupItem> items)
+    {
+        foreach (var item in items)
+        {
+            scene.GroupItems.Remove(item);
+        }
+
+        if (items.Count > 0)
+        {
+            db.GroupItems.RemoveRange(items);
+        }
     }
 
     // ===== Merge =====
@@ -718,6 +723,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             target.OCounter += source.OCounter;
             target.PlayDuration += source.PlayDuration;
             // Delete source
+            if (tagProvenanceService != null)
+                await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Scene, source.Id, ct);
             db.Scenes.Remove(source);
         }
 

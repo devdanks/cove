@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, images, metadata, performers, scenes, entityImages } from "../api/client";
-import type { FindFilter, Gallery, Image, Performer as PerformerModel, Scene, MetadataServer, MetadataServerPerformerMatch } from "../api/types";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { faces, galleries, images, metadata, performers, scenes, entityImages } from "../api/client";
+import type { Face, FaceSimilar, FindFilter, Gallery, Image, Performer as PerformerModel, Scene, MetadataServer, MetadataServerPerformerMatch } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
 import { ArrowLeft, Calendar, ChevronDown, CloudDownload, ExternalLink, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link2, Loader2, MapPin, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -8,6 +8,7 @@ import { PerformerEditModal } from "./PerformerEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailMergeDialog } from "../components/DetailMergeDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
+import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { SceneCard, GalleryTile, ImageTile } from "../components/EntityCards";
 import { InteractiveRating } from "../components/Rating";
 import { QuickViewDialog } from "../components/QuickViewDialog";
@@ -21,6 +22,7 @@ import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PerformerScrapeDialog } from "../components/PerformerScrapeDialog";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission, hasAnyPermission } from "../auth/visibility";
 
@@ -48,7 +50,7 @@ const GROUP_SORT = [
 
 export function PerformerDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: performer, isLoading } = useQuery({
     queryKey: ["performer", id],
@@ -76,7 +78,9 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "performers" }, onNavigate);
   const canWritePerformer = canWriteEntity("performer", hasPermission);
+  const canEngagePerformer = canReadEntity("performer", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeletePerformer = canDeleteEntity("performer", hasPermission);
+  const canReadFaces = canReadEntity("face", hasPermission);
   const canReadPerformerScenes = canReadEntity("scene", hasPermission);
   const canReadPerformerGalleries = canReadEntity("gallery", hasPermission);
   const canReadPerformerImages = canReadEntity("image", hasPermission);
@@ -101,9 +105,14 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  const updateMut = useMutation({
-    mutationFn: (data: { favorite?: boolean; rating?: number }) => performers.update(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["performer", id] }),
+  const {
+    favorite: performerFavorite,
+    rating: performerRating,
+    setFavorite: setPerformerFavorite,
+    setRating: setPerformerRating,
+  } = useEntityEngagement("performer", id, {
+    fallbackFavorite: performer?.favorite,
+    fallbackRating: performer?.rating,
   });
 
   const autoTagMut = useMutation({
@@ -125,14 +134,14 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       switch (e.key) {
         case "e": if (canWritePerformer) setEditing((v) => !v); break;
-        case "f": if (performer && canWritePerformer) updateMut.mutate({ favorite: !performer.favorite }); break;
+        case "f": if (performer && canEngagePerformer) setPerformerFavorite(!performerFavorite); break;
         case "c": if (canReadPerformerScenes) setActiveTab("scenes"); break;
         case "g": if (canReadPerformerGalleries) setActiveTab("galleries"); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canReadPerformerGalleries, canReadPerformerScenes, canWritePerformer, performer]);
+  }, [canEngagePerformer, canReadPerformerGalleries, canReadPerformerScenes, canWritePerformer, performer, performerFavorite, setPerformerFavorite]);
 
   useEffect(() => {
     if (!showOpsMenu) return;
@@ -248,26 +257,27 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                     <p className="mt-1 text-sm text-secondary">Also known as: {performer.aliases.join(", ")}</p>
                   )}
                 </div>
-                {canWritePerformer ? (
+                {canEngagePerformer ? (
                   <button
-                    onClick={() => updateMut.mutate({ favorite: !performer.favorite })}
+                    onClick={() => setPerformerFavorite(!performerFavorite)}
                     className={`rounded-full p-2 transition-colors ${
-                      performer.favorite
+                      performerFavorite
                         ? "bg-red-500/15 text-red-500"
                         : "bg-card text-muted hover:text-red-400"
                     }`}
-                    title={performer.favorite ? "Remove from favorites" : "Add to favorites"}
+                    title={performerFavorite ? "Remove from favorites" : "Add to favorites"}
                   >
-                    <Heart className={`h-6 w-6 ${performer.favorite ? "fill-current" : ""}`} />
+                    <Heart className={`h-6 w-6 ${performerFavorite ? "fill-current" : ""}`} />
                   </button>
-                ) : performer.favorite ? (
+                ) : performerFavorite ? (
                   <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite performer">
                     <Heart className="h-6 w-6 fill-current" />
                   </span>
                 ) : null}
               </div>
 
-              <InteractiveRating value={performer.rating} onChange={(value) => updateMut.mutate({ rating: value })} readOnly={!canWritePerformer} />
+              <InteractiveRating value={performerRating} onChange={(value) => setPerformerRating(value)} readOnly={!canEngagePerformer} />
+              <AspectRatingsPanel hostType="performer" hostId={id} canRate={canEngagePerformer} className="mt-3" />
 
               <div className="mt-4 flex flex-wrap gap-3">
                 <CountCard label="Scenes" value={performer.sceneCount} icon={<Film className="h-4 w-4" />} />
@@ -335,6 +345,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                 <p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{performer.details}</p>
               )}
               <CustomFieldsDisplay customFields={performer.customFields} />
+              <PerformerFaceSimilarityPanel performerId={id} canReadFaces={canReadFaces} onNavigate={onNavigate} />
               <PerformerMetadataServerPanel performer={performer} metadataServers={metadataServers} onNavigate={onNavigate} />
             </div>
           </div>
@@ -411,6 +422,172 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
       </div>
       <PerformerScrapeDialog open={scrapeOpen} onClose={() => setScrapeOpen(false)} performer={performer} />
     </div>
+  );
+}
+
+type PerformerFaceMatch = {
+  performerId: number;
+  performerName: string;
+  coverImageUrl?: string;
+  bestDistance: number;
+  bestFaceId: number;
+  bestFaceLabel?: string;
+  matchingFaceIds: number[];
+};
+
+function PerformerFaceSimilarityPanel({ performerId, canReadFaces, onNavigate }: { performerId: number; canReadFaces: boolean; onNavigate: (r: any) => void }) {
+  const { data: linkedFacesResponse, isLoading: linkedFacesLoading } = useQuery({
+    queryKey: ["performer", performerId, "linked-faces"],
+    queryFn: () => faces.list({ performerId, merged: false, page: 1, perPage: 6 }),
+    enabled: canReadFaces,
+  });
+
+  const linkedFaces = linkedFacesResponse?.items ?? [];
+  const similarFaceQueries = useQueries({
+    queries: linkedFaces.map((face) => ({
+      queryKey: ["performer", performerId, "linked-face", face.id, "similar"],
+      queryFn: () => faces.similar(face.id, { k: 12 }),
+      enabled: canReadFaces,
+    })),
+  });
+
+  const similarPerformers = useMemo<PerformerFaceMatch[]>(() => {
+    const matches = new Map<number, PerformerFaceMatch & { matchingFaceIdSet: Set<number> }>();
+
+    for (const query of similarFaceQueries) {
+      const candidates = query.data ?? [];
+      for (const candidate of candidates) {
+        if (candidate.performerId == null || candidate.performerId === performerId) {
+          continue;
+        }
+
+        const existing = matches.get(candidate.performerId);
+        if (existing) {
+          existing.matchingFaceIdSet.add(candidate.id);
+          existing.matchingFaceIds = Array.from(existing.matchingFaceIdSet);
+          if (candidate.distance < existing.bestDistance) {
+            existing.bestDistance = candidate.distance;
+            existing.bestFaceId = candidate.id;
+            existing.bestFaceLabel = candidate.label;
+            if (candidate.coverImageUrl) {
+              existing.coverImageUrl = candidate.coverImageUrl;
+            }
+          }
+          continue;
+        }
+
+        matches.set(candidate.performerId, {
+          performerId: candidate.performerId,
+          performerName: candidate.performerName || `Performer #${candidate.performerId}`,
+          coverImageUrl: candidate.coverImageUrl,
+          bestDistance: candidate.distance,
+          bestFaceId: candidate.id,
+          bestFaceLabel: candidate.label,
+          matchingFaceIds: [candidate.id],
+          matchingFaceIdSet: new Set([candidate.id]),
+        });
+      }
+    }
+
+    return Array.from(matches.values())
+      .map(({ matchingFaceIdSet: _matchingFaceIdSet, ...candidate }) => candidate)
+      .sort((left, right) => left.bestDistance - right.bestDistance || right.matchingFaceIds.length - left.matchingFaceIds.length)
+      .slice(0, 8);
+  }, [performerId, similarFaceQueries]);
+
+  if (!canReadFaces) {
+    return null;
+  }
+
+  const similarFacesLoading = similarFaceQueries.some((query) => query.isLoading);
+
+  return (
+    <div className="mt-6 rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Similar Performers by Face</h2>
+          <p className="mt-1 text-sm text-secondary">Visual matches derived from linked face embeddings.</p>
+        </div>
+        <div className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted">
+          {linkedFaces.length} linked face{linkedFaces.length === 1 ? "" : "s"}
+        </div>
+      </div>
+
+      {linkedFacesLoading ? (
+        <p className="mt-4 text-sm text-secondary">Loading linked faces...</p>
+      ) : linkedFaces.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-secondary">
+          This performer does not have any primary face clusters linked yet.
+        </div>
+      ) : (
+        <>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {linkedFaces.map((face) => (
+              <button
+                key={face.id}
+                type="button"
+                onClick={() => onNavigate({ page: "face", id: face.id })}
+                className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-foreground transition-colors hover:border-accent"
+              >
+                {face.label?.trim() || `Face #${face.id}`}
+              </button>
+            ))}
+          </div>
+
+          {similarFacesLoading ? (
+            <p className="mt-4 text-sm text-secondary">Finding visually similar performers...</p>
+          ) : similarPerformers.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-secondary">
+              No similar performers were found for the linked faces yet.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {similarPerformers.map((match) => (
+                <SimilarPerformerFaceCard key={match.performerId} match={match} onNavigate={onNavigate} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SimilarPerformerFaceCard({ match, onNavigate }: { match: PerformerFaceMatch; onNavigate: (r: any) => void }) {
+  return (
+    <article className="overflow-hidden rounded-2xl border border-border bg-surface/60">
+      <button
+        type="button"
+        onClick={() => onNavigate({ page: "performer", id: match.performerId })}
+        className="flex w-full items-center gap-3 p-4 text-left"
+      >
+        <div className="h-16 w-16 overflow-hidden rounded-xl bg-surface/90">
+          {match.coverImageUrl ? (
+            <img src={match.coverImageUrl} alt={match.performerName} className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted">
+              <UserRound className="h-6 w-6" />
+            </div>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-foreground">{match.performerName}</div>
+          <div className="mt-1 text-xs text-secondary">Best face distance {match.bestDistance.toFixed(3)}</div>
+          <div className="mt-1 text-xs text-muted">
+            Matched via {match.matchingFaceIds.length} face{match.matchingFaceIds.length === 1 ? "" : "s"}
+          </div>
+        </div>
+      </button>
+      <div className="border-t border-border px-4 py-3 text-xs text-secondary">
+        <button
+          type="button"
+          onClick={() => onNavigate({ page: "face", id: match.bestFaceId })}
+          className="text-accent hover:underline"
+        >
+          Open best face match{match.bestFaceLabel ? `: ${match.bestFaceLabel}` : ""}
+        </button>
+      </div>
+    </article>
   );
 }
 

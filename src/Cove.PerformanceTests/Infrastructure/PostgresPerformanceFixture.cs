@@ -327,7 +327,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
             scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performers[index % performers.Count].Id });
             scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performers[(index + 11) % performers.Count].Id });
             scene.SceneGalleries.Add(new SceneGallery { SceneId = scene.Id, GalleryId = gallery.Id });
-            scene.SceneGroups.Add(new SceneGroup { SceneId = scene.Id, GroupId = group.Id, SceneIndex = (index % 8) + 1 });
+            scene.GroupItems.Add(new GroupItem { SceneId = scene.Id, GroupId = group.Id, OrderIndex = (index % 8) + 1, Kind = GroupItemKind.Scene });
 
             var fileCount = index % 3 == 0 ? 2 : 1;
             for (var fileIndex = 0; fileIndex < fileCount; fileIndex++)

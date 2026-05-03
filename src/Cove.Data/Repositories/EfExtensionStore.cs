@@ -10,25 +10,30 @@ namespace Cove.Data.Repositories;
 /// </summary>
 public class EfExtensionStore : IExtensionStore
 {
-    private readonly CoveContext _db;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _extensionId;
 
-    public EfExtensionStore(CoveContext db, string extensionId)
+    public EfExtensionStore(IServiceScopeFactory scopeFactory, string extensionId)
     {
-        _db = db;
+        _scopeFactory = scopeFactory;
         _extensionId = extensionId;
     }
 
     public async Task<string?> GetAsync(string key, CancellationToken ct = default)
     {
-        var entry = await _db.ExtensionData
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var entry = await db.ExtensionData
+            .AsNoTracking()
             .FirstOrDefaultAsync(e => e.ExtensionId == _extensionId && e.Key == key, ct);
         return entry?.Value;
     }
 
     public async Task SetAsync(string key, string value, CancellationToken ct = default)
     {
-        var entry = await _db.ExtensionData
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var entry = await db.ExtensionData
             .FirstOrDefaultAsync(e => e.ExtensionId == _extensionId && e.Key == key, ct);
 
         if (entry is not null)
@@ -38,30 +43,35 @@ public class EfExtensionStore : IExtensionStore
         }
         else
         {
-            _db.ExtensionData.Add(new ExtensionData
+            db.ExtensionData.Add(new ExtensionData
             {
                 ExtensionId = _extensionId,
                 Key = key,
                 Value = value
             });
         }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(string key, CancellationToken ct = default)
     {
-        var entry = await _db.ExtensionData
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var entry = await db.ExtensionData
             .FirstOrDefaultAsync(e => e.ExtensionId == _extensionId && e.Key == key, ct);
         if (entry is not null)
         {
-            _db.ExtensionData.Remove(entry);
-            await _db.SaveChangesAsync(ct);
+            db.ExtensionData.Remove(entry);
+            await db.SaveChangesAsync(ct);
         }
     }
 
     public async Task<Dictionary<string, string>> GetAllAsync(CancellationToken ct = default)
     {
-        return await _db.ExtensionData
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        return await db.ExtensionData
+            .AsNoTracking()
             .Where(e => e.ExtensionId == _extensionId)
             .ToDictionaryAsync(e => e.Key, e => e.Value, ct);
     }
@@ -81,8 +91,7 @@ public class EfExtensionStoreFactory : IExtensionStoreFactory
 
     public IExtensionStore CreateStore(string extensionId)
     {
-        var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
-        return new EfExtensionStore(db, extensionId);
+        var scopeFactory = _services.GetRequiredService<IServiceScopeFactory>();
+        return new EfExtensionStore(scopeFactory, extensionId);
     }
 }

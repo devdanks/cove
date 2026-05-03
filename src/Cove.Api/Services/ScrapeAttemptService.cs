@@ -2,12 +2,13 @@ using System.Text.Json;
 using System.Text;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Interfaces;
 using Cove.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Api.Services;
 
-public class ScrapeAttemptService(CoveContext db, ScraperService scraperService, ISceneCoverService sceneCoverService, PerformerScrapeService performerScrapeService, ILogger<ScrapeAttemptService> logger)
+public class ScrapeAttemptService(CoveContext db, ScraperService scraperService, ISceneCoverService sceneCoverService, PerformerScrapeService performerScrapeService, ITagProvenanceService tagProvenanceService, ILogger<ScrapeAttemptService> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -330,7 +331,10 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             }
 
             if (existingTagIds.Add(tag.Id))
+            {
                 scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tag.Id, Tag = tag });
+                await tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, "scraper", cancellationToken: ct);
+            }
         }
     }
 

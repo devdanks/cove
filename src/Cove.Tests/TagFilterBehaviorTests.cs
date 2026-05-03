@@ -180,54 +180,6 @@ public class TagFilterBehaviorTests
     }
 
     [Fact]
-    public async Task MarkerCountCriterion_CanIncludeDescendantTagCounts()
-    {
-        await using var scope = await CreateContextAsync();
-        var context = scope.Context;
-
-        var (parent, child, _) = await SeedTagHierarchyAsync(context);
-        var scene = new Scene { Title = "marker scene" };
-        context.Scenes.Add(scene);
-        await context.SaveChangesAsync();
-
-        context.SceneMarkers.Add(new SceneMarker
-        {
-            Title = "child marker",
-            Seconds = 1,
-            SceneId = scene.Id,
-            PrimaryTagId = child.Id,
-        });
-        await context.SaveChangesAsync();
-
-        var repository = new TagRepository(context);
-        var directFilter = new TagFilter
-        {
-            MarkerCountCriterion = new IntCriterion
-            {
-                Modifier = CriterionModifier.GreaterThan,
-                Value = 0,
-            },
-        };
-        var includeChildrenFilter = new TagFilter
-        {
-            MarkerCountCriterion = new IntCriterion
-            {
-                Modifier = CriterionModifier.GreaterThan,
-                Value = 0,
-            },
-            MarkerCountIncludesChildren = true,
-        };
-
-        var (directItems, directCount) = await repository.FindAsync(directFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "name" });
-        var (aggregatedItems, aggregatedCount) = await repository.FindAsync(includeChildrenFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "name" });
-
-        Assert.Equal(1, directCount);
-        Assert.Equal(["Child"], directItems.Select(tag => tag.Name).ToArray());
-        Assert.Equal(2, aggregatedCount);
-        Assert.Equal(["Child", "Parent"], aggregatedItems.Select(tag => tag.Name).ToArray());
-    }
-
-    [Fact]
     public async Task SceneCountCriterion_IncludingChildren_DeduplicatesEntitiesAcrossMultipleDescendants()
     {
         await using var scope = await CreateContextAsync();

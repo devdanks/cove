@@ -59,6 +59,7 @@ describe("filter criteria definitions", () => {
     expect(sceneCriteriaById.has("interactive")).toBe(false);
     expect(sceneCriteriaById.has("interactiveSpeed")).toBe(false);
     expect(sceneCriteriaById.has("checksum")).toBe(false);
+    expect(sceneCriteriaById.has("hasMarkers")).toBe(false);
     expect(sceneCriteriaById.get("playCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(sceneCriteriaById.get("fileCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(sceneCriteriaById.get("frameRate")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
@@ -79,7 +80,7 @@ describe("filter criteria definitions", () => {
     expect(performerCriteriaById.get("studioCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.get("imageCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.get("galleryCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
-    expect(performerCriteriaById.get("markerCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(performerCriteriaById.has("markerCount")).toBe(false);
     expect(performerCriteriaById.get("playCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.get("oCounter")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.get("careerLength")?.label).toBe("Career Length");
@@ -101,8 +102,7 @@ describe("filter criteria definitions", () => {
 
     expect(tagCriteriaById.get("sceneCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(tagCriteriaById.get("sceneCount")?.auxiliaryToggleKey).toBe("sceneCountIncludesChildren");
-    expect(tagCriteriaById.get("markerCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
-    expect(tagCriteriaById.get("markerCount")?.auxiliaryToggleKey).toBe("markerCountIncludesChildren");
+    expect(tagCriteriaById.has("markerCount")).toBe(false);
     expect(tagCriteriaById.get("performerCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(tagCriteriaById.get("performerCount")?.auxiliaryToggleKey).toBe("performerCountIncludesChildren");
     expect(tagCriteriaById.get("children")?.label).toBe("Sub-Tags");

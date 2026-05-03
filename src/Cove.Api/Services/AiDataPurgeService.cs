@@ -15,6 +15,8 @@ public sealed class AiDataPurgeService(
     IBlobService blobService,
     ILogger<AiDataPurgeService> logger)
 {
+    private const int PurgeBatchSize = 5_000;
+
     private readonly CoveContext _db = db;
     private readonly IReadOnlyList<IFaceLifecycleParticipant> _faceLifecycleParticipants = faceLifecycleParticipants.ToList();
     private readonly IBlobService _blobService = blobService;
@@ -90,10 +92,6 @@ public sealed class AiDataPurgeService(
             : [];
         IReadOnlyCollection<int>? excludedFaceIds = faceIds.Count > 0 ? faceIds : null;
 
-        await using var transaction = !dryRun && _db.Database.IsRelational()
-            ? await _db.Database.BeginTransactionAsync(cancellationToken)
-            : null;
-
         if (faceIds.Count > 0)
             MergeRemovedCounts(removed, await PurgeFacesByIdsAsync(faceIds, dryRun, cancellationToken));
 
@@ -108,9 +106,6 @@ public sealed class AiDataPurgeService(
 
         if (selector.IncludesKind("tagapplication"))
             MergeRemovedCounts(removed, await PurgeTagApplicationsCoreAsync(selector, dryRun, cancellationToken));
-
-        if (transaction is not null)
-            await transaction.CommitAsync(cancellationToken);
 
         return new AiDataPurgeResultDto(removed);
     }
@@ -322,11 +317,7 @@ public sealed class AiDataPurgeService(
             return candidates.Count;
         }
 
-        var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
-        var embeddings = await _db.Embeddings.Where(embedding => ids.Contains(embedding.Id)).ToListAsync(cancellationToken);
-        _db.Embeddings.RemoveRange(embeddings);
-        await _db.SaveChangesAsync(cancellationToken);
-        return embeddings.Count;
+        return await RemoveByIdsInBatchesAsync(_db.Embeddings, candidates.Select(candidate => candidate.Id), cancellationToken);
     }
 
     private async Task<int> PurgeDetectionsCoreAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, bool dryRun, CancellationToken cancellationToken, IReadOnlyCollection<int>? excludedFaceIds = null)
@@ -342,11 +333,7 @@ public sealed class AiDataPurgeService(
             return candidates.Count;
         }
 
-        var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
-        var detections = await _db.Set<Detection>().Where(detection => ids.Contains(detection.Id)).ToListAsync(cancellationToken);
-        _db.Set<Detection>().RemoveRange(detections);
-        await _db.SaveChangesAsync(cancellationToken);
-        return detections.Count;
+        return await RemoveByIdsInBatchesAsync(_db.Set<Detection>(), candidates.Select(candidate => candidate.Id), cancellationToken);
     }
 
     private async Task<int> PurgeSegmentsCoreAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, bool dryRun, CancellationToken cancellationToken, IReadOnlyCollection<int>? excludedFaceIds = null)
@@ -362,11 +349,7 @@ public sealed class AiDataPurgeService(
             return candidates.Count;
         }
 
-        var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
-        var segments = await _db.Segments.Where(segment => ids.Contains(segment.Id)).ToListAsync(cancellationToken);
-        _db.Segments.RemoveRange(segments);
-        await _db.SaveChangesAsync(cancellationToken);
-        return segments.Count;
+        return await RemoveByIdsInBatchesAsync(_db.Segments, candidates.Select(candidate => candidate.Id), cancellationToken);
     }
 
     private async Task<Dictionary<string, int>> PurgeTagApplicationsCoreAsync(AiDataSelector selector, bool dryRun, CancellationToken cancellationToken)
@@ -405,10 +388,7 @@ public sealed class AiDataPurgeService(
             };
         }
 
-        var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
-        var applications = await _db.TagApplications.Where(application => ids.Contains(application.Id)).ToListAsync(cancellationToken);
-        _db.TagApplications.RemoveRange(applications);
-        await _db.SaveChangesAsync(cancellationToken);
+        var removedCount = await RemoveByIdsInBatchesAsync(_db.TagApplications, candidates.Select(candidate => candidate.Id), cancellationToken);
 
         var affectedPairs = candidates
             .Select(candidate => new TagHostPair(candidate.HostType, candidate.HostId, candidate.TagId))
@@ -418,8 +398,33 @@ public sealed class AiDataPurgeService(
 
         return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
         {
-            ["tagApplication"] = applications.Count,
+            ["tagApplication"] = removedCount,
         };
+    }
+
+    private async Task<int> RemoveByIdsInBatchesAsync<TEntity>(DbSet<TEntity> set, IEnumerable<int> ids, CancellationToken cancellationToken)
+        where TEntity : class
+    {
+        var removed = 0;
+
+        foreach (var batchIds in ids.Distinct().Chunk(PurgeBatchSize))
+        {
+            var idBatch = batchIds.ToArray();
+            var entities = await set
+                .Where(entity => idBatch.Contains(EF.Property<int>(entity, "Id")))
+                .ToListAsync(cancellationToken);
+
+            if (entities.Count == 0)
+            {
+                continue;
+            }
+
+            set.RemoveRange(entities);
+            removed += entities.Count;
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        return removed;
     }
 
     private async Task<HashSet<int>> ResolveFaceIdsAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken)
