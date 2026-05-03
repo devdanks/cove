@@ -13,6 +13,7 @@ import { FaceCompareDialog } from "../components/FaceCompareDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { EditModal } from "../components/EditModal";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { formatDate } from "../components/shared";
 
@@ -564,21 +565,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         onFavoriteToggle={canEngageFace && !faceFavoritePending ? () => setFaceFavorite(!faceFavorite) : undefined}
         actions={faceActions}
       >
-        <div className="mb-4 border-b border-border">
-          <div className="flex flex-wrap gap-1">
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setActiveTab(tab.key as FaceTab)}
-                className={`px-2.5 py-2 text-sm transition-colors border-b-2 cursor-pointer ${activeTab === tab.key ? "border-accent text-accent" : "border-transparent text-secondary hover:text-foreground"}`}
-              >
-                {tab.label}
-                {typeof tab.count === "number" ? <span className="ml-1 text-xs text-muted">({tab.count})</span> : null}
-              </button>
-            ))}
-          </div>
-        </div>
+        <EntityDetailTabs tabs={tabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as FaceTab)} className="mx-auto mb-4 max-w-7xl" />
         {activeTabContent}
       </EntityHeroLayout>
 

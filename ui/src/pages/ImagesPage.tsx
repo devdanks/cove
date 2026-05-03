@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { images } from "../api/client";
 import type { EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner } from "../components/Rating";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
@@ -253,7 +254,7 @@ export function ImagesPage({ onNavigate }: Props) {
       }
     >
       {displayMode === "grid" ? (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 140px), 1fr))" }}>
+        <EntityCardGrid minCardWidth="var(--card-min-width, 140px)">
           {items.map((img, idx) => (
             <ImageCard
               key={img.id}
@@ -275,7 +276,7 @@ export function ImagesPage({ onNavigate }: Props) {
               onQuickView={() => setQuickViewId(img.id)}
             />
           ))}
-        </div>
+        </EntityCardGrid>
       ) : (
         <div className="flex gap-2 px-2">
           {wallColumns.map((column, columnIndex) => (

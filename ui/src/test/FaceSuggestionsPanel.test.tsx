@@ -75,7 +75,7 @@ describe("FaceSuggestionsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
     expect(onReject).toHaveBeenCalledWith(suggestions[0]);
 
-    fireEvent.click(screen.getByRole("link", { name: /Face 51/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Open evidence face 51" }));
     expect(onNavigate).toHaveBeenCalledWith({ page: "face", id: 51 });
   });
 
@@ -104,11 +104,10 @@ describe("FaceSuggestionsPanel", () => {
       />,
     );
 
-    expect(screen.getByText("Reference")).toBeInTheDocument();
-    expect(screen.getByText("Nearest imported reference identity.")).toBeInTheDocument();
-    expect(screen.getByText("This is a reference-pack only match. Review it side by side before importing.")).toBeInTheDocument();
+    expect(screen.getByText("Reference DB")).toBeInTheDocument();
+    expect(screen.getByText("External reference match. Import it to create a local performer link.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Import performer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import as performer" }));
     expect(onAccept).toHaveBeenCalledWith(suggestion);
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));

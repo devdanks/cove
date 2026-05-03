@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { performers, entityImages } from "../api/client";
 import type { EntityEngagement, FindFilter, Performer, PerformerCreate, PerformerFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -166,7 +167,7 @@ export function PerformersPage({ onNavigate }: Props) {
       {displayMode === "tagger" ? (
         <PerformerTagger performers={items} />
       ) : displayMode === "grid" ? (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 160px), 1fr))" }}>
+        <EntityCardGrid minCardWidth="var(--card-min-width, 160px)">
           {items.map((p) => (
             <PerformerCard
               key={p.id}
@@ -179,7 +180,7 @@ export function PerformersPage({ onNavigate }: Props) {
               selecting={selecting}
             />
           ))}
-        </div>
+        </EntityCardGrid>
       ) : (
         <PerformerListTable performers={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}

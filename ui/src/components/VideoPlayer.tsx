@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Eye,
+  EyeOff,
   Maximize,
   Minimize,
   Pause,
@@ -31,7 +33,36 @@ function generateUuid() {
 
 const VOLUME_KEY = "cove-video-player-volume";
 const MUTED_KEY = "cove-video-player-muted";
+const FACE_OVERLAY_KEY = "cove.player.faceOverlay";
 const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+
+function usePersistedFlag(key: string, defaultValue: boolean): [boolean, (next: boolean | ((prev: boolean) => boolean)) => void] {
+  const [value, setValue] = useState<boolean>(() => {
+    if (typeof window === "undefined") return defaultValue;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw === "true") return true;
+      if (raw === "false") return false;
+    } catch {
+      // Ignore storage access failures.
+    }
+    return defaultValue;
+  });
+
+  const setPersistedValue = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setValue((previous) => {
+      const resolved = typeof next === "function" ? (next as (prev: boolean) => boolean)(previous) : next;
+      try {
+        window.localStorage.setItem(key, resolved ? "true" : "false");
+      } catch {
+        // Ignore storage access failures.
+      }
+      return resolved;
+    });
+  }, [key]);
+
+  return [value, setPersistedValue];
+}
 
 function roundPlaybackTime(value: number) {
   return Math.round(value * 1000) / 1000;
@@ -101,6 +132,7 @@ export function VideoPlayer({
   const [showQuality, setShowQuality] = useState(false);
   const [selectedQuality, setSelectedQuality] = useState<string>("Direct");
   const [availableQualities, setAvailableQualities] = useState<string[]>([]);
+  const [faceOverlayEnabled, setFaceOverlayEnabled] = usePersistedFlag(FACE_OVERLAY_KEY, false);
   const playbackTracker = useRef(createPlaybackTracker());
   const hideTimer = useRef<ReturnType<typeof setTimeout>>(null);
   const playTriggered = useRef(false);
@@ -227,6 +259,11 @@ export function VideoPlayer({
     const byKey = new Map<string, Detection>();
 
     for (const detection of detections) {
+      const isFaceDetection = (detection.refKind ?? detection.class ?? "").toLowerCase() === "face";
+      if (isFaceDetection && !faceOverlayEnabled) {
+        continue;
+      }
+
       const observedAt = detection.observedAtSec;
       if (observedAt != null && Math.abs(observedAt - currentTime) > toleranceSec) {
         continue;
@@ -248,7 +285,12 @@ export function VideoPlayer({
     }
 
     return Array.from(byKey.values());
-  }, [currentTime, detections]);
+  }, [currentTime, detections, faceOverlayEnabled]);
+
+  const hasFaceDetections = useMemo(
+    () => detections.some((detection) => (detection.refKind ?? detection.class ?? "").toLowerCase() === "face"),
+    [detections],
+  );
 
   const effectiveStreamUrl = selectedQuality === "Direct" ? streamUrl : scenes.transcodeUrl(sceneId, selectedQuality);
 
@@ -905,6 +947,16 @@ export function VideoPlayer({
                 <Subtitles className="w-4 h-4" />
               </button>
             )}
+
+            {hasFaceDetections ? (
+              <button
+                onClick={() => setFaceOverlayEnabled((previous) => !previous)}
+                className={`hover:text-accent p-1 ${faceOverlayEnabled ? "text-accent" : ""}`}
+                title={faceOverlayEnabled ? "Hide face boxes on video" : "Show face boxes on video"}
+              >
+                {faceOverlayEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              </button>
+            ) : null}
 
             <button onClick={toggleFullscreen} className="hover:text-accent p-1">
               {fullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}

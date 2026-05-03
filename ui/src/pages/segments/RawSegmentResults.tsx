@@ -1,4 +1,5 @@
 import { FolderOpen } from "lucide-react";
+import { EntityCardGrid } from "../../components/EntityCardGrid";
 import type { DisplayMode } from "../../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../../components/RouteCardLinkOverlay";
 import {
@@ -31,7 +32,7 @@ export function RawSegmentResults({
 }: Props) {
   if (displayMode === "grid") {
     return (
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 220px), 1fr))" }}>
+      <EntityCardGrid minCardWidth="var(--card-min-width, 220px)">
         {items.map((item) => (
           <RawSegmentCard
             key={item.key}
@@ -44,7 +45,7 @@ export function RawSegmentResults({
             selecting={selecting}
           />
         ))}
-      </div>
+      </EntityCardGrid>
     );
   }
 

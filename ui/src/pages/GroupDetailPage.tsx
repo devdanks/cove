@@ -12,7 +12,9 @@ import { CompilationPlayer } from "../components/CompilationPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { DetailListToolbar } from "../components/DetailListToolbar";
-import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { EntityCardGrid } from "../components/EntityCardGrid";
+import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
@@ -96,24 +98,6 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       edit: "groups.read",
     }, hasPermission).filter((tab) => tab.key !== "items" || canReadScenes || canReadGroups);
   }, [canReadGroups, canReadScenes, group?.containingGroupCount, group?.subGroupCount, groupItems.length, groupTabs, hasPermission]);
-
-  const groupKeyboardShortcuts = useMemo(() => ([
-    {
-      key: "i",
-      description: "Open items",
-      handler: () => setActiveTab("items"),
-    },
-    {
-      key: "m",
-      description: "Open metadata",
-      handler: () => setActiveTab("metadata"),
-    },
-    {
-      key: "e",
-      description: canWriteGroup ? "Open edit actions" : "Open edit tab",
-      handler: () => setActiveTab("edit"),
-    },
-  ]), [canWriteGroup]);
 
   useEffect(() => {
     if (tabs.length > 0 && !tabs.some((tab) => tab.key === activeTab)) {
@@ -271,11 +255,11 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         onCancel={() => setConfirmDelete(false)}
       />
 
-      <MediaDetailLayout
+      <EntityHeroLayout
         title={group.name}
-        subtitle={
+        aliases={group.aliases || undefined}
+        metaRow={
           <div className="flex flex-wrap items-center gap-3 text-sm text-secondary">
-            {group.aliases ? <span>Aliases: {group.aliases}</span> : null}
             {group.date ? <span>{formatDate(group.date)}</span> : null}
             {group.director ? <span>Director: {group.director}</span> : null}
             {group.duration ? <span className="inline-flex items-center gap-1"><Clapperboard className="h-4 w-4" /> {formatDuration(group.duration)}</span> : null}
@@ -292,11 +276,12 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         }
         backLabel={backLabel}
         onGoBack={goBack}
-        mediaAspectRatio="auto"
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={(key) => setActiveTab(key as TabKey)}
-        keyboardShortcuts={groupKeyboardShortcuts}
+        imageFallback={<Layers className="h-14 w-14" />}
+        counts={[
+          { key: "scenes", label: "Scenes", value: group.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "subgroups", label: "Sub-groups", value: group.subGroupCount, icon: <Layers className="h-4 w-4" /> },
+          { key: "containing", label: "Containing", value: group.containingGroupCount, icon: <LinkIcon className="h-4 w-4" /> },
+        ]}
         actions={
           <>
             <ExtensionSlot slot="group-detail-actions" context={{ group, onNavigate }} />
@@ -333,9 +318,14 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
           </>
         }
       >
-        {activeContent}
-        <ExtensionSlot slot="group-detail-main-bottom" context={{ group, onNavigate }} />
-      </MediaDetailLayout>
+        <div className="mx-auto max-w-7xl">
+          <EntityDetailTabs tabs={tabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} />
+          <div className="py-6">
+            {activeContent}
+            <ExtensionSlot slot="group-detail-main-bottom" context={{ group, onNavigate }} />
+          </div>
+        </div>
+      </EntityHeroLayout>
 
       <ExtensionSlot slot="group-detail-bottom" context={{ group, onNavigate }} />
     </div>
@@ -515,11 +505,11 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
         onSelectNone={selectNone}
         selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={groupScenes.items} onNavigate={onNavigate} />}
       />
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
         {groupScenes.items.map((scene) => (
           <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}

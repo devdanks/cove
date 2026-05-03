@@ -13,6 +13,8 @@ import { InteractiveRating } from "../components/Rating";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { SceneCard, ImageTile } from "../components/EntityCards";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { EntityDetailTabs } from "../components/EntityDetailTabs";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
@@ -367,24 +369,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
           </section>
         ) : null}
 
-        <div className="mb-4 border-b border-border">
-          <div className="flex flex-wrap gap-1">
-            {visibleGalleryTabs.map((tab) => {
-              const count = tab.count;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key as TabKey)}
-                  className={`px-2.5 py-2 text-sm transition-colors border-b-2 cursor-pointer ${activeTab === tab.key ? "border-accent text-accent" : "border-transparent text-secondary hover:text-foreground"}`}
-                >
-                  {tab.label}
-                  {typeof count === "number" ? <span className="ml-1 text-xs text-muted">({count})</span> : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <EntityDetailTabs tabs={visibleGalleryTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto mb-4 max-w-7xl" />
 
         {activeContent}
         <ExtensionSlot slot="gallery-detail-main-bottom" context={{ gallery, onNavigate }} />
@@ -483,11 +468,11 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
         onSelectNone={selectNone}
         selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={data.items} onNavigate={onNavigate} />}
       />
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
         {data.items.map((scene) => (
           <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -562,7 +547,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
           <Plus className="w-3 h-3" /> Add Images
         </button>
       </div> : null}
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + imageZoom * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${160 + imageZoom * 50}px`}>
         {galleryImages.items.map((image, idx) => (
           <ImageTile
             key={image.id}
@@ -575,7 +560,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
             selecting={selecting}
           />
         ))}
-      </div>
+      </EntityCardGrid>
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}

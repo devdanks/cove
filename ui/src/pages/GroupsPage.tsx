@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups } from "../api/client";
 import type { FindFilter, Group, GroupCreate, GroupFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -130,7 +131,7 @@ export function GroupsPage({ onNavigate }: Props) {
         }
       >
       {displayMode === "grid" ? (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 160px), 1fr))" }}>
+        <EntityCardGrid minCardWidth="var(--card-min-width, 160px)">
           {items.map((g) => (
             <GroupCard
               key={g.id}
@@ -142,7 +143,7 @@ export function GroupsPage({ onNavigate }: Props) {
               selecting={selecting}
             />
           ))}
-        </div>
+        </EntityCardGrid>
       ) : (
         <GroupListTable groups={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}

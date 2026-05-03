@@ -1,7 +1,7 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, images } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Files as FilesIcon, Heart, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, Trash2, UserRound, Users, X } from "lucide-react";
+import { Check, Download, Heart, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -27,7 +27,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type ImageTab = "details" | "detections" | "related";
+type ImageTab = "details" | "file-info" | "detections" | "related";
 
 export function ImageDetailPage({ id, onNavigate }: Props) {
   const { data: image, isLoading } = useQuery({
@@ -107,15 +107,25 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   });
   const imageOCount = image?.oCounter ?? 0;
   const displayTitle = image ? getImageDisplayTitle(image) : `Image ${id}`;
-  const tabs = useMemo(() => ([
-    { key: "details", label: "Details" },
-    { key: "detections", label: "Detections", count: imageDetections.length },
-    {
-      key: "related",
-      label: "Related",
-      count: (image?.performers.length ?? 0) + (image?.tags.length ?? 0) + (image?.studioId ? 1 : 0),
-    },
-  ]), [image?.performers.length, image?.studioId, image?.tags.length, imageDetections.length]);
+  const tabs = useMemo(() => {
+    const nextTabs = [
+      { key: "details", label: "Details" },
+      ...(canReadFiles ? [{ key: "file-info", label: "File Info", count: image?.files.length ?? 0 }] : []),
+      { key: "detections", label: "Detections", count: imageDetections.length },
+      {
+        key: "related",
+        label: "Related",
+        count: (image?.performers.length ?? 0) + (image?.tags.length ?? 0) + (image?.studioId ? 1 : 0),
+      },
+    ];
+    return nextTabs;
+  }, [canReadFiles, image?.files.length, image?.performers.length, image?.studioId, image?.tags.length, imageDetections.length]);
+
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab("details");
+    }
+  }, [activeTab, tabs]);
 
   useEffect(() => {
     if (image) document.title = `${displayTitle} | Cove`;
@@ -249,22 +259,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         </section>
       ) : null}
 
-      {canReadFiles && image.files.length > 0 ? (
-        <section>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">File Info</h2>
-          <div className="mt-3 space-y-3">
-            {image.files.map((file) => (
-              <dl key={file.id} className="grid gap-2 md:grid-cols-2">
-                <DetailField label="Path" value={<span className="break-all font-mono text-[11px]">{file.path}</span>} />
-                <DetailField label="Dimensions" value={`${file.width} x ${file.height}`} />
-                <DetailField label="Format" value={file.format} />
-                <DetailField label="Size" value={`${(file.size / 1024 / 1024).toFixed(2)} MB`} />
-              </dl>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
       <section>
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Details</h2>
         <dl className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
@@ -294,6 +288,28 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       <CustomFieldsDisplay customFields={image.customFields} />
       <ExtensionSlot slot="image-detail-sidebar-bottom" context={{ image, onNavigate }} />
     </div>
+  );
+
+  const fileInfoContent = canReadFiles ? (
+    image.files.length > 0 ? (
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">File Info</h2>
+        <div className="mt-3 space-y-3">
+          {image.files.map((file) => (
+            <dl key={file.id} className="grid gap-2 md:grid-cols-2">
+              <DetailField label="Path" value={<span className="break-all font-mono text-[11px]">{file.path}</span>} />
+              <DetailField label="Dimensions" value={`${file.width} x ${file.height}`} />
+              <DetailField label="Format" value={file.format} />
+              <DetailField label="Size" value={`${(file.size / 1024 / 1024).toFixed(2)} MB`} />
+            </dl>
+          ))}
+        </div>
+      </section>
+    ) : (
+      <EmptyPanel icon={<ImageOff className="h-10 w-10" />} message="No image file metadata is available yet." />
+    )
+  ) : (
+    <EmptyPanel icon={<ImageOff className="h-10 w-10" />} message="File metadata is unavailable with your current permissions." />
   );
 
   const detectionsContent = (
@@ -395,10 +411,16 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     </div>
   );
 
-  const activeContent = activeTab === "detections" ? detectionsContent : activeTab === "related" ? relatedContent : detailsContent;
+  const activeContent = activeTab === "file-info"
+    ? fileInfoContent
+    : activeTab === "detections"
+      ? detectionsContent
+      : activeTab === "related"
+        ? relatedContent
+        : detailsContent;
 
   return (
-    <div className="overflow-hidden">
+    <>
       <Suspense fallback={null}>
         {editing ? <ImageEditModal image={image} open={editing} onClose={() => setEditing(false)} /> : null}
         {showDownloadDialog ? (
@@ -498,8 +520,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
               onClick: canEngageImage ? () => incrementOMut.mutate() : undefined,
               active: imageOCount > 0,
             },
-            { label: "Files", value: image.files.length, icon: <FilesIcon className="h-4 w-4" />, title: "File count" },
-            { label: "Faces", value: imageFaces.length, icon: <Users className="h-4 w-4" />, title: "Faces detected" },
           ],
         }}
         actions={
@@ -568,7 +588,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
           <ExtensionSlot slot="image-detail-main-bottom" context={{ image, onNavigate }} />
         </MediaDetailLayout.Content>
       </MediaDetailLayout>
-    </div>
+    </>
   );
 }
 

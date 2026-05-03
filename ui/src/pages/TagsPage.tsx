@@ -5,6 +5,7 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import type { EntityEngagement, FindFilter, Tag, TagCreate, TagFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { Tag as TagIcon, Film, Trash2, Loader2, Edit, Merge, Heart, Image, LayoutGrid, Layers, Users, Building2 } from "lucide-react";
@@ -209,7 +210,7 @@ export function TagsPage({ onNavigate }: Props) {
           } : undefined}
         />
       ) : displayMode === "grid" ? (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 200px), 1fr))" }}>
+        <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {items.map((tag) => (
             <TagCard
               key={tag.id}
@@ -222,7 +223,7 @@ export function TagsPage({ onNavigate }: Props) {
               selecting={selecting}
             />
           ))}
-        </div>
+        </EntityCardGrid>
       ) : (
         <TagListTable tags={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}

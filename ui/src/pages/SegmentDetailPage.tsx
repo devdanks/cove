@@ -680,7 +680,8 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
           embedded
         />
       }
-      mediaAspectRatio="video"
+      mediaAspectRatio="auto"
+      mediaFullBleed
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={(key) => setActiveTab(key as SegmentTab)}
@@ -868,7 +869,7 @@ function SegmentPlaybackPanel({
   const file = scene?.files[0];
   const clipDuration = getSegmentDuration(segment.startSec, segment.endSec);
   const containerClassName = embedded
-    ? "flex h-full flex-col bg-card/80"
+    ? "flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black"
     : "self-start overflow-hidden rounded-3xl border border-border bg-card/80 shadow-sm xl:sticky xl:top-4";
 
   if (segment.hostType !== "scene") {
@@ -920,13 +921,13 @@ function SegmentPlaybackPanel({
         </div>
       ) : null}
 
-      <div className={embedded ? "flex min-h-0 flex-1 flex-col bg-black" : "bg-black px-3 py-3 sm:px-4"}>
+      <div className={embedded ? "flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black" : "bg-black px-3 py-3 sm:px-4"}>
         {sceneLoading ? (
           <div className={embedded ? "flex flex-1 items-center justify-center bg-black text-sm text-secondary" : "mx-auto flex aspect-video max-w-5xl items-center justify-center rounded-2xl bg-black text-sm text-secondary"}>
             Loading scene player...
           </div>
         ) : file ? (
-          <div className={embedded ? "flex min-h-0 flex-1 overflow-hidden bg-black" : "mx-auto aspect-video max-w-5xl overflow-hidden rounded-2xl bg-black"}>
+          <div className={embedded ? "flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden bg-black" : "mx-auto aspect-video max-w-5xl overflow-hidden rounded-2xl bg-black"}>
             <VideoPlayer
               streamUrl={scenes.streamUrl(segment.hostId)}
               posterUrl={scenes.screenshotUrl(segment.hostId, segment.updatedAt)}

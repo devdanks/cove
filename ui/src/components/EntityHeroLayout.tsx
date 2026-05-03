@@ -11,10 +11,18 @@ export interface EntityHeroCount {
 export interface EntityHeroLayoutProps {
   backLabel: string;
   onGoBack: () => void;
+  backgroundImageUrl?: string | null;
+  backgroundImageAlt?: string;
+  backgroundImageClassName?: string;
+  backgroundOverlayClassName?: string;
   imageUrl?: string | null;
   imageAlt?: string;
+  imageContainerClassName?: string;
+  imageClassName?: string;
+  imageFallbackClassName?: string;
   imageFallback?: ReactNode;
   title: ReactNode;
+  subtitle?: ReactNode;
   sortName?: ReactNode;
   aliases?: ReactNode;
   description?: ReactNode;
@@ -22,7 +30,11 @@ export interface EntityHeroLayoutProps {
   metaRow?: ReactNode;
   favorite?: boolean;
   onFavoriteToggle?: () => void;
+  titleActions?: ReactNode;
+  heroContent?: ReactNode;
   actions?: ReactNode;
+  heroRowClassName?: string;
+  contentClassName?: string;
   children?: ReactNode;
 }
 
@@ -32,10 +44,18 @@ export interface EntityHeroLayoutProps {
 export function EntityHeroLayout({
   backLabel,
   onGoBack,
+  backgroundImageUrl,
+  backgroundImageAlt,
+  backgroundImageClassName,
+  backgroundOverlayClassName,
   imageUrl,
   imageAlt,
+  imageContainerClassName,
+  imageClassName,
+  imageFallbackClassName,
   imageFallback,
   title,
+  subtitle,
   sortName,
   aliases,
   description,
@@ -43,13 +63,37 @@ export function EntityHeroLayout({
   metaRow,
   favorite,
   onFavoriteToggle,
+  titleActions,
+  heroContent,
   actions,
+  heroRowClassName,
+  contentClassName,
   children,
 }: EntityHeroLayoutProps) {
+  const resolvedImageContainerClassName = imageContainerClassName ?? "relative flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/35 md:h-36 md:w-36";
+  const resolvedImageClassName = imageClassName ?? "h-full w-full object-cover";
+  const resolvedFallbackClassName = imageFallbackClassName ?? "h-full w-full items-center justify-center bg-card text-muted";
+  const resolvedHeroRowClassName = heroRowClassName ?? "flex flex-col gap-6 md:flex-row md:items-end";
+  const resolvedContentClassName = contentClassName ?? "w-full px-4 py-6";
+
   return (
     <div className="min-h-screen">
       <div className="relative overflow-hidden border-b border-border detail-hero-gradient">
-        <div className="mx-auto max-w-7xl px-4 py-8">
+        {backgroundImageUrl ? (
+          <>
+            <img
+              src={backgroundImageUrl}
+              alt={backgroundImageAlt ?? ""}
+              className={backgroundImageClassName ?? "absolute inset-0 h-full w-full scale-110 object-cover opacity-10 blur-md"}
+              onError={(event) => {
+                (event.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+            <div className={backgroundOverlayClassName ?? "absolute inset-0 bg-gradient-to-t from-background via-background/70 to-transparent"} />
+          </>
+        ) : null}
+
+        <div className="relative mx-auto max-w-7xl px-4 py-8">
           <div className="mb-5 flex items-center justify-between gap-4">
             <button
               type="button"
@@ -61,13 +105,13 @@ export function EntityHeroLayout({
             {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
           </div>
 
-          <div className="flex flex-col gap-6 md:flex-row md:items-end">
-            <div className="relative flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/35 md:h-36 md:w-36">
+          <div className={resolvedHeroRowClassName}>
+            <div className={resolvedImageContainerClassName}>
               {imageUrl ? (
                 <img
                   src={imageUrl}
                   alt={imageAlt ?? ""}
-                  className="h-full w-full object-cover"
+                  className={resolvedImageClassName}
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = "none";
                     const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
@@ -77,7 +121,7 @@ export function EntityHeroLayout({
               ) : null}
               <div
                 className={[
-                  "h-full w-full items-center justify-center bg-card text-muted",
+                  resolvedFallbackClassName,
                   imageUrl ? "hidden" : "flex",
                 ].join(" ")}
               >
@@ -89,6 +133,7 @@ export function EntityHeroLayout({
               <div className="mb-2 flex items-start gap-4">
                 <div className="min-w-0 flex-1">
                   <h1 className="truncate text-2xl font-bold text-foreground sm:text-3xl md:text-4xl">{title}</h1>
+                  {subtitle ? <div className="mt-1 text-sm text-secondary">{subtitle}</div> : null}
                   {sortName ? <p className="mt-1 text-sm text-muted">Sort name: {sortName}</p> : null}
                   {aliases ? <p className="mt-1 text-sm text-secondary">Also known as: {aliases}</p> : null}
                 </div>
@@ -112,6 +157,7 @@ export function EntityHeroLayout({
                     </span>
                   ) : null
                 ) : null}
+                {titleActions}
               </div>
 
               {description ? (
@@ -133,12 +179,13 @@ export function EntityHeroLayout({
               ) : null}
 
               {metaRow ? <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">{metaRow}</div> : null}
+              {heroContent ? <div className="mt-4">{heroContent}</div> : null}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="w-full px-4 py-6">
+      <div className={resolvedContentClassName}>
         {children}
       </div>
     </div>

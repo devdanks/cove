@@ -185,31 +185,32 @@ describe("GalleryDetailPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the shared layout with chapters and file info tabs", async () => {
+  it("renders the shared layout with images, scenes, and file info tabs", async () => {
     mockGalleries.get.mockResolvedValue(buildGallery());
-    mockGalleries.chapters.mockResolvedValue([{ id: 2, title: "Arrival", imageIndex: 1 }]);
     mockImages.find.mockResolvedValue({
       items: [{ id: 91, title: "Cover Frame" }],
       totalCount: 1,
     });
-    mockScenes.find.mockResolvedValue({ items: [], totalCount: 0 });
+    mockScenes.find.mockResolvedValue({ items: [{ id: 4, title: "Scene One" }], totalCount: 1 });
 
     renderPage();
 
     expect((await screen.findAllByRole("heading", { name: "Summer Set" })).length).toBeGreaterThan(0);
     expect(screen.getByText("Alex")).toBeInTheDocument();
+    expect(await screen.findByText("Cover Frame")).toBeInTheDocument();
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
-    fireEvent.click(within(tabs).getByRole("tab", { name: /chapters/i }));
-    expect(await screen.findByText("Arrival")).toBeInTheDocument();
+    expect(tabs).not.toHaveClass("mx-auto");
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: /scenes/i }));
+    expect(await screen.findByText("Scene One")).toBeInTheDocument();
 
     fireEvent.click(within(tabs).getByRole("tab", { name: /file info/i }));
     expect(await screen.findByText("C:/galleries/summer-set")).toBeInTheDocument();
   });
 
-  it("supports keyboard shortcuts for chapters, file info, and edit", async () => {
+  it("supports keyboard shortcuts for images, scenes, file info, and edit", async () => {
     mockGalleries.get.mockResolvedValue(buildGallery());
-    mockGalleries.chapters.mockResolvedValue([{ id: 2, title: "Arrival", imageIndex: 1 }]);
     mockImages.find.mockResolvedValue({
       items: [{ id: 91, title: "Cover Frame" }],
       totalCount: 1,
@@ -220,11 +221,14 @@ describe("GalleryDetailPage", () => {
 
     expect((await screen.findAllByRole("heading", { name: "Summer Set" })).length).toBeGreaterThan(0);
 
-    fireEvent.keyDown(window, { key: "c" });
-    expect(await screen.findByText("Arrival")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "s" });
+    expect(await screen.findByText("Scene One")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "f" });
     expect(await screen.findByText("C:/galleries/summer-set")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "a" });
+    expect(await screen.findByText("Cover Frame")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "e" });
     expect(await screen.findByText("Edit Gallery Modal")).toBeInTheDocument();

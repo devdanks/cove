@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { studios, entityImages } from "../api/client";
 import type { FindFilter, Studio, StudioCreate, StudioFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -167,7 +168,7 @@ export function StudiosPage({ onNavigate }: Props) {
       {displayMode === "tagger" ? (
         <StudioTagger studios={items} />
       ) : displayMode === "grid" ? (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 200px), 1fr))" }}>
+        <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {items.map((s) => (
             <StudioCard
               key={s.id}
@@ -179,7 +180,7 @@ export function StudiosPage({ onNavigate }: Props) {
               selecting={selecting}
             />
           ))}
-        </div>
+        </EntityCardGrid>
       ) : (
         <StudioListTable studios={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}

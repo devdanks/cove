@@ -126,6 +126,7 @@ describe("SegmentDetailPage", () => {
     expect(await screen.findByRole("heading", { name: "Episode Intro" })).toBeInTheDocument();
     expect(screen.getByTestId("media-detail-layout-media")).toBeInTheDocument();
     expect(screen.getByTestId("segment-video-player")).toBeInTheDocument();
+    expect(screen.queryByTestId("media-detail-layout-media-frame")).not.toBeInTheDocument();
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
 

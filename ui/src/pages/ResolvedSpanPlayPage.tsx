@@ -275,13 +275,13 @@ function ResolvedSpanPlayerCard({
     : "Playback follows the resolved span intervals and automatically skips the gaps between them.";
 
   const playerMedia = (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-black">
+    <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black">
       {currentSceneLoading ? (
-        <div className="flex h-full w-full items-center justify-center text-sm text-secondary">
+        <div className="flex flex-1 items-center justify-center bg-black text-sm text-secondary">
           Loading resolved span playback...
         </div>
       ) : currentFile ? (
-        <div className="flex h-full w-full">
+        <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden bg-black">
           <VideoPlayer
             streamUrl={scenes.streamUrl(detail.sceneId)}
             posterUrl={scenes.screenshotUrl(detail.sceneId)}
@@ -305,7 +305,7 @@ function ResolvedSpanPlayerCard({
           />
         </div>
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-sm text-secondary">
+        <div className="flex flex-1 items-center justify-center bg-black text-sm text-secondary">
           No playable scene file is available for this resolved span.
         </div>
       )}
@@ -327,8 +327,9 @@ function ResolvedSpanPlayerCard({
       backLabel={backLabel}
       onGoBack={onGoBack}
       media={playerMedia}
-      mediaAspectRatio="video"
-      mediaSticky
+      mediaAspectRatio="auto"
+      mediaFullBleed
+      mediaSticky={false}
     >
       <MediaDetailLayout.Content>
         <div className="space-y-4">

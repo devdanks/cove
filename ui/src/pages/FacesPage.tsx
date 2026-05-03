@@ -8,6 +8,7 @@ import { ListPage, type DisplayMode } from "../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { formatDate } from "../components/shared";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -183,7 +184,7 @@ export function FacesPage({ onNavigate }: Props) {
         )}
       >
         {displayMode === "grid" ? (
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(18rem,1fr))]">
+          <EntityCardGrid minCardWidth="18rem" gapClassName="gap-4">
             {items.map((face) => (
               <FaceCard
                 key={face.id}
@@ -197,7 +198,7 @@ export function FacesPage({ onNavigate }: Props) {
                 selecting={selecting}
               />
             ))}
-          </div>
+          </EntityCardGrid>
         ) : (
           <FaceListTable
             faces={items}

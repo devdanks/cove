@@ -110,6 +110,7 @@ describe("ResolvedSpanPlayPage", () => {
     renderPage();
 
     expect(await screen.findByText("Clip 5-10 @ 5")).toBeInTheDocument();
+    expect(screen.queryByTestId("media-detail-layout-media-frame")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Seek within the resolved span"), { target: { value: "7" } });
     expect(await screen.findByText("Clip 20-25 @ 22")).toBeInTheDocument();

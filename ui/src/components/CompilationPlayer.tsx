@@ -102,13 +102,13 @@ export function CompilationPlayer({
   }
 
   const playerMedia = (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-black">
+    <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black">
       {currentSceneLoading ? (
         <div className="flex flex-1 items-center justify-center text-sm text-secondary">
           Loading clip playback...
         </div>
       ) : currentFile ? (
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
+        <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden bg-black">
           <VideoPlayer
             streamUrl={scenes.streamUrl(item.sceneId)}
             posterUrl={item.posterPath ? scenes.screenshotUrl(item.sceneId) : undefined}
