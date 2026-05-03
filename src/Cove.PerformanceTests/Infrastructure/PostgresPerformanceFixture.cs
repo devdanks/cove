@@ -1,3 +1,4 @@
+using Cove.Data.Auth;
 using Cove.Core.Entities;
 using Cove.Data;
 using Microsoft.EntityFrameworkCore;
@@ -43,6 +44,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
         await using var context = CreateContext();
         await context.Database.MigrateAsync();
         await EnsureCompatibilityColumnsAsync(context);
+        await AuthorizationSqlBootstrap.EnsureAsync(context, CancellationToken.None);
         await SeedDataAsync(context);
         await context.Database.ExecuteSqlRawAsync("ANALYZE");
     }
