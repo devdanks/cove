@@ -15,6 +15,7 @@ COPY src/Cove.slnx ./
 COPY src/Cove.Api/Cove.Api.csproj Cove.Api/
 COPY src/Cove.Core/Cove.Core.csproj Cove.Core/
 COPY src/Cove.Data/Cove.Data.csproj Cove.Data/
+COPY src/Cove.PerformanceTests/Cove.PerformanceTests.csproj Cove.PerformanceTests/
 COPY src/Cove.Plugins/Cove.Plugins.csproj Cove.Plugins/
 COPY src/Cove.Sdk/Cove.Sdk.csproj Cove.Sdk/
 COPY src/Cove.Tests/Cove.Tests.csproj Cove.Tests/
