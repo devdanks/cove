@@ -1,11 +1,13 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, scenes, segmentDisplayProfiles, tags, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata } from "../api/client";
+import { faces, scenes, segmentDisplayProfiles, tags, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata, playback } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay } from "../components/shared";
 import { 
-  Pencil, Plus, Trash2, Search, Eye, Heart, ArrowLeft,
-  Check, ChevronLeft, ChevronRight, MoreVertical,
-  Gauge, Clapperboard, Monitor, FolderOpen, Layers,
+  Pencil, Plus, Trash2, Search, Eye, EyeOff, Heart, ArrowLeft,
+  Check, ChevronLeft, ChevronRight, MoreVertical, PanelLeftClose, PanelLeft,
+  Play, Pause, Volume2, VolumeX, Maximize, Minimize,
+  SkipBack, SkipForward, Gauge, Clapperboard, Monitor, FolderOpen, Layers,
   RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download,
+  PictureInPicture2, Repeat, Repeat1, Subtitles
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -23,11 +25,9 @@ import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionEntityActions } from "../components/ExtensionEntityActions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
+import { authStore } from "../auth/authStore";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission, hasAnyPermission } from "../auth/visibility";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
-import { VideoPlayer } from "../components/VideoPlayer";
-import { DetailSkeleton } from "../components/DetailSkeleton";
-import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 
 const SceneEditModal = lazy(() => import("./SceneEditModal").then((module) => ({ default: module.SceneEditModal })));
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
@@ -40,6 +40,26 @@ interface Props {
   id: number;
   initialSeekTo?: number;
   onNavigate: (r: any) => void;
+}
+
+function usePersistedFlag(key: string, defaultValue: boolean): [boolean, (next: boolean | ((prev: boolean) => boolean)) => void] {
+  const [value, setValue] = useState<boolean>(() => {
+    if (typeof window === "undefined") return defaultValue;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw === "true") return true;
+      if (raw === "false") return false;
+    } catch { /* ignore */ }
+    return defaultValue;
+  });
+  const set = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setValue((prev) => {
+      const resolved = typeof next === "function" ? (next as (p: boolean) => boolean)(prev) : next;
+      try { window.localStorage.setItem(key, resolved ? "true" : "false"); } catch { /* ignore */ }
+      return resolved;
+    });
+  }, [key]);
+  return [value, set];
 }
 
 type TabKey = "details" | "groups" | "galleries" | "segments" | "filters" | "file-info" | "edit" | "history" | string;
@@ -57,6 +77,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
   const [theaterMode, setTheaterMode] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showIdentify, setShowIdentify] = useState(false);
@@ -123,6 +144,37 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     return () => document.body.classList.remove("has-video-player");
   }, []);
 
+  // Theater mode: hide navbar and expand layout
+  useEffect(() => {
+    if (theaterMode) {
+      document.documentElement.classList.add("theater-mode");
+    } else {
+      document.documentElement.classList.remove("theater-mode");
+    }
+    return () => document.documentElement.classList.remove("theater-mode");
+  }, [theaterMode]);
+
+  // Keyboard shortcuts: "," for theater mode, a/e/s/i/h for tab navigation, o to toggle favorite
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      switch (e.key) {
+        case ",": setTheaterMode((prev) => !prev); break;
+        case "a": setActiveTab("details"); break;
+        case "e": if (canWriteScene) setActiveTab("edit"); break;
+        case "s": if (canReadMarkers) setActiveTab("segments"); break;
+        case "i": if (canReadFiles) setActiveTab("file-info"); break;
+        case "h": setActiveTab("history"); break;
+        case "o": if (scene && canEngageScene) setSceneFavorite(!sceneFavorite); break;
+        case "[": if (hasPrev && prevId != null) onNavigate({ page: "scene", id: prevId }); break;
+        case "]": if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); break;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [canEngageScene, canReadFiles, canReadMarkers, canWriteScene, hasNext, hasPrev, nextId, onNavigate, prevId, scene, sceneFavorite, setSceneFavorite]);
+
   // Close ops menu on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -161,14 +213,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       queryClient.invalidateQueries({ queryKey: ["scene", id] });
       queryClient.invalidateQueries({ queryKey: ["engagement", "scene", id] });
       queryClient.invalidateQueries({ queryKey: ["scene-history", id] });
-    },
-  });
-
-  const incrementOMut = useMutation({
-    mutationFn: () => scenes.incrementO(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", id] });
-      queryClient.invalidateQueries({ queryKey: ["engagement", "scene", id] });
     },
   });
 
@@ -241,6 +285,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     enabled: canReadMarkers,
   });
 
+  const faceTrackWindows = useMemo(() => buildFaceTrackWindowMap(segments), [segments]);
+
   const sceneFaceIds = useMemo(() => {
     const ids = new Set<number>();
     for (const detection of detections) {
@@ -307,22 +353,10 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     }
   }, [activeTab, tabs]);
 
-  const sceneKeyboardShortcuts = useMemo(() => [
-    { key: ",", description: "Toggle theater mode", handler: () => setTheaterMode(!theaterMode) },
-    { key: "a", description: "Open details tab", handler: () => setActiveTab("details") },
-    { key: "e", description: "Open edit tab", handler: () => canWriteScene && setActiveTab("edit") },
-    { key: "s", description: "Open segments tab", handler: () => canReadMarkers && setActiveTab("segments") },
-    { key: "i", description: "Open file info tab", handler: () => canReadFiles && setActiveTab("file-info") },
-    { key: "h", description: "Open history tab", handler: () => setActiveTab("history") },
-    { key: "o", description: "Toggle favorite", handler: () => scene && canEngageScene && setSceneFavorite(!sceneFavorite) },
-    { key: "[", description: "Open previous scene", handler: () => hasPrev && prevId != null && onNavigate({ page: "scene", id: prevId }) },
-    { key: "]", description: "Open next scene", handler: () => hasNext && nextId != null && onNavigate({ page: "scene", id: nextId }) },
-  ], [canEngageScene, canReadFiles, canReadMarkers, canWriteScene, hasNext, hasPrev, nextId, onNavigate, prevId, scene, sceneFavorite, theaterMode, setSceneFavorite]);
-
   if (isLoading) {
     return (
-      <div className="-mx-6 -mt-5 -mb-5 px-6 py-6">
-        <DetailSkeleton />
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" />
       </div>
     );
   }
@@ -334,228 +368,9 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
 
   const studioImageUrl = scene.studioId ? entityImages.studioImageUrl(scene.studioId) : null;
-  const sceneTitle = scene.title || file?.basename || `Scene ${scene.id}`;
-
-  const sceneHeaderImage = studioImageUrl && scene.studioId ? (
-    <button
-      type="button"
-      onClick={() => onNavigate({ page: "studio", id: scene.studioId })}
-      className="block"
-      title={scene.studioName || "Studio"}
-    >
-      <img
-        src={studioImageUrl}
-        alt={scene.studioName || "Studio"}
-        className="max-h-[5rem] max-w-full object-contain"
-        onError={(event) => { (event.target as HTMLImageElement).style.display = "none"; }}
-      />
-    </button>
-  ) : null;
-
-  const sceneSubtitle = (
-    <div className="flex flex-wrap items-start gap-4 text-sm text-secondary">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        {scene.date ? (
-          <span>
-            {new Date(`${scene.date}T00:00:00`).toLocaleDateString(undefined, {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </span>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          {scene.studioName && scene.studioId ? (
-            <button
-              type="button"
-              onClick={() => onNavigate({ page: "studio", id: scene.studioId })}
-              className="font-medium text-accent hover:underline"
-            >
-              {scene.studioName}
-            </button>
-          ) : null}
-          {file && file.frameRate > 0 ? <span>{file.frameRate.toFixed(0)} fps</span> : null}
-          {file && resLabel ? <span className="font-semibold text-accent">{resLabel}</span> : null}
-          {scene.code ? <span>Code {scene.code}</span> : null}
-          {scene.director ? (
-            <button
-              type="button"
-              onClick={() => onNavigate({ page: "scenes", query: scene.director })}
-              className="hover:text-foreground"
-            >
-              Director {scene.director}
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-
-  const sceneActions = (
-    <>
-      {canWriteScene ? (
-        <button
-          type="button"
-          onClick={() => { if (!updateMut.isPending) updateMut.mutate({ organized: !scene.organized }); }}
-          disabled={updateMut.isPending}
-          className={`inline-flex items-center justify-center rounded p-1 transition ${scene.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground"} ${updateMut.isPending ? "cursor-not-allowed opacity-60" : ""}`}
-          title={scene.organized ? "Organized" : "Mark organized"}
-        >
-          <Check className="h-4 w-4" />
-        </button>
-      ) : scene.organized ? (
-        <span className="inline-flex items-center justify-center rounded bg-green-600 p-1 text-white" title="Organized">
-          <Check className="h-4 w-4" />
-        </span>
-      ) : null}
-
-      {file ? (
-        <a
-          href={streamUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
-          title="Open in external player"
-        >
-          <ExternalLink className="h-4 w-4" />
-        </a>
-      ) : null}
-
-      <div className="relative" ref={opsMenuRef}>
-        <button
-          type="button"
-          onClick={() => setShowOpsMenu(!showOpsMenu)}
-          className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
-          title="Operations"
-        >
-          <MoreVertical className="h-4 w-4" />
-        </button>
-        {showOpsMenu && (
-          <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] rounded-2xl border border-border bg-card py-1 shadow-lg">
-            {canWriteScene ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
-            {!file && canDownloadScene ? (
-              <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Download className="h-3.5 w-3.5" /> Download Media…</button>
-            ) : null}
-            {file && canLibraryScan ? (
-              <button onClick={() => { rescanMut.mutate(); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button>
-            ) : null}
-            {canScrapeScene ? <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><ExternalLink className="h-3.5 w-3.5" /> Scrape…</button> : null}
-            {canIdentifyScene ? <button onClick={() => { setShowIdentify(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Identify…</button> : null}
-            {canGenerateScene || canWriteScene ? <div className="my-1 border-t border-border" /> : null}
-            <ExtensionEntityActions entityType="scene" entityId={scene.id} renderMode="menu" onInvoked={() => setShowOpsMenu(false)} />
-            {canGenerateScene ? <button onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Clapperboard className="h-3.5 w-3.5" /> Generate…</button> : null}
-            {canWriteScene ? <button onClick={() => { handleSetCoverFromCurrentFrame(); setShowOpsMenu(false); }} disabled={coverActionPending || !file} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Camera className="h-3.5 w-3.5" /> Set Cover from Current Frame</button> : null}
-            {canWriteScene ? <button onClick={() => { coverFileInputRef.current?.click(); setShowOpsMenu(false); }} disabled={coverActionPending} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Upload className="h-3.5 w-3.5" /> Upload Cover Image…</button> : null}
-            {canWriteScene ? <button onClick={() => { handleResetCoverToDefault(); setShowOpsMenu(false); }} disabled={coverActionPending} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Image className="h-3.5 w-3.5" /> Use Default Cover</button> : null}
-            {canWriteScene ? <div className="my-1 border-t border-border" /> : null}
-            {canWriteScene ? <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Merge className="h-3.5 w-3.5" /> Merge…</button> : null}
-            <button onClick={() => { setTheaterMode(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Monitor className="h-3.5 w-3.5" /> Theater Mode</button>
-            {canDeleteScene ? <div className="my-1 border-t border-border" /> : null}
-            {canDeleteScene ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
-          </div>
-        )}
-      </div>
-
-      <ExtensionSlot slot="scene-detail-actions" context={{ scene, onNavigate }} />
-    </>
-  );
-
-  const activeTabContent = activeTab === "details" ? (
-    <DetailsTab scene={scene} onNavigate={onNavigate} sceneFaces={sceneFaces} />
-  ) : activeTab === "groups" ? (
-    <GroupsTab scene={scene} onNavigate={onNavigate} />
-  ) : activeTab === "galleries" ? (
-    <GalleriesTab scene={scene} onNavigate={onNavigate} />
-  ) : activeTab === "segments" ? (
-    <div className="space-y-4">
-      <ResolvedSpansPanel
-        sceneId={scene.id}
-        spans={resolvedSpans}
-        loading={resolvedSpansLoading}
-        profiles={displayProfiles}
-        currentProfileId={activeProfileId}
-        onProfileChange={setSelectedProfileId}
-        onSeek={(time) => seekRef.current?.(time)}
-        onNavigate={onNavigate}
-      />
-      <SegmentsPanel
-        sceneId={scene.id}
-        segments={segments}
-        loading={segmentsLoading}
-        canEdit={canWriteMarkers}
-        onSeek={(time) => seekRef.current?.(time)}
-      />
-    </div>
-  ) : activeTab === "filters" ? (
-    <VideoFiltersTab filters={videoFilters} onChange={setVideoFilters} />
-  ) : activeTab === "file-info" && scene.files.length > 0 ? (
-    <FileInfoTab files={scene.files} />
-  ) : activeTab === "history" ? (
-    <HistoryTab
-      scene={scene}
-      playCount={scenePlayCount}
-      favorite={sceneFavorite}
-      favoritePending={sceneFavoritePending}
-      setFavorite={setSceneFavorite}
-      oCount={sceneOCount}
-      canEngageScene={canEngageScene}
-    />
-  ) : activeTab === "edit" ? (
-    <SceneEditPanel scene={scene} onSaved={() => setActiveTab("details")} />
-  ) : activeTab.startsWith("ext:") ? (() => {
-    const extTabKey = activeTab.replace("ext:", "");
-    const extTab = getTabsForPage("scene").find((tab) => tab.key === extTabKey);
-    if (!extTab) return null;
-    const Component = resolveExtComponent(extTab.componentName);
-    if (!Component) return <div className="p-4 text-muted">Extension component not found: {extTab.componentName}</div>;
-    return <Component entityId={id} />;
-  })() : null;
-
-  const sceneMedia = (
-    <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black">
-      <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden bg-black">
-        {file ? (
-          <VideoPlayer
-            streamUrl={streamUrl}
-            posterUrl={scenes.screenshotUrl(id, scene.updatedAt)}
-            format={file.format}
-            duration={file.duration}
-            resumeTime={effectiveResumeTime}
-            sceneId={id}
-            detections={detections}
-            captions={file.captions}
-            onSeekRegister={(fn) => { seekRef.current = fn; }}
-            onTimeUpdate={setVideoTime}
-            autostart={config?.ui.autostartVideo}
-            showAbLoop={config?.ui.showAbLoopControls}
-            trackActivity={trackPlaybackActivity}
-            onEnded={() => { if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
-            onPrev={hasPrev && prevId != null ? () => onNavigate({ page: "scene", id: prevId }) : undefined}
-            onNext={hasNext && nextId != null ? () => onNavigate({ page: "scene", id: nextId }) : undefined}
-            onPlay={canEngageScene ? () => incrementPlayMut.mutate() : () => {}}
-          />
-        ) : (
-          <div className="flex h-48 items-center justify-center text-muted">No video file available</div>
-        )}
-      </div>
-      {file ? (
-        <SceneScrubber
-          sceneId={scene.id}
-          duration={file.duration}
-          spans={resolvedSpans}
-          rawSegments={segments}
-          detections={detections}
-          onSeek={(time) => seekRef.current?.(time)}
-          currentTime={videoTime}
-          profileName={activeProfileName}
-        />
-      ) : null}
-    </div>
-  );
 
   return (
-    <div className="-mx-3 sm:-mx-4 md:-mx-6 -mt-5 -mb-5 overflow-x-hidden">
+    <div className="-mx-6 -mt-5 -mb-5 h-[calc(100vh-49px)] overflow-hidden flex flex-col min-h-0">
       <input
         ref={coverFileInputRef}
         type="file"
@@ -623,53 +438,307 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         onCancel={() => setConfirmDelete(false)}
         showDeleteFile
       />
-      <MediaDetailLayout
-        title={sceneTitle}
-        headerImage={sceneHeaderImage}
-        subtitle={sceneSubtitle}
-        backLabel={backLabel}
-        onGoBack={goBack}
-        media={sceneMedia}
-        mediaAspectRatio="auto"
-        mediaFullBleed
-        mediaSticky={false}
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={(key) => setActiveTab(key as TabKey)}
-        engagement={{
-          primaryContent: <InteractiveRating value={sceneRating ?? scene.rating} onChange={(value) => setSceneRating(value)} readOnly={!canEngageScene} />,
-          additionalMetrics: [
-            {
-              label: "Plays",
-              value: scenePlayCount,
-              icon: <Eye className="h-4 w-4" />,
-              title: "Record play",
-              onClick: canEngageScene ? () => incrementPlayMut.mutate() : undefined,
-            },
-            {
-              label: "Favorites",
-              value: sceneOCount,
-              icon: <Heart className={["h-4 w-4", sceneOCount > 0 ? "fill-red-400 text-red-400" : ""].join(" ")} />,
-              title: "Increment favorites count",
-              onClick: canEngageScene ? () => incrementOMut.mutate() : undefined,
-              active: sceneOCount > 0,
-            },
-          ],
-        }}
-        keyboardShortcuts={sceneKeyboardShortcuts}
-        theaterModeSupported
-        isTheaterMode={theaterMode}
-        onTheaterModeToggle={setTheaterMode}
-        actions={sceneActions}
-      >
-        <MediaDetailLayout.Content>
-          {activeTabContent}
-          {activeTab === "details" ? (
-            <AspectRatingsPanel hostType="scene" hostId={id} canRate={canEngageScene} />
-          ) : null}
-        </MediaDetailLayout.Content>
-        <ExtensionSlot slot="scene-detail-main-bottom" context={{ scene, onNavigate }} />
-      </MediaDetailLayout>
+      {/* Standard layout: left sidebar + right video */}
+      <div className={theaterMode ? "flex flex-col flex-1 min-h-0 overflow-hidden" : "flex flex-1 flex-col xl:flex-row min-h-0 overflow-hidden"}>
+        {/* Left sidebar: metadata, tabs, tab content */}
+        {!theaterMode && !sidebarCollapsed && (
+          <div
+            className="w-full xl:w-[400px] 2xl:w-[450px] xl:min-w-[350px] xl:max-w-[500px] xl:border-r border-b xl:border-b-0 border-border overflow-y-auto shrink-0 xl:max-h-[calc(100vh-48px)]"
+          >
+            <div className="px-6 pt-4 pb-2">
+              {/* Studio logo */}
+              {studioImageUrl && scene.studioId && (
+                <div className="mb-3 flex items-start gap-4">
+                  <button
+                    onClick={() => onNavigate({ page: "studio", id: scene.studioId })}
+                    className="flex-shrink-0"
+                  >
+                    <img
+                      src={studioImageUrl}
+                      alt={scene.studioName || "Studio"}
+                      className="max-h-[5rem] max-w-full object-contain"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  </button>
+                </div>
+              )}
+
+              {/* Queue navigation removed - will be replaced later */}
+
+              <button
+                onClick={goBack}
+                className="mb-3 flex items-center gap-1 text-sm text-secondary hover:text-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" /> {backLabel}
+              </button>
+
+              {/* Title — large like original's h3 */}
+              <h3 className="text-[1.5rem] font-semibold text-foreground leading-snug line-clamp-2 mt-1">
+                {scene.title || file?.basename || `Scene ${scene.id}`}
+              </h3>
+
+              {/* Subheader: date left, resolution+fps right */}
+              <div className="flex items-center justify-between mt-2 text-sm text-secondary">
+                <span>{scene.date ? new Date(scene.date + "T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : ""}</span>
+                <span className="flex items-center gap-1.5">
+                  {file && file.frameRate > 0 && <span>{file.frameRate.toFixed(0)} fps</span>}
+                  {file && resLabel && <span className="text-accent font-bold">{resLabel}</span>}
+                </span>
+              </div>
+
+              {/* Studio name text fallback (when no logo) */}
+              {scene.studioName && scene.studioId && !studioImageUrl && (
+                <button 
+                  onClick={() => onNavigate({ page: "studio", id: scene.studioId })}
+                  className="text-accent hover:underline text-sm mt-1 block"
+                >
+                  {scene.studioName}
+                </button>
+              )}
+
+              {/* Toolbar: rating left, counters + ops right — single row */}
+              <div className="flex items-center justify-between mt-3 gap-2">
+                <InteractiveRating value={sceneRating ?? scene.rating} onChange={(value) => setSceneRating(value)} readOnly={!canEngageScene} />
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1 text-sm text-secondary" title="Your play count">
+                    <Eye className="w-4 h-4" />
+                    <span>{scenePlayCount}</span>
+                  </span>
+                  {canEngageScene ? (
+                    <button 
+                      onClick={() => setSceneFavorite(!sceneFavorite)}
+                      disabled={sceneFavoritePending}
+                      className="flex items-center gap-1 text-sm text-secondary hover:text-accent"
+                      title={sceneFavorite ? "Remove from favorites" : "Add to favorites"}
+                    >
+                      <Heart className={`w-4 h-4 ${sceneFavorite ? "fill-accent text-accent" : ""}`} />
+                      <span>{sceneFavorite ? "Favorited" : "Favorite"}</span>
+                    </button>
+                  ) : (
+                    <span className="flex items-center gap-1 text-sm text-secondary">
+                      <Heart className={`w-4 h-4 ${sceneFavorite ? "fill-accent text-accent" : ""}`} />
+                      <span>{sceneFavorite ? "Favorited" : "Favorite"}</span>
+                    </span>
+                  )}
+                  {canWriteScene ? (
+                    <button 
+                      onClick={() => { if (!updateMut.isPending) updateMut.mutate({ organized: !scene.organized }); }}
+                      disabled={updateMut.isPending}
+                      className={`p-1 rounded ${scene.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground"} ${updateMut.isPending ? "opacity-60 cursor-not-allowed" : ""}`}
+                      title={scene.organized ? "Organized" : "Not organized"}
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                  ) : scene.organized ? (
+                    <span className="p-1 rounded bg-green-600 text-white" title="Organized">
+                      <Check className="w-4 h-4" />
+                    </span>
+                  ) : null}
+                  {file && (
+                    <a
+                      href={streamUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1 rounded text-secondary hover:text-foreground hover:bg-card"
+                      title="Open in external player"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  )}
+                  {/* Operations dropdown */}
+                  <div className="relative" ref={opsMenuRef}>
+                    <button
+                      onClick={() => setShowOpsMenu(!showOpsMenu)}
+                      className="p-1 rounded text-secondary hover:text-foreground hover:bg-card"
+                      title="Operations"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                    {showOpsMenu && (
+                      <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] bg-card border border-border rounded shadow-lg py-1">
+                        {canWriteScene ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Pencil className="w-3.5 h-3.5" /> Edit</button> : null}
+                        {!file && canDownloadScene ? (
+                          <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Download className="w-3.5 h-3.5" /> Download Media…</button>
+                        ) : null}
+                        {file && canLibraryScan ? (
+                          <button onClick={() => { rescanMut.mutate(); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5" /> Rescan</button>
+                        ) : null}
+                        {canScrapeScene ? <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Scrape…</button> : null}
+                        {canIdentifyScene ? <button onClick={() => { setShowIdentify(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Search className="w-3.5 h-3.5" /> Identify…</button> : null}
+                        {canGenerateScene || canWriteScene ? <div className="border-t border-border my-1" /> : null}
+                        <ExtensionEntityActions entityType="scene" entityId={scene.id} renderMode="menu" onInvoked={() => setShowOpsMenu(false)} />
+                        {canGenerateScene ? <button onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Clapperboard className="w-3.5 h-3.5" /> Generate…</button> : null}
+                        {canWriteScene ? <button onClick={() => { handleSetCoverFromCurrentFrame(); setShowOpsMenu(false); }} disabled={coverActionPending || !file} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Camera className="w-3.5 h-3.5" /> Set Cover from Current Frame</button> : null}
+                        {canWriteScene ? <button onClick={() => { coverFileInputRef.current?.click(); setShowOpsMenu(false); }} disabled={coverActionPending} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Upload className="w-3.5 h-3.5" /> Upload Cover Image…</button> : null}
+                        {canWriteScene ? <button onClick={() => { handleResetCoverToDefault(); setShowOpsMenu(false); }} disabled={coverActionPending} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60 flex items-center gap-2"><Image className="w-3.5 h-3.5" /> Use Default Cover</button> : null}
+                        {canWriteScene ? <div className="border-t border-border my-1" /> : null}
+                        {canWriteScene ? <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Merge className="w-3.5 h-3.5" /> Merge…</button> : null}
+                        <button onClick={() => { setTheaterMode(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Monitor className="w-3.5 h-3.5" /> Theater Mode</button>
+                        {canDeleteScene ? <div className="border-t border-border my-1" /> : null}
+                        {canDeleteScene ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button> : null}
+                      </div>
+                    )}
+                  </div>
+                  <ExtensionSlot slot="scene-detail-actions" context={{ scene, onNavigate }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Tab Navigation */}
+            <div className="px-6">
+              <div className="flex flex-wrap border-b border-border">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key)}
+                    className={`px-2.5 py-2 text-sm transition-colors border-b-2 cursor-pointer ${
+                      activeTab === tab.key 
+                        ? "border-accent text-accent" 
+                        : "border-transparent text-secondary hover:text-foreground"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tab Content */}
+            <div className="px-6 py-4">
+              {activeTab === "details" && (
+                <>
+                  <DetailsTab scene={scene} onNavigate={onNavigate} sceneFaces={sceneFaces} />
+                  <AspectRatingsPanel hostType="scene" hostId={id} canRate={canEngageScene} className="mt-4" />
+                </>
+              )}
+              {activeTab === "groups" && (
+                <GroupsTab scene={scene} onNavigate={onNavigate} />
+              )}
+              {activeTab === "galleries" && (
+                <GalleriesTab scene={scene} onNavigate={onNavigate} />
+              )}
+              {activeTab === "segments" && (
+                <div className="space-y-4">
+                  <ResolvedSpansPanel
+                    sceneId={scene.id}
+                    spans={resolvedSpans}
+                    loading={resolvedSpansLoading}
+                    profiles={displayProfiles}
+                    currentProfileId={activeProfileId}
+                    onProfileChange={setSelectedProfileId}
+                    onSeek={(t) => seekRef.current?.(t)}
+                    onNavigate={onNavigate}
+                  />
+                  <SegmentsPanel
+                    sceneId={scene.id}
+                    segments={segments}
+                    loading={segmentsLoading}
+                    canEdit={canWriteMarkers}
+                    onSeek={(t) => seekRef.current?.(t)}
+                  />
+                </div>
+              )}
+              {activeTab === "filters" && (
+                <VideoFiltersTab filters={videoFilters} onChange={setVideoFilters} />
+              )}
+              {activeTab === "file-info" && scene.files.length > 0 && (
+                <FileInfoTab files={scene.files} />
+              )}
+              {activeTab === "history" && (
+                <HistoryTab
+                  scene={scene}
+                  playCount={scenePlayCount}
+                  favorite={sceneFavorite}
+                  favoritePending={sceneFavoritePending}
+                  setFavorite={setSceneFavorite}
+                  oCount={sceneOCount}
+                  canEngageScene={canEngageScene}
+                />
+              )}
+              {activeTab === "edit" && (
+                <SceneEditPanel scene={scene} onSaved={() => setActiveTab("details")} />
+              )}
+              {/* Extension-contributed tab content */}
+              {activeTab.startsWith("ext:") && (() => {
+                const extTabKey = activeTab.replace("ext:", "");
+                const extTab = getTabsForPage("scene").find((t) => t.key === extTabKey);
+                if (!extTab) return null;
+                const Component = resolveExtComponent(extTab.componentName);
+                if (!Component) return <div className="p-4 text-muted">Extension component not found: {extTab.componentName}</div>;
+                return <Component entityId={id} />;
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* Sidebar collapse/expand divider */}
+        {!theaterMode && (
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="hidden xl:flex items-center justify-center bg-surface/50 hover:bg-surface border-r border-border transition-colors w-[15px] shrink-0"
+            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+          >
+            {sidebarCollapsed ? <ChevronRight className="w-4 h-4 text-muted" /> : <ChevronLeft className="w-4 h-4 text-muted" />}
+          </button>
+        )}
+
+        {/* Right side: video player + scrubber */}
+        <div className="min-w-0 flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="bg-black flex-1 flex flex-col min-h-0 max-h-[70vh] xl:max-h-none">
+            {file ? (
+              <VideoPlayer
+                streamUrl={streamUrl}
+                posterUrl={scenes.screenshotUrl(id, scene.updatedAt)}
+                format={file.format}
+                duration={file.duration}
+                resumeTime={effectiveResumeTime}
+                sceneId={id}
+                detections={detections}
+                captions={file.captions}
+                faceTrackWindows={faceTrackWindows}
+                onSeekRegister={(fn) => { seekRef.current = fn; }}
+                onTimeUpdate={setVideoTime}
+                autostart={config?.ui.autostartVideo}
+                showAbLoop={config?.ui.showAbLoopControls}
+                trackActivity={trackPlaybackActivity}
+                onEnded={() => { if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
+                onPrev={hasPrev && prevId != null ? () => onNavigate({ page: "scene", id: prevId }) : undefined}
+                onNext={hasNext && nextId != null ? () => onNavigate({ page: "scene", id: nextId }) : undefined}
+                onPlay={canEngageScene ? () => incrementPlayMut.mutate() : () => {}}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-48 text-muted">No video file available</div>
+            )}
+          </div>
+          {/* Scene scrubber */}
+          {file && (
+            <SceneScrubber
+              sceneId={scene.id}
+              duration={file.duration}
+              spans={resolvedSpans}
+              rawSegments={segments}
+              detections={detections}
+              onSeek={(t) => seekRef.current?.(t)}
+              currentTime={videoTime}
+              profileName={activeProfileName}
+            />
+          )}
+
+          {/* Theater mode: show metadata below video */}
+          {theaterMode && (
+            <div className="px-4 pt-3 max-w-5xl mx-auto">
+              <h1 className="text-xl font-bold text-foreground">{scene.title || file?.basename || `Scene ${scene.id}`}</h1>
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <InteractiveRating value={sceneRating ?? scene.rating} onChange={(value) => setSceneRating(value)} readOnly={!canEngageScene} />
+                <span className="flex items-center gap-1 text-sm text-secondary" title="Your play count"><Eye className="w-4 h-4" />{scenePlayCount}</span>
+                {canEngageScene ? <button onClick={() => setSceneFavorite(!sceneFavorite)} disabled={sceneFavoritePending} className="flex items-center gap-1 text-sm text-secondary hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"><Heart className={`w-4 h-4 ${sceneFavorite ? "fill-accent text-accent" : ""}`} />{sceneFavorite ? "Favorited" : "Favorite"}</button> : <span className="flex items-center gap-1 text-sm text-secondary"><Heart className={`w-4 h-4 ${sceneFavorite ? "fill-accent text-accent" : ""}`} />{sceneFavorite ? "Favorited" : "Favorite"}</span>}
+                <button onClick={() => setTheaterMode(false)} className="flex items-center gap-1 px-2 py-1 text-xs bg-accent text-white rounded"><Monitor className="w-3 h-3" /> Exit Theater</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      <ExtensionSlot slot="scene-detail-main-bottom" context={{ scene, onNavigate }} />
     </div>
   );
 }
@@ -748,7 +817,7 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       {sceneFaces.length > 0 && (
         <div>
           <h6 className="mb-2 text-sm text-muted">Faces in this scene</h6>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2 overflow-x-auto pb-1">
             {sceneFaces.map(({ face, detectionCount }) => {
               const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
               return (
@@ -756,7 +825,7 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
                   key={face.id}
                   type="button"
                   onClick={() => onNavigate({ page: "face", id: face.id })}
-                  className="flex min-w-[180px] flex-1 items-center gap-3 rounded-xl border border-border bg-card/70 px-3 py-2 text-left transition-colors hover:border-accent sm:flex-none sm:basis-[calc(50%-0.25rem)]"
+                  className="flex min-w-[180px] items-center gap-3 rounded-xl border border-border bg-card/70 px-3 py-2 text-left transition-colors hover:border-accent"
                 >
                   <div className="h-14 w-14 overflow-hidden rounded-lg bg-surface/80">
                     {face.coverImageUrl ? (
@@ -1055,9 +1124,9 @@ function HistoryTab({
   const timelineEvents = history?.events ?? [];
 
   return (
-    <div className="space-y-6 text-sm">
+    <div className="space-y-4 text-sm">
       {/* Play History */}
-      <section>
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">Play History</h3>
           <div className="flex gap-1">
@@ -1076,10 +1145,10 @@ function HistoryTab({
             ))}
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Favorite (boolean state) */}
-      <section>
+      {/* Favorites History */}
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">Favorite</h3>
           {canEngageScene ? (
@@ -1102,13 +1171,13 @@ function HistoryTab({
         <div className="mb-2">
           <span className="text-muted">Current state:</span> <span className="text-foreground">{favorite ? "Favorited" : "Not favorited"}</span>
         </div>
-      </section>
+      </div>
 
-      <section>
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">Favorites</h3>
+          <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">O Count</h3>
           <div className="flex items-center gap-1.5 rounded border border-border bg-card px-2.5 py-1 text-xs text-secondary">
-            <Heart className={`w-3.5 h-3.5 ${oCount > 0 ? "fill-red-400 text-red-400" : ""}`} />
+            <Heart className={`w-3.5 h-3.5 ${oCount > 0 ? "fill-accent text-accent" : ""}`} />
             <span>{oCount}</span>
           </div>
         </div>
@@ -1122,9 +1191,9 @@ function HistoryTab({
             ))}
           </div>
         )}
-      </section>
+      </div>
 
-      <section>
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Watched Sections</h3>
           <span className="text-xs text-secondary">{history?.allTimeWatchedIntervals?.length ?? 0} intervals</span>
@@ -1155,10 +1224,10 @@ function HistoryTab({
         ) : (
           <div className="border-t border-border pt-3 text-xs text-secondary">No watched intervals recorded yet.</div>
         )}
-      </section>
+      </div>
 
       {history?.sessions && history.sessions.length > 0 && (
-        <section>
+        <div className="rounded-xl border border-border bg-card p-4">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Playback Sessions</h3>
             <span className="text-xs text-secondary">{history.sessions.length} sessions</span>
@@ -1191,11 +1260,11 @@ function HistoryTab({
               </div>
             ))}
           </div>
-        </section>
+        </div>
       )}
 
       {timelineEvents.length > 0 && (
-        <section>
+        <div className="rounded-xl border border-border bg-card p-4">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Interaction Timeline</h3>
             <span className="text-xs text-secondary">{timelineEvents.length} events</span>
@@ -1212,7 +1281,7 @@ function HistoryTab({
               </div>
             ))}
           </div>
-        </section>
+        </div>
       )}
 
       {/* Timestamps */}
@@ -1272,6 +1341,1004 @@ function VideoFiltersTab({ filters, onChange }: { filters: VideoFilters; onChang
       ))}
     </div>
   );
+}
+
+/* ── Video Player with custom controls ── */
+const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const VOLUME_KEY = "cove-player-volume";
+const MUTED_KEY = "cove-player-muted";
+
+function createPlaybackSessionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+    const random = Math.random() * 16 | 0;
+    const value = character === "x" ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
+}
+
+function roundPlaybackTime(value: number) {
+  return Math.round(value * 1000) / 1000;
+}
+
+function buildKeepaliveHeaders() {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const shareToken = authStore.getShareToken();
+  const sharePassword = authStore.getSharePassword();
+  const accessToken = authStore.getAccessToken();
+
+  if (shareToken) {
+    headers.set("X-Share-Token", shareToken);
+    if (sharePassword) {
+      headers.set("X-Share-Password", sharePassword);
+    }
+  } else if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+  }
+
+  return headers;
+}
+
+async function postPlaybackIntervalsKeepalive(data: import("../api/types").PlaybackIntervalsRequest) {
+  await fetch("/api/playback/intervals", {
+    method: "POST",
+    keepalive: true,
+    headers: buildKeepaliveHeaders(),
+    body: JSON.stringify(data),
+  });
+}
+
+export function VideoPlayer({
+  streamUrl,
+  posterUrl,
+  format,
+  duration,
+  resumeTime,
+  sceneId,
+  detections = [],
+  captions,
+  onPlay,
+  onSeekRegister,
+  onTimeUpdate: onTimeUpdateProp,
+  autostart,
+  autostartToken,
+  showAbLoop,
+  trackActivity = true,
+  onEnded: onEndedProp,
+  clip,
+  onPrev,
+  onNext,
+  faceTrackWindows,
+}: {
+  streamUrl: string;
+  posterUrl?: string;
+  format: string;
+  duration: number;
+  resumeTime?: number;
+  sceneId: number;
+  detections?: Detection[];
+  captions?: { id: number; languageCode: string; captionType: string; filename: string }[];
+  onPlay: () => void;
+  onSeekRegister?: (fn: (time: number) => void) => void;
+  onTimeUpdate?: (time: number) => void;
+  autostart?: boolean;
+  autostartToken?: number;
+  showAbLoop?: boolean;
+  trackActivity?: boolean;
+  onEnded?: () => void;
+  clip?: { start: number; end?: number; loop?: boolean };
+  onPrev?: () => void;
+  onNext?: () => void;
+  faceTrackWindows?: Map<string, { startSec: number; endSec: number }>;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurTime] = useState(0);
+  const [buffered, setBuffered] = useState(0);
+  const [vol, setVol] = useState(() => {
+    const saved = localStorage.getItem(VOLUME_KEY);
+    return saved ? Number(saved) : 1;
+  });
+  const [muted, setMuted] = useState(() => localStorage.getItem(MUTED_KEY) === "true");
+  const [fullscreen, setFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const [showSpeed, setShowSpeed] = useState(false);
+  const [rate, setRate] = useState(1);
+  const [pip, setPip] = useState(false);
+  const [loop, setLoop] = useState(false);
+  const [abLoop, setAbLoop] = useState<{ a: number | null; b: number | null }>({ a: null, b: null });
+  const [showCaptions, setShowCaptions] = useState(false);
+  const [faceOverlayEnabled, setFaceOverlayEnabled] = usePersistedFlag("cove.player.faceOverlay", false);
+  const [showQuality, setShowQuality] = useState(false);
+  const [selectedQuality, setSelectedQuality] = useState<string>("Direct");
+  const [availableQualities, setAvailableQualities] = useState<string[]>([]);
+  const hideTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  const playTriggered = useRef(false);
+  const sourceRestoreRef = useRef<{ time: number; shouldPlay: boolean } | null>(null);
+  const lastLoadedSourceRef = useRef<string | null>(null);
+  const pendingAutostartRef = useRef(false);
+  const activitySessionId = useRef(createPlaybackSessionId());
+  const intervalStart = useRef<number | null>(null);
+  const lastSeenTime = useRef<number>(0);
+  const lastKeepaliveSentAt = useRef<number>(0);
+  const journalFlushed = useRef(false);
+  const lastHideInteractionAt = useRef(0);
+  const clipEndedHandled = useRef(false);
+  const [videoBox, setVideoBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const clipStart = clip?.start ?? 0;
+  const clipEnd = Math.max(clipStart, clip?.end ?? duration);
+  const timelineStart = clip ? clipStart : 0;
+  const timelineDuration = clip ? Math.max(clipEnd - clipStart, 0.001) : Math.max(duration, 0.001);
+  const visibleCurrentTime = clip ? Math.max(0, currentTime - clipStart) : currentTime;
+  const visibleBuffered = clip ? Math.max(0, Math.min(buffered, clipEnd) - clipStart) : buffered;
+
+  useEffect(() => {
+    activitySessionId.current = createPlaybackSessionId();
+    intervalStart.current = null;
+    lastSeenTime.current = 0;
+    lastKeepaliveSentAt.current = 0;
+    lastHideInteractionAt.current = 0;
+    playTriggered.current = false;
+    pendingAutostartRef.current = false;
+  }, [sceneId]);
+
+  useEffect(() => {
+    clipEndedHandled.current = false;
+  }, [clip?.end, clip?.loop, clip?.start, sceneId, streamUrl]);
+
+  // Restore volume
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.volume = vol;
+    v.muted = muted;
+  }, []);
+
+  // Register seek callback for external timeline components.
+  useEffect(() => {
+    if (onSeekRegister) {
+      onSeekRegister((time: number) => {
+        const v = videoRef.current;
+        if (v) {
+          v.currentTime = time;
+          v.play().catch(() => {});
+        }
+      });
+    }
+  }, [onSeekRegister]);
+
+  const updateVideoBox = useCallback(() => {
+    const video = videoRef.current;
+    const container = containerRef.current;
+    if (!video || !container) {
+      return;
+    }
+
+    const intrinsicWidth = video.videoWidth || video.clientWidth;
+    const intrinsicHeight = video.videoHeight || video.clientHeight;
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+
+    if (!intrinsicWidth || !intrinsicHeight || !containerWidth || !containerHeight) {
+      return;
+    }
+
+    const scale = Math.min(containerWidth / intrinsicWidth, containerHeight / intrinsicHeight);
+    const width = intrinsicWidth * scale;
+    const height = intrinsicHeight * scale;
+    const left = (containerWidth - width) / 2;
+    const top = (containerHeight - height) / 2;
+
+    setVideoBox((current) => {
+      if (
+        Math.abs(current.left - left) < 0.5
+        && Math.abs(current.top - top) < 0.5
+        && Math.abs(current.width - width) < 0.5
+        && Math.abs(current.height - height) < 0.5
+      ) {
+        return current;
+      }
+
+      return { left, top, width, height };
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const video = videoRef.current;
+    if (!container || !video) {
+      return;
+    }
+
+    updateVideoBox();
+    const resizeObserver = new ResizeObserver(() => updateVideoBox());
+    resizeObserver.observe(container);
+    resizeObserver.observe(video);
+    window.addEventListener("resize", updateVideoBox);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateVideoBox);
+    };
+  }, [sceneId, selectedQuality, streamUrl, updateVideoBox]);
+
+  const activeDetections = useMemo(() => {
+    if (!detections.length) {
+      return [];
+    }
+
+    const byKey = new Map<string, Detection[]>();
+
+    for (const detection of detections) {
+      const key = detection.groupKey
+        ?? `${detection.refKind ?? detection.class}:${detection.refId ?? detection.id}:${detection.class}`;
+
+      const groupDetections = byKey.get(key);
+      if (groupDetections) {
+        groupDetections.push(detection);
+      }
+      else {
+        byKey.set(key, [detection]);
+      }
+    }
+
+    return Array.from(byKey.values())
+      .filter((group) => faceOverlayEnabled || !group.some((d) => (d.refKind ?? d.class ?? "").toLowerCase() === "face"))
+      .map((groupDetections) => selectActiveDetectionAtTime(groupDetections, currentTime, faceTrackWindows ?? new Map()))
+      .filter((detection): detection is Detection => detection != null);
+  }, [currentTime, detections, faceTrackWindows, faceOverlayEnabled]);
+
+  const effectiveStreamUrl = selectedQuality === "Direct" ? streamUrl : scenes.transcodeUrl(sceneId, selectedQuality);
+
+  // Resume from saved position
+  useEffect(() => {
+    const v = videoRef.current;
+    const nextTime = clip ? clip.start : resumeTime;
+    if (v && nextTime != null) {
+      v.currentTime = nextTime;
+      setCurTime(roundPlaybackTime(nextTime));
+    }
+
+    if (clip?.loop && clip.end != null) {
+      setAbLoop({ a: clip.start, b: clip.end });
+    } else if (clip) {
+      setAbLoop({ a: null, b: null });
+    }
+  }, [clip?.end, clip?.loop, clip?.start, resumeTime, sceneId, streamUrl]);
+
+  // Autostart video
+  useEffect(() => {
+    if (!autostart) {
+      return;
+    }
+
+    pendingAutostartRef.current = true;
+    const video = videoRef.current;
+    const sourceSignature = `${effectiveStreamUrl}|${format || "mp4"}`;
+    if (!video || lastLoadedSourceRef.current !== sourceSignature) {
+      return;
+    }
+
+    video.play().catch(() => {});
+  }, [autostart, autostartToken, effectiveStreamUrl, format]);
+
+  // PiP change listener
+  useEffect(() => {
+    const handler = () => setPip(document.pictureInPictureElement === videoRef.current);
+    document.addEventListener("enterpictureinpicture", handler);
+    document.addEventListener("leavepictureinpicture", handler);
+    return () => {
+      document.removeEventListener("enterpictureinpicture", handler);
+      document.removeEventListener("leavepictureinpicture", handler);
+    };
+  }, []);
+
+  // AirPlay: sync seek position when playback target changes (e.g. Apple TV)
+  useEffect(() => {
+    const v = videoRef.current as (HTMLVideoElement & { webkitShowPlaybackTargetPicker?: () => void }) | null;
+    if (!v) return;
+    const onTargetChanged = () => {
+      // When switching to AirPlay target, re-apply current time after a brief delay
+      const savedTime = v.currentTime;
+      setTimeout(() => {
+        if (v.currentTime < savedTime - 1) v.currentTime = savedTime;
+      }, 500);
+    };
+    v.addEventListener("webkitcurrentplaybacktargetchanged" as any, onTargetChanged);
+    return () => v.removeEventListener("webkitcurrentplaybacktargetchanged" as any, onTargetChanged);
+  }, []);
+
+  // A-B loop enforcement
+  useEffect(() => {
+    if (abLoop.a == null || abLoop.b == null) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const handler = () => {
+      if (v.currentTime >= abLoop.b!) {
+        v.currentTime = abLoop.a!;
+      }
+    };
+    v.addEventListener("timeupdate", handler);
+    return () => v.removeEventListener("timeupdate", handler);
+  }, [abLoop]);
+
+  useEffect(() => {
+    if (journalFlushed.current) {
+      return;
+    }
+
+    journalFlushed.current = true;
+    // Clear any stale localStorage journal entries from the old system
+    window.localStorage.removeItem("cove-scene-activity-journal");
+  }, []);
+
+  const flushInterval = useCallback((state: string) => {
+    const video = videoRef.current;
+    if (!trackActivity || !video || intervalStart.current === null) return;
+    const startSec = intervalStart.current;
+    const endSec = roundPlaybackTime(lastSeenTime.current);
+    if (endSec <= startSec) return;
+    const data: import("../api/types").PlaybackIntervalsRequest = {
+      hostType: "scene",
+      hostId: sceneId,
+      sessionId: activitySessionId.current,
+      mediaDurationSec: video.duration || 0,
+      currentPositionSec: endSec,
+      state,
+      intervals: [{ startSec, endSec }],
+    };
+    void playback.recordIntervals(data).catch(() => {});
+  }, [sceneId, trackActivity]);
+
+  const flushIntervalKeepalive = useCallback((state: string) => {
+    const video = videoRef.current;
+    if (!trackActivity || !video || intervalStart.current === null) return;
+    const startSec = intervalStart.current;
+    const endSec = roundPlaybackTime(lastSeenTime.current);
+    if (endSec <= startSec) return;
+    const data: import("../api/types").PlaybackIntervalsRequest = {
+      hostType: "scene",
+      hostId: sceneId,
+      sessionId: activitySessionId.current,
+      mediaDurationSec: video.duration || 0,
+      currentPositionSec: endSec,
+      state,
+      intervals: [{ startSec, endSec }],
+    };
+    void postPlaybackIntervalsKeepalive(data).catch(() => {});
+  }, [sceneId, trackActivity]);
+
+  useEffect(() => {
+    if (!clip) {
+      return;
+    }
+
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    const handleClipBoundary = () => {
+      if (video.currentTime < clipStart) {
+        video.currentTime = clipStart;
+        setCurTime(roundPlaybackTime(clipStart));
+        return;
+      }
+
+      if (video.currentTime < clipEnd - 0.05) {
+        clipEndedHandled.current = false;
+        return;
+      }
+
+      if (clip.loop) {
+        video.currentTime = clipStart;
+        setCurTime(roundPlaybackTime(clipStart));
+        lastSeenTime.current = roundPlaybackTime(clipStart);
+        if (intervalStart.current !== null) {
+          flushInterval("active");
+          intervalStart.current = clipStart;
+        }
+        return;
+      }
+
+      if (clipEndedHandled.current) {
+        return;
+      }
+
+      clipEndedHandled.current = true;
+      video.pause();
+      video.currentTime = clipEnd;
+      lastSeenTime.current = roundPlaybackTime(clipEnd);
+      setCurTime(roundPlaybackTime(clipEnd));
+      flushInterval("ended");
+      intervalStart.current = null;
+      setPlaying(false);
+      onEndedProp?.();
+    };
+
+    video.addEventListener("timeupdate", handleClipBoundary);
+    return () => {
+      video.removeEventListener("timeupdate", handleClipBoundary);
+    };
+  }, [clip, clipEnd, clipStart, flushInterval, onEndedProp]);
+
+  // Flush interval when the page is backgrounded or the player unmounts.
+  useEffect(() => {
+    if (!trackActivity) {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushIntervalKeepalive("paused");
+      }
+    };
+    const handlePageHide = () => flushIntervalKeepalive("paused");
+
+    window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      flushIntervalKeepalive("paused");
+    };
+  }, [flushIntervalKeepalive, trackActivity]);
+
+  // Fullscreen change listener
+  useEffect(() => {
+    const handler = () => setFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  // Auto-hide controls
+  const resetHideTimer = useCallback(() => {
+    setShowControls(true);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => {
+      if (videoRef.current && !videoRef.current.paused) setShowControls(false);
+    }, 3000);
+  }, []);
+
+  // Toggle text tracks when showCaptions state changes
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    for (let i = 0; i < v.textTracks.length; i++) {
+      v.textTracks[i].mode = showCaptions ? "showing" : "hidden";
+    }
+  }, [showCaptions]);
+
+  // Fetch available resolutions for quality selector
+  useEffect(() => {
+    scenes.getResolutions(sceneId).then((res) => setAvailableQualities(res ?? [])).catch(() => {});
+  }, [sceneId]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const v = videoRef.current;
+      if (!v) return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      switch (e.key) {
+        case " ":
+        case "k":
+          e.preventDefault();
+          v.paused ? v.play() : v.pause();
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          v.currentTime = Math.max(0, v.currentTime - (e.shiftKey ? 10 : 5));
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          v.currentTime = Math.min(v.duration, v.currentTime + (e.shiftKey ? 10 : 5));
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          v.volume = Math.min(1, v.volume + 0.1);
+          setVol(v.volume);
+          localStorage.setItem(VOLUME_KEY, String(v.volume));
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          v.volume = Math.max(0, v.volume - 0.1);
+          setVol(v.volume);
+          localStorage.setItem(VOLUME_KEY, String(v.volume));
+          break;
+        case "m":
+          v.muted = !v.muted;
+          setMuted(v.muted);
+          localStorage.setItem(MUTED_KEY, String(v.muted));
+          break;
+        case "f":
+          if (document.fullscreenElement) document.exitFullscreen();
+          else containerRef.current?.requestFullscreen();
+          break;
+        case "0": case "1": case "2": case "3": case "4":
+        case "5": case "6": case "7": case "8": case "9":
+          e.preventDefault();
+          v.currentTime = v.duration * (Number(e.key) / 10);
+          break;
+      }
+      resetHideTimer();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [resetHideTimer]);
+
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.paused ? v.play() : v.pause();
+  };
+
+  const seekTo = (e: React.MouseEvent<HTMLDivElement>) => {
+    const v = videoRef.current;
+    if (!v) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    v.currentTime = timelineStart + pct * timelineDuration;
+  };
+
+  const changeVolume = (e: React.MouseEvent<HTMLDivElement>) => {
+    const v = videoRef.current;
+    if (!v) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    v.volume = pct;
+    v.muted = false;
+    setVol(pct);
+    setMuted(false);
+    localStorage.setItem(VOLUME_KEY, String(pct));
+    localStorage.setItem(MUTED_KEY, "false");
+  };
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else containerRef.current?.requestFullscreen();
+  };
+
+  const changeRate = (r: number) => {
+    const v = videoRef.current;
+    if (v) v.playbackRate = r;
+    setRate(r);
+    setShowSpeed(false);
+  };
+
+  const changeQuality = (q: string) => {
+    const v = videoRef.current;
+    const curTime = v?.currentTime ?? 0;
+    const wasPlaying = v ? !v.paused : false;
+    sourceRestoreRef.current = { time: curTime, shouldPlay: wasPlaying };
+    setSelectedQuality(q);
+    setShowQuality(false);
+  };
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    const sourceSignature = `${effectiveStreamUrl}|${format || "mp4"}`;
+    if (lastLoadedSourceRef.current === sourceSignature) {
+      return;
+    }
+    lastLoadedSourceRef.current = sourceSignature;
+
+    const pendingRestore = sourceRestoreRef.current;
+    sourceRestoreRef.current = null;
+    const shouldAutoplayAfterLoad = pendingRestore?.shouldPlay || pendingAutostartRef.current;
+
+    const handleLoadedMetadata = () => {
+      const targetTime = pendingRestore?.time ?? (clip ? clip.start : resumeTime);
+      if (targetTime != null && Number.isFinite(targetTime)) {
+        video.currentTime = targetTime;
+        setCurTime(roundPlaybackTime(targetTime));
+      }
+
+      if (shouldAutoplayAfterLoad) {
+        pendingAutostartRef.current = false;
+        video.play().catch(() => {});
+      }
+    };
+
+    video.addEventListener("loadedmetadata", handleLoadedMetadata, { once: true });
+    video.load();
+    return () => {
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+    };
+  }, [clip, effectiveStreamUrl, format, resumeTime]);
+
+  const togglePip = async () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await v.requestPictureInPicture();
+      }
+    } catch { /* PiP not supported or denied */ }
+  };
+
+  const cycleAbLoop = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (abLoop.a == null) {
+      setAbLoop({ a: v.currentTime, b: null });
+    } else if (abLoop.b == null) {
+      setAbLoop({ a: abLoop.a, b: v.currentTime });
+    } else {
+      setAbLoop({ a: null, b: null });
+    }
+  };
+
+  const fmtTime = (s: number) => {
+    if (!isFinite(s)) return "0:00";
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}` : `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative group w-full h-full flex items-center justify-center bg-black"
+      onMouseMove={resetHideTimer}
+      onMouseLeave={() => playing && setShowControls(false)}
+    >
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain cursor-pointer"
+        preload="metadata"
+        poster={posterUrl}
+        {...{ "x-webkit-airplay": "allow" } as any}
+        onLoadedMetadata={updateVideoBox}
+        onLoadedData={updateVideoBox}
+        onClick={togglePlay}
+        onDoubleClick={toggleFullscreen}
+        onPlay={() => {
+          setPlaying(true);
+          pendingAutostartRef.current = false;
+          const currentPos = roundPlaybackTime(videoRef.current?.currentTime ?? currentTime);
+          intervalStart.current = currentPos;
+          lastSeenTime.current = currentPos;
+          if (!playTriggered.current) { playTriggered.current = true; onPlay(); }
+        }}
+        onPause={() => {
+          setPlaying(false);
+          flushInterval("paused");
+          intervalStart.current = null;
+        }}
+        onSeeking={() => {
+          if (intervalStart.current !== null) {
+            flushInterval("active");
+            intervalStart.current = null;
+          }
+        }}
+        onSeeked={() => {
+          const video = videoRef.current;
+          if (video && !video.paused) {
+            const time = roundPlaybackTime(video.currentTime);
+            intervalStart.current = time;
+            lastSeenTime.current = time;
+          }
+        }}
+        onTimeUpdate={() => {
+          const v = videoRef.current;
+          const time = roundPlaybackTime(v?.currentTime ?? 0);
+          setCurTime(time);
+          onTimeUpdateProp?.(time);
+          lastSeenTime.current = time;
+          if (trackActivity && intervalStart.current !== null) {
+            const now = Date.now();
+            if (now - lastKeepaliveSentAt.current >= 10000) {
+              lastKeepaliveSentAt.current = now;
+              flushInterval("active");
+              intervalStart.current = time;
+            }
+          }
+        }}
+        onProgress={() => {
+          const v = videoRef.current;
+          if (v && v.buffered.length > 0) setBuffered(v.buffered.end(v.buffered.length - 1));
+        }}
+        onEnded={() => {
+          if (loop) {
+            flushInterval("active");
+            intervalStart.current = null;
+            const v = videoRef.current;
+            if (v) { v.currentTime = 0; v.play().catch(() => {}); }
+            return;
+          }
+          setPlaying(false);
+          flushInterval("ended");
+          intervalStart.current = null;
+          onEndedProp?.();
+        }}
+      >
+        <source src={effectiveStreamUrl} type={`video/${format || "mp4"}`} />
+        {captions?.map((cap, idx) => (
+          <track
+            key={cap.id}
+            kind="captions"
+            src={scenes.captionUrl(sceneId, cap.id)}
+            srcLang={cap.languageCode === "00" ? "en" : cap.languageCode}
+            label={cap.languageCode === "00" ? cap.filename : cap.languageCode.toUpperCase()}
+            default={idx === 0 && showCaptions}
+          />
+        ))}
+      </video>
+
+      {activeDetections.length > 0 && videoBox.width > 0 && videoBox.height > 0 ? (
+        <div className="pointer-events-none absolute inset-0 z-[2]">
+          {activeDetections.map((detection) => {
+            const left = videoBox.left + (detection.x / Math.max(detection.frameWidth, 1)) * videoBox.width;
+            const top = videoBox.top + (detection.y / Math.max(detection.frameHeight, 1)) * videoBox.height;
+            const width = (detection.w / Math.max(detection.frameWidth, 1)) * videoBox.width;
+            const height = (detection.h / Math.max(detection.frameHeight, 1)) * videoBox.height;
+            const color = detectionColor(detection.class);
+
+            return (
+              <div
+                key={detection.id}
+                className="absolute rounded-md border shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
+                style={{
+                  left,
+                  top,
+                  width,
+                  height,
+                  borderColor: color,
+                  boxShadow: `0 0 0 1px ${color}55 inset`,
+                  background: `${color}14`,
+                }}
+              >
+                <span
+                  className="absolute left-0 top-0 -translate-y-full rounded-sm px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white"
+                  style={{ backgroundColor: color }}
+                >
+                  {formatDetectionBadge(detection)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {/* Custom Controls Overlay */}
+      <div
+        className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent transition-opacity ${
+          showControls ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+        style={{ padding: "40px 0 0 0" }}
+      >
+        {/* Seek bar */}
+        <div className="px-3">
+          <div className="relative h-4 flex items-center cursor-pointer group/seek" onClick={seekTo}>
+            <div className="w-full h-1 bg-white/20 rounded-full group-hover/seek:h-1.5 transition-all relative">
+              {/* Buffered */}
+              <div className="absolute top-0 left-0 h-full bg-white/30 rounded-full" style={{ width: `${(visibleBuffered / timelineDuration) * 100}%` }} />
+              {/* Progress */}
+              <div className="absolute top-0 left-0 h-full bg-accent rounded-full" style={{ width: `${(visibleCurrentTime / timelineDuration) * 100}%` }} />
+              {/* A-B loop range indicator */}
+              {abLoop.a != null && (
+                <div
+                  className="absolute top-0 h-full bg-accent/25 pointer-events-none"
+                  style={{
+                    left: `${((abLoop.a - timelineStart) / timelineDuration) * 100}%`,
+                    width: abLoop.b != null ? `${((abLoop.b - abLoop.a) / timelineDuration) * 100}%` : "2px",
+                  }}
+                />
+              )}
+            </div>
+            {/* Seek thumb */}
+            <div
+              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-accent rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity"
+              style={{ left: `${(visibleCurrentTime / timelineDuration) * 100}%`, transform: "translate(-50%, -50%)" }}
+            />
+          </div>
+        </div>
+
+        {/* Controls row */}
+        <div className="flex items-center gap-2 px-3 py-2 text-white">
+          {/* Previous scene */}
+          {onPrev && (
+            <button onClick={onPrev} className="hover:text-accent p-1" title="Previous scene">
+              <SkipBack className="w-4 h-4 fill-current" />
+            </button>
+          )}
+
+          <button onClick={togglePlay} className="hover:text-accent p-1">
+            {playing ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+          </button>
+
+          {/* Next scene */}
+          {onNext && (
+            <button onClick={onNext} className="hover:text-accent p-1" title="Next scene">
+              <SkipForward className="w-4 h-4 fill-current" />
+            </button>
+          )}
+
+          <button onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10); }} className="hover:text-accent p-1" title="Back 10s">
+            <SkipBack className="w-4 h-4" />
+          </button>
+          <button onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration, v.currentTime + 10); }} className="hover:text-accent p-1" title="Forward 10s">
+            <SkipForward className="w-4 h-4" />
+          </button>
+
+          {/* Volume */}
+          <button onClick={() => {
+            const v = videoRef.current;
+            if (!v) return;
+            v.muted = !v.muted;
+            setMuted(v.muted);
+            localStorage.setItem(MUTED_KEY, String(v.muted));
+          }} className="hover:text-accent p-1">
+            {muted || vol === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+          <div className="w-20 h-3 flex items-center cursor-pointer group/vol" onClick={changeVolume}>
+            <div className="w-full h-1 bg-white/20 rounded-full relative">
+              <div className="absolute top-0 left-0 h-full bg-white rounded-full" style={{ width: `${(muted ? 0 : vol) * 100}%` }} />
+            </div>
+          </div>
+
+          <span className="text-xs text-white/70 ml-1 select-none tabular-nums">
+            {fmtTime(visibleCurrentTime)} / {fmtTime(clip ? clipEnd - clipStart : duration)}
+          </span>
+
+          <div className="ml-auto flex items-center gap-2">
+            {/* Playback speed */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSpeed(!showSpeed)}
+                className={`hover:text-accent p-1 text-xs font-medium flex items-center gap-1 ${rate !== 1 ? "text-accent" : ""}`}
+              >
+                {rate}x
+              </button>
+              {showSpeed && (
+                <div className="absolute bottom-full right-0 mb-2 bg-surface border border-border rounded shadow-lg py-1 z-10">
+                  {PLAYBACK_RATES.map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => changeRate(r)}
+                      className={`block w-full text-left px-4 py-1 text-sm hover:bg-card ${r === rate ? "text-accent" : "text-white"}`}
+                    >
+                      {r}x
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* A-B Loop */}
+            {showAbLoop && (
+              <button
+                onClick={cycleAbLoop}
+                className={`hover:text-accent p-1 text-xs font-medium flex items-center gap-1 ${abLoop.a != null ? "text-accent" : ""}`}
+                title={abLoop.a == null ? "Set loop start (A)" : abLoop.b == null ? "Set loop end (B)" : "Clear A-B loop"}
+              >
+                <Repeat className="w-4 h-4" />
+                {abLoop.a != null && abLoop.b == null && "A"}
+                {abLoop.a != null && abLoop.b != null && "A-B"}
+              </button>
+            )}
+
+            {/* Quality selector */}
+            {availableQualities.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowQuality(!showQuality)}
+                  className={`hover:text-accent p-1 text-xs font-medium ${selectedQuality !== "Direct" ? "text-accent" : ""}`}
+                  title="Video quality"
+                >
+                  {selectedQuality === "Direct" ? "Direct" : selectedQuality}
+                </button>
+                {showQuality && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-surface border border-border rounded shadow-lg py-1 z-10">
+                    <button
+                      onClick={() => changeQuality("Direct")}
+                      className={`block w-full text-left px-4 py-1 text-sm hover:bg-card ${selectedQuality === "Direct" ? "text-accent" : "text-white"}`}
+                    >
+                      Direct
+                    </button>
+                    {availableQualities.map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => changeQuality(q)}
+                        className={`block w-full text-left px-4 py-1 text-sm hover:bg-card ${q === selectedQuality ? "text-accent" : "text-white"}`}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Loop entire video */}
+            <button
+              onClick={() => setLoop(!loop)}
+              className={`hover:text-accent p-1 ${loop ? "text-accent" : ""}`}
+              title={loop ? "Disable loop" : "Loop video"}
+            >
+              <Repeat1 className="w-4 h-4" />
+            </button>
+
+            {/* Picture-in-Picture */}
+            <button onClick={togglePip} className={`hover:text-accent p-1 ${pip ? "text-accent" : ""}`} title="Picture-in-Picture">
+              <PictureInPicture2 className="w-4 h-4" />
+            </button>
+
+            {/* Captions toggle */}
+            {captions && captions.length > 0 && (
+              <button
+                onClick={() => setShowCaptions((prev) => !prev)}
+                className={`hover:text-accent p-1 ${showCaptions ? "text-accent" : ""}`}
+                title={showCaptions ? "Hide captions" : "Show captions"}
+              >
+                <Subtitles className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* Face overlay toggle (default off) */}
+            <button
+              onClick={() => setFaceOverlayEnabled((prev) => !prev)}
+              className={`hover:text-accent p-1 ${faceOverlayEnabled ? "text-accent" : ""}`}
+              title={faceOverlayEnabled ? "Hide face boxes on video" : "Show face boxes on video"}
+            >
+              {faceOverlayEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+            </button>
+
+            <button onClick={toggleFullscreen} className="hover:text-accent p-1">
+              {fullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Big play button overlay when paused */}
+      {!playing && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-black/40 rounded-full p-4">
+            <Play className="w-12 h-12 text-white" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function detectionColor(className: string) {
+  const normalized = className.trim().toLowerCase();
+  if (normalized === "face") return "#22c55e";
+  if (normalized === "person" || normalized === "body") return "#38bdf8";
+  if (normalized === "hand") return "#f59e0b";
+  if (normalized === "text") return "#a855f7";
+
+  let hash = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = ((hash << 5) - hash) + normalized.charCodeAt(index);
+    hash |= 0;
+  }
+
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue} 80% 55%)`;
+}
+
+function formatDetectionBadge(detection: Detection) {
+  const confidence = Math.round(detection.score * 100);
+  const refText = detection.refKind && detection.refId != null
+    ? ` · ${detection.refKind} #${detection.refId}`
+    : "";
+  return `${detection.class} ${confidence}%${refText}`;
 }
 
 // Scene Scrubber / Timeline Component
@@ -1608,6 +2675,98 @@ function buildTimelineLanes<T extends { key: string; startSec: number; endSec: n
   });
 
   return lanes;
+}
+
+function buildFaceTrackWindowMap(segments: Pick<Segment, "kind" | "payload" | "startSec" | "endSec">[]) {
+  const windows = new Map<string, { startSec: number; endSec: number }>();
+
+  for (const segment of segments) {
+    if (segment.kind?.trim().toLowerCase() !== "face") {
+      continue;
+    }
+
+    const trackKey = readPayloadString(segment.payload, "trackKey");
+    if (!trackKey) {
+      continue;
+    }
+
+    const startSec = segment.startSec;
+    const endSec = Math.max(segment.endSec ?? segment.startSec, startSec);
+    const existing = windows.get(trackKey);
+    if (!existing) {
+      windows.set(trackKey, { startSec, endSec });
+      continue;
+    }
+
+    existing.startSec = Math.min(existing.startSec, startSec);
+    existing.endSec = Math.max(existing.endSec, endSec);
+  }
+
+  return windows;
+}
+
+function selectActiveDetectionAtTime(
+  detections: Detection[],
+  currentTime: number,
+  faceTrackWindows: Map<string, { startSec: number; endSec: number }>,
+) {
+  if (!detections.length) {
+    return null;
+  }
+
+  const ordered = [...detections].sort((left, right) => (left.observedAtSec ?? Number.NEGATIVE_INFINITY) - (right.observedAtSec ?? Number.NEGATIVE_INFINITY) || left.id - right.id);
+  const trackKey = ordered[0].groupKey;
+  const isFaceTrack = !!trackKey && ordered.some((detection) => detection.refKind?.trim().toLowerCase() === "face");
+  if (isFaceTrack) {
+    const trackWindow = faceTrackWindows.get(trackKey);
+    if (trackWindow) {
+      for (let index = 0; index < ordered.length; index += 1) {
+        const detection = ordered[index];
+        const startSec = index === 0
+          ? Math.min(trackWindow.startSec, detection.observedAtSec ?? trackWindow.startSec)
+          : detection.observedAtSec ?? trackWindow.startSec;
+        const nextObservedAt = ordered[index + 1]?.observedAtSec;
+        const endSec = Math.max(nextObservedAt ?? trackWindow.endSec, startSec);
+        const isLast = index === ordered.length - 1;
+        if (currentTime < startSec) {
+          continue;
+        }
+
+        if ((isLast && currentTime <= endSec) || (!isLast && currentTime < endSec)) {
+          return detection;
+        }
+      }
+
+      return null;
+    }
+  }
+
+  const toleranceSec = 0.5;
+  let nearestDetection: Detection | null = null;
+  let nearestDelta = Number.POSITIVE_INFINITY;
+  for (const detection of ordered) {
+    const observedAt = detection.observedAtSec;
+    const delta = Math.abs((observedAt ?? currentTime) - currentTime);
+    if (observedAt != null && delta > toleranceSec) {
+      continue;
+    }
+
+    if (delta < nearestDelta) {
+      nearestDelta = delta;
+      nearestDetection = detection;
+    }
+  }
+
+  return nearestDetection;
+}
+
+function readPayloadString(payload: unknown, key: string) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function isFaceTimelineSegment(segment: Pick<Segment, "title" | "kind" | "sourceKey">) {

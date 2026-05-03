@@ -3,6 +3,7 @@ using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
+using Cove.Data.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -556,6 +557,14 @@ public class FacesController(
 
     private async Task<Dictionary<int, FaceTopSuggestionDto>> BuildTopSuggestionsAsync(IReadOnlyCollection<Face> faces, CancellationToken cancellationToken)
     {
+        // Short-circuit when no real suggesters are registered (only the empty stub).
+        // This avoids per-face DB hits for blocked-decision lookups on the list endpoint.
+        var activeSuggesters = (faceSuggesters ?? []).Where(s => s is not EmptyFaceSuggester).ToArray();
+        if (activeSuggesters.Length == 0)
+        {
+            return [];
+        }
+
         var eligibleFaceIds = faces
             .Where(face => !face.PerformerId.HasValue)
             .Select(face => face.Id)
@@ -567,20 +576,16 @@ public class FacesController(
 
         var blockedByFaceId = await LoadBlockedSuggestionIdsAsync(eligibleFaceIds, cancellationToken);
 
-        // Run per-face ranked-suggestion lookups concurrently. Each per-face call
-        // already fans out across IFaceSuggester implementations, so this turns
-        // the previous sequential O(faces*suggesters) latency into a single batch.
-        var tasks = eligibleFaceIds.Select(async faceId =>
+        // Run per-face ranked-suggestion lookups sequentially: each suggester reuses the
+        // shared scoped DbContext, so concurrent EF queries would trigger
+        // NpgsqlOperationInProgressException. Within a face, the suggester fan-out is
+        // still concurrent inside BuildRankedSuggestionsAsync.
+        var topSuggestions = new Dictionary<int, FaceTopSuggestionDto>(eligibleFaceIds.Length);
+        foreach (var faceId in eligibleFaceIds)
         {
             blockedByFaceId.TryGetValue(faceId, out var blockedIds);
             var suggestions = await BuildRankedSuggestionsAsync(faceId, blockedIds, TopSuggestionCandidateCount, cancellationToken);
-            return (faceId, top: suggestions.FirstOrDefault());
-        });
-        var results = await Task.WhenAll(tasks);
-
-        var topSuggestions = new Dictionary<int, FaceTopSuggestionDto>(eligibleFaceIds.Length);
-        foreach (var (faceId, top) in results)
-        {
+            var top = suggestions.FirstOrDefault();
             if (top is not null)
             {
                 topSuggestions[faceId] = MapTopSuggestion(top);
@@ -680,34 +685,47 @@ public class FacesController(
         var distinctFaceIds = faceIds.Distinct().ToArray();
         var faceIdLongs = distinctFaceIds.Select(static id => (long)id).ToArray();
 
-        var detectionRows = await db.Detections
+        // Aggregate at the database tier so we don't materialize every detection row
+        // for every face on the page (a face can have tens of thousands of detections).
+        var detectionAggregates = await db.Detections
             .AsNoTracking()
             .Where(detection =>
                 detection.RefId.HasValue &&
                 faceIdLongs.Contains(detection.RefId.Value) &&
                 detection.RefKind != null &&
                 detection.RefKind.ToLower() == "face")
-            .Select(detection => new
+            .GroupBy(detection => new
             {
                 FaceId = (int)detection.RefId!.Value,
                 detection.HostType,
                 detection.HostId,
             })
+            .Select(group => new
+            {
+                group.Key.FaceId,
+                group.Key.HostType,
+                group.Key.HostId,
+                Count = group.Count(),
+            })
             .ToListAsync(cancellationToken);
 
-        var detectionCounts = detectionRows
+        var detectionCounts = detectionAggregates
             .GroupBy(row => row.FaceId)
             .ToDictionary(
                 group => group.Key,
                 group =>
                 {
                     var rows = group.ToList();
+                    var totalDetections = rows.Sum(row => row.Count);
+                    var sceneCount = rows.Where(row => row.HostType == DetectionHostType.Scene).Select(row => row.HostId).Distinct().Count();
+                    var imageCount = rows.Where(row => row.HostType == DetectionHostType.Image).Select(row => row.HostId).Distinct().Count();
+                    var hostCount = rows.Select(row => (row.HostType, row.HostId)).Distinct().Count();
                     return new FaceComputedCounts(
-                        rows.Count,
-                        rows.Where(row => row.HostType == DetectionHostType.Scene).Select(row => row.HostId).Distinct().Count(),
-                        rows.Where(row => row.HostType == DetectionHostType.Image).Select(row => row.HostId).Distinct().Count(),
-                        rows.Select(row => (row.HostType, row.HostId)).Distinct().Count(),
-                        rows.Count);
+                        totalDetections,
+                        sceneCount,
+                        imageCount,
+                        hostCount,
+                        totalDetections);
                 });
 
         var storedCounts = await db.FaceAppearances

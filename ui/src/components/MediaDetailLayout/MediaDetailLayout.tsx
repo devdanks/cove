@@ -290,7 +290,7 @@ function MediaDetailLayoutRoot({
         className={
           theaterMode || !media
             ? "flex flex-col"
-            : "flex flex-col lg:flex-row lg:h-[calc(100vh-49px)] lg:overflow-hidden"
+            : "flex flex-col h-[calc(100vh-49px)] overflow-hidden lg:flex-row"
         }
       >
         {!theaterMode ? sidebar : null}

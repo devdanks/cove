@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Pgvector;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Cove.Tests;
 
@@ -26,7 +27,12 @@ public class AiCoreControllerTests
         await context.SaveChangesAsync();
 
         var embeddingService = new EmbeddingService(context, []);
-        var controller = new FacesController(context, embeddingService);
+        var controller = new FacesController(
+            context,
+            embeddingService,
+            new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            Array.Empty<IFaceLifecycleParticipant>(),
+            NullLogger<FacesController>.Instance);
 
         var firstCreate = await controller.Create(new FaceCreateDto("Lead", null, false, "ext:ai.faces"), CancellationToken.None);
         var firstCreated = Assert.IsType<CreatedAtActionResult>(firstCreate.Result);
@@ -142,7 +148,12 @@ public class AiCoreControllerTests
         await context.SaveChangesAsync();
 
         var embeddingService = new EmbeddingService(context, []);
-        var controller = new FacesController(context, embeddingService);
+        var controller = new FacesController(
+            context,
+            embeddingService,
+            new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            Array.Empty<IFaceLifecycleParticipant>(),
+            NullLogger<FacesController>.Instance);
 
         var result = await controller.GetDetections(face.Id, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -168,7 +179,12 @@ public class AiCoreControllerTests
         await context.SaveChangesAsync();
 
         var embeddingService = new EmbeddingService(context, []);
-        var controller = new FacesController(context, embeddingService);
+        var controller = new FacesController(
+            context,
+            embeddingService,
+            new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            Array.Empty<IFaceLifecycleParticipant>(),
+            NullLogger<FacesController>.Instance);
 
         var result = await controller.GetById(face.Id, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -235,7 +251,12 @@ public class AiCoreControllerTests
         await context.SaveChangesAsync();
 
         var embeddingService = new EmbeddingService(context, []);
-        var controller = new FacesController(context, embeddingService, new StubBlobService([]), [], NullLogger<FacesController>.Instance);
+        var controller = new FacesController(
+            context,
+            embeddingService,
+            new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            Array.Empty<IFaceLifecycleParticipant>(),
+            NullLogger<FacesController>.Instance);
 
         var result = await controller.GetSuggestions(face.Id, 5, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
