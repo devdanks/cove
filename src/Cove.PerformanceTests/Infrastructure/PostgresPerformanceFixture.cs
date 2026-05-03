@@ -30,13 +30,6 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
         try
         {
             await CreateDatabaseAsync(_settings, _databaseName);
-            _databaseConnectionString = _settings.BuildDatabaseConnectionString(_databaseName);
-
-            await using var context = CreateContext();
-            await context.Database.MigrateAsync();
-            await EnsureCompatibilityColumnsAsync(context);
-            await SeedDataAsync(context);
-            await context.Database.ExecuteSqlRawAsync("ANALYZE");
         }
         catch (Exception ex)
         {
@@ -44,6 +37,14 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 "Performance tests require a reachable PostgreSQL instance. Set COVE_PERF_PG_HOST, COVE_PERF_PG_PORT, COVE_PERF_PG_USER, COVE_PERF_PG_PASSWORD, and COVE_PERF_PG_ADMIN_DB as needed.",
                 ex);
         }
+
+        _databaseConnectionString = _settings.BuildDatabaseConnectionString(_databaseName);
+
+        await using var context = CreateContext();
+        await context.Database.MigrateAsync();
+        await EnsureCompatibilityColumnsAsync(context);
+        await SeedDataAsync(context);
+        await context.Database.ExecuteSqlRawAsync("ANALYZE");
     }
 
     public async Task DisposeAsync()
@@ -503,6 +504,9 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
         await AddColumnIfMissing("scenes", "ImageBlobId", "text");
         await AddColumnIfMissing("galleries", "ImageBlobId", "text");
         await AddColumnIfMissing("galleries", "CoverImageId", "integer");
+        await AddColumnIfMissing("tags", "ShowAsSegment", "boolean");
+        await AddColumnIfMissing("tags", "SegmentColorOverride", "text");
+        await AddColumnIfMissing("tags", "SegmentLaneOverride", "integer");
 
         await connection.CloseAsync();
     }
