@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, groups, images, markers, metadata, performers, scenes, studios, tags, entityImages } from "../api/client";
-import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerTagMatch, Performer, Scene, SceneMarkerWall, Studio, TagDetail as TagDetailModel } from "../api/types";
+import { galleries, groups, images, metadata, performers, scenes, studios, tags, entityImages } from "../api/client";
+import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerTagMatch, Performer, Scene, Studio, TagDetail as TagDetailModel, TagSegmentWall } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, Bookmark, Building2, ChevronDown, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
+import { Building2, ChevronDown, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { TagEditModal } from "./TagEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -15,13 +15,17 @@ import { DetailListToolbar } from "../components/DetailListToolbar";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
+import { EntityDetailTabs } from "../components/EntityDetailTabs";
+import { EntityCardGrid } from "../components/EntityCardGrid";
+import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { createRouteLinkProps } from "../components/cardNavigation";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useAuth } from "../auth/AuthContext";
-import { canDeleteEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
+import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 
 const PERFORMER_SORT = PERFORMER_SORT_OPTIONS;
 const IMAGE_SORT = [
@@ -50,11 +54,11 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "performers" | "images" | "galleries" | "markers" | "studios" | "groups" | (string & {});
+type TabKey = "scenes" | "performers" | "images" | "galleries" | "segments" | "studios" | "groups" | (string & {});
 
 export function TagDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: tag, isLoading } = useQuery({
     queryKey: ["tag", id],
@@ -69,7 +73,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     { key: "performers", label: "Performers", count: tag?.performerCount },
     { key: "images", label: "Images", count: tag?.imageCount },
     { key: "galleries", label: "Galleries", count: tag?.galleryCount },
-    { key: "markers", label: "Markers", count: tag?.markerCount },
+    { key: "segments", label: "Segments", count: tag?.segmentCount },
     { key: "studios", label: "Studios", count: tag?.studioCount },
     { key: "groups", label: "Groups", count: tag?.groupCount },
   ], id);
@@ -82,6 +86,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "tags" }, onNavigate);
   const canWriteTag = canWriteEntity("tag", hasPermission);
+  const canEngageTag = canReadEntity("tag", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeleteTag = canDeleteEntity("tag", hasPermission);
   const canAutoTagTag = hasPermission("library.autotag") && canWriteTag;
   const visibleTagTabs = filterItemsByPermission(tagTabs, {
@@ -89,10 +94,14 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     performers: "performers.read",
     images: "images.read",
     galleries: "galleries.read",
-    markers: "markers.read",
+    segments: "scenes.read",
     studios: "studios.read",
     groups: "groups.read",
   }, hasPermission);
+
+  const { favorite: tagFavorite, setFavorite: setTagFavorite } = useEntityEngagement("tag", id, {
+    fallbackFavorite: tag?.favorite,
+  });
 
   useEffect(() => {
     if (tag) document.title = `${tag.name} | Cove`;
@@ -106,12 +115,12 @@ export function TagDetailPage({ id, onNavigate }: Props) {
       if (el === "INPUT" || el === "TEXTAREA" || el === "SELECT") return;
       switch (e.key) {
         case "e": if (canWriteTag) setEditing((v) => !v); break;
-        case "f": if (tag && canWriteTag) updateMut.mutate({ favorite: !tag.favorite }); break;
+        case "f": if (tag && canEngageTag) setTagFavorite(!tagFavorite); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canWriteTag, tag]);
+  }, [canEngageTag, canWriteTag, tag, tagFavorite, setTagFavorite]);
 
   useEffect(() => {
     if (visibleTagTabs.length > 0 && !visibleTagTabs.some((tab) => tab.key === activeTab)) {
@@ -125,11 +134,6 @@ export function TagDetailPage({ id, onNavigate }: Props) {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
       goBack();
     },
-  });
-
-  const updateMut = useMutation({
-    mutationFn: (data: { favorite?: boolean }) => tags.update(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tag", id] }),
   });
 
   const autoTagMut = useMutation({
@@ -154,122 +158,122 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const tagImageUrl = tag.imagePath || entityImages.tagImageUrl(tag.id, tag.updatedAt);
 
   return (
-    <div className="min-h-screen">
-      <div className="relative overflow-hidden border-b border-border detail-hero-gradient">
-        <div className="mx-auto max-w-7xl px-4 py-8">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <button
-              onClick={goBack}
-              className="flex items-center gap-1 text-sm text-secondary hover:text-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" /> {backLabel}
-            </button>
-            <div className="flex items-center gap-2">
-              <ExtensionSlot slot="tag-detail-actions" context={{ tag, onNavigate }} />
-              {canWriteTag ? <button
-                onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
-              >
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </button> : null}
-              {canAutoTagTag ? <button
-                onClick={() => autoTagMut.mutate()}
-                className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground"
-                disabled={tag.ignoreAutoTag || autoTagMut.isPending}
-              >
-                {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
-              </button> : null}
-              {canWriteTag ? <button
-                onClick={() => setMergeOpen(true)}
-                className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground"
-              >
-                <GitMerge className="h-3.5 w-3.5" /> Merge...
-              </button> : null}
-              {canDeleteTag ? <button
-                onClick={() => setConfirmDelete(true)}
-                className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:border-red-500 hover:text-red-300"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Delete
-              </button> : null}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-6 md:flex-row md:items-end">
-            <div className="flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/35 md:h-36 md:w-36">
-              <img
-                src={tagImageUrl}
-                alt={tag.name}
-                className="h-full w-full object-contain p-3"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                  const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
-                  if (fallback) fallback.style.display = "flex";
-                }}
-              />
-              <div className="hidden h-full w-full items-center justify-center bg-card">
-                <TagIcon className="h-14 w-14 text-accent" />
-              </div>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="mb-2 flex items-start gap-4">
-                <div className="min-w-0 flex-1">
-                  <h1 className="truncate text-2xl sm:text-3xl md:text-4xl font-bold text-foreground">{tag.name}</h1>
-                  {tag.sortName && tag.sortName !== tag.name && (
-                    <p className="mt-1 text-sm text-muted">Sort name: {tag.sortName}</p>
-                  )}
-                  {tag.aliases.length > 0 && (
-                    <p className="mt-1 text-sm text-secondary">Also known as: {tag.aliases.join(", ")}</p>
-                  )}
+    <>
+      <EntityHeroLayout
+        backLabel={backLabel}
+        onGoBack={goBack}
+        imageUrl={tagImageUrl}
+        imageAlt={tag.name}
+        imageClassName="h-full w-full object-contain p-3"
+        imageFallback={<TagIcon className="h-14 w-14 text-accent" />}
+        title={tag.name}
+        sortName={tag.sortName && tag.sortName !== tag.name ? tag.sortName : undefined}
+        aliases={tag.aliases.length > 0 ? tag.aliases.join(", ") : undefined}
+        description={tag.description}
+        favorite={tagFavorite}
+        onFavoriteToggle={canEngageTag ? () => setTagFavorite(!tagFavorite) : undefined}
+        counts={[
+          { key: "scenes", label: "Scenes", value: tag.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "performers", label: "Performers", value: tag.performerCount, icon: <UserRound className="h-4 w-4" /> },
+          { key: "images", label: "Images", value: tag.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
+          { key: "galleries", label: "Galleries", value: tag.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
+          { key: "segments", label: "Segments", value: tag.segmentCount, icon: <Layers className="h-4 w-4" /> },
+          { key: "studios", label: "Studios", value: tag.studioCount, icon: <Building2 className="h-4 w-4" /> },
+          { key: "groups", label: "Groups", value: tag.groupCount, icon: <Layers className="h-4 w-4" /> },
+          ...extensionCounts.map((ec) => ({
+            key: ec.key,
+            label: ec.label,
+            value: ec.count,
+            icon: ec.icon === "music" ? <Music className="h-4 w-4" /> : undefined,
+          })),
+        ]}
+        metaRow={(
+          <>
+            {tag.ignoreAutoTag ? <span className="rounded bg-yellow-500/15 px-1.5 py-0.5 text-yellow-400">Ignores Auto-Tag</span> : null}
+            <span title={`Created ${formatDate(tag.createdAt)}`}>Updated {formatDate(tag.updatedAt)}</span>
+          </>
+        )}
+        heroContent={(
+          <>
+            {autoTagMut.isSuccess ? <p className="text-sm text-emerald-300">Auto-tag job queued.</p> : null}
+            <div className="mt-4 rounded-xl border border-border bg-card/70 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold uppercase tracking-wide text-muted">Player bar</div>
+                  <div className="mt-2 text-sm text-foreground">{formatPlayerBarSummary(tag)}</div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-secondary">
+                    {tag.showAsSegment === true ? <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-emerald-300">Always visible</span> : null}
+                    {tag.showAsSegment === false ? <span className="rounded-full bg-red-500/15 px-2 py-1 text-red-300">Never visible</span> : null}
+                    {tag.showAsSegment == null ? <span className="rounded-full bg-surface px-2 py-1 text-secondary">Uses display profiles</span> : null}
+                    {tag.segmentColorOverride ? (
+                      <span className="inline-flex items-center gap-2 rounded-full bg-surface px-2 py-1 text-secondary">
+                        <span className="h-2.5 w-2.5 rounded-full border border-white/20" style={{ backgroundColor: tag.segmentColorOverride }} />
+                        {tag.segmentColorOverride}
+                      </span>
+                    ) : null}
+                    {tag.segmentLaneOverride != null ? <span className="rounded-full bg-surface px-2 py-1 text-secondary">Lane {tag.segmentLaneOverride}</span> : null}
+                  </div>
                 </div>
                 {canWriteTag ? (
-                  <button
-                    onClick={() => updateMut.mutate({ favorite: !tag.favorite })}
-                    className={`rounded-full p-2 transition-colors ${
-                      tag.favorite
-                        ? "bg-red-500/15 text-red-500"
-                        : "bg-card text-muted hover:text-red-400"
-                    }`}
-                    title={tag.favorite ? "Remove from favorites" : "Add to favorites"}
-                  >
-                    <Heart className={`h-6 w-6 ${tag.favorite ? "fill-current" : ""}`} />
-                  </button>
-                ) : tag.favorite ? (
-                  <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite tag">
-                    <Heart className="h-6 w-6 fill-current" />
-                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => onNavigate({ page: "settings" })} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent">
+                      <Layers className="h-4 w-4" />
+                      Open display profiles
+                    </button>
+                    <button type="button" onClick={() => setEditing(true)} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent">
+                      <Pencil className="h-4 w-4" />
+                      Edit player bar
+                    </button>
+                  </div>
                 ) : null}
               </div>
-
-              {tag.description && (
-                <p className="max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{tag.description}</p>
-              )}
-
-              {autoTagMut.isSuccess && (
-                <p className="mt-3 text-sm text-emerald-300">Auto-tag job queued.</p>
-              )}
-
-              <div className="mt-4 flex flex-wrap gap-3">
-                <CountCard label="Scenes" value={tag.sceneCount} icon={<Film className="h-4 w-4" />} />
-                <CountCard label="Performers" value={tag.performerCount} icon={<UserRound className="h-4 w-4" />} />
-                <CountCard label="Images" value={tag.imageCount} icon={<ImageIcon className="h-4 w-4" />} />
-                <CountCard label="Galleries" value={tag.galleryCount} icon={<FolderOpen className="h-4 w-4" />} />
-                <CountCard label="Markers" value={tag.markerCount} icon={<Bookmark className="h-4 w-4" />} />
-                <CountCard label="Studios" value={tag.studioCount} icon={<Building2 className="h-4 w-4" />} />
-                <CountCard label="Groups" value={tag.groupCount} icon={<Layers className="h-4 w-4" />} />
-                {extensionCounts.map((ec) => (
-                  <CountCard key={ec.key} label={ec.label} value={ec.count} icon={ec.icon === "music" ? <Music className="h-4 w-4" /> : undefined} />
-                ))}
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
-                {tag.ignoreAutoTag && <span className="rounded bg-yellow-500/15 px-1.5 py-0.5 text-yellow-400">Ignores Auto-Tag</span>}
-                <span title={`Created ${formatDate(tag.createdAt)}`}>Updated {formatDate(tag.updatedAt)}</span>
-              </div>
-              <CustomFieldsDisplay customFields={tag.customFields} />
-              <TagMetadataServerPanel tag={tag} metadataServers={metadataServers} onNavigate={onNavigate} />
             </div>
-          </div>
+            <CustomFieldsDisplay customFields={tag.customFields} />
+            <TagMetadataServerPanel tag={tag} metadataServers={metadataServers} onNavigate={onNavigate} />
+          </>
+        )}
+        actions={(
+          <>
+            <ExtensionSlot slot="tag-detail-actions" context={{ tag, onNavigate }} />
+            {canWriteTag ? <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
+            {canAutoTagTag ? <button onClick={() => autoTagMut.mutate()} className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground" disabled={tag.ignoreAutoTag || autoTagMut.isPending}>{autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag</button> : null}
+            {canWriteTag ? <button onClick={() => setMergeOpen(true)} className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground"><GitMerge className="h-3.5 w-3.5" /> Merge...</button> : null}
+            {canDeleteTag ? <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:border-red-500 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
+          </>
+        )}
+      >
+        <ExtensionSlot slot="tag-detail-sidebar-bottom" context={{ tag, onNavigate }} />
+
+        <TagHierarchyLinks tag={tag} onNavigate={onNavigate} className="mx-auto mb-4 max-w-7xl" />
+        <EntityDetailTabs tabs={visibleTagTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl" />
+
+        <div className="py-6">
+          {activeTab === "scenes" && (
+            <TagScenesPanel tagId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "performers" && (
+            <TagPerformersPanel tagId={id} filter={performerFilter} setFilter={setPerformerFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "images" && (
+            <TagImagesPanel tagId={id} filter={imageFilter} setFilter={setImageFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "galleries" && (
+            <TagGalleriesPanel tagId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "segments" && (
+            <TagSegmentsPanel tagId={id} onNavigate={onNavigate} />
+          )}
+          {activeTab === "studios" && (
+            <TagStudiosPanel tagId={id} filter={studioFilter} setFilter={setStudioFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "groups" && (
+            <TagGroupsPanel tagId={id} filter={groupFilter} setFilter={setGroupFilter} onNavigate={onNavigate} />
+          )}
+          {renderExtensionTab(activeTab, id, onNavigate)}
         </div>
-      </div>
+
+        <ExtensionSlot slot="tag-detail-bottom" context={{ tag, onNavigate }} />
+      </EntityHeroLayout>
 
       <TagEditModal tag={tag} open={editing} onClose={() => setEditing(false)} />
       <ConfirmDialog
@@ -296,87 +300,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         invalidateQueryKeys={[["tag", id], ["tags"]]}
       />
 
-      <div className="px-4 py-6">
-            {(tag.parents.length > 0 || tag.children.length > 0) && (
-              <div className="rounded-xl border border-border bg-card p-4 mb-6">
-                {tag.parents.length > 0 && (
-                  <div className="mb-4">
-                    <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">Parent Tags</h2>
-                    <div className="flex flex-wrap gap-1.5">
-                      {tag.parents.map((parent) => (
-                        <span key={parent.id} className="inline-flex items-center gap-1 rounded bg-surface px-1.5 py-1">
-                          <span className="text-xs text-muted">↖</span>
-                          <TagBadge name={parent.name} onClick={() => onNavigate({ page: "tag", id: parent.id })} />
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {tag.children.length > 0 && (
-                  <div>
-                    <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">Sub Tags</h2>
-                    <div className="flex flex-wrap gap-1.5">
-                      {tag.children.map((child) => (
-                        <span key={child.id} className="inline-flex items-center gap-1 rounded bg-surface px-1.5 py-1">
-                          <span className="text-xs text-muted">↳</span>
-                          <TagBadge name={child.name} onClick={() => onNavigate({ page: "tag", id: child.id })} />
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <ExtensionSlot slot="tag-detail-sidebar-bottom" context={{ tag, onNavigate }} />
-
-        <div className="mx-auto max-w-7xl border-b border-border">
-          <div className="flex gap-1 overflow-x-auto">
-            {visibleTagTabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key as TabKey)}
-                className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-                  activeTab === tab.key
-                    ? "border-accent text-foreground"
-                    : "border-transparent text-secondary hover:border-muted hover:text-foreground"
-                }`}
-              >
-                {tab.label}
-                <span className="ml-2 rounded-full bg-card px-2 py-0.5 text-xs text-muted">{tab.count}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="py-6">
-          {activeTab === "scenes" && (
-            <TagScenesPanel tagId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "performers" && (
-            <TagPerformersPanel tagId={id} filter={performerFilter} setFilter={setPerformerFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "images" && (
-            <TagImagesPanel tagId={id} filter={imageFilter} setFilter={setImageFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "galleries" && (
-            <TagGalleriesPanel tagId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "markers" && (
-            <TagMarkersPanel tagId={id} onNavigate={onNavigate} />
-          )}
-          {activeTab === "studios" && (
-            <TagStudiosPanel tagId={id} filter={studioFilter} setFilter={setStudioFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "groups" && (
-            <TagGroupsPanel tagId={id} filter={groupFilter} setFilter={setGroupFilter} onNavigate={onNavigate} />
-          )}
-          {renderExtensionTab(activeTab, id, onNavigate)}
-        </div>
-
-        <ExtensionSlot slot="tag-detail-bottom" context={{ tag, onNavigate }} />
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -536,15 +460,56 @@ function TagMetadataServerPanel({ tag, metadataServers, onNavigate }: { tag: Tag
   );
 }
 
-function CountCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
+function formatPlayerBarSummary(tag: TagDetailModel) {
+  if (tag.showAsSegment === true) {
+    return "This tag is forced visible on the player bar for all display profiles.";
+  }
+
+  if (tag.showAsSegment === false) {
+    return "This tag is suppressed on the player bar for all display profiles.";
+  }
+
+  return "This tag inherits its player-bar behavior from the active display profile rules.";
+}
+
+function TagHierarchyLinks({
+  tag,
+  onNavigate,
+  className = "",
+}: {
+  tag: TagDetailModel;
+  onNavigate: (r: any) => void;
+  className?: string;
+}) {
+  if (tag.parents.length === 0 && tag.children.length === 0) {
+    return null;
+  }
+
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
-      <span className="text-accent">{icon}</span>
-      <div>
-        <div className="text-lg font-semibold text-foreground">{value}</div>
-        <div className="text-xs text-muted">{label}</div>
+    <section className={["rounded-xl border border-border bg-card/70 px-4 py-3", className].filter(Boolean).join(" ")}>
+      <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm text-secondary">
+        {tag.parents.length > 0 ? (
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              <TagIcon className="h-3 w-3" /> Parents
+            </span>
+            {tag.parents.map((parent) => (
+              <TagBadge key={parent.id} name={parent.name} onClick={() => onNavigate({ page: "tag", id: parent.id })} />
+            ))}
+          </div>
+        ) : null}
+        {tag.children.length > 0 ? (
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              <TagIcon className="h-3 w-3" /> Sub Tags
+            </span>
+            {tag.children.map((child) => (
+              <TagBadge key={child.id} name={child.name} onClick={() => onNavigate({ page: "tag", id: child.id })} />
+            ))}
+          </div>
+        ) : null}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -569,11 +534,11 @@ function TagScenesPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={data.items} onNavigate={onNavigate} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`}>
         {data.items.map((scene) => (
           <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
@@ -602,11 +567,11 @@ function TagPerformersPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={PERFORMER_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${180 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${180 + zoomLevel * 50}px`}>
         {data.items.map((performer) => (
           <PerformerTile key={performer.id} performer={performer} onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })} selected={selectedIds.has(performer.id)} onSelect={() => toggle(performer.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
@@ -633,11 +598,11 @@ function TagImagesPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${160 + zoomLevel * 50}px`}>
         {data.items.map((image) => (
           <ImageTile key={image.id} image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
@@ -666,55 +631,55 @@ function TagGalleriesPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`}>
         {data.items.map((gallery) => (
           <GalleryTile key={gallery.id} gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
 }
 
-function TagMarkersPanel({ tagId, onNavigate }: { tagId: number; onNavigate: (r: any) => void }) {
+function TagSegmentsPanel({ tagId, onNavigate }: { tagId: number; onNavigate: (r: any) => void }) {
   const { data, isLoading } = useQuery({
-    queryKey: ["tag-markers", tagId],
-    queryFn: () => markers.wall({ tagId, count: 100 }),
+    queryKey: ["tag-segments", tagId],
+    queryFn: () => tags.segments(tagId, 100),
   });
 
-  if (isLoading) return <LoadingPanel icon={<Bookmark className="h-10 w-10" />} message="Loading markers..." />;
-  if (!data || data.length === 0) return <EmptyPanel icon={<Bookmark className="h-12 w-12" />} message="No markers with this tag" />;
+  if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading segments..." />;
+  if (!data || data.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No segments with this tag" />;
 
   return (
-    <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
-      {data.map((marker) => {
-        const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: marker.sceneId }, () => onNavigate({ page: "scene", id: marker.sceneId }));
+    <EntityCardGrid minCardWidth="220px">
+      {data.map((segment: TagSegmentWall) => {
+        const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: segment.sceneId }, () => onNavigate({ page: "scene", id: segment.sceneId }));
 
         return (
           <a
-            key={marker.id}
+            key={segment.id}
             {...linkProps}
             className="group text-left"
           >
             <div className="relative aspect-video overflow-hidden rounded-lg border border-border bg-card shadow-md shadow-black/30">
               <img
-                src={scenes.screenshotUrl(marker.sceneId)}
-                alt={marker.title}
+                src={scenes.screenshotUrl(segment.sceneId)}
+                alt={segment.title || segment.kind}
                 className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                 loading="lazy"
               />
               <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[11px] text-white">
-                {formatDuration(marker.seconds)}
+                {formatDuration(segment.startSec)}
               </span>
             </div>
             <div className="pt-2">
-              <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">{marker.title}</p>
-              <p className="mt-0.5 truncate text-xs text-secondary">{marker.sceneTitle || "Untitled Scene"}</p>
+              <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">{segment.title || segment.kind}</p>
+              <p className="mt-0.5 truncate text-xs text-secondary">{segment.sceneTitle || "Untitled Scene"}</p>
             </div>
           </a>
         );
       })}
-    </div>
+    </EntityCardGrid>
   );
 }
 
@@ -738,11 +703,11 @@ function TagStudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={STUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="studios" selectedIds={selectedIds} onDone={selectNone} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${200 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${200 + zoomLevel * 50}px`}>
         {data.items.map((studio) => (
           <StudioTile key={studio.id} studio={studio} onClick={() => selecting ? toggle(studio.id) : onNavigate({ page: "studio", id: studio.id })} selected={selectedIds.has(studio.id)} onSelect={() => toggle(studio.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
@@ -768,11 +733,11 @@ function TagGroupsPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GROUP_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${200 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${200 + zoomLevel * 50}px`}>
         {data.items.map((group) => (
           <GroupTile key={group.id} group={group} onClick={() => selecting ? toggle(group.id) : onNavigate({ page: "group", id: group.id })} selected={selectedIds.has(group.id)} onSelect={() => toggle(group.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );

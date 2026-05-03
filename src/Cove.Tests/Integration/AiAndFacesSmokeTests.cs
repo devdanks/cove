@@ -1,0 +1,162 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using Cove.Core.DTOs;
+using Cove.Core.Entities;
+using Microsoft.EntityFrameworkCore;
+using Pgvector;
+
+namespace Cove.Tests.Integration;
+
+public sealed class AiDataControllerSmokeTests
+{
+    [Fact]
+    public async Task Summary_ReturnsOk()
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var scene = new Scene { Title = "Audio Scene" };
+            db.Scenes.Add(scene);
+            await db.SaveChangesAsync();
+
+            db.AiRuns.Add(new AiRun
+            {
+                RunKey = "run-summary",
+                SourceKey = "ext:ai.audio",
+                TargetType = AiRunTargetType.Scene,
+                TargetId = scene.Id,
+                Models = JsonDocument.Parse("[{\"ConfigName\":\"audio-model\"}]"),
+            });
+            db.Segments.Add(new Segment
+            {
+                HostType = SegmentHostType.Scene,
+                HostId = scene.Id,
+                StartSec = 0,
+                EndSec = 3,
+                Kind = "audio.label",
+                SourceKey = "ext:ai.audio",
+                SourceRunId = "run-summary",
+            });
+            await db.SaveChangesAsync();
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+        var response = await client.GetAsync("/api/ai-data/summary");
+        response.EnsureSuccessStatusCode();
+
+        var summary = await response.Content.ReadApiJsonAsync<AiDataSummaryDto>();
+        Assert.NotNull(summary);
+        Assert.NotEmpty(summary.Items);
+    }
+}
+
+public sealed class AiRunsControllerSmokeTests
+{
+    [Fact]
+    public async Task List_ReturnsOk()
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.AiRuns.Add(new AiRun
+            {
+                RunKey = "run-a",
+                SourceKey = "ext:ai.faces",
+                TargetType = AiRunTargetType.Scene,
+                TargetId = 10,
+                Trigger = "manual",
+                Status = AiRunStatus.Completed,
+                StartedAt = DateTime.UtcNow.AddMinutes(-2),
+                CompletedAt = DateTime.UtcNow.AddMinutes(-1),
+                Summary = JsonDocument.Parse("{\"faces\":4}"),
+            });
+            await db.SaveChangesAsync();
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+        var response = await client.GetAsync("/api/ai-runs?page=1&perPage=10");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadApiJsonAsync<PaginatedResponse<AiRunDto>>();
+        Assert.NotNull(payload);
+        Assert.Single(payload.Items);
+    }
+}
+
+public sealed class EmbeddingsControllerSmokeTests
+{
+    [Fact]
+    public async Task List_ReturnsOk()
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var scene = new Scene { Title = "Embedding Scene" };
+            db.Scenes.Add(scene);
+            await db.SaveChangesAsync();
+
+            db.Embeddings.Add(new Embedding
+            {
+                HostType = EmbeddingHostType.Scene,
+                HostId = scene.Id,
+                Kind = "scene.clip",
+                KindFamily = "scene.clip",
+                Modality = EmbeddingModality.Visual,
+                Dim = 2,
+                Vector = new Vector(new float[] { 0.1f, 0.2f }),
+                SourceKey = "ext:ai.visual",
+                SourceRunId = "run-1",
+            });
+            await db.SaveChangesAsync();
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+        var response = await client.GetAsync("/api/embeddings?page=1&perPage=10");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadApiJsonAsync<PaginatedResponse<EmbeddingDto>>();
+        Assert.NotNull(payload);
+        Assert.Single(payload.Items);
+    }
+}
+
+public sealed class FacesControllerSmokeTests
+{
+    [Fact]
+    public async Task List_And_Suggestions_ReturnOk()
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        var faceId = await factory.WithDbContextAsync(async db =>
+        {
+            var face = new Face
+            {
+                Label = "Lead",
+                PrimarySourceKey = "ext:ai.faces",
+            };
+            db.Faces.Add(face);
+            await db.SaveChangesAsync();
+            return face.Id;
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+
+        var listResponse = await client.GetAsync("/api/faces?page=1&perPage=10");
+        listResponse.EnsureSuccessStatusCode();
+        var listPayload = await listResponse.Content.ReadApiJsonAsync<PaginatedResponse<FaceDto>>();
+        Assert.NotNull(listPayload);
+        Assert.Single(listPayload.Items);
+
+        var suggestionsResponse = await client.GetAsync($"/api/faces/{faceId}/suggestions?maxResults=5");
+        suggestionsResponse.EnsureSuccessStatusCode();
+        var suggestions = await suggestionsResponse.Content.ReadApiJsonAsync<List<FaceSuggestionDto>>();
+        Assert.NotNull(suggestions);
+    }
+}

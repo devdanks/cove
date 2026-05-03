@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
 using Cove.Core.Auth;
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
@@ -9,6 +10,7 @@ using Cove.Data;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Cove.Api.Controllers;
 
@@ -23,6 +25,12 @@ public class MetadataController(
     CoveConfiguration config,
     ILogger<MetadataController> logger) : ControllerBase
 {
+    private static readonly JsonSerializerOptions MetadataExportJsonOptions = new(CoveJson.Default)
+    {
+        WriteIndented = true,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles,
+    };
+
     [HttpPost("scan")]
     [RequiresPermission(Permissions.LibraryScan)]
     public ActionResult<object> StartScan([FromBody] ScanOptionsDto? opts)
@@ -343,8 +351,7 @@ public class MetadataController(
             }
 
             progress.Report(0.9, "Writing export file...");
-            var jsonOpts = new JsonSerializerOptions { WriteIndented = true, ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles };
-            await System.IO.File.WriteAllTextAsync(exportFile, JsonSerializer.Serialize(exportData, jsonOpts), ct);
+            await System.IO.File.WriteAllTextAsync(exportFile, JsonSerializer.Serialize(exportData, MetadataExportJsonOptions), ct);
 
             logger.LogInformation("Export completed: {Path}", exportFile);
         }, exclusive: false);
@@ -369,14 +376,13 @@ public class MetadataController(
 
             progress.Report(0.05, "Reading import file...");
             var json = await System.IO.File.ReadAllTextAsync(filePath, ct);
-            var jsonOpts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var importData = JsonSerializer.Deserialize<JsonElement>(json, jsonOpts);
+            var importData = JsonSerializer.Deserialize<JsonElement>(json, CoveJson.Default);
 
             // Import tags first (no dependencies)
             if (importData.TryGetProperty("tags", out var tagsEl))
             {
                 progress.Report(0.1, "Importing tags...");
-                var importTags = JsonSerializer.Deserialize<List<Tag>>(tagsEl.GetRawText(), jsonOpts) ?? [];
+                var importTags = JsonSerializer.Deserialize<List<Tag>>(tagsEl.GetRawText(), CoveJson.Default) ?? [];
                 foreach (var tag in importTags)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -397,7 +403,7 @@ public class MetadataController(
             if (importData.TryGetProperty("studios", out var studiosEl))
             {
                 progress.Report(0.3, "Importing studios...");
-                var importStudios = JsonSerializer.Deserialize<List<Studio>>(studiosEl.GetRawText(), jsonOpts) ?? [];
+                var importStudios = JsonSerializer.Deserialize<List<Studio>>(studiosEl.GetRawText(), CoveJson.Default) ?? [];
                 foreach (var studio in importStudios)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -418,7 +424,7 @@ public class MetadataController(
             if (importData.TryGetProperty("performers", out var performersEl))
             {
                 progress.Report(0.5, "Importing performers...");
-                var importPerformers = JsonSerializer.Deserialize<List<Performer>>(performersEl.GetRawText(), jsonOpts) ?? [];
+                var importPerformers = JsonSerializer.Deserialize<List<Performer>>(performersEl.GetRawText(), CoveJson.Default) ?? [];
                 foreach (var performer in importPerformers)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -452,7 +458,7 @@ public class MetadataController(
             if (importData.TryGetProperty("groups", out var groupsEl))
             {
                 progress.Report(0.7, "Importing groups...");
-                var importGroups = JsonSerializer.Deserialize<List<Group>>(groupsEl.GetRawText(), jsonOpts) ?? [];
+                var importGroups = JsonSerializer.Deserialize<List<Group>>(groupsEl.GetRawText(), CoveJson.Default) ?? [];
                 foreach (var group in importGroups)
                 {
                     ct.ThrowIfCancellationRequested();

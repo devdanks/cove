@@ -57,6 +57,7 @@ public class RegistryExtensionSummary
     public string? Description { get; set; }
     public string? Author { get; set; }
     public string? IconUrl { get; set; }
+    public string Kind { get; set; } = "extension";
     public List<string> Categories { get; set; } = [];
     /// <summary>Auto-set by registry CI from the latest version's release date.</summary>
     public DateTime? UpdatedAt { get; set; }

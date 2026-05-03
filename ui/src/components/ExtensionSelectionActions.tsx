@@ -1,0 +1,152 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Puzzle } from "lucide-react";
+import { extensions } from "../api/client";
+import type { ExtensionAction } from "../api/types";
+import { useExtensions } from "../extensions/ExtensionLoader";
+
+interface Props {
+  entityType: string;
+  selectedIds: Set<number>;
+}
+
+interface QueuedActionResponse {
+  jobId?: string;
+  description?: string;
+  message?: string;
+  cancelled?: boolean;
+  suppressToast?: boolean;
+}
+
+function normalizeEntityType(entityType: string): string {
+  const normalized = entityType.trim().toLowerCase();
+  switch (normalized) {
+    case "scenes":
+      return "scene";
+    case "images":
+      return "image";
+    default:
+      return normalized;
+  }
+}
+
+function buildActionPayload(action: ExtensionAction, entityType: string, selectedIds: number[]) {
+  return {
+    actionId: action.id,
+    extensionId: action.extensionId,
+    entityType,
+    pageType: entityType,
+    entityIds: selectedIds,
+    selectedIds,
+    selectedCount: selectedIds.length,
+  };
+}
+
+function formatQueuedMessage(action: ExtensionAction, result: unknown, entityType: string, count: number): string {
+  if (result && typeof result === "object") {
+    const queued = result as QueuedActionResponse;
+    if (queued.description && queued.jobId) {
+      return `${queued.description}\nJob: ${queued.jobId}`;
+    }
+
+    if (queued.description) {
+      return queued.description;
+    }
+
+    if (queued.message) {
+      return queued.message;
+    }
+
+    if (queued.jobId) {
+      return `${action.label} queued for ${count} ${entityType}${count === 1 ? "" : "s"}.\nJob: ${queued.jobId}`;
+    }
+  }
+
+  return `${action.label} queued for ${count} ${entityType}${count === 1 ? "" : "s"}.`;
+}
+
+function shouldSuppressResultToast(result: unknown): boolean {
+  return !!result
+    && typeof result === "object"
+    && (("cancelled" in result && Boolean((result as QueuedActionResponse).cancelled))
+      || ("suppressToast" in result && Boolean((result as QueuedActionResponse).suppressToast)));
+}
+
+export function ExtensionSelectionActions({ entityType, selectedIds }: Props) {
+  const normalizedEntityType = normalizeEntityType(entityType);
+  const selectedIdList = useMemo(() => [...selectedIds], [selectedIds]);
+  const queryClient = useQueryClient();
+  const { getActionsForContext, resolveActionHandler } = useExtensions();
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+
+  const actions = useMemo(() => {
+    if (selectedIdList.length === 0) {
+      return [];
+    }
+
+    if (normalizedEntityType !== "scene" && normalizedEntityType !== "image") {
+      return [];
+    }
+
+    return getActionsForContext(normalizedEntityType, undefined, "bulk");
+  }, [getActionsForContext, normalizedEntityType, selectedIdList.length]);
+
+  const invokeActionMut = useMutation<unknown, Error, ExtensionAction>({
+    mutationFn: async (action) => {
+      const payload = buildActionPayload(action, normalizedEntityType, selectedIdList);
+
+      if (action.handlerName) {
+        const handler = resolveActionHandler(action.handlerName);
+        if (handler) {
+          return await handler(action, payload);
+        }
+      }
+
+      if (!action.apiEndpoint) {
+        throw new Error(`Extension action '${action.id}' does not provide an API endpoint or a registered handler.`);
+      }
+
+      return await extensions.invokeAction(action.apiEndpoint, payload);
+    },
+    onMutate: (action) => {
+      setPendingActionId(action.id);
+    },
+    onSuccess: (result, action) => {
+      if (shouldSuppressResultToast(result)) {
+        return;
+      }
+
+      queryClient.invalidateQueries();
+      window.alert(formatQueuedMessage(action, result, normalizedEntityType, selectedIdList.length));
+    },
+    onError: (error) => {
+      window.alert(error.message || "Failed to run the selected extension action.");
+    },
+    onSettled: () => {
+      setPendingActionId(null);
+    },
+  });
+
+  if (actions.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      {actions.map((action) => {
+        const isPending = invokeActionMut.isPending && pendingActionId === action.id;
+        return (
+          <button
+            key={action.id}
+            onClick={() => invokeActionMut.mutate(action)}
+            disabled={invokeActionMut.isPending}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10 disabled:opacity-60"
+          >
+            {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Puzzle className="w-3 h-3" />}
+            {action.label}
+          </button>
+        );
+      })}
+    </>
+  );
+}

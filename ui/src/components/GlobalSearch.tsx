@@ -2,9 +2,11 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, Film, FolderOpen, ImageIcon, Layers, Loader2, Search, Tag, Users } from "lucide-react";
 import { galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
+import type { InteractionHostType } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canReadEntity } from "../auth/visibility";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
+import { trackInteraction } from "../utils/interactionTracking";
 
 interface Props {
   navigate: (r: any) => void;
@@ -14,7 +16,7 @@ type SearchGroup = {
   key: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  items: { id: number; title: string; subtitle?: string; route: any }[];
+  items: { id: number; title: string; subtitle?: string; route: any; hostType: InteractionHostType }[];
 };
 
 type SceneSearchItems = Awaited<ReturnType<typeof scenes.find>>["items"];
@@ -29,6 +31,7 @@ type SearchDefinition = {
   key: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  hostType: InteractionHostType;
   load: () => Promise<{ items: unknown[] }>;
   mapItems: (items: unknown[]) => SearchGroup["items"];
 };
@@ -38,6 +41,7 @@ export function GlobalSearch({ navigate }: Props) {
   const [open, setOpen] = useState(false);
   const deferredTerm = useDeferredValue(term.trim());
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastTrackedSearchKey = useRef("");
   const { hasPermission, permissions } = useAuth();
 
   const readableEntities = useMemo(() => ({
@@ -82,84 +86,98 @@ export function GlobalSearch({ navigate }: Props) {
           key: "scenes",
           label: "Scenes",
           icon: Film,
+          hostType: "scene" as const,
           load: () => scenes.find(query),
           mapItems: (items: unknown[]) => (items as SceneSearchItems).map((item) => ({
             id: item.id,
             title: item.title || item.files[0]?.basename || `Scene ${item.id}`,
             subtitle: item.studioName || item.date || undefined,
             route: { page: "scene", id: item.id },
+            hostType: "scene" as const,
           })),
         }] : []),
         ...(readableEntities.performers ? [{
           key: "performers",
           label: "Performers",
           icon: Users,
+          hostType: "performer" as const,
           load: () => performers.find({ ...query, sort: "name", direction: "asc" }),
           mapItems: (items: unknown[]) => (items as PerformerSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
             subtitle: item.disambiguation || undefined,
             route: { page: "performer", id: item.id },
+            hostType: "performer" as const,
           })),
         }] : []),
         ...(readableEntities.studios ? [{
           key: "studios",
           label: "Studios",
           icon: Building2,
+          hostType: "studio" as const,
           load: () => studios.find({ ...query, sort: "name", direction: "asc" }),
           mapItems: (items: unknown[]) => (items as StudioSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
             subtitle: item.parentName || undefined,
             route: { page: "studio", id: item.id },
+            hostType: "studio" as const,
           })),
         }] : []),
         ...(readableEntities.tags ? [{
           key: "tags",
           label: "Tags",
           icon: Tag,
+          hostType: "tag" as const,
           load: () => tags.find({ ...query, sort: "name", direction: "asc" }),
           mapItems: (items: unknown[]) => (items as TagSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
             subtitle: item.description || undefined,
             route: { page: "tag", id: item.id },
+            hostType: "tag" as const,
           })),
         }] : []),
         ...(readableEntities.galleries ? [{
           key: "galleries",
           label: "Galleries",
           icon: FolderOpen,
+          hostType: "gallery" as const,
           load: () => galleries.find({ ...query, sort: "title", direction: "asc" }),
           mapItems: (items: unknown[]) => (items as GallerySearchItems).map((item) => ({
             id: item.id,
             title: item.title || `Gallery ${item.id}`,
             subtitle: item.studioName || item.date || undefined,
             route: { page: "gallery", id: item.id },
+            hostType: "gallery" as const,
           })),
         }] : []),
         ...(readableEntities.images ? [{
           key: "images",
           label: "Images",
           icon: ImageIcon,
+          hostType: "image" as const,
           load: () => images.find({ ...query, sort: "title", direction: "asc" }),
           mapItems: (items: unknown[]) => (items as ImageSearchItems).map((item) => ({
             id: item.id,
             title: getImageDisplayTitle(item),
             subtitle: item.studioName || item.date || undefined,
             route: { page: "image", id: item.id },
+            hostType: "image" as const,
           })),
         }] : []),
         ...(readableEntities.groups ? [{
           key: "groups",
           label: "Groups",
           icon: Layers,
+          hostType: "group" as const,
           load: () => groups.find({ ...query, sort: "name", direction: "asc" }),
           mapItems: (items: unknown[]) => (items as GroupSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
             subtitle: item.studioName || item.date || undefined,
             route: { page: "group", id: item.id },
+            hostType: "group" as const,
           })),
         }] : []),
       ];
@@ -181,8 +199,42 @@ export function GlobalSearch({ navigate }: Props) {
 
   const flatResults = useMemo(() => (data ?? []).flatMap((group) => group.items), [data]);
 
-  const handleSelect = (route: any) => {
-    navigate(route);
+  useEffect(() => {
+    if (!open || deferredTerm.length < 2 || isFetching || searchableLabels.length === 0) {
+      return;
+    }
+
+    const resultCount = flatResults.length;
+    const searchKey = `${deferredTerm}|${searchableLabels.join(",")}|${resultCount}`;
+    if (lastTrackedSearchKey.current === searchKey) {
+      return;
+    }
+
+    lastTrackedSearchKey.current = searchKey;
+    trackInteraction({
+      hostType: "search",
+      kind: "searchQuery",
+      meta: {
+        query: deferredTerm,
+        resultCount,
+        scopes: searchableLabels,
+        source: "globalSearch",
+      },
+    });
+  }, [deferredTerm, flatResults.length, isFetching, open, searchableLabels]);
+
+  const handleSelect = (item: SearchGroup["items"][number], rank: number) => {
+    trackInteraction({
+      hostType: item.hostType,
+      hostId: item.id,
+      kind: "searchSelect",
+      meta: {
+        query: deferredTerm,
+        rank,
+        source: "globalSearch",
+      },
+    });
+    navigate(item.route);
     setOpen(false);
     setTerm("");
   };
@@ -216,7 +268,7 @@ export function GlobalSearch({ navigate }: Props) {
                   {group.items.map((item) => (
                     <button
                       key={`${group.key}-${item.id}`}
-                      onClick={() => handleSelect(item.route)}
+                      onClick={() => handleSelect(item, flatResults.findIndex((result) => result.hostType === item.hostType && result.id === item.id) + 1)}
                       className="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-surface"
                     >
                       <Icon className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
@@ -263,7 +315,7 @@ export function GlobalSearch({ navigate }: Props) {
             }
             if (event.key === "Enter" && flatResults.length > 0) {
               event.preventDefault();
-              handleSelect(flatResults[0].route);
+              handleSelect(flatResults[0], 1);
             }
           }}
           placeholder="Search all..."
@@ -291,7 +343,7 @@ export function GlobalSearch({ navigate }: Props) {
                     }
                     if (event.key === "Enter" && flatResults.length > 0) {
                       event.preventDefault();
-                      handleSelect(flatResults[0].route);
+                      handleSelect(flatResults[0], 1);
                     }
                   }}
                   placeholder="Search all..."

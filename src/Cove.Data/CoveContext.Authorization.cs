@@ -23,6 +23,7 @@ public partial class CoveContext
     private string[] CurrentRoleNames => CurrentPrincipal?.Roles.ToArray() ?? [];
 
     private Guid? CurrentShareLinkId => CurrentPrincipal?.Kind == PrincipalKind.ShareLink ? CurrentPrincipal.TokenId : null;
+    private int? CurrentUserId => CurrentPrincipal?.UserId;
 
     internal Guid? CurrentShareLinkIdForReadOptimization => CurrentShareLinkId;
 
@@ -34,6 +35,9 @@ public partial class CoveContext
     private bool CanReadImages => CurrentPrincipal?.Has(PermissionKeys.ImagesRead) == true;
     private bool CanReadGroups => CurrentPrincipal?.Has(PermissionKeys.GroupsRead) == true;
     private bool CanReadMarkers => CurrentPrincipal?.Has(PermissionKeys.MarkersRead) == true;
+    private bool CanReadFaces => CurrentPrincipal?.Has(PermissionKeys.FacesRead) == true;
+    private bool CanReadEmbeddings => CurrentPrincipal?.Has(PermissionKeys.EmbeddingsRead) == true;
+    private bool CanReadAiRuns => CurrentPrincipal?.Has(PermissionKeys.AiRunsRead) == true;
     private bool CanReadScenesByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Scene) == true;
     private bool CanReadPerformersByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Performer) == true;
     private bool CanReadTagsByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Tag) == true;
@@ -116,6 +120,36 @@ public partial class CoveContext
                 : !RequiresGroupReadScopeEvaluation
                     ? CanReadGroups
                     : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGroups, CanReadGroupsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Group, group.Id));
+
+        modelBuilder.Entity<Face>().HasQueryFilter(face =>
+            AuthorizationFiltersBypassed || CanReadFaces);
+
+        modelBuilder.Entity<Embedding>().HasQueryFilter(embedding =>
+            AuthorizationFiltersBypassed || CanReadEmbeddings);
+
+        modelBuilder.Entity<AiRun>().HasQueryFilter(run =>
+            AuthorizationFiltersBypassed || CanReadAiRuns);
+
+        modelBuilder.Entity<UserEntityAffinity>().HasQueryFilter(affinity =>
+            AuthorizationFiltersBypassed || (CurrentUserId != null && affinity.UserId == CurrentUserId.Value));
+
+        modelBuilder.Entity<Interaction>().HasQueryFilter(interaction =>
+            AuthorizationFiltersBypassed || (CurrentUserId != null && interaction.UserId == CurrentUserId.Value));
+
+        modelBuilder.Entity<PlaybackSession>().HasQueryFilter(session =>
+            AuthorizationFiltersBypassed || (CurrentUserId != null && session.UserId == CurrentUserId.Value));
+
+        modelBuilder.Entity<PlaybackInterval>().HasQueryFilter(interval =>
+            AuthorizationFiltersBypassed || (CurrentUserId != null && interval.UserId == CurrentUserId.Value));
+
+        modelBuilder.Entity<Rating>().HasQueryFilter(rating =>
+            AuthorizationFiltersBypassed || (CurrentUserId != null && rating.UserId == CurrentUserId.Value));
+
+        modelBuilder.Entity<SegmentDisplayProfile>().HasQueryFilter(profile =>
+            AuthorizationFiltersBypassed || profile.UserId == null || (CurrentUserId != null && profile.UserId == CurrentUserId.Value));
+
+        modelBuilder.Entity<SegmentDisplayRule>().HasQueryFilter(rule =>
+            AuthorizationFiltersBypassed || rule.UserId == null || (CurrentUserId != null && rule.UserId == CurrentUserId.Value));
 
         modelBuilder.Entity<SceneMarker>().HasQueryFilter(marker =>
             AuthorizationFiltersBypassed
@@ -269,15 +303,15 @@ public partial class CoveContext
                     ? CanReadGalleries
                     : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGalleries, CanReadGalleriesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Gallery, link.GalleryId)));
 
-        modelBuilder.Entity<SceneGroup>().HasQueryFilter(link =>
+        modelBuilder.Entity<GroupItem>().HasQueryFilter(item =>
             AuthorizationFiltersBypassed
                 ? true
                 : (!RequiresSceneReadScopeEvaluation
                     ? CanReadScenes
-                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, link.SceneId))
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, item.SceneId))
                 && (!RequiresGroupReadScopeEvaluation
                     ? CanReadGroups
-                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGroups, CanReadGroupsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Group, link.GroupId)));
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGroups, CanReadGroupsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Group, item.GroupId)));
 
         modelBuilder.Entity<PerformerTag>().HasQueryFilter(link =>
             AuthorizationFiltersBypassed

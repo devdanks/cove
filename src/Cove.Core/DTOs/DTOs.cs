@@ -1,4 +1,8 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Cove.Core.Enums;
+using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 
 namespace Cove.Core.DTOs;
@@ -17,14 +21,13 @@ public record SceneDto(
     double ResumeTime, double PlayDuration, int PlayCount, string? LastPlayedAt,
     int OCounter, string? Captions, int? InteractiveSpeed,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
-    List<VideoFileDto> Files, List<SceneMarkerSummaryDto> Markers,
+    List<VideoFileDto> Files,
     List<GroupSummaryDto> Groups, List<GallerySummaryDto> Galleries,
     List<SceneRemoteIdDto> RemoteIds, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
 
 public record SceneRemoteIdDto(string Endpoint, string RemoteId);
 
 public record SceneGroupInputDto(int GroupId, int SceneIndex = 0);
-
 public record SceneCreateDto(
     string? Title, string? Code, string? Details, string? Director,
     string? Date, int? Rating, bool Organized, int? StudioId,
@@ -77,17 +80,62 @@ public record PerformerUpdateDto(
     List<string>? Urls, List<string>? Aliases, List<int>? TagIds, Dictionary<string, object>? CustomFields);
 
 // ===== TAG DTOs =====
-public record TagDto(int Id, string Name, string? Description, bool Favorite, bool IgnoreAutoTag, List<string> Aliases);
+public record TagProvenanceDto(
+    string SourceKey,
+    string? SourceRunId,
+    string? ModelKey,
+    float? Confidence,
+    string AppliedAt);
 
-public record TagListDto(int Id, string Name, string? Description, bool Favorite, bool IgnoreAutoTag, List<string> Aliases,
-    int SceneCount, int SceneMarkerCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int StudioCount, string? ImagePath);
+public record TagDto(
+    int Id,
+    string Name,
+    string? Description,
+    bool Favorite,
+    bool IgnoreAutoTag,
+    List<string> Aliases,
+    bool? ShowAsSegment = null,
+    string? SegmentColorOverride = null,
+    int? SegmentLaneOverride = null,
+    List<TagProvenanceDto>? Provenance = null);
+
+public record TagListDto(
+    int Id,
+    string Name,
+    string? Description,
+    bool Favorite,
+    bool IgnoreAutoTag,
+    List<string> Aliases,
+    int SceneCount,
+    int SegmentCount,
+    int ImageCount,
+    int GalleryCount,
+    int GroupCount,
+    int PerformerCount,
+    int StudioCount,
+    string? ImagePath,
+    bool? ShowAsSegment = null,
+    string? SegmentColorOverride = null,
+    int? SegmentLaneOverride = null);
 
 public record TagDetailDto(
     int Id, string Name, string? SortName, string? Description, bool Favorite, bool IgnoreAutoTag,
     List<string> Aliases, List<TagDto> Parents, List<TagDto> Children,
     int SceneCount, int PerformerCount, int ImageCount, int GalleryCount,
-    int StudioCount, int GroupCount, int MarkerCount,
-    Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
+    int StudioCount, int GroupCount, int SegmentCount,
+    Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
+    bool? ShowAsSegment = null, string? SegmentColorOverride = null, int? SegmentLaneOverride = null);
+
+public record TagSegmentWallDto(
+    int Id,
+    string? Title,
+    double StartSec,
+    double? EndSec,
+    string Kind,
+    string SourceKey,
+    float? Confidence,
+    int SceneId,
+    string SceneTitle);
 
 public record TagGraphNodeDto(
     int Id,
@@ -99,7 +147,7 @@ public record TagGraphNodeDto(
     List<int> ChildIds,
     int TotalUsageCount,
     int SceneCount,
-    int SceneMarkerCount,
+    int SegmentCount,
     int ImageCount,
     int GalleryCount,
     int GroupCount,
@@ -108,8 +156,31 @@ public record TagGraphNodeDto(
 public record TagGraphLinkDto(int SourceId, int TargetId);
 public record TagGraphResponseDto(List<TagGraphNodeDto> Items, List<TagGraphLinkDto> Links, int TotalCount);
 
-public record TagCreateDto(string Name, string? SortName, string? Description, bool Favorite, bool IgnoreAutoTag, List<string>? Aliases, List<int>? ParentIds, List<int>? ChildIds);
-public record TagUpdateDto(string? Name, string? SortName, string? Description, bool? Favorite, bool? IgnoreAutoTag, List<string>? Aliases, List<int>? ParentIds, List<int>? ChildIds, Dictionary<string, object>? CustomFields);
+public record TagCreateDto(
+    string Name,
+    string? SortName,
+    string? Description,
+    bool Favorite,
+    bool IgnoreAutoTag,
+    List<string>? Aliases,
+    List<int>? ParentIds,
+    List<int>? ChildIds,
+    bool? ShowAsSegment = null,
+    string? SegmentColorOverride = null,
+    int? SegmentLaneOverride = null);
+public record TagUpdateDto(
+    string? Name,
+    string? SortName,
+    string? Description,
+    bool? Favorite,
+    bool? IgnoreAutoTag,
+    List<string>? Aliases,
+    List<int>? ParentIds,
+    List<int>? ChildIds,
+    Dictionary<string, object>? CustomFields,
+    bool? ShowAsSegment = null,
+    string? SegmentColorOverride = null,
+    int? SegmentLaneOverride = null);
 
 // ===== STUDIO DTOs =====
 public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, int? Rating, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
@@ -160,11 +231,75 @@ public record ImageUpdateDto(string? Title, string? Code, string? Details, strin
 // ===== GROUP DTOs =====
 public record GroupDto(int Id, string Name, string? Aliases, int? Duration, string? Date,
     int? Rating, int? StudioId, string? StudioName, string? Director, string? Synopsis,
-    List<string> Urls, List<TagDto> Tags, int SceneCount, int SubGroupCount, int ContainingGroupCount,
+    List<string> Urls, List<TagDto> Tags, int SceneCount, bool IsCompilation, int SubGroupCount, int ContainingGroupCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     string? FrontImagePath, string? BackImagePath);
 
 public record GroupSummaryDto(int Id, string Name, int SceneIndex);
+
+public record GroupItemDto(
+    int Id,
+    int GroupId,
+    int OrderIndex,
+    GroupItemKind Kind,
+    int SceneId,
+    string? SceneTitle,
+    double? StartSec,
+    double? EndSec,
+    string? Title,
+    string? Notes,
+    string? SourceSpanKey,
+    int? SourceProfileId,
+    string? SourceQueryJson,
+    string? SnapshotAt,
+    string CreatedAt,
+    string UpdatedAt);
+
+public record GroupItemCreateDto(
+    int OrderIndex,
+    GroupItemKind Kind,
+    int SceneId,
+    double? StartSec,
+    double? EndSec,
+    string? Title,
+    string? Notes,
+    string? SourceSpanKey,
+    int? SourceProfileId,
+    string? SourceQueryJson = null);
+
+public record GroupItemUpdateDto(
+    int OrderIndex,
+    GroupItemKind Kind,
+    double? StartSec,
+    double? EndSec,
+    string? Title,
+    string? Notes);
+
+public record GroupItemsReorderDto(List<int> Ids);
+
+public record GroupItemSpanInputDto(
+    string? SpanKey,
+    int? SceneId,
+    double? StartSec,
+    double? EndSec,
+    string? Title,
+    int? ProfileId,
+    SegmentSpanDerivedQueryDto? DerivedQuery = null);
+
+public record GroupItemsFromSpansDto(List<GroupItemSpanInputDto> Spans);
+
+public record GroupPlaybackManifestItemDto(
+    int GroupItemId,
+    int SceneId,
+    string? SceneTitle,
+    string Src,
+    double StartSec,
+    double? EndSec,
+    double? DurationSec,
+    string? PosterPath,
+    string? Title);
+
+public record GroupPlaybackManifestDto(List<GroupPlaybackManifestItemDto> Items);
 
 public record GroupCreateDto(string Name, string? Aliases, int? Duration, string? Date,
     int? Rating, int? StudioId, string? Director, string? Synopsis,
@@ -184,19 +319,504 @@ public record CaptionDto(int Id, string LanguageCode, string CaptionType, string
 
 public record FingerprintDto(string Type, string Value);
 
-public record SceneMarkerSummaryDto(int Id, string Title, double Seconds, double? EndSeconds, int PrimaryTagId, string PrimaryTagName);
-
-public record SceneMarkerWallDto(
-    int Id, string Title, double Seconds, double? EndSeconds,
-    int PrimaryTagId, string PrimaryTagName,
-    int SceneId, string SceneTitle, string SceneFilePath,
-    List<TagSummaryDto> Tags);
-
 public record TagSummaryDto(int Id, string Name);
 
-public record SceneMarkerCreateDto(string Title, double Seconds, double? EndSeconds, int PrimaryTagId, List<int>? TagIds);
+public sealed record ResolvedSpan(
+    string SpanKey,
+    SegmentHostType HostType,
+    int HostId,
+    double StartSec,
+    double EndSec,
+    string? SourceKey,
+    string? Kind,
+    int? TagId,
+    string? TagName,
+    string? ColorHint,
+    int? Lane,
+    bool CollapsedToInstant,
+    IReadOnlyList<int> SegmentIds);
 
-public record SceneMarkerUpdateDto(string? Title, double? Seconds, double? EndSeconds, int? PrimaryTagId, List<int>? TagIds);
+public record ResolvedSpanIntervalDto(double StartSec, double EndSec);
+
+public record ResolvedSpanDetailDto(
+    ResolvedSpan Span,
+    int SceneId,
+    string? SceneTitle,
+    IReadOnlyList<ResolvedSpanIntervalDto> Intervals,
+    int ProfileId,
+    int ProfileVersion);
+
+public record SceneResolvedSpansDto(
+    IReadOnlyList<ResolvedSpan> Spans,
+    int ProfileId,
+    int ProfileVersion);
+
+public record ResolvedSpanListDto(IReadOnlyList<ResolvedSpan> Spans);
+
+public record SegmentSpanOperandDto(
+    string? SourceKey,
+    string? Kind,
+    List<int>? TagIds,
+    float? MinConfidence,
+    List<long>? RefIds = null);
+
+public record SegmentSpanQueryRequestDto(
+    int? Profile,
+    string Operator,
+    List<SegmentSpanOperandDto> Operands,
+    double? MergeGapSec,
+    double? MinDurationSec);
+
+public record SegmentDisplayProfileDto(
+    int Id,
+    string Name,
+    string? Description,
+    int? UserId,
+    bool IsSystem,
+    bool IsDefault,
+    int Version,
+    string CreatedAt,
+    string UpdatedAt);
+
+public record SegmentDisplayProfileCreateDto(
+    string Name,
+    string? Description,
+    bool IsDefault);
+
+public record SegmentDisplayProfileUpdateDto(
+    string Name,
+    string? Description);
+
+public record SegmentDistinctValueDto(
+    string Value,
+    int Count);
+
+public record SegmentDisplayProfilePreviewRequestDto(
+    int SceneId,
+    List<SegmentDisplayRuleCreateDto> Rules);
+
+// ===== Segment Span Search =====
+
+public record SegmentSpanDerivedQueryDto(
+    string Operator,
+    List<SegmentSpanOperandDto> Operands,
+    double? MergeGapSec,
+    double? MinDurationSec);
+
+public record SegmentSpanSearchRequestDto(
+    int? Profile,
+    SegmentSpanDerivedQueryDto? DerivedQuery,
+    int? Page,
+    int? PerPage,
+    string? Sort,
+    string? Direction,
+    string? Q,
+    string? SceneTitle,
+    int[]? SceneIds,
+    int[]? ExcludeSceneIds);
+
+public record SegmentSpanSearchResultItemDto(
+    ResolvedSpan Span,
+    int SceneId,
+    string? SceneTitle,
+    string? SceneUpdatedAt,
+    int ProfileId);
+
+public record SegmentSpanSearchResponseDto(
+    IReadOnlyList<SegmentSpanSearchResultItemDto> Items,
+    int TotalCount,
+    int Page,
+    int PerPage);
+
+public static class ResolvedSpanKeys
+{
+    public static string Create(int sceneId, int profileId, string? sourceKey, string? kind, int? tagId, double startSec, double endSec)
+    {
+        var payload = $"v1|{sceneId}|{profileId}|{sourceKey ?? string.Empty}|{kind ?? string.Empty}|{tagId?.ToString() ?? string.Empty}|{ToMilliseconds(startSec)}|{ToMilliseconds(endSec)}";
+        var hashBytes = SHA1.HashData(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(hashBytes[..8]).ToLowerInvariant();
+    }
+
+    public static string CreateDerivedQuery(string? kind, double startSec, double endSec)
+        => $"dq-{NormalizeDerivedKind(kind)}-{ToMilliseconds(startSec)}-{ToMilliseconds(endSec)}";
+
+    public static bool TryParseDerivedQuery(string spanKey, out string kind, out double startSec, out double endSec)
+    {
+        kind = string.Empty;
+        startSec = 0;
+        endSec = 0;
+
+        if (string.IsNullOrWhiteSpace(spanKey))
+            return false;
+
+        var parts = spanKey.Split('-', 4, StringSplitOptions.None);
+        if (parts.Length != 4 || !string.Equals(parts[0], "dq", StringComparison.Ordinal))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(parts[1]))
+            return false;
+
+        if (!long.TryParse(parts[2], out var startMs) || !long.TryParse(parts[3], out var endMs))
+            return false;
+
+        kind = parts[1];
+        startSec = startMs / 1000d;
+        endSec = endMs / 1000d;
+        return true;
+    }
+
+    private static long ToMilliseconds(double seconds) => (long)Math.Round(seconds * 1000, MidpointRounding.AwayFromZero);
+
+    private static string NormalizeDerivedKind(string? kind) =>
+        string.IsNullOrWhiteSpace(kind) ? "derived" : kind.Trim().ToLowerInvariant();
+}
+
+public record SegmentDto(
+    int Id,
+    SegmentHostType HostType,
+    int HostId,
+    double StartSec,
+    double? EndSec,
+    int? TagId,
+    string? TagName,
+    string? Kind,
+    long? RefId,
+    JsonElement? Payload,
+    string SourceKey,
+    string? SourceRunId,
+    float? Confidence,
+    string? Title,
+    string? ColorHint,
+    string CreatedAt,
+    string UpdatedAt);
+
+public record SegmentRecordDto(
+    int Id,
+    SegmentHostType HostType,
+    int HostId,
+    string? HostTitle,
+    double StartSec,
+    double? EndSec,
+    int? TagId,
+    string? TagName,
+    string? Kind,
+    long? RefId,
+    JsonElement? Payload,
+    string SourceKey,
+    string? SourceRunId,
+    float? Confidence,
+    string? Title,
+    string? ColorHint,
+    string CreatedAt,
+    string UpdatedAt);
+
+public record SegmentCreateDto(
+    double StartSec,
+    double? EndSec,
+    int? TagId,
+    string? Kind,
+    long? RefId,
+    JsonElement? Payload,
+    string? SourceKey,
+    string? SourceRunId,
+    float? Confidence,
+    string? Title,
+    string? ColorHint);
+
+public record SegmentUpdateDto(
+    double StartSec,
+    double? EndSec,
+    int? TagId,
+    string? Kind,
+    long? RefId,
+    JsonElement? Payload,
+    string SourceKey,
+    string? SourceRunId,
+    float? Confidence,
+    string? Title,
+    string? ColorHint);
+
+public record SegmentDisplayRuleDto(
+    int Id,
+    string? SourceKey,
+    string? Kind,
+    int? TagId,
+    string? TagName,
+    string? TagCategory,
+    SegmentHostType? HostType,
+    bool Visible,
+    float? MinConfidence,
+    double? MinDurationSec,
+    double? MergeGapSec,
+    bool CollapseToInstant,
+    string? ColorOverride,
+    int? Lane,
+    int? Priority,
+    int? UserId,
+    string CreatedAt,
+    string UpdatedAt);
+
+public record SegmentDisplayRuleCreateDto(
+    string? SourceKey,
+    string? Kind,
+    int? TagId,
+    string? TagCategory,
+    SegmentHostType? HostType,
+    bool Visible,
+    float? MinConfidence,
+    double? MinDurationSec,
+    double? MergeGapSec,
+    bool CollapseToInstant,
+    string? ColorOverride,
+    int? Lane,
+    int? Priority);
+
+public record SegmentDisplayRuleUpdateDto(
+    string? SourceKey,
+    string? Kind,
+    int? TagId,
+    string? TagCategory,
+    SegmentHostType? HostType,
+    bool Visible,
+    float? MinConfidence,
+    double? MinDurationSec,
+    double? MergeGapSec,
+    bool CollapseToInstant,
+    string? ColorOverride,
+    int? Lane,
+    int? Priority);
+
+public record DetectionDto(
+    int Id,
+    DetectionHostType HostType,
+    int HostId,
+    double? ObservedAtSec,
+    int FrameWidth,
+    int FrameHeight,
+    string Class,
+    float Score,
+    float X,
+    float Y,
+    float W,
+    float H,
+    JsonElement? Extra,
+    string? RefKind,
+    long? RefId,
+    string? GroupKey,
+    string SourceKey,
+    string? SourceRunId,
+    string CreatedAt,
+    string UpdatedAt);
+
+public record DetectionCreateDto(
+    double? ObservedAtSec,
+    int FrameWidth,
+    int FrameHeight,
+    string Class,
+    float Score,
+    float X,
+    float Y,
+    float W,
+    float H,
+    JsonElement? Extra,
+    string? RefKind,
+    long? RefId,
+    string? GroupKey,
+    string? SourceKey,
+    string? SourceRunId);
+
+public record DetectionUpdateDto(
+    double? ObservedAtSec,
+    int FrameWidth,
+    int FrameHeight,
+    string Class,
+    float Score,
+    float X,
+    float Y,
+    float W,
+    float H,
+    JsonElement? Extra,
+    string? RefKind,
+    long? RefId,
+    string? GroupKey,
+    string SourceKey,
+    string? SourceRunId);
+
+public record FaceDto(
+    int Id,
+    string? Label,
+    int? PerformerId,
+    string? PerformerName,
+    string? CoverImageUrl,
+    bool Ignored,
+    int? MergedIntoFaceId,
+    int DetectionCount,
+    int SceneCount,
+    int ImageCount,
+    string? PrimarySourceKey,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    int AppearanceCount = 0,
+    int FrameSampleCount = 0,
+    FaceTopSuggestionDto? TopSuggestion = null);
+
+public record FaceCreateDto(
+    string? Label,
+    int? PerformerId,
+    bool Ignored,
+    string? PrimarySourceKey);
+
+public record FaceUpdateDto(
+    string? Label,
+    int? PerformerId,
+    bool Ignored,
+    string? PrimarySourceKey);
+
+public record FaceLinkDto(int? PerformerId);
+
+public record FaceMergeDto(int TargetFaceId);
+
+public record FaceIgnoreDto(bool Ignored);
+
+public record FaceDeleteImpactDto(
+    int DetectionCount,
+    int EmbeddingCount,
+    int SegmentCount,
+    bool HasCoverImage,
+    int ReleasedMergedFaceCount);
+
+public record FaceSuggestionDecisionDto(
+    int PerformerId,
+    string Decision);
+
+public record FaceSuggestionEvidenceDto(
+    int FaceId,
+    string? ThumbnailUrl,
+    float Similarity);
+
+public record FaceSuggestionDto(
+    int PerformerId,
+    string PerformerName,
+    string? CoverImageUrl,
+    float Confidence,
+    string Why,
+    IReadOnlyList<FaceSuggestionEvidenceDto> Evidence,
+    int? LocalPerformerId = null,
+    string? ExternalUrl = null);
+
+public record FaceSimilarDto(
+    int Id,
+    string? Label,
+    int? PerformerId,
+    string? PerformerName,
+    string? CoverImageUrl,
+    float Distance);
+
+public record EmbeddingDto(
+    int Id,
+    EmbeddingHostType HostType,
+    int HostId,
+    string Kind,
+    string? KindFamily,
+    EmbeddingModality Modality,
+    bool IsSemantic,
+    int Dim,
+    float[] Vector,
+    int SectionIndex,
+    double? StartSec,
+    double? EndSec,
+    string SourceKey,
+    string? SourceRunId,
+    JsonElement? Meta,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public record EmbeddingSearchRequestDto(
+    string? QueryText,
+    float[]? QueryVector,
+    string? Kind,
+    string? KindFamily,
+    EmbeddingHostType? HostType,
+    int? HostId,
+    EmbeddingModality? Modality,
+    bool? IsSemantic,
+    string? SourceKey,
+    int K = 20);
+
+public record EmbeddingSearchResultDto(
+    int EmbeddingId,
+    EmbeddingHostType HostType,
+    int HostId,
+    string Kind,
+    string? KindFamily,
+    EmbeddingModality Modality,
+    bool IsSemantic,
+    int SectionIndex,
+    double? StartSec,
+    double? EndSec,
+    string SourceKey,
+    string? SourceRunId,
+    float Distance);
+
+public record AiRunDto(
+    int Id,
+    string RunKey,
+    string SourceKey,
+    AiRunTargetType TargetType,
+    int TargetId,
+    string? Trigger,
+    string? JobId,
+    AiRunStatus Status,
+    DateTime StartedAt,
+    DateTime? CompletedAt,
+    string? LoadPolicy,
+    double? FrameIntervalSec,
+    bool? Vr,
+    JsonElement? Request,
+    JsonElement? Models,
+    JsonElement? Summary,
+    string? Error,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public record AiDataSelectorDto(
+    string? SourceKey,
+    string? SourceRunId,
+    string? Model,
+    string? Modality,
+    string? HostType,
+    int? HostId,
+    List<string>? Kinds);
+
+public record AiDataPurgeRequestDto(
+    string? SourceKey,
+    string? SourceRunId,
+    string? Model,
+    string? Modality,
+    string? HostType,
+    int? HostId,
+    List<string>? Kinds,
+    bool DryRun = false)
+{
+    public AiDataSelectorDto ToSelectorDto()
+        => new(SourceKey, SourceRunId, Model, Modality, HostType, HostId, Kinds);
+}
+
+public record AiDataSummaryItemDto(
+    string Kind,
+    string? Detail,
+    string SourceKey,
+    string? SourceRunId,
+    string? Model,
+    string HostType,
+    int Count);
+
+public record AiDataSummaryDto(
+    IReadOnlyList<AiDataSummaryItemDto> Items,
+    IReadOnlyDictionary<string, int> Totals,
+    int TotalCount);
+
+public record AiDataPurgeResultDto(IReadOnlyDictionary<string, int> RemovedCounts);
 
 public record PaginatedResponse<T>(IReadOnlyList<T> Items, int TotalCount, int Page, int PerPage);
 
@@ -621,10 +1241,79 @@ public record DownloaderBatchStartRequestDto
     public DownloaderBatchFollowUpDto FollowUp { get; init; } = new();
 }
 
-// ===== ACTIVITY DTOs =====
-public record SceneActivityDto(double? ResumeTime, double? PlayDuration);
+// ===== PLAYBACK TRACKING DTOs =====
+public record PlaybackIntervalInputDto(double StartSec, double EndSec);
 
-public record SceneHistoryDto(List<string> PlayHistory, List<string> OHistory);
+public record PlaybackIntervalsRequestDto(
+    string HostType,
+    int HostId,
+    Guid SessionId,
+    double MediaDurationSec,
+    double CurrentPositionSec,
+    string State,
+    List<PlaybackIntervalInputDto> Intervals);
+
+public record PlaybackIntervalDto(double StartSec, double EndSec, string RecordedAt);
+
+public record ScenePlaybackSessionDto(
+    Guid SessionId,
+    string StartedAt,
+    string LastSeenAt,
+    string? EndedAt,
+    string State,
+    double MediaDurationSec,
+    double TotalWatchedSec,
+    double? LastPositionSec,
+    bool IsCompleted,
+    List<PlaybackIntervalDto> Intervals);
+
+// Non-playback events timeline (pause, seek, search, filter, etc.)
+public record InteractionEventDto(string Kind, string At, JsonElement? Meta = null);
+
+public record SceneRatingDto(int? Value, string Aspect = "overall");
+
+public record EntityEngagementDto(
+    int HostId,
+    bool IsFavorite,
+    int? Rating,
+    double ResumeTime,
+    double PlayDuration,
+    int PlayCount,
+    string? LastPlayedAt,
+    int OCount,
+    int CompleteCount);
+
+public record EntityRatingsDto(int HostId, Dictionary<string, int> Ratings);
+
+public record EntityFavoriteDto(bool IsFavorite);
+
+public record EntityEngagementBatchRequestDto(AffinityHostType HostType, List<int> HostIds);
+
+public record EngagementInteractionWriteDto(
+    string HostType,
+    int? HostId,
+    string Kind,
+    JsonElement? Meta = null);
+
+public record EngagementInteractionDto(
+    int Id,
+    string HostType,
+    int? HostId,
+    string Kind,
+    string At,
+    JsonElement? Meta = null);
+
+public record SceneHistoryDto(
+    List<string> PlayHistory,
+    List<string> OHistory,
+    /// <summary>Non-playback engagement events (search, filter, O-count, etc.).</summary>
+    List<InteractionEventDto>? Events = null,
+    /// <summary>Merged watched intervals across all sessions (the unique sections this user has ever watched).</summary>
+    List<PlaybackIntervalDto>? AllTimeWatchedIntervals = null,
+    /// <summary>Total unique seconds watched across all sessions.</summary>
+    double? TotalDistinctWatchedSec = null,
+    /// <summary>Per-session playback history.</summary>
+    List<ScenePlaybackSessionDto>? Sessions = null);
 
 // ===== BULK UPDATE DTOs =====
 public enum BulkUpdateMode { Set, Add, Remove }
@@ -723,7 +1412,6 @@ public record ReorderSubGroupsDto(List<int> SubGroupIds);
 
 // ===== BATCH/BULK DTOs =====
 public record BatchDeleteDto(List<int> Ids);
-public record BulkSceneMarkerUpdateDto(List<int> Ids, int? PrimaryTagId, string? TagMode, List<int>? TagIds);
 
 // ===== FILE OPERATION DTOs =====
 public record MoveFilesDto(List<int> FileIds, string DestinationPath);

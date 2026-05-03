@@ -17,6 +17,7 @@ COPY src/Cove.Core/Cove.Core.csproj Cove.Core/
 COPY src/Cove.Data/Cove.Data.csproj Cove.Data/
 COPY src/Cove.Plugins/Cove.Plugins.csproj Cove.Plugins/
 COPY src/Cove.Sdk/Cove.Sdk.csproj Cove.Sdk/
+COPY src/Cove.PerformanceTests/Cove.PerformanceTests.csproj Cove.PerformanceTests/
 COPY src/Cove.Tests/Cove.Tests.csproj Cove.Tests/
 RUN dotnet restore Cove.slnx
 
@@ -47,7 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     esac \
     && curl -fsSL "$FFMPEG_URL" | tar -Jx --strip-components=2 -C /usr/local/bin/ --wildcards '*/bin/ffmpeg' '*/bin/ffprobe' \
     && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
-    && apt-get purge -y --auto-remove curl xz-utils \
+    && apt-get purge -y --auto-remove xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash cove
@@ -67,6 +68,7 @@ ENV COVE__Host=0.0.0.0 \
     COVE__Postgres__Managed=false
 
 EXPOSE 9999
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD curl -fsS http://localhost:9999/health || exit 1
 VOLUME ["/data", "/config", "/generated", "/cache", "/backups"]
 
 ENTRYPOINT ["dotnet", "Cove.Api.dll"]

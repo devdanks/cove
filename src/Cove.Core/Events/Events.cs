@@ -10,7 +10,6 @@ public enum EventType
     GalleryCreated, GalleryUpdated, GalleryDeleted,
     ImageCreated, ImageUpdated, ImageDeleted,
     GroupCreated, GroupUpdated, GroupDeleted,
-    SceneMarkerCreated, SceneMarkerUpdated, SceneMarkerDeleted,
 
     // Jobs
     ScanStarted, ScanProgress, ScanCompleted,

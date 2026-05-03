@@ -21,11 +21,10 @@ public class SceneRepository : ISceneRepository
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
             .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
-            .Include(s => s.SceneGroups).ThenInclude(sg => sg.Group)
+            .Include(s => s.GroupItems).ThenInclude(item => item.Group)
             .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
             .Include(s => s.Files).ThenInclude(f => f.Captions)
             .Include(s => s.Files).ThenInclude(f => f.ParentFolder)
-            .Include(s => s.SceneMarkers)
             .Include(s => s.RemoteIds)
             .AsSplitQuery()
             .FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -130,7 +129,6 @@ public class SceneRepository : ISceneRepository
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
             .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
             .Include(s => s.Files)
-            .Include(s => s.SceneMarkers)
             .AsSplitQuery()
             .Where(s => pagedIds.Contains(s.Id))
             .AsNoTracking()
@@ -155,7 +153,7 @@ public class SceneRepository : ISceneRepository
             if (filter.StudioId.HasValue)
                 query = query.Where(s => s.StudioId == filter.StudioId.Value);
             if (filter.GroupId.HasValue)
-                query = query.Where(s => s.SceneGroups.Any(sg => sg.GroupId == filter.GroupId.Value));
+                query = query.Where(s => s.GroupItems.Any(item => item.GroupId == filter.GroupId.Value));
             if (filter.GalleryId.HasValue)
                 query = query.Where(s => s.SceneGalleries.Any(sg => sg.GalleryId == filter.GalleryId.Value));
             if (filter.TagIds?.Count > 0)
@@ -200,15 +198,10 @@ public class SceneRepository : ISceneRepository
                 };
             }
 
-            query = ApplyMultiIdCriterion(query, filter.GroupsCriterion, s => s.SceneGroups.Select(sg => sg.GroupId));
+            query = ApplyMultiIdCriterion(query, filter.GroupsCriterion, s => s.GroupItems.Select(item => item.GroupId));
 
             if (filter.OrganizedCriterion != null)
                 query = query.Where(s => s.Organized == filter.OrganizedCriterion.Value);
-
-            if (filter.HasMarkersCriterion != null)
-                query = filter.HasMarkersCriterion.Value
-                    ? query.Where(s => s.SceneMarkers.Count > 0)
-                    : query.Where(s => s.SceneMarkers.Count == 0);
 
             if (filter.InteractiveCriterion != null)
                 query = filter.InteractiveCriterion.Value

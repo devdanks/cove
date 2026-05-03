@@ -1,0 +1,54 @@
+export interface EntityDetailTab {
+  key: string;
+  label: string;
+  count?: number;
+  disabled?: boolean;
+}
+
+interface EntityDetailTabsProps {
+  tabs: EntityDetailTab[];
+  activeTab: string;
+  onTabChange: (key: string) => void;
+  className?: string;
+}
+
+export function EntityDetailTabs({ tabs, activeTab, onTabChange, className = "" }: EntityDetailTabsProps) {
+  if (tabs.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={["border-b border-border", className].filter(Boolean).join(" ")}>
+      <div className="overflow-x-auto">
+        <div className="flex w-max min-w-max gap-1" role="tablist" aria-label="Detail tabs">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-label={tab.label}
+                disabled={tab.disabled}
+                onClick={() => onTabChange(tab.key)}
+                className={[
+                  "inline-flex min-h-10 shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors",
+                  isActive
+                    ? "border-accent text-foreground"
+                    : "border-transparent text-secondary hover:border-muted hover:text-foreground",
+                  tab.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
+                ].join(" ")}
+              >
+                <span>{tab.label}</span>
+                {typeof tab.count === "number" ? (
+                  <span className="rounded-full bg-card px-2 py-0.5 text-xs text-muted">{tab.count}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}

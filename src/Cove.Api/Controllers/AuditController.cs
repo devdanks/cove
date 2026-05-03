@@ -33,17 +33,28 @@ public class AuditController : ControllerBase
             query = query.Where(e => e.ActorUserId == aid);
 
         var total = await query.LongCountAsync(ct);
-        var rows = await query
+        var pageQuery = query
             .OrderByDescending(e => e.Id)
             .Skip((page - 1) * perPage)
-            .Take(perPage)
-            .Join(_db.Users.AsNoTracking().DefaultIfEmpty(),
-                e => e.ActorUserId,
-                u => u.Id,
-                (e, u) => new AuditEventDto(
-                    e.Id, e.OccurredAt, e.ActorUserId, u == null ? null : u.Username,
-                    e.ActorKind, e.Ip, e.UserAgent, e.Action,
-                    e.TargetKind, e.TargetId, e.Outcome, e.Detail))
+            .Take(perPage);
+
+        var rows = await (
+            from e in pageQuery
+            join u in _db.Users.AsNoTracking() on e.ActorUserId equals (int?)u.Id into userGroup
+            from u in userGroup.DefaultIfEmpty()
+            select new AuditEventDto(
+                e.Id,
+                e.OccurredAt,
+                e.ActorUserId,
+                u != null ? u.Username : null,
+                e.ActorKind,
+                e.Ip,
+                e.UserAgent,
+                e.Action,
+                e.TargetKind,
+                e.TargetId,
+                e.Outcome,
+                e.Detail))
             .ToListAsync(ct);
 
         return Ok(new { items = rows, totalCount = total, page, perPage });

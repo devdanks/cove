@@ -340,7 +340,7 @@ public class SceneFilterBehaviorTests
     {
         var repository = new CapturingSceneRepository();
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        var controller = new ScenesController(repository, null!, null!, null!, null!, memoryCache, null!, null!, null!);
+        var controller = new ScenesController(repository, null!, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService());
 
         await controller.Find(q: null, page: 1, perPage: 25, sort: "random", direction: "desc", seed: 12345, ct: default);
 

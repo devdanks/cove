@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { scenes, performers, studios, tags, galleries, groups, savedFilters } from "../api/client";
-import type { Scene, Performer, Studio, Tag, Gallery, Group, SavedFilter } from "../api/types";
+import type { AffinityHostType, EntityEngagement, Scene, Performer, Studio, Tag, Gallery, Group, SavedFilter } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from "../components/shared";
 import { RatingBanner } from "../components/Rating";
 import { ChevronLeft, ChevronRight, Settings2, Plus, Trash2, Film, User, Building2, Tag as TagIcon, Images, Clapperboard, GripVertical } from "lucide-react";
 import { createRouteLinkProps } from "../components/cardNavigation";
+import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,8 @@ function CustomFilterRecommendationRow({ filter, onNavigate }: { filter: CustomF
   });
 
   const items = data?.items ?? [];
+  const engagementHostType = getRecommendationEngagementHostType(filter.mode);
+  const { engagementById } = useEntityEngagementBatch(engagementHostType ?? "scene", engagementHostType ? items.map((item: any) => item.id) : []);
   if (!isLoading && items.length === 0) return null;
 
   return (
@@ -146,7 +149,7 @@ function CustomFilterRecommendationRow({ filter, onNavigate }: { filter: CustomF
       count={items.length}
     >
       {items.map((item: any) => (
-        <EntityCard key={item.id} item={item} mode={filter.mode} onNavigate={onNavigate} />
+        <EntityCard key={item.id} item={item} engagement={engagementById.get(item.id)} mode={filter.mode} onNavigate={onNavigate} />
       ))}
     </RecommendationRowShell>
   );
@@ -192,6 +195,8 @@ function SavedFilterRecommendationRow({ savedFilterId, onNavigate }: { savedFilt
   });
 
   const items = (data as any)?.items ?? [];
+  const engagementHostType = getRecommendationEngagementHostType(mode);
+  const { engagementById } = useEntityEngagementBatch(engagementHostType ?? "scene", engagementHostType ? items.map((item: any) => item.id) : []);
   if (!filter || (!isLoading && items.length === 0)) return null;
 
   return (
@@ -203,7 +208,7 @@ function SavedFilterRecommendationRow({ savedFilterId, onNavigate }: { savedFilt
       count={items.length}
     >
       {items.map((item: any) => (
-        <EntityCard key={item.id} item={item} mode={mode!} onNavigate={onNavigate} />
+        <EntityCard key={item.id} item={item} engagement={engagementById.get(item.id)} mode={mode!} onNavigate={onNavigate} />
       ))}
     </RecommendationRowShell>
   );
@@ -332,26 +337,27 @@ function RecommendationRowShell({
 
 // ─── Entity Card (renders appropriate card based on mode) ───────────────────
 
-function EntityCard({ item, mode, onNavigate }: { item: any; mode: FilterMode; onNavigate: (r: any) => void }) {
+function EntityCard({ item, engagement, mode, onNavigate }: { item: any; engagement?: EntityEngagement; mode: FilterMode; onNavigate: (r: any) => void }) {
   switch (mode) {
-    case "scenes": return <SceneRecommendationCard scene={item} onNavigate={onNavigate} />;
-    case "performers": return <PerformerRecommendationCard performer={item} onNavigate={onNavigate} />;
-    case "studios": return <StudioRecommendationCard studio={item} onNavigate={onNavigate} />;
+    case "scenes": return <SceneRecommendationCard scene={item} engagement={engagement} onNavigate={onNavigate} />;
+    case "performers": return <PerformerRecommendationCard performer={item} engagement={engagement} onNavigate={onNavigate} />;
+    case "studios": return <StudioRecommendationCard studio={item} engagement={engagement} onNavigate={onNavigate} />;
     case "tags": return <TagRecommendationCard tag={item} onNavigate={onNavigate} />;
-    case "galleries": return <GalleryRecommendationCard gallery={item} onNavigate={onNavigate} />;
-    case "groups": return <GroupRecommendationCard group={item} onNavigate={onNavigate} />;
+    case "galleries": return <GalleryRecommendationCard gallery={item} engagement={engagement} onNavigate={onNavigate} />;
+    case "groups": return <GroupRecommendationCard group={item} engagement={engagement} onNavigate={onNavigate} />;
     default: return null;
   }
 }
 
 // ─── Scene Card ─────────────────────────────────────────────────────────────
 
-function SceneRecommendationCard({ scene, onNavigate }: { scene: Scene; onNavigate: (r: any) => void }) {
+function SceneRecommendationCard({ scene, engagement, onNavigate }: { scene: Scene; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const file = scene.files[0];
   const duration = file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
   const screenshotUrl = scenes.screenshotUrl(scene.id);
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: scene.id }, () => onNavigate({ page: "scene", id: scene.id }));
+  const rating = engagement?.rating ?? scene.rating;
 
   return (
     <a
@@ -366,7 +372,7 @@ function SceneRecommendationCard({ scene, onNavigate }: { scene: Scene; onNaviga
           {resLabel && <span className="bg-black/70 px-1 py-0.5 rounded font-bold">{resLabel}</span>}
           {duration > 0 && <span className="bg-black/70 px-1 py-0.5 rounded">{formatDuration(duration)}</span>}
         </div>
-        <RatingBanner rating={scene.rating} />
+        <RatingBanner rating={rating} />
       </div>
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">
@@ -389,8 +395,9 @@ function SceneRecommendationCard({ scene, onNavigate }: { scene: Scene; onNaviga
 
 // ─── Performer Card ─────────────────────────────────────────────────────────
 
-function PerformerRecommendationCard({ performer, onNavigate }: { performer: Performer; onNavigate: (r: any) => void }) {
+function PerformerRecommendationCard({ performer, engagement, onNavigate }: { performer: Performer; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, () => onNavigate({ page: "performer", id: performer.id }));
+  const rating = engagement?.rating ?? performer.rating;
 
   return (
     <a
@@ -406,7 +413,7 @@ function PerformerRecommendationCard({ performer, onNavigate }: { performer: Per
             <User className="w-10 h-10 text-muted" />
           </div>
         )}
-        <RatingBanner rating={performer.rating} />
+        <RatingBanner rating={rating} />
       </div>
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{performer.name}</p>
@@ -421,8 +428,9 @@ function PerformerRecommendationCard({ performer, onNavigate }: { performer: Per
 
 // ─── Studio Card ────────────────────────────────────────────────────────────
 
-function StudioRecommendationCard({ studio, onNavigate }: { studio: Studio; onNavigate: (r: any) => void }) {
+function StudioRecommendationCard({ studio, engagement, onNavigate }: { studio: Studio; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "studio", id: studio.id }, () => onNavigate({ page: "studio", id: studio.id }));
+  const rating = engagement?.rating ?? studio.rating;
 
   return (
     <a
@@ -436,7 +444,7 @@ function StudioRecommendationCard({ studio, onNavigate }: { studio: Studio; onNa
         ) : (
           <Building2 className="w-10 h-10 text-muted" />
         )}
-        <RatingBanner rating={studio.rating} />
+        <RatingBanner rating={rating} />
       </div>
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{studio.name}</p>
@@ -480,8 +488,9 @@ function TagRecommendationCard({ tag, onNavigate }: { tag: Tag; onNavigate: (r: 
 
 // ─── Gallery Card ───────────────────────────────────────────────────────────
 
-function GalleryRecommendationCard({ gallery, onNavigate }: { gallery: Gallery; onNavigate: (r: any) => void }) {
+function GalleryRecommendationCard({ gallery, engagement, onNavigate }: { gallery: Gallery; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, () => onNavigate({ page: "gallery", id: gallery.id }));
+  const rating = engagement?.rating ?? gallery.rating;
 
   return (
     <a
@@ -495,7 +504,7 @@ function GalleryRecommendationCard({ gallery, onNavigate }: { gallery: Gallery; 
         ) : (
           <Images className="w-8 h-8 text-muted" />
         )}
-        <RatingBanner rating={gallery.rating} />
+        <RatingBanner rating={rating} />
       </div>
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{gallery.title || "Untitled"}</p>
@@ -510,8 +519,9 @@ function GalleryRecommendationCard({ gallery, onNavigate }: { gallery: Gallery; 
 
 // ─── Group Card ─────────────────────────────────────────────────────────────
 
-function GroupRecommendationCard({ group, onNavigate }: { group: Group; onNavigate: (r: any) => void }) {
+function GroupRecommendationCard({ group, engagement, onNavigate }: { group: Group; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
+  const rating = engagement?.rating ?? group.rating;
 
   return (
     <a
@@ -525,7 +535,7 @@ function GroupRecommendationCard({ group, onNavigate }: { group: Group; onNaviga
         ) : (
           <Clapperboard className="w-8 h-8 text-muted" />
         )}
-        <RatingBanner rating={group.rating} />
+        <RatingBanner rating={rating} />
       </div>
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{group.name}</p>
@@ -536,6 +546,23 @@ function GroupRecommendationCard({ group, onNavigate }: { group: Group; onNaviga
       </div>
     </a>
   );
+}
+
+function getRecommendationEngagementHostType(mode: FilterMode | undefined): AffinityHostType | null {
+  switch (mode) {
+    case "scenes":
+      return "scene";
+    case "performers":
+      return "performer";
+    case "studios":
+      return "studio";
+    case "galleries":
+      return "gallery";
+    case "groups":
+      return "group";
+    default:
+      return null;
+  }
 }
 
 // ─── Front Page Editor ──────────────────────────────────────────────────────

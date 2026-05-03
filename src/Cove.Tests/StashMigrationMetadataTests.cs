@@ -93,6 +93,74 @@ INSERT INTO performers_tags (performer_id, tag_id) VALUES (1, 7);
         Assert.Equal([tag.Id], performer.PerformerTags.Select(pt => pt.TagId).ToArray());
     }
 
+        [Fact]
+        public async Task ImportPerformersAsync_ImportsMultiplePerformersWithUrls()
+        {
+                await using var context = CreateContext();
+
+                await using var stash = new SqliteConnection("Data Source=:memory:");
+                await stash.OpenAsync();
+                await ExecuteSqlAsync(stash, @"
+CREATE TABLE performers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    disambiguation TEXT,
+    gender TEXT,
+    birthdate TEXT,
+    ethnicity TEXT,
+    country TEXT,
+    eye_color TEXT,
+    hair_color TEXT,
+    height INTEGER,
+    weight INTEGER,
+    measurements TEXT,
+    fake_tits TEXT,
+    penis_length REAL,
+    circumcised TEXT,
+    career_length TEXT,
+    death_date TEXT,
+    tattoos TEXT,
+    piercings TEXT,
+    favorite INTEGER NOT NULL,
+    rating INTEGER,
+    details TEXT,
+    ignore_auto_tag INTEGER NOT NULL,
+    image_blob TEXT
+);
+CREATE TABLE performer_urls (performer_id INTEGER NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE performer_aliases (performer_id INTEGER NOT NULL, alias TEXT NOT NULL);
+CREATE TABLE performers_tags (performer_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+INSERT INTO performers (id, name, favorite, ignore_auto_tag) VALUES
+    (1, 'First Performer', 0, 0),
+    (2, 'Second Performer', 0, 0);
+INSERT INTO performer_urls (performer_id, url) VALUES
+    (1, 'https://performer-a.local'),
+    (1, 'https://performer-a.local'),
+    (2, 'https://performer-b.local');
+");
+
+                var service = CreateService(context);
+                await InvokePrivateAsync(
+                        service,
+                        "ImportPerformersAsync",
+                        stash,
+                        new Dictionary<string, string>(),
+                        new Dictionary<int, int>(),
+                        NullJobProgress.Instance,
+                        0d,
+                        1d,
+                        CancellationToken.None);
+
+                var performers = await context.Performers
+                        .Include(performer => performer.Urls)
+                        .OrderBy(performer => performer.Name)
+                        .ToListAsync();
+
+                Assert.Equal(2, performers.Count);
+                Assert.Equal(["https://performer-a.local"], performers[0].Urls.Select(url => url.Url).ToArray());
+                Assert.Equal(["https://performer-b.local"], performers[1].Urls.Select(url => url.Url).ToArray());
+        }
+
     [Fact]
     public async Task ImportBlobsAsync_DetectsAvifContentType()
     {
@@ -376,6 +444,103 @@ VALUES (1, 50, NULL, 0, '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z');
         Assert.Equal("Summer Set", gallery.Title);
     }
 
+    [Fact]
+    public async Task ImportFoldersAsync_ReusesExistingFoldersWhenSlashDirectionDiffers()
+    {
+        await using var context = CreateContext();
+        var existingFolder = new Folder
+        {
+            Path = "C:/library",
+            ModTime = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        };
+        context.Folders.Add(existingFolder);
+        await context.SaveChangesAsync();
+
+        await using var stash = new SqliteConnection("Data Source=:memory:");
+        await stash.OpenAsync();
+        await ExecuteSqlAsync(stash, @"
+CREATE TABLE folders (
+  id INTEGER PRIMARY KEY,
+  path TEXT NOT NULL,
+  parent_folder_id INTEGER,
+  mod_time TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+INSERT INTO folders (id, path, parent_folder_id, mod_time, created_at) VALUES
+    (1, 'C:\library', NULL, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z'),
+    (2, 'C:\library\clips', 1, '2024-01-02T00:00:00Z', '2024-01-02T00:00:00Z');
+");
+
+        var service = CreateService(context);
+        var folderIdMap = Assert.IsType<Dictionary<int, int>>(await InvokePrivateAsync(
+            service,
+            "ImportFoldersAsync",
+            stash,
+            NullJobProgress.Instance,
+            0d,
+            1d,
+            CancellationToken.None));
+
+        Assert.Equal(existingFolder.Id, folderIdMap[1]);
+        Assert.Equal(2, await context.Folders.CountAsync());
+        Assert.Equal(1, await context.Folders.CountAsync(folder => folder.Path == "C:/library"));
+
+        var importedChild = await context.Folders.SingleAsync(folder => folder.Id == folderIdMap[2]);
+        Assert.Equal("C:/library/clips", importedChild.Path);
+        Assert.Equal(existingFolder.Id, importedChild.ParentFolderId);
+    }
+
+    [Fact]
+    public async Task ImportStudiosAsync_ImportsMultipleRemoteIdsForSingleStudio()
+    {
+        await using var context = CreateContext();
+
+        await using var stash = new SqliteConnection("Data Source=:memory:");
+        await stash.OpenAsync();
+        await ExecuteSqlAsync(stash, @"
+CREATE TABLE studios (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  parent_id INTEGER,
+  details TEXT,
+  rating INTEGER,
+  favorite INTEGER NOT NULL,
+  ignore_auto_tag INTEGER NOT NULL,
+  image_blob TEXT
+);
+CREATE TABLE studio_urls (studio_id INTEGER NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE studio_aliases (studio_id INTEGER NOT NULL, alias TEXT NOT NULL);
+CREATE TABLE studio_stash_ids (studio_id INTEGER NOT NULL, endpoint TEXT NOT NULL, stash_id TEXT NOT NULL);
+INSERT INTO studios (id, name, favorite, ignore_auto_tag) VALUES (1, 'Imported Studio', 0, 0);
+INSERT INTO studio_stash_ids (studio_id, endpoint, stash_id) VALUES
+  (1, 'https://stash-a.local', '101'),
+    (1, 'https://stash-a.local', '101'),
+  (1, 'https://stash-b.local', '202');
+");
+
+        var service = CreateService(context);
+        var studioIdMap = Assert.IsType<Dictionary<int, int>>(await InvokePrivateAsync(
+            service,
+            "ImportStudiosAsync",
+            stash,
+            new Dictionary<string, string>(),
+            NullJobProgress.Instance,
+            0d,
+            1d,
+            CancellationToken.None));
+
+        var importedStudio = await context.Studios
+            .Include(studio => studio.RemoteIds)
+            .SingleAsync(studio => studio.Id == studioIdMap[1]);
+
+        Assert.Equal("Imported Studio", importedStudio.Name);
+        Assert.Equal(2, importedStudio.RemoteIds.Count);
+        Assert.Contains(importedStudio.RemoteIds, remoteId => remoteId.Endpoint == "https://stash-a.local" && remoteId.RemoteId == "101");
+        Assert.Contains(importedStudio.RemoteIds, remoteId => remoteId.Endpoint == "https://stash-b.local" && remoteId.RemoteId == "202");
+    }
+
         [Fact]
         public async Task ReconcileImportedZipLinksAsync_PreservesZipFileIdsForImportedImages()
         {
@@ -514,6 +679,396 @@ INSERT INTO galleries_files (gallery_id, file_id, [primary]) VALUES (200, 10, 1)
                 Assert.Equal(importedGalleryFile.Id, importedFolder.ZipFileId);
         }
 
+        [Fact]
+        public async Task ImportSceneMarkerSegmentsAsync_ImportsMarkersAsUserSegments()
+        {
+                await using var context = CreateContext();
+                var scene = new Scene { Title = "Imported Scene" };
+                var primaryTag = new Tag { Name = "Favorite" };
+                var secondaryTag = new Tag { Name = "Extra" };
+                context.AddRange(scene, primaryTag, secondaryTag);
+                await context.SaveChangesAsync();
+
+                await using var stash = new SqliteConnection("Data Source=:memory:");
+                await stash.OpenAsync();
+                await ExecuteSqlAsync(stash, @"
+CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE scene_markers (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    seconds REAL NOT NULL,
+    end_seconds REAL,
+    primary_tag_id INTEGER NOT NULL,
+    scene_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE scene_markers_tags (scene_marker_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+INSERT INTO tags (id, name) VALUES (7, 'Favorite'), (9, 'Extra');
+INSERT INTO scene_markers (id, title, seconds, end_seconds, primary_tag_id, scene_id, created_at, updated_at)
+VALUES (1, 'Imported marker', 12.5, 18.0, 7, 3, '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z');
+INSERT INTO scene_markers_tags (scene_marker_id, tag_id) VALUES (1, 9);
+");
+
+                var service = CreateService(context);
+                var imported = (int)(await InvokePrivateAsync(
+                        service,
+                        "ImportSceneMarkerSegmentsAsync",
+                        stash,
+                        new Dictionary<int, int> { [3] = scene.Id },
+                        new Dictionary<int, int> { [7] = primaryTag.Id, [9] = secondaryTag.Id },
+                        NullJobProgress.Instance,
+                        0d,
+                        1d,
+                        CancellationToken.None))!;
+
+                Assert.Equal(1, imported);
+
+                var segment = await context.Segments.SingleAsync();
+                Assert.Equal(SegmentHostType.Scene, segment.HostType);
+                Assert.Equal(scene.Id, segment.HostId);
+                Assert.Equal(12.5, segment.StartSec);
+                Assert.Equal(18.0, segment.EndSec);
+                Assert.Equal(primaryTag.Id, segment.TagId);
+                Assert.Equal("tag", segment.Kind);
+                Assert.Equal("user", segment.SourceKey);
+                Assert.Equal(1L, segment.RefId);
+                Assert.Equal("Imported marker", segment.Title);
+                Assert.Equal(new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), segment.CreatedAt);
+                Assert.Equal(new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc), segment.UpdatedAt);
+                Assert.NotNull(segment.Payload);
+                var secondaryTagIds = segment.Payload!.RootElement.GetProperty("secondaryTagIds");
+                Assert.Equal(1, secondaryTagIds.GetArrayLength());
+                Assert.Equal(secondaryTag.Id, secondaryTagIds[0].GetInt32());
+        }
+
+        [Fact]
+        public async Task ImportSceneMarkerSegmentsAsync_SkipsLegacyAiMarkersAndDescendants()
+        {
+                await using var context = CreateContext();
+                var scene = new Scene { Title = "Imported Scene" };
+                var aiTag = new Tag { Name = "AI" };
+                var aiChildTag = new Tag { Name = "AI Child" };
+                var manualTag = new Tag { Name = "Manual" };
+                context.AddRange(scene, aiTag, aiChildTag, manualTag);
+                await context.SaveChangesAsync();
+
+                await using var stash = new SqliteConnection("Data Source=:memory:");
+                await stash.OpenAsync();
+                await ExecuteSqlAsync(stash, @"
+CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE tags_relations (parent_id INTEGER NOT NULL, child_id INTEGER NOT NULL);
+CREATE TABLE scene_markers (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    seconds REAL NOT NULL,
+    end_seconds REAL,
+    primary_tag_id INTEGER NOT NULL,
+    scene_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+INSERT INTO tags (id, name) VALUES (1, 'AI'), (2, 'AI Child'), (3, 'Manual');
+INSERT INTO tags_relations (parent_id, child_id) VALUES (1, 2);
+INSERT INTO scene_markers (id, title, seconds, end_seconds, primary_tag_id, scene_id, created_at, updated_at)
+VALUES
+    (1, 'AI root marker', 1.0, NULL, 1, 3, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z'),
+    (2, 'AI child marker', 2.0, NULL, 2, 3, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z'),
+    (3, 'Manual marker', 3.0, 5.0, 3, 3, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z');
+");
+
+                var service = CreateService(context);
+                var imported = (int)(await InvokePrivateAsync(
+                        service,
+                        "ImportSceneMarkerSegmentsAsync",
+                        stash,
+                        new Dictionary<int, int> { [3] = scene.Id },
+                        new Dictionary<int, int> { [1] = aiTag.Id, [2] = aiChildTag.Id, [3] = manualTag.Id },
+                        NullJobProgress.Instance,
+                        0d,
+                        1d,
+                        CancellationToken.None))!;
+
+                Assert.Equal(1, imported);
+
+                var segments = await context.Segments.ToListAsync();
+                var segment = Assert.Single(segments);
+                Assert.Equal(manualTag.Id, segment.TagId);
+                Assert.Equal(3L, segment.RefId);
+                Assert.Equal("Manual marker", segment.Title);
+        }
+
+        [Fact]
+        public async Task ImportAiTagDataAsync_ImportsRunsAndSegmentsFromSqliteAiDb()
+        {
+                await using var context = CreateContext();
+                var scene = new Scene { Title = "Imported Scene" };
+                var tag = new Tag { Name = "Body" };
+                context.AddRange(scene, tag);
+                await context.SaveChangesAsync();
+
+                var aiDbPath = await CreateAiSqliteDatabaseAsync(@"
+CREATE TABLE ai_models (
+    id INTEGER PRIMARY KEY,
+    service TEXT NOT NULL,
+    plugin_name TEXT,
+    model_id INTEGER,
+    name TEXT NOT NULL,
+    version REAL,
+    model_type TEXT,
+    categories TEXT,
+    extra TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE ai_model_runs (
+    id INTEGER PRIMARY KEY,
+    service TEXT NOT NULL,
+    plugin_name TEXT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    input_params TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    result_metadata TEXT
+);
+CREATE TABLE ai_model_run_models (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    model_id INTEGER,
+    input_params TEXT,
+    frame_interval REAL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE ai_result_timespans (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    payload_type TEXT NOT NULL,
+    category TEXT,
+    str_value TEXT,
+    value_id INTEGER,
+    start_s REAL NOT NULL,
+    end_s REAL,
+    value_json TEXT,
+    created_at TEXT NOT NULL
+);
+INSERT INTO ai_models (id, service, plugin_name, model_id, name, version, model_type, categories, extra, created_at)
+VALUES (1, 'aioverhaul', 'AIOverhaul', 17, 'wd14', 2.0, 'tagger', '[""body""]', '{""provider"":""local""}', '2024-02-01T00:00:00Z');
+INSERT INTO ai_model_runs (id, service, plugin_name, entity_type, entity_id, status, input_params, started_at, completed_at, result_metadata)
+VALUES (10, 'aioverhaul', 'AIOverhaul', 'scene', 3, 'completed', '{""frame_interval"":2.5,""vr"":true}', '2024-02-01T00:00:00Z', '2024-02-01T00:05:00Z', '{""schema_version"":1}');
+INSERT INTO ai_model_run_models (id, run_id, model_id, input_params, frame_interval, created_at)
+VALUES (20, 10, 1, '{""threshold"":0.3}', 2.5, '2024-02-01T00:00:00Z');
+INSERT INTO ai_result_timespans (id, run_id, entity_type, entity_id, payload_type, category, str_value, value_id, start_s, end_s, value_json, created_at)
+VALUES (30, 10, 'scene', 3, 'tag', 'body', NULL, 7, 12.0, 15.0, '{""confidence"":0.82}', '2024-02-01T00:00:00Z');
+");
+
+                try
+                {
+                        var service = CreateService(context);
+                        var (runCount, segmentCount) = ((ValueTuple<int, int>)(await InvokePrivateAsync(
+                                service,
+                                "ImportAiTagDataAsync",
+                                aiDbPath,
+                                new Dictionary<int, int> { [3] = scene.Id },
+                                new Dictionary<int, int>(),
+                                new Dictionary<int, int> { [7] = tag.Id },
+                                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+                                NullJobProgress.Instance,
+                                0d,
+                                1d,
+                                CancellationToken.None))!);
+
+                        Assert.Equal(1, runCount);
+                        Assert.Equal(1, segmentCount);
+
+                        var aiRun = await context.AiRuns.SingleAsync();
+                        Assert.Equal("import:stash-ai-server", aiRun.SourceKey);
+                        Assert.Equal(AiRunTargetType.Scene, aiRun.TargetType);
+                        Assert.Equal(scene.Id, aiRun.TargetId);
+                        Assert.Equal(AiRunStatus.Completed, aiRun.Status);
+                        Assert.Equal("AIOverhaul", aiRun.Trigger);
+                        Assert.Equal(2.5, aiRun.FrameIntervalSec);
+                        Assert.True(aiRun.Vr);
+                        Assert.NotNull(aiRun.Request);
+                        Assert.Equal(2.5, aiRun.Request!.RootElement.GetProperty("frame_interval").GetDouble());
+                        Assert.NotNull(aiRun.Models);
+                        Assert.Equal("wd14", aiRun.Models!.RootElement[0].GetProperty("name").GetString());
+                        Assert.NotNull(aiRun.Summary);
+                        Assert.Equal(10, aiRun.Summary!.RootElement.GetProperty("legacyRunId").GetInt32());
+
+                        var segment = await context.Segments.SingleAsync();
+                        Assert.Equal(SegmentHostType.Scene, segment.HostType);
+                        Assert.Equal(scene.Id, segment.HostId);
+                        Assert.Equal(tag.Id, segment.TagId);
+                        Assert.Equal("import:stash-ai-server", segment.SourceKey);
+                        Assert.Equal(aiRun.RunKey, segment.SourceRunId);
+                        Assert.Equal(12.0, segment.StartSec);
+                        Assert.Equal(15.0, segment.EndSec);
+                        Assert.Equal(30L, segment.RefId);
+                        Assert.Equal(0.82f, segment.Confidence);
+                        Assert.NotNull(segment.Payload);
+                        Assert.Equal("body", segment.Payload!.RootElement.GetProperty("category").GetString());
+                }
+                finally
+                {
+                    TryDeleteFile(aiDbPath);
+                }
+        }
+
+        [Fact]
+        public async Task ImportAiTagDataAsync_FallsBackToTagNameMappingWhenValueIdMissing()
+        {
+                await using var context = CreateContext();
+                var scene = new Scene { Title = "Imported Scene" };
+                var tag = new Tag { Name = "Body" };
+                context.AddRange(scene, tag);
+                await context.SaveChangesAsync();
+
+                var aiDbPath = await CreateAiSqliteDatabaseAsync(@"
+CREATE TABLE ai_model_runs (
+    id INTEGER PRIMARY KEY,
+    service TEXT NOT NULL,
+    plugin_name TEXT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    input_params TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    result_metadata TEXT
+);
+CREATE TABLE ai_result_timespans (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    payload_type TEXT NOT NULL,
+    category TEXT,
+    str_value TEXT,
+    value_id INTEGER,
+    start_s REAL NOT NULL,
+    end_s REAL,
+    value_json TEXT,
+    created_at TEXT NOT NULL
+);
+INSERT INTO ai_model_runs (id, service, plugin_name, entity_type, entity_id, status, input_params, started_at, completed_at, result_metadata)
+VALUES (11, 'aioverhaul', 'AIOverhaul', 'scene', 3, 'completed', NULL, '2024-02-01T00:00:00Z', '2024-02-01T00:05:00Z', NULL);
+INSERT INTO ai_result_timespans (id, run_id, entity_type, entity_id, payload_type, category, str_value, value_id, start_s, end_s, value_json, created_at)
+VALUES (31, 11, 'scene', 3, 'tag', NULL, 'Body', NULL, 1.0, 2.0, NULL, '2024-02-01T00:00:00Z');
+");
+
+                try
+                {
+                        var service = CreateService(context);
+                        var (runCount, segmentCount) = ((ValueTuple<int, int>)(await InvokePrivateAsync(
+                                service,
+                                "ImportAiTagDataAsync",
+                                aiDbPath,
+                                new Dictionary<int, int> { [3] = scene.Id },
+                                new Dictionary<int, int>(),
+                                new Dictionary<int, int>(),
+                                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Body"] = tag.Id },
+                                NullJobProgress.Instance,
+                                0d,
+                                1d,
+                                CancellationToken.None))!);
+
+                        Assert.Equal(1, runCount);
+                        Assert.Equal(1, segmentCount);
+
+                        var segment = await context.Segments.SingleAsync();
+                        Assert.Equal(tag.Id, segment.TagId);
+                        Assert.Equal(31L, segment.RefId);
+                        Assert.Equal(1.0, segment.StartSec);
+                        Assert.Equal(2.0, segment.EndSec);
+                }
+                finally
+                {
+                    TryDeleteFile(aiDbPath);
+                }
+        }
+
+    [Fact]
+    public async Task RunAiTagImportAsync_ImportsFromExistingStashMappings()
+    {
+        await using var context = CreateContext();
+        var scene = new Scene
+        {
+            Title = "Imported Scene",
+            RemoteIds = [new SceneRemoteId { Endpoint = "StashDB", RemoteId = "3" }],
+        };
+        var tag = new Tag { Name = "Body" };
+        context.AddRange(scene, tag);
+        await context.SaveChangesAsync();
+
+        var stashDbPath = await CreateSqliteDatabaseAsync(@"
+CREATE TABLE tags (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+INSERT INTO tags (id, name) VALUES (7, 'Body');
+");
+        var aiDbPath = await CreateAiSqliteDatabaseAsync(@"
+CREATE TABLE ai_model_runs (
+    id INTEGER PRIMARY KEY,
+    service TEXT NOT NULL,
+    plugin_name TEXT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    input_params TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    result_metadata TEXT
+);
+CREATE TABLE ai_result_timespans (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    payload_type TEXT NOT NULL,
+    category TEXT,
+    str_value TEXT,
+    value_id INTEGER,
+    start_s REAL NOT NULL,
+    end_s REAL,
+    value_json TEXT,
+    created_at TEXT NOT NULL
+);
+INSERT INTO ai_model_runs (id, service, plugin_name, entity_type, entity_id, status, input_params, started_at, completed_at, result_metadata)
+VALUES (41, 'aioverhaul', 'AIOverhaul', 'scene', 3, 'completed', NULL, '2024-02-01T00:00:00Z', '2024-02-01T00:05:00Z', NULL);
+INSERT INTO ai_result_timespans (id, run_id, entity_type, entity_id, payload_type, category, str_value, value_id, start_s, end_s, value_json, created_at)
+VALUES (51, 41, 'scene', 3, 'tag', 'body', NULL, 7, 8.0, 11.0, '{""confidence"":0.75}', '2024-02-01T00:00:00Z');
+");
+
+        try
+        {
+            var service = CreateService(context);
+            var result = await service.RunAiTagImportAsync(stashDbPath, aiDbPath, NullJobProgress.Instance, CancellationToken.None);
+
+            Assert.Equal(1, result.AiRuns);
+            Assert.Equal(1, result.Segments);
+
+            var aiRun = await context.AiRuns.SingleAsync();
+            Assert.Equal(AiRunTargetType.Scene, aiRun.TargetType);
+            Assert.Equal(scene.Id, aiRun.TargetId);
+
+            var segment = await context.Segments.SingleAsync();
+            Assert.Equal(tag.Id, segment.TagId);
+            Assert.Equal(scene.Id, segment.HostId);
+            Assert.Equal(51L, segment.RefId);
+            Assert.Equal(8.0, segment.StartSec);
+            Assert.Equal(11.0, segment.EndSec);
+        }
+        finally
+        {
+            TryDeleteFile(stashDbPath);
+            TryDeleteFile(aiDbPath);
+        }
+    }
+
     private static StashMigrationService CreateService(CoveContext context, IBlobService? blobService = null)
     {
         var config = new CoveConfiguration();
@@ -547,6 +1102,33 @@ INSERT INTO galleries_files (gallery_id, file_id, [primary]) VALUES (200, 10, 1)
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async Task<string> CreateSqliteDatabaseAsync(string sql, string prefix = "cove-test-db")
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"{prefix}-{Guid.NewGuid():N}.sqlite");
+        await using var connection = new SqliteConnection($"Data Source={dbPath}");
+        await connection.OpenAsync();
+        await ExecuteSqlAsync(connection, sql);
+        return dbPath;
+    }
+
+    private static Task<string> CreateAiSqliteDatabaseAsync(string sql)
+        => CreateSqliteDatabaseAsync(sql, "cove-ai-import");
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
     private static CoveContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<CoveContext>()
@@ -569,6 +1151,7 @@ INSERT INTO galleries_files (gallery_id, file_id, [primary]) VALUES (200, 10, 1)
             modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
             modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
             modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
+            modelBuilder.Entity<Face>().Ignore(face => face.CustomFields);
         }
     }
 

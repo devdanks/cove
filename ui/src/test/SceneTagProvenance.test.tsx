@@ -1,0 +1,53 @@
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { DetailsTab } from "../pages/SceneDetailPage";
+
+describe("Scene tag provenance", () => {
+  it("passes tag provenance through to the shared badge surface", () => {
+    const scene = {
+      id: 17,
+      title: "Provenance scene",
+      updatedAt: "2026-05-01T00:00:00Z",
+      files: [],
+      performers: [],
+      groups: [],
+      galleries: [],
+      studioName: null,
+      studioId: null,
+      resumeTime: 0,
+      rating: null,
+      oCounter: 0,
+      organized: false,
+      details: null,
+      date: null,
+      playCount: 0,
+      remoteIds: [],
+      urls: [],
+      customFields: undefined,
+      tags: [
+        {
+          id: 99,
+          name: "AI Tagged",
+          provenance: [
+            {
+              sourceKey: "ext:ai.tagging",
+              sourceRunId: "run-17",
+              modelKey: "tagger-v1",
+              confidence: 0.91,
+              appliedAt: "2026-05-01T00:00:00Z",
+            },
+          ],
+        },
+      ],
+    };
+
+    render(<DetailsTab scene={scene as any} onNavigate={vi.fn()} />);
+
+    expect(screen.getByText("AI")).toBeInTheDocument();
+    expect(screen.getByText("Ai.Tagging")).toBeInTheDocument();
+    expect(screen.getByText("Model tagger-v1")).toBeInTheDocument();
+    expect(screen.getByText("Run run-17")).toBeInTheDocument();
+    expect(screen.getByText("91%")).toBeInTheDocument();
+  });
+});

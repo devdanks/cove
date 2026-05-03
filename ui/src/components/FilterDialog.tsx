@@ -209,7 +209,6 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
     { id: "playCount", label: "Play Count", type: "number", filterKey: "playCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "hasMarkers", label: "Has Markers", type: "bool", filterKey: "hasMarkersCriterion" },
   { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
   { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
   { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
@@ -286,7 +285,6 @@ export const PERFORMER_CRITERIA: CriteriaDefinitionList<PerformerFilterCriteria>
   { id: "piercings", label: "Piercings", type: "string", filterKey: "piercingsCriterion" },
   { id: "aliases", label: "Aliases", type: "string", filterKey: "aliasesCriterion" },
   { id: "deathDate", label: "Death Date", type: "date", filterKey: "deathDateCriterion" },
-  { id: "markerCount", label: "Marker Count", type: "number", filterKey: "markerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "playCount", label: "Play Count", type: "number", filterKey: "playCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "oCounter", label: "Favorites", type: "number", filterKey: "oCounterCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "groups", label: "Groups", type: "multiId", entityType: "groups", filterKey: "groupsCriterion" },
@@ -297,7 +295,6 @@ export const PERFORMER_CRITERIA: CriteriaDefinitionList<PerformerFilterCriteria>
 export const TAG_CRITERIA: CriteriaDefinitionList<TagFilterCriteria> = [
   { id: "favorite", label: "Favorite", type: "bool", filterKey: "favoriteCriterion" },
   { id: "sceneCount", label: "Scene Count", type: "number", filterKey: "sceneCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS, auxiliaryToggleKey: "sceneCountIncludesChildren", auxiliaryToggleLabel: "Count scenes from child tags" },
-  { id: "markerCount", label: "Marker Count", type: "number", filterKey: "markerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS, auxiliaryToggleKey: "markerCountIncludesChildren", auxiliaryToggleLabel: "Count markers from child tags" },
   { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS, auxiliaryToggleKey: "performerCountIncludesChildren", auxiliaryToggleLabel: "Count performers from child tags" },
   { id: "parents", label: "Parent Tags", type: "multiId", entityType: "tags", filterKey: "parentsCriterion" },
   { id: "children", label: "Sub-Tags", type: "multiId", entityType: "tags", filterKey: "childrenCriterion" },
@@ -425,9 +422,20 @@ interface FilterDialogProps {
   activeFilter: Record<string, unknown>;
   onApply: (filter: Record<string, unknown>) => void;
   preselectCriterion?: string;
+  customSections?: FilterDialogCustomSection[];
 }
 
-export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, preselectCriterion }: FilterDialogProps) {
+export interface FilterDialogCustomSection {
+  id: string;
+  label: string;
+  filterKey: string;
+  defaultValue: unknown;
+  isActive: (value: unknown) => boolean;
+  renderEditor: (value: unknown, onChange: (value: unknown) => void) => ReactNode;
+  summarize?: (value: unknown) => string;
+}
+
+export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, preselectCriterion, customSections }: FilterDialogProps) {
   const [editFilter, setEditFilter] = useState<Record<string, unknown>>({ ...activeFilter });
   const backdropPointerDownRef = useRef(false);
   const [search, setSearch] = useState("");
@@ -492,8 +500,10 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
   }, [activeFilterSignature, lastSyncedFilterSignature, open]);
 
   const activeCriterionCount = useMemo(() => {
-    return criteria.filter((c) => editFilter[c.filterKey] !== undefined).length;
-  }, [criteria, editFilter]);
+    const criteriaCount = criteria.filter((criterion) => editFilter[criterion.filterKey] !== undefined).length;
+    const customCount = (customSections ?? []).filter((section) => section.isActive(editFilter[section.filterKey])).length;
+    return criteriaCount + customCount;
+  }, [criteria, customSections, editFilter]);
 
   const handleRemoveCriterion = useCallback((criterion: CriterionDefinition, criterionId?: string) => {
     setEditFilter((prev) => {
@@ -542,7 +552,15 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
   }, []);
 
   const handleApply = () => {
-    onApply(sanitizeFilterCriteria(editFilter, criteria));
+    const nextFilter = sanitizeFilterCriteria(editFilter, criteria);
+    for (const section of customSections ?? []) {
+      const value = editFilter[section.filterKey];
+      if (section.isActive(value)) {
+        nextFilter[section.filterKey] = value;
+      }
+    }
+
+    onApply(nextFilter);
     onClose();
   };
 
@@ -603,6 +621,27 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
         {/* Active filter tags */}
         {activeCriterionCount > 0 && (
           <div className="px-4 py-2 border-b border-border flex flex-wrap gap-1">
+            {(customSections ?? [])
+              .filter((section) => section.isActive(editFilter[section.filterKey]))
+              .map((section) => (
+                <span
+                  key={section.id}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-accent/20 text-accent border border-accent/30"
+                >
+                  {section.label}
+                  <button
+                    onClick={() => setEditFilter((current) => {
+                      const next = { ...current };
+                      delete next[section.filterKey];
+                      return next;
+                    })}
+                    aria-label={`Remove ${section.label} filter chip`}
+                    className="hover:text-white"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
             {criteria
               .filter((c) => editFilter[c.filterKey] !== undefined)
               .map((c) => (
@@ -625,6 +664,63 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
 
         {/* Criterion list */}
         <div className="flex-1 overflow-y-auto px-2 py-1">
+          {(customSections ?? []).map((section) => {
+            const value = editFilter[section.filterKey] ?? section.defaultValue;
+            const isActive = section.isActive(editFilter[section.filterKey]);
+            const isExpanded = expandedCriterion === section.id;
+
+            return (
+              <div key={section.id} className={`rounded mb-0.5 ${isActive ? "bg-accent/5 border border-accent/20" : ""}`}>
+                <div
+                  className="flex items-center gap-1 px-2 py-1.5 cursor-pointer hover:bg-card/50 rounded"
+                  onClick={() => setExpandedCriterion(isExpanded ? null : section.id)}
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="w-3 h-3 text-muted flex-shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-3 h-3 text-muted flex-shrink-0" />
+                  )}
+                  <span className={`text-xs flex-1 ${isActive ? "text-accent font-medium" : "text-foreground"}`}>
+                    {section.label}
+                  </span>
+                  {isActive ? (
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setEditFilter((current) => {
+                          const next = { ...current };
+                          delete next[section.filterKey];
+                          return next;
+                        });
+                      }}
+                      aria-label={`Remove ${section.label} filter row`}
+                      className="p-0.5 rounded hover:bg-red-900/20 text-muted hover:text-red-400"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  ) : null}
+                </div>
+                {isExpanded ? (
+                  <div className="px-3 pb-2">
+                    {section.renderEditor(value, (nextValue) => {
+                      setEditFilter((current) => {
+                        const next = { ...current };
+                        if (section.isActive(nextValue)) {
+                          next[section.filterKey] = nextValue;
+                        } else {
+                          delete next[section.filterKey];
+                        }
+                        return next;
+                      });
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+
+          {customSections && customSections.length > 0 ? <div className="border-t border-border my-1" /> : null}
+
           {/* Pinned divider */}
           {filteredCriteria.some((c) => pinnedIds.has(c.id)) && filteredCriteria.some((c) => !pinnedIds.has(c.id)) && (
             <>

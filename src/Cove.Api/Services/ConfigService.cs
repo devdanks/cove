@@ -81,7 +81,7 @@ public class ConfigService
             Interface = new InterfaceConfigDto
             {
                 Language = cfg.Interface.Language,
-                MenuItems = cfg.Interface.MenuItems,
+                MenuItems = NormalizeMenuItems(cfg.Interface.MenuItems),
             },
             Ui = new UiConfigDto
             {
@@ -254,11 +254,7 @@ public class ConfigService
         cfg.DeleteGeneratedDefault = dto.DeleteGeneratedDefault;
 
         cfg.Interface.Language = dto.Interface.Language;
-        var menuItems = dto.Interface.MenuItems
-            .Where(item => !string.IsNullOrWhiteSpace(item))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        cfg.Interface.MenuItems = menuItems.Count > 0 ? menuItems : [.. InterfaceConfig.DefaultMenuItems];
+        cfg.Interface.MenuItems = NormalizeMenuItems(dto.Interface.MenuItems);
 
         cfg.Ui.Title = string.IsNullOrWhiteSpace(dto.Ui.Title) ? null : dto.Ui.Title.Trim();
         cfg.Ui.AbbreviateCounters = dto.Ui.AbbreviateCounters;
@@ -335,5 +331,36 @@ public class ConfigService
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static List<string> NormalizeMenuItems(IEnumerable<string>? items)
+    {
+        var normalizedItems = items?
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+
+        if (normalizedItems.Count == 0)
+            return [.. InterfaceConfig.DefaultMenuItems];
+
+        if (MatchesMenuItems(normalizedItems, InterfaceConfig.LegacyDefaultMenuItems)
+            || MatchesMenuItems(normalizedItems, InterfaceConfig.SegmentsDefaultMenuItems))
+            return [.. InterfaceConfig.DefaultMenuItems];
+
+        return normalizedItems;
+    }
+
+    private static bool MatchesMenuItems(IReadOnlyList<string> items, IReadOnlyList<string> expected)
+    {
+        if (items.Count != expected.Count)
+            return false;
+
+        for (var i = 0; i < expected.Count; i++)
+        {
+            if (!string.Equals(items[i], expected[i], StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return true;
     }
 }

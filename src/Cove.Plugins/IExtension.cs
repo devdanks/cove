@@ -336,6 +336,8 @@ public class ExtensionManifestFile
     public string? Author { get; set; }
     public string? Url { get; set; }
     public string? IconUrl { get; set; }
+    /// <summary>Manifest type: "extension" or metadata-only "bundle".</summary>
+    public string Kind { get; set; } = "extension";
     /// <summary>Minimum Cove version required (semver).</summary>
     public string? MinCoveVersion { get; set; }
     /// <summary>Extension dependencies: ID → semver range (e.g. ">=1.0.0").</summary>

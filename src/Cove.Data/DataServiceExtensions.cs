@@ -5,6 +5,9 @@ using Cove.Core.Auth;
 using Cove.Core.Interfaces;
 using Cove.Data.Auth;
 using Cove.Data.Repositories;
+using Cove.Data.Services;
+using Npgsql;
+using Pgvector;
 
 namespace Cove.Data;
 
@@ -12,10 +15,20 @@ public static class DataServiceExtensions
 {
     public static IServiceCollection AddCoveData(this IServiceCollection services, string connectionString)
     {
-        // Use DbContext pooling for faster context acquisition (avoids repeated setup)
-        services.AddDbContextPool<CoveContext>(options =>
+        services.AddSingleton(sp =>
         {
-            options.UseNpgsql(connectionString, npgsqlOptions =>
+            var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+            dataSourceBuilder.EnableDynamicJson();
+            dataSourceBuilder.UseVector();
+            return dataSourceBuilder.Build();
+        });
+
+        // Use DbContext pooling for faster context acquisition (avoids repeated setup)
+        services.AddDbContextPool<CoveContext>((sp, options) =>
+        {
+            var dataSource = sp.GetRequiredService<NpgsqlDataSource>();
+
+            options.UseNpgsql(dataSource, npgsqlOptions =>
             {
                 npgsqlOptions.UseVector();
                 npgsqlOptions.MigrationsAssembly(typeof(CoveContext).Assembly.FullName);
@@ -38,7 +51,11 @@ public static class DataServiceExtensions
         services.AddScoped<IImageRepository, ImageRepository>();
         services.AddScoped<IGroupRepository, GroupRepository>();
         services.AddScoped<ISavedFilterRepository, SavedFilterRepository>();
-        services.AddScoped<ISceneMarkerRepository, SceneMarkerRepository>();
+        services.AddScoped<EmbeddingService>();
+        services.AddScoped<SegmentSpanResolver>();
+        services.AddScoped<IUserEngagementService, UserEngagementService>();
+        services.AddScoped<IEmbeddingService>(sp => sp.GetRequiredService<EmbeddingService>());
+        services.AddScoped<ITextEncoderRegistry>(sp => sp.GetRequiredService<EmbeddingService>());
 
         // Schema C Stage 1 dual-write
         services.AddScoped<IEntityIdentifierService, EntityIdentifierService>();

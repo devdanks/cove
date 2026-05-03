@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { scenes, tags, performers, galleries } from "../api/client";
 import type { FindFilter, Scene, SceneCreate, SceneFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { RatingField } from "../components/Rating";
 import { SceneTagger } from "../components/SceneTagger";
@@ -21,6 +22,7 @@ import { StringListEditor } from "../components/StringListEditor";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { StudioSelector } from "../components/StudioSelector";
+import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
 import {
@@ -295,6 +297,7 @@ export function ScenesPage({ onNavigate }: Props) {
             <Play className="w-3 h-3" />
             Play
           </button>
+          <ExtensionSelectionActions entityType="scene" selectedIds={selectedIds} />
           {canDeleteScene && (
             <button
               onClick={() => { if (confirm(`Delete ${selectedIds.size} scene(s)?`)) bulkDeleteMut.mutate(); }}
@@ -309,7 +312,7 @@ export function ScenesPage({ onNavigate }: Props) {
       }
     >
       {displayMode === "grid" && (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 200px), 1fr))" }}>
+        <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {items.map((scene) => (
             <SceneCard
               key={scene.id}
@@ -322,7 +325,7 @@ export function ScenesPage({ onNavigate }: Props) {
               onQuickView={() => setQuickViewId(scene.id)}
             />
           ))}
-        </div>
+        </EntityCardGrid>
       )}
       {displayMode === "list" && (
         <SceneListTable scenes={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />

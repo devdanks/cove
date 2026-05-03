@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { performers, entityImages } from "../api/client";
-import type { FindFilter, Performer, PerformerCreate, PerformerFilterCriteria } from "../api/types";
+import type { EntityEngagement, FindFilter, Performer, PerformerCreate, PerformerFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
+import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { PERFORMER_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, PERFORMER_BULK_FIELDS } from "../components/BulkEditDialog";
 import { Users, Heart, Tag, Film, Image, LayoutGrid, Layers, Trash2, Loader2, Edit, Merge } from "lucide-react";
@@ -71,6 +74,7 @@ export function PerformersPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const { engagementById } = useEntityEngagementBatch("performer", items.map((item) => item.id));
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
 
@@ -163,11 +167,12 @@ export function PerformersPage({ onNavigate }: Props) {
       {displayMode === "tagger" ? (
         <PerformerTagger performers={items} />
       ) : displayMode === "grid" ? (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 160px), 1fr))" }}>
+        <EntityCardGrid minCardWidth="var(--card-min-width, 160px)">
           {items.map((p) => (
             <PerformerCard
               key={p.id}
               performer={p}
+              engagement={engagementById.get(p.id)}
               onClick={() => selecting ? toggle(p.id) : onNavigate({ page: "performer", id: p.id })}
               onNavigate={onNavigate}
               selected={selectedIds.has(p.id)}
@@ -175,9 +180,9 @@ export function PerformersPage({ onNavigate }: Props) {
               selecting={selecting}
             />
           ))}
-        </div>
+        </EntityCardGrid>
       ) : (
-        <PerformerListTable performers={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <PerformerListTable performers={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}
       {items.length === 0 && (
         <div className="text-center text-secondary py-16">
@@ -209,15 +214,19 @@ export function PerformersPage({ onNavigate }: Props) {
   );
 }
 
-function PerformerCard({ performer, onClick, onNavigate, selected, onSelect, selecting }: { performer: Performer; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  const queryClient = useQueryClient();
+function PerformerCard({ performer, engagement, onClick, onNavigate, selected, onSelect, selecting }: { performer: Performer; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const age = performer.birthdate
     ? Math.floor((Date.now() - new Date(performer.birthdate).getTime()) / 31557600000)
     : null;
-
-  const favMut = useMutation({
-    mutationFn: () => performers.update(performer.id, { favorite: !performer.favorite }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["performers"] }),
+  const {
+    favorite,
+    rating,
+    setFavorite,
+    favoritePending,
+  } = useEntityEngagement("performer", performer.id, {
+    enabled: false,
+    fallbackFavorite: engagement?.isFavorite ?? performer.favorite,
+    fallbackRating: engagement?.rating ?? performer.rating,
   });
 
   return (
@@ -249,17 +258,22 @@ function PerformerCard({ performer, onClick, onNavigate, selected, onSelect, sel
 
         {/* Favorite star overlay */}
         <button
-          onClick={(e) => { e.stopPropagation(); favMut.mutate(); }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setFavorite(!favorite);
+          }}
+          disabled={favoritePending}
           className={`absolute top-1 right-1 p-1 transition-opacity ${
-            performer.favorite ? "opacity-100" : "opacity-0 group-hover:opacity-70"
+            favorite ? "opacity-100" : "opacity-0 group-hover:opacity-70"
           }`}
-          title={performer.favorite ? "Unfavorite" : "Favorite"}
+          title={favorite ? "Unfavorite" : "Favorite"}
         >
-          <Heart className={`w-5 h-5 ${performer.favorite ? "fill-red-500 text-red-500" : "text-white drop-shadow-md"}`} />
+          <Heart className={`w-5 h-5 ${favorite ? "fill-red-500 text-red-500" : "text-white drop-shadow-md"}`} />
         </button>
 
         {/* Rating banner */}
-        <RatingBanner rating={performer.rating} />
+        <RatingBanner rating={rating} />
 
         {/* Country flag overlay - bottom right */}
         {performer.country && (
@@ -337,7 +351,7 @@ function PerformerCardPopovers({ performer, onNavigate }: { performer: Performer
   );
 }
 
-function PerformerListTable({ performers: items, onNavigate, selectedIds, onToggle, selecting }: { performers: Performer[]; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
+function PerformerListTable({ performers: items, engagementById, onNavigate, selectedIds, onToggle, selecting }: { performers: Performer[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
   return (
     <table className="w-full text-sm">
       <thead>
@@ -357,6 +371,9 @@ function PerformerListTable({ performers: items, onNavigate, selectedIds, onTogg
           const age = p.birthdate
             ? Math.floor((Date.now() - new Date(p.birthdate).getTime()) / 31557600000)
             : null;
+          const engagement = engagementById.get(p.id);
+          const favorite = engagement?.isFavorite ?? p.favorite;
+          const rating = engagement?.rating ?? p.rating;
           return (
             <tr 
               key={p.id} 
@@ -376,9 +393,9 @@ function PerformerListTable({ performers: items, onNavigate, selectedIds, onTogg
               <td className="py-2 px-3 text-secondary">{age ?? ""}</td>
               <td className="py-2 px-3 text-secondary">{p.country ?? ""}</td>
               <td className="py-2 px-3 text-secondary text-right">{p.sceneCount}</td>
-              <td className="py-2 px-3 text-secondary text-right">{p.rating ?? ""}</td>
+              <td className="py-2 px-3 text-secondary text-right">{rating ?? ""}</td>
               <td className="py-2 px-3">
-                {p.favorite && <Heart className="w-4 h-4 fill-red-500 text-red-500" />}
+                {favorite && <Heart className="w-4 h-4 fill-red-500 text-red-500" />}
               </td>
             </tr>
           );

@@ -107,6 +107,53 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         return NoContent();
     }
 
+    // ── Faces ──────────────────────────────────────────────────
+
+    [HttpPost("faces/{id:int}/image")]
+    [RequiresPermission(Permissions.FacesWrite)]
+    [RequiresEntityAccess(EntityKinds.Face, Permissions.FacesWrite)]
+    public async Task<IActionResult> UploadFaceImage(int id, IFormFile file, CancellationToken ct)
+    {
+        if (!IsImage(file)) return BadRequest("File must be an image.");
+
+        var entity = await db.Faces.FirstOrDefaultAsync(face => face.Id == id, ct);
+        if (entity == null) return NotFound();
+
+        if (entity.CoverBlobId != null)
+            await blobService.DeleteBlobAsync(entity.CoverBlobId, ct);
+
+        await using var stream = file.OpenReadStream();
+        entity.CoverBlobId = await blobService.StoreBlobAsync(stream, file.ContentType, ct);
+        await db.SaveChangesAsync(ct);
+
+        return Ok(new { blobId = entity.CoverBlobId });
+    }
+
+    [HttpGet("faces/{id:int}/image")]
+    [RequiresPermission(Permissions.FacesRead)]
+    public async Task<IActionResult> GetFaceImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
+    {
+        var entity = await db.Faces.FirstOrDefaultAsync(face => face.Id == id, ct);
+        if (entity?.CoverBlobId == null) return NotFound();
+
+        return await ServeBlobAsync(entity.CoverBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
+    }
+
+    [HttpDelete("faces/{id:int}/image")]
+    [RequiresPermission(Permissions.FacesWrite)]
+    [RequiresEntityAccess(EntityKinds.Face, Permissions.FacesWrite)]
+    public async Task<IActionResult> DeleteFaceImage(int id, CancellationToken ct)
+    {
+        var entity = await db.Faces.FirstOrDefaultAsync(face => face.Id == id, ct);
+        if (entity?.CoverBlobId == null) return NotFound();
+
+        await blobService.DeleteBlobAsync(entity.CoverBlobId, ct);
+        entity.CoverBlobId = null;
+        await db.SaveChangesAsync(ct);
+
+        return NoContent();
+    }
+
     // ── Studios ─────────────────────────────────────────────────
 
     [HttpPost("studios/{id:int}/image")]

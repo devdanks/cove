@@ -8,7 +8,8 @@ namespace Cove.Api.Controllers;
 public class StashMigrationController(StashMigrationService migrationService) : ControllerBase
 {
     public record PreviewRequest(string StashDbPath);
-    public record ImportRequest(string StashDbPath, string? GeneratedPath, bool MigrateGeneratedContent = true);
+    public record ImportRequest(string StashDbPath, string? GeneratedPath, bool MigrateGeneratedContent = true, string? AiDataSource = null);
+    public record AiImportRequest(string StashDbPath, string AiDataSource);
 
     [HttpPost("preview")]
     public async Task<ActionResult<StashPreviewResult>> Preview([FromBody] PreviewRequest req, CancellationToken ct)
@@ -24,7 +25,7 @@ public class StashMigrationController(StashMigrationService migrationService) : 
     {
         try
         {
-            var jobId = migrationService.StartImport(req.StashDbPath, new StashImportOptions(req.GeneratedPath, req.MigrateGeneratedContent));
+            var jobId = migrationService.StartImport(req.StashDbPath, new StashImportOptions(req.GeneratedPath, req.MigrateGeneratedContent, req.AiDataSource));
             return Accepted(new { jobId });
         }
         catch (StashMigrationInProgressException ex)
@@ -49,6 +50,39 @@ public class StashMigrationController(StashMigrationService migrationService) : 
     public ActionResult<StashImportResult> GetImportResult(string jobId)
     {
         var result = migrationService.GetImportResult(jobId);
+        return result != null ? Ok(result) : NotFound();
+    }
+
+    [HttpPost("import-ai")]
+    public ActionResult<object> ImportAi([FromBody] AiImportRequest req)
+    {
+        try
+        {
+            var jobId = migrationService.StartAiTagImport(req.StashDbPath, req.AiDataSource);
+            return Accepted(new { jobId });
+        }
+        catch (StashMigrationInProgressException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("import-ai/{jobId}")]
+    public ActionResult<StashAiImportResult> GetAiImportResult(string jobId)
+    {
+        var result = migrationService.GetAiImportResult(jobId);
         return result != null ? Ok(result) : NotFound();
     }
 }

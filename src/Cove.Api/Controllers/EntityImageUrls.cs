@@ -8,6 +8,9 @@ internal static class EntityImageUrls
     public static string Performer(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build($"/api/performers/{id}/image", updatedAt, maxDimension);
 
+    public static string Face(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
+        => Build($"/api/faces/{id}/image", updatedAt, maxDimension);
+
     public static string Studio(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build($"/api/studios/{id}/image", updatedAt, maxDimension);
 

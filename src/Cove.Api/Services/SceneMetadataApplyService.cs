@@ -1,6 +1,7 @@
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Events;
+using Cove.Core.Interfaces;
 using Cove.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +12,7 @@ public interface ISceneMetadataApplyService
     Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, CancellationToken ct = default);
 }
 
-public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, ISceneCoverService sceneCoverService) : ISceneMetadataApplyService
+public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, ISceneCoverService sceneCoverService, ITagProvenanceService tagProvenanceService) : ISceneMetadataApplyService
 {
     public async Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, CancellationToken ct = default)
     {
@@ -90,7 +91,10 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
             }
 
             if (existing.Add(tag.Name))
+            {
                 scene.SceneTags.Add(new SceneTag { Scene = scene, Tag = tag });
+                await tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, "scraper", cancellationToken: ct);
+            }
         }
     }
 

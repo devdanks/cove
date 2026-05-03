@@ -332,13 +332,14 @@ public class FingerprintService(
                 Console.WriteLine($"[phash] Database check: {totalScenes} video files total, {filesWithPhashIds.Count} already have phash entries");
 
                 // Only load files that need phash generation
-                workItems = await db.VideoFiles
+                var pendingVideoFiles = await db.VideoFiles
                     .Include(file => file.ParentFolder)
                     .Where(file => !filesWithPhashIds.Contains(file.Id))
                     .OrderBy(file => file.Id)
                     .Select(file => new { file.Id, Path = file.ParentFolder != null ? file.ParentFolder.Path + System.IO.Path.DirectorySeparatorChar + file.Basename : file.Basename, file.Duration })
-                    .ToListAsync(ct)
-                    .ContinueWith(t => t.Result.Select(f => (f.Id, f.Path, f.Duration)).ToList(), ct);
+                    .ToListAsync(ct);
+
+                workItems = pendingVideoFiles.Select(file => (file.Id, file.Path, file.Duration)).ToList();
             }
 
             logger.LogInformation("[phash] Query complete: found {Pending} video files needing phash generation", workItems.Count);
@@ -407,13 +408,14 @@ public class FingerprintService(
                     .Distinct()
                     .ToHashSetAsync(ct);
 
-                workItems = await db.ImageFiles
+                var pendingImageFiles = await db.ImageFiles
                     .Include(file => file.ParentFolder)
                     .Where(file => !filesWithPhash.Contains(file.Id))
                     .OrderBy(file => file.Id)
                     .Select(file => new { file.Id, Path = file.ParentFolder != null ? file.ParentFolder.Path + System.IO.Path.DirectorySeparatorChar + file.Basename : file.Basename })
-                    .ToListAsync(ct)
-                    .ContinueWith(t => t.Result.Select(f => (f.Id, f.Path)).ToList(), ct);
+                    .ToListAsync(ct);
+
+                workItems = pendingImageFiles.Select(file => (file.Id, file.Path)).ToList();
             }
 
             if (workItems.Count == 0)

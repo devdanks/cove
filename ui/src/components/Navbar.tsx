@@ -1,4 +1,4 @@
-import { Film, Users, Building2, Tags, Image, ImageIcon, Layers, Settings, BarChart3, Activity, Bookmark, HelpCircle, Menu, X } from "lucide-react";
+import { Film, Users, Building2, Tags, Image, ImageIcon, Layers, Settings, BarChart3, Activity, HelpCircle, Menu, X, Fingerprint, Bookmark } from "lucide-react";
 import { useState } from "react";
 import { JobDrawer, useJobCount } from "./JobDrawer";
 import { GlobalSearch } from "./GlobalSearch";
@@ -16,8 +16,9 @@ interface NavbarProps {
 
 const navItems: { page: NavPage; label: string; icon: typeof Film }[] = [
   { page: "scenes", label: "Scenes", icon: Film },
+  { page: "segments", label: "Segments", icon: Bookmark },
   { page: "images", label: "Images", icon: ImageIcon },
-  { page: "markers", label: "Markers", icon: Bookmark },
+  { page: "faces", label: "Faces", icon: Fingerprint },
   { page: "galleries", label: "Galleries", icon: Image },
   { page: "performers", label: "Performers", icon: Users },
   { page: "studios", label: "Studios", icon: Building2 },
@@ -27,6 +28,7 @@ const navItems: { page: NavPage; label: string; icon: typeof Film }[] = [
 
 const DETAIL_PARENT_PAGE: Record<string, string> = {
   scene: "scenes",
+  segment: "segments",
   image: "images",
   performer: "performers",
   gallery: "galleries",
@@ -81,7 +83,7 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
   return (
     <nav className="cove-navbar bg-nav sticky top-0 z-50 shadow-lg shadow-black/30" role="navigation" aria-label="Main navigation">
       <div className="w-full px-4">
-        <div className="flex items-center h-12">
+        <div className="flex min-w-0 items-center h-12">
           {/* Logo */}
           <a
             href="/"
@@ -106,7 +108,7 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
           </button>
 
           {/* Nav items - hidden on mobile */}
-          <div className="navbar-desktop-links items-center gap-0.5 overflow-x-auto shrink-0">
+          <div className="navbar-desktop-links min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
             {allNavItems.map(({ page, label, icon: Icon }) => (
               <a
                 key={page}
@@ -126,7 +128,7 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
           </div>
 
           {/* Spacer */}
-          <div className="flex-1" />
+          <div className="w-2 shrink-0" />
 
           <GlobalSearch navigate={navigate} />
 

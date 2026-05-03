@@ -1,13 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, images, metadata, performers, scenes, entityImages } from "../api/client";
-import type { FindFilter, Gallery, Image, Performer as PerformerModel, Scene, MetadataServer, MetadataServerPerformerMatch } from "../api/types";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { faces, galleries, images, metadata, performers, scenes, entityImages } from "../api/client";
+import type { Face, FaceSimilar, FindFilter, Gallery, Image, Performer as PerformerModel, Scene, MetadataServer, MetadataServerPerformerMatch } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, Calendar, ChevronDown, CloudDownload, ExternalLink, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link2, Loader2, MapPin, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
+import { Calendar, ChevronDown, CloudDownload, ExternalLink, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link2, Loader2, MapPin, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PerformerEditModal } from "./PerformerEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailMergeDialog } from "../components/DetailMergeDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
+import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { SceneCard, GalleryTile, ImageTile } from "../components/EntityCards";
 import { InteractiveRating } from "../components/Rating";
 import { QuickViewDialog } from "../components/QuickViewDialog";
@@ -16,11 +17,15 @@ import { DetailListToolbar } from "../components/DetailListToolbar";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
+import { EntityDetailTabs } from "../components/EntityDetailTabs";
+import { EntityCardGrid } from "../components/EntityCardGrid";
+import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { createRouteLinkProps } from "../components/cardNavigation";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PerformerScrapeDialog } from "../components/PerformerScrapeDialog";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission, hasAnyPermission } from "../auth/visibility";
 
@@ -48,7 +53,7 @@ const GROUP_SORT = [
 
 export function PerformerDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: performer, isLoading } = useQuery({
     queryKey: ["performer", id],
@@ -76,7 +81,9 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "performers" }, onNavigate);
   const canWritePerformer = canWriteEntity("performer", hasPermission);
+  const canEngagePerformer = canReadEntity("performer", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeletePerformer = canDeleteEntity("performer", hasPermission);
+  const canReadFaces = canReadEntity("face", hasPermission);
   const canReadPerformerScenes = canReadEntity("scene", hasPermission);
   const canReadPerformerGalleries = canReadEntity("gallery", hasPermission);
   const canReadPerformerImages = canReadEntity("image", hasPermission);
@@ -101,9 +108,14 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  const updateMut = useMutation({
-    mutationFn: (data: { favorite?: boolean; rating?: number }) => performers.update(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["performer", id] }),
+  const {
+    favorite: performerFavorite,
+    rating: performerRating,
+    setFavorite: setPerformerFavorite,
+    setRating: setPerformerRating,
+  } = useEntityEngagement("performer", id, {
+    fallbackFavorite: performer?.favorite,
+    fallbackRating: performer?.rating,
   });
 
   const autoTagMut = useMutation({
@@ -125,14 +137,14 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       switch (e.key) {
         case "e": if (canWritePerformer) setEditing((v) => !v); break;
-        case "f": if (performer && canWritePerformer) updateMut.mutate({ favorite: !performer.favorite }); break;
+        case "f": if (performer && canEngagePerformer) setPerformerFavorite(!performerFavorite); break;
         case "c": if (canReadPerformerScenes) setActiveTab("scenes"); break;
         case "g": if (canReadPerformerGalleries) setActiveTab("galleries"); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canReadPerformerGalleries, canReadPerformerScenes, canWritePerformer, performer]);
+  }, [canEngagePerformer, canReadPerformerGalleries, canReadPerformerScenes, canWritePerformer, performer, performerFavorite, setPerformerFavorite]);
 
   useEffect(() => {
     if (!showOpsMenu) return;
@@ -166,180 +178,133 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     : null;
 
   return (
-    <div className="min-h-screen">
-      <div className="relative overflow-hidden border-b border-border detail-hero-gradient">
-        {/* Background performer image */}
-        <img
-          src={entityImages.performerImageUrl(performer.id, performer.updatedAt, 1600)}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover opacity-10 blur-md scale-110"
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-transparent" />
-        <div className="relative mx-auto max-w-7xl px-4 py-8">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <button
-              onClick={goBack}
-              className="flex items-center gap-1 text-sm text-secondary hover:text-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" /> {backLabel}
-            </button>
-            <div className="flex items-center gap-2">
-              <ExtensionSlot slot="performer-detail-actions" context={{ performer, onNavigate }} />
-              {showPerformerOpsMenu ? (
-                <div className="relative" ref={opsMenuRef}>
-                  <button
-                    onClick={() => setShowOpsMenu(!showOpsMenu)}
-                    className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground"
-                    title="Actions"
-                  >
-                    <MoreVertical className="h-4 w-4" />
-                  </button>
-                  {showOpsMenu && (
-                    <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
-                      {canWritePerformer ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                        <Pencil className="h-3.5 w-3.5" /> Edit
-                      </button> : null}
-                      {canAutoTagPerformer ? <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">
-                        {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
-                      </button> : null}
-                      {canScrapePerformer ? <button onClick={() => { setScrapeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                        <Search className="h-3.5 w-3.5" /> Scrape...
-                      </button> : null}
-                      {canWritePerformer ? <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                        <GitMerge className="h-3.5 w-3.5" /> Merge...
-                      </button> : null}
-                      {canDeletePerformer ? <div className="my-1 border-t border-border" /> : null}
-                      {canDeletePerformer ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface">
-                        <Trash2 className="h-3.5 w-3.5" /> Delete
-                      </button> : null}
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          </div>
+    <>
+      <EntityHeroLayout
+        backLabel={backLabel}
+        onGoBack={goBack}
+        backgroundImageUrl={entityImages.performerImageUrl(performer.id, performer.updatedAt, 1600)}
+        imageUrl={performer.imagePath || entityImages.performerImageUrl(performer.id, performer.updatedAt, 1200)}
+        imageAlt={performer.name}
+        imageContainerClassName="aspect-[2/3] w-48 flex-shrink-0 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/40 md:w-64"
+        imageFallbackClassName="flex h-full w-full items-center justify-center bg-gradient-to-b from-card to-surface"
+        imageFallback={<UserRound className="h-20 w-20 text-muted/50" />}
+        title={performer.name}
+        subtitle={performer.disambiguation || undefined}
+        aliases={performer.aliases.length > 0 ? performer.aliases.join(", ") : undefined}
+        favorite={performerFavorite}
+        onFavoriteToggle={canEngagePerformer ? () => setPerformerFavorite(!performerFavorite) : undefined}
+        counts={[
+          { key: "scenes", label: "Scenes", value: performer.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "galleries", label: "Galleries", value: performer.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
+          { key: "images", label: "Images", value: performer.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
+          { key: "groups", label: "Groups", value: performer.groupCount, icon: <Layers className="h-4 w-4" /> },
+          ...extensionCounts.map((ec) => ({
+            key: ec.key,
+            label: ec.label,
+            value: ec.count,
+            icon: ec.icon === "music" ? <Music className="h-4 w-4" /> : <Layers className="h-4 w-4" />,
+          })),
+        ]}
+        heroContent={(
+          <>
+            <InteractiveRating value={performerRating} onChange={(value) => setPerformerRating(value)} readOnly={!canEngagePerformer} />
+            <AspectRatingsPanel hostType="performer" hostId={id} canRate={canEngagePerformer} className="mt-3" />
 
-          <div className="flex flex-col gap-6 md:flex-row md:items-start">
-            <div className="w-48 flex-shrink-0 md:w-64">
-              <div className="aspect-[2/3] overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/40">
-                <img
-                  src={performer.imagePath || entityImages.performerImageUrl(performer.id, performer.updatedAt, 1200)}
-                  alt={performer.name}
-                  className="h-full w-full object-cover"
-                  onError={(e) => {
-                    const el = e.target as HTMLImageElement;
-                    el.style.display = "none";
-                    if (el.nextElementSibling) (el.nextElementSibling as HTMLElement).style.display = "";
-                  }}
-                />
-                <div className="flex h-full w-full items-center justify-center bg-gradient-to-b from-card to-surface" style={{ display: "none" }}>
-                  <UserRound className="h-20 w-20 text-muted/50" />
-                </div>
-              </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+              {performer.gender && <InfoItem icon={<UserRound className="h-4 w-4" />} label="Gender" value={performer.gender} />}
+              {performer.birthdate && (
+                <InfoItem icon={<Calendar className="h-4 w-4" />} label="Born" value={`${formatDate(performer.birthdate)}${age ? ` (${age})` : ""}`} />
+              )}
+              {performer.deathDate && <InfoItem icon={<Calendar className="h-4 w-4" />} label="Died" value={formatDate(performer.deathDate)} />}
+              {performer.country && <InfoItem icon={<MapPin className="h-4 w-4" />} label="Country" value={performer.country} />}
+              {performer.ethnicity && <InfoItem label="Ethnicity" value={performer.ethnicity} />}
+              {performer.heightCm && <InfoItem icon={<Ruler className="h-4 w-4" />} label="Height" value={`${performer.heightCm} cm`} />}
+              {performer.weight && <InfoItem icon={<Scale className="h-4 w-4" />} label="Weight" value={`${performer.weight} kg`} />}
+              {performer.measurements && <InfoItem label="Measurements" value={performer.measurements} />}
+              {performer.eyeColor && <InfoItem label="Eye Color" value={performer.eyeColor} />}
+              {performer.hairColor && <InfoItem label="Hair Color" value={performer.hairColor} />}
+              {performer.fakeTits && <InfoItem label="Fake Tits" value={performer.fakeTits} />}
+              {performer.penisLength != null && <InfoItem label="Penis Length" value={`${performer.penisLength} cm`} />}
+              {performer.circumcised && <InfoItem label="Circumcised" value={performer.circumcised} />}
+              {performer.tattoos && <InfoItem label="Tattoos" value={performer.tattoos} />}
+              {performer.piercings && <InfoItem label="Piercings" value={performer.piercings} />}
+              {performer.careerStart && <InfoItem label="Career" value={`${performer.careerStart}${performer.careerEnd ? ` – ${performer.careerEnd}` : " – present"}`} />}
             </div>
 
-            <div className="min-w-0 flex-1">
-              <div className="mb-2 flex items-start gap-4">
-                <div className="min-w-0 flex-1">
-                  <h1 className="truncate text-2xl sm:text-3xl md:text-4xl font-bold text-foreground">{performer.name}</h1>
-                  {performer.disambiguation && <p className="mt-1 text-sm text-secondary">{performer.disambiguation}</p>}
-                  {performer.aliases.length > 0 && (
-                    <p className="mt-1 text-sm text-secondary">Also known as: {performer.aliases.join(", ")}</p>
-                  )}
-                </div>
-                {canWritePerformer ? (
-                  <button
-                    onClick={() => updateMut.mutate({ favorite: !performer.favorite })}
-                    className={`rounded-full p-2 transition-colors ${
-                      performer.favorite
-                        ? "bg-red-500/15 text-red-500"
-                        : "bg-card text-muted hover:text-red-400"
-                    }`}
-                    title={performer.favorite ? "Remove from favorites" : "Add to favorites"}
-                  >
-                    <Heart className={`h-6 w-6 ${performer.favorite ? "fill-current" : ""}`} />
-                  </button>
-                ) : performer.favorite ? (
-                  <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite performer">
-                    <Heart className="h-6 w-6 fill-current" />
-                  </span>
-                ) : null}
-              </div>
-
-              <InteractiveRating value={performer.rating} onChange={(value) => updateMut.mutate({ rating: value })} readOnly={!canWritePerformer} />
-
-              <div className="mt-4 flex flex-wrap gap-3">
-                <CountCard label="Scenes" value={performer.sceneCount} icon={<Film className="h-4 w-4" />} />
-                <CountCard label="Galleries" value={performer.galleryCount} icon={<FolderOpen className="h-4 w-4" />} />
-                <CountCard label="Images" value={performer.imageCount} icon={<ImageIcon className="h-4 w-4" />} />
-                <CountCard label="Groups" value={performer.groupCount} icon={<Layers className="h-4 w-4" />} />
-                {extensionCounts.map((ec) => (
-                  <CountCard key={ec.key} label={ec.label} value={ec.count} icon={ec.icon === "music" ? <Music className="h-4 w-4" /> : <Layers className="h-4 w-4" />} />
+            {performer.urls.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {performer.urls.map((url, i) => (
+                  <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
+                    <ExternalLink className="h-3 w-3" />
+                    {(() => { try { return new URL(url).hostname.replace("www.", ""); } catch { return url; } })()}
+                  </a>
                 ))}
               </div>
+            ) : null}
 
-              <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-                {performer.gender && <InfoItem icon={<UserRound className="h-4 w-4" />} label="Gender" value={performer.gender} />}
-                {performer.birthdate && (
-                  <InfoItem icon={<Calendar className="h-4 w-4" />} label="Born" value={`${formatDate(performer.birthdate)}${age ? ` (${age})` : ""}`} />
-                )}
-                {performer.deathDate && (
-                  <InfoItem icon={<Calendar className="h-4 w-4" />} label="Died" value={formatDate(performer.deathDate)} />
-                )}
-                {performer.country && <InfoItem icon={<MapPin className="h-4 w-4" />} label="Country" value={performer.country} />}
-                {performer.ethnicity && <InfoItem label="Ethnicity" value={performer.ethnicity} />}
-                {performer.heightCm && <InfoItem icon={<Ruler className="h-4 w-4" />} label="Height" value={`${performer.heightCm} cm`} />}
-                {performer.weight && <InfoItem icon={<Scale className="h-4 w-4" />} label="Weight" value={`${performer.weight} kg`} />}
-                {performer.measurements && <InfoItem label="Measurements" value={performer.measurements} />}
-                {performer.eyeColor && <InfoItem label="Eye Color" value={performer.eyeColor} />}
-                {performer.hairColor && <InfoItem label="Hair Color" value={performer.hairColor} />}
-                {performer.fakeTits && <InfoItem label="Fake Tits" value={performer.fakeTits} />}
-                {performer.penisLength != null && <InfoItem label="Penis Length" value={`${performer.penisLength} cm`} />}
-                {performer.circumcised && <InfoItem label="Circumcised" value={performer.circumcised} />}
-                {performer.tattoos && <InfoItem label="Tattoos" value={performer.tattoos} />}
-                {performer.piercings && <InfoItem label="Piercings" value={performer.piercings} />}
-                {performer.careerStart && <InfoItem label="Career" value={`${performer.careerStart}${performer.careerEnd ? ` – ${performer.careerEnd}` : " – present"}`} />}
+            {autoTagMut.isSuccess ? <p className="mt-4 text-sm text-emerald-300">Auto-tag job queued.</p> : null}
+
+            {canReadTags && performer.tags.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {performer.tags.map((tag) => (
+                  <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                ))}
               </div>
+            ) : null}
 
-              {performer.urls.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {performer.urls.map((url, i) => (
-                    <a
-                      key={i}
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      {(() => { try { return new URL(url).hostname.replace("www.", ""); } catch { return url; } })()}
-                    </a>
-                  ))}
-                </div>
-              )}
+            {performer.details ? <p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{performer.details}</p> : null}
+            <CustomFieldsDisplay customFields={performer.customFields} />
+            <PerformerFaceSimilarityPanel performerId={id} canReadFaces={canReadFaces} onNavigate={onNavigate} />
+            <PerformerMetadataServerPanel performer={performer} metadataServers={metadataServers} onNavigate={onNavigate} />
+          </>
+        )}
+        actions={(
+          <>
+            <ExtensionSlot slot="performer-detail-actions" context={{ performer, onNavigate }} />
+            {showPerformerOpsMenu ? (
+              <div className="relative" ref={opsMenuRef}>
+                <button onClick={() => setShowOpsMenu(!showOpsMenu)} className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground" title="Actions">
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+                {showOpsMenu ? (
+                  <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
+                    {canWritePerformer ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
+                    {canAutoTagPerformer ? <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">{autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag</button> : null}
+                    {canScrapePerformer ? <button onClick={() => { setScrapeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Scrape...</button> : null}
+                    {canWritePerformer ? <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><GitMerge className="h-3.5 w-3.5" /> Merge...</button> : null}
+                    {canDeletePerformer ? <div className="my-1 border-t border-border" /> : null}
+                    {canDeletePerformer ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
+        heroRowClassName="flex flex-col gap-6 md:flex-row md:items-start"
+      >
+        <EntityDetailTabs tabs={visiblePerformerTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl mt-0" />
 
-              {autoTagMut.isSuccess && (
-                <p className="mt-4 text-sm text-emerald-300">Auto-tag job queued.</p>
-              )}
-
-              {canReadTags && performer.tags.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  {performer.tags.map((tag) => (
-                    <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
-                  ))}
-                </div>
-              )}
-
-              {performer.details && (
-                <p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{performer.details}</p>
-              )}
-              <CustomFieldsDisplay customFields={performer.customFields} />
-              <PerformerMetadataServerPanel performer={performer} metadataServers={metadataServers} onNavigate={onNavigate} />
-            </div>
-          </div>
+        <div className="py-6">
+          {activeTab === "scenes" && (
+            <PerformerScenesPanel performerId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "galleries" && (
+            <PerformerGalleriesPanel performerId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "images" && (
+            <PerformerImagesPanel performerId={id} filter={imageFilter} setFilter={setImageFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "groups" && (
+            <PerformerGroupsPanel performerId={id} filter={groupFilter} setFilter={setGroupFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "appearsWith" && (
+            <PerformerAppearsWithPanel performerId={id} filter={appearsWithFilter} setFilter={setAppearsWithFilter} onNavigate={onNavigate} />
+          )}
+          {renderExtensionTab(activeTab, id, onNavigate)}
         </div>
-      </div>
+
+        <ExtensionSlot slot="performer-detail-bottom" context={{ performer, onNavigate }} />
+      </EntityHeroLayout>
 
       <PerformerEditModal performer={performer} open={editing} onClose={() => setEditing(false)} />
       <ConfirmDialog
@@ -367,50 +332,174 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
         invalidateQueryKeys={[["performer", id], ["performers"]]}
       />
 
-      <div className="px-4 py-6">
+      <PerformerScrapeDialog open={scrapeOpen} onClose={() => setScrapeOpen(false)} performer={performer} />
+    </>
+  );
+}
 
-        <div className="mx-auto max-w-7xl mt-0 border-b border-border">
-          <div className="flex gap-1 overflow-x-auto">
-            {visiblePerformerTabs.map((tab) => (
+type PerformerFaceMatch = {
+  performerId: number;
+  performerName: string;
+  coverImageUrl?: string;
+  bestDistance: number;
+  bestFaceId: number;
+  bestFaceLabel?: string;
+  matchingFaceIds: number[];
+};
+
+function PerformerFaceSimilarityPanel({ performerId, canReadFaces, onNavigate }: { performerId: number; canReadFaces: boolean; onNavigate: (r: any) => void }) {
+  const { data: linkedFacesResponse, isLoading: linkedFacesLoading } = useQuery({
+    queryKey: ["performer", performerId, "linked-faces"],
+    queryFn: () => faces.list({ performerId, merged: false, page: 1, perPage: 6 }),
+    enabled: canReadFaces,
+  });
+
+  const linkedFaces = linkedFacesResponse?.items ?? [];
+  const similarFaceQueries = useQueries({
+    queries: linkedFaces.map((face) => ({
+      queryKey: ["performer", performerId, "linked-face", face.id, "similar"],
+      queryFn: () => faces.similar(face.id, { k: 12 }),
+      enabled: canReadFaces,
+    })),
+  });
+
+  const similarPerformers = useMemo<PerformerFaceMatch[]>(() => {
+    const matches = new Map<number, PerformerFaceMatch & { matchingFaceIdSet: Set<number> }>();
+
+    for (const query of similarFaceQueries) {
+      const candidates = query.data ?? [];
+      for (const candidate of candidates) {
+        if (candidate.performerId == null || candidate.performerId === performerId) {
+          continue;
+        }
+
+        const existing = matches.get(candidate.performerId);
+        if (existing) {
+          existing.matchingFaceIdSet.add(candidate.id);
+          existing.matchingFaceIds = Array.from(existing.matchingFaceIdSet);
+          if (candidate.distance < existing.bestDistance) {
+            existing.bestDistance = candidate.distance;
+            existing.bestFaceId = candidate.id;
+            existing.bestFaceLabel = candidate.label;
+            if (candidate.coverImageUrl) {
+              existing.coverImageUrl = candidate.coverImageUrl;
+            }
+          }
+          continue;
+        }
+
+        matches.set(candidate.performerId, {
+          performerId: candidate.performerId,
+          performerName: candidate.performerName || `Performer #${candidate.performerId}`,
+          coverImageUrl: candidate.coverImageUrl,
+          bestDistance: candidate.distance,
+          bestFaceId: candidate.id,
+          bestFaceLabel: candidate.label,
+          matchingFaceIds: [candidate.id],
+          matchingFaceIdSet: new Set([candidate.id]),
+        });
+      }
+    }
+
+    return Array.from(matches.values())
+      .map(({ matchingFaceIdSet: _matchingFaceIdSet, ...candidate }) => candidate)
+      .sort((left, right) => left.bestDistance - right.bestDistance || right.matchingFaceIds.length - left.matchingFaceIds.length)
+      .slice(0, 8);
+  }, [performerId, similarFaceQueries]);
+
+  if (!canReadFaces) {
+    return null;
+  }
+
+  const similarFacesLoading = similarFaceQueries.some((query) => query.isLoading);
+
+  return (
+    <div className="mt-6 rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Similar Performers by Face</h2>
+          <p className="mt-1 text-sm text-secondary">Visual matches derived from linked face embeddings.</p>
+        </div>
+        <div className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted">
+          {linkedFaces.length} linked face{linkedFaces.length === 1 ? "" : "s"}
+        </div>
+      </div>
+
+      {linkedFacesLoading ? (
+        <p className="mt-4 text-sm text-secondary">Loading linked faces...</p>
+      ) : linkedFaces.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-secondary">
+          This performer does not have any primary face clusters linked yet.
+        </div>
+      ) : (
+        <>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {linkedFaces.map((face) => (
               <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key as TabKey)}
-                className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-                  activeTab === tab.key
-                    ? "border-accent text-foreground"
-                    : "border-transparent text-secondary hover:border-muted hover:text-foreground"
-                }`}
+                key={face.id}
+                type="button"
+                onClick={() => onNavigate({ page: "face", id: face.id })}
+                className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-foreground transition-colors hover:border-accent"
               >
-                {tab.label}
-                {tab.count !== undefined && <span className="ml-2 rounded-full bg-card px-2 py-0.5 text-xs text-muted">{tab.count}</span>}
+                {face.label?.trim() || `Face #${face.id}`}
               </button>
             ))}
           </div>
-        </div>
 
-        <div className="py-6">
-          {activeTab === "scenes" && (
-            <PerformerScenesPanel performerId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+          {similarFacesLoading ? (
+            <p className="mt-4 text-sm text-secondary">Finding visually similar performers...</p>
+          ) : similarPerformers.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-secondary">
+              No similar performers were found for the linked faces yet.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {similarPerformers.map((match) => (
+                <SimilarPerformerFaceCard key={match.performerId} match={match} onNavigate={onNavigate} />
+              ))}
+            </div>
           )}
-          {activeTab === "galleries" && (
-            <PerformerGalleriesPanel performerId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "images" && (
-            <PerformerImagesPanel performerId={id} filter={imageFilter} setFilter={setImageFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "groups" && (
-            <PerformerGroupsPanel performerId={id} filter={groupFilter} setFilter={setGroupFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "appearsWith" && (
-            <PerformerAppearsWithPanel performerId={id} filter={appearsWithFilter} setFilter={setAppearsWithFilter} onNavigate={onNavigate} />
-          )}
-          {renderExtensionTab(activeTab, id, onNavigate)}
-        </div>
-
-        <ExtensionSlot slot="performer-detail-bottom" context={{ performer, onNavigate }} />
-      </div>
-      <PerformerScrapeDialog open={scrapeOpen} onClose={() => setScrapeOpen(false)} performer={performer} />
+        </>
+      )}
     </div>
+  );
+}
+
+function SimilarPerformerFaceCard({ match, onNavigate }: { match: PerformerFaceMatch; onNavigate: (r: any) => void }) {
+  return (
+    <article className="overflow-hidden rounded-2xl border border-border bg-surface/60">
+      <button
+        type="button"
+        onClick={() => onNavigate({ page: "performer", id: match.performerId })}
+        className="flex w-full items-center gap-3 p-4 text-left"
+      >
+        <div className="h-16 w-16 overflow-hidden rounded-xl bg-surface/90">
+          {match.coverImageUrl ? (
+            <img src={match.coverImageUrl} alt={match.performerName} className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted">
+              <UserRound className="h-6 w-6" />
+            </div>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-foreground">{match.performerName}</div>
+          <div className="mt-1 text-xs text-secondary">Best face distance {match.bestDistance.toFixed(3)}</div>
+          <div className="mt-1 text-xs text-muted">
+            Matched via {match.matchingFaceIds.length} face{match.matchingFaceIds.length === 1 ? "" : "s"}
+          </div>
+        </div>
+      </button>
+      <div className="border-t border-border px-4 py-3 text-xs text-secondary">
+        <button
+          type="button"
+          onClick={() => onNavigate({ page: "face", id: match.bestFaceId })}
+          className="text-accent hover:underline"
+        >
+          Open best face match{match.bestFaceLabel ? `: ${match.bestFaceLabel}` : ""}
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -611,18 +700,6 @@ function PerformerMetadataServerPanel({ performer, metadataServers, onNavigate }
   );
 }
 
-function CountCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
-      <span className="text-accent">{icon}</span>
-      <div>
-        <div className="text-lg font-semibold text-foreground">{value}</div>
-        <div className="text-xs text-muted">{label}</div>
-      </div>
-    </div>
-  );
-}
-
 function InfoItem({ icon, label, value }: { icon?: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center gap-2 text-sm">
@@ -656,11 +733,11 @@ function PerformerScenesPanel({ performerId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={data.items} onNavigate={onNavigate} />} />
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
         {data.items.map((scene) => (
           <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
@@ -689,11 +766,11 @@ function PerformerGalleriesPanel({ performerId, filter, setFilter, onNavigate }:
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
         {data.items.map((gallery) => (
           <GalleryTile key={gallery.id} gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
@@ -720,11 +797,11 @@ function PerformerImagesPanel({ performerId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${160 + zoomLevel * 50}px`}>
         {data.items.map((image) => (
           <ImageTile key={image.id} image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
@@ -770,7 +847,7 @@ function PerformerGroupsPanel({ performerId, filter, setFilter, onNavigate }: {
 
   return (
     <>
-      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
+      <EntityCardGrid minCardWidth="200px" gapClassName="gap-4">
         {paginated.map((group) => {
           const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
 
@@ -786,7 +863,7 @@ function PerformerGroupsPanel({ performerId, filter, setFilter, onNavigate }: {
             </a>
           );
         })}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={uniqueGroups.length} />
     </>
   );
@@ -831,7 +908,7 @@ function PerformerAppearsWithPanel({ performerId, filter, setFilter, onNavigate 
 
   return (
     <>
-      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}>
+      <EntityCardGrid minCardWidth="180px" gapClassName="gap-4">
         {paginated.map(({ performer: p, count }) => {
           const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: p.id }, () => onNavigate({ page: "performer", id: p.id }));
 
@@ -853,7 +930,7 @@ function PerformerAppearsWithPanel({ performerId, filter, setFilter, onNavigate 
             </a>
           );
         })}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={coStars.length} />
     </>
   );

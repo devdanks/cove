@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
 using Cove.Core.Auth;
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -26,7 +27,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         [FromQuery] int? parentId = null, [FromQuery] string? tagIds = null,
         CancellationToken ct = default)
     {
-        var filter = new StudioFilter { Name = name, Favorite = favorite, ParentId = parentId, TagIds = ParseIntList(tagIds) };
+        var filter = new StudioFilter { Name = name, Favorite = favorite, ParentId = parentId, TagIds = QueryParsing.ParseIntList(tagIds)?.ToList() };
         var findFilter = new FindFilter
         {
             Q = q, Page = page, PerPage = perPage, Sort = sort,
@@ -195,8 +196,6 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     {
         return items.Count == 0 ? [] : items.Select(studio => MapToDto(studio)).ToList();
     }
-
-    private static List<int>? ParseIntList(string? csv) => string.IsNullOrEmpty(csv) ? null : csv.Split(',').Select(int.Parse).ToList();
 
     // ===== Merge =====
 

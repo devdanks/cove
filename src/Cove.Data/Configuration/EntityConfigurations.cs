@@ -117,14 +117,18 @@ public class SceneGalleryConfiguration : IEntityTypeConfiguration<SceneGallery>
     }
 }
 
-public class SceneGroupConfiguration : IEntityTypeConfiguration<SceneGroup>
+public class GroupItemConfiguration : IEntityTypeConfiguration<GroupItem>
 {
-    public void Configure(EntityTypeBuilder<SceneGroup> builder)
+    public void Configure(EntityTypeBuilder<GroupItem> builder)
     {
-        builder.ToTable("scene_groups");
-        builder.HasKey(sg => new { sg.SceneId, sg.GroupId });
-        builder.HasOne(sg => sg.Scene).WithMany(s => s.SceneGroups).HasForeignKey(sg => sg.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne(sg => sg.Group).WithMany(g => g.SceneGroups).HasForeignKey(sg => sg.GroupId).OnDelete(DeleteBehavior.Cascade);
+        builder.ToTable("group_items");
+        builder.HasKey(item => item.Id);
+        builder.HasOne(item => item.Group).WithMany(group => group.GroupItems).HasForeignKey(item => item.GroupId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(item => item.Scene).WithMany(scene => scene.GroupItems).HasForeignKey(item => item.SceneId).OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(item => new { item.GroupId, item.OrderIndex });
+        builder.HasIndex(item => item.SceneId);
+        builder.HasIndex(item => item.SourceProfileId);
     }
 }
 
@@ -500,6 +504,268 @@ public class SceneMarkerTagConfiguration : IEntityTypeConfiguration<SceneMarkerT
     }
 }
 
+public class TagApplicationConfiguration : IEntityTypeConfiguration<TagApplication>
+{
+    public void Configure(EntityTypeBuilder<TagApplication> builder)
+    {
+        builder.ToTable("tag_applications");
+        builder.HasKey(application => application.Id);
+        builder.Property(application => application.SourceKey).IsRequired();
+        builder.Property(application => application.SourceRunId).IsRequired().HasDefaultValue(string.Empty);
+        builder.Property(application => application.ModelKey).IsRequired().HasDefaultValue(string.Empty);
+        builder.HasOne(application => application.Tag).WithMany().HasForeignKey(application => application.TagId).OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(application => new { application.HostType, application.HostId });
+        builder.HasIndex(application => application.TagId);
+        builder.HasIndex(application => application.SourceKey);
+        builder.HasIndex(application => new { application.HostType, application.HostId, application.TagId, application.SourceKey, application.SourceRunId, application.ModelKey }).IsUnique();
+    }
+}
+
+public class SegmentConfiguration : IEntityTypeConfiguration<Segment>
+{
+    public void Configure(EntityTypeBuilder<Segment> builder)
+    {
+        builder.ToTable("segments");
+        builder.HasKey(segment => segment.Id);
+        builder.Property(segment => segment.Payload).HasColumnType("jsonb");
+        builder.Property(segment => segment.SourceKey).IsRequired();
+        builder.HasOne(segment => segment.Tag).WithMany().HasForeignKey(segment => segment.TagId).OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(segment => new { segment.HostType, segment.HostId, segment.StartSec });
+        builder.HasIndex(segment => segment.TagId);
+        builder.HasIndex(segment => segment.SourceKey);
+        builder.HasIndex(segment => segment.SourceRunId);
+        builder.HasIndex(segment => segment.Kind);
+    }
+}
+
+public class SegmentDisplayRuleConfiguration : IEntityTypeConfiguration<SegmentDisplayRule>
+{
+    public void Configure(EntityTypeBuilder<SegmentDisplayRule> builder)
+    {
+        builder.ToTable("segment_display_rules");
+        builder.HasKey(rule => rule.Id);
+        builder.HasOne(rule => rule.Profile).WithMany(profile => profile.Rules).HasForeignKey(rule => rule.ProfileId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(rule => rule.Tag).WithMany().HasForeignKey(rule => rule.TagId).OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(rule => rule.ProfileId);
+        builder.HasIndex(rule => rule.UserId);
+        builder.HasIndex(rule => new { rule.ProfileId, rule.SourceKey, rule.Kind, rule.TagId, rule.TagCategory, rule.HostType, rule.Priority });
+    }
+}
+
+public class SegmentDisplayProfileConfiguration : IEntityTypeConfiguration<SegmentDisplayProfile>
+{
+    public void Configure(EntityTypeBuilder<SegmentDisplayProfile> builder)
+    {
+        builder.ToTable("segment_display_profiles");
+        builder.HasKey(profile => profile.Id);
+        builder.Property(profile => profile.Name).IsRequired().HasMaxLength(200);
+        builder.Property(profile => profile.Description).HasMaxLength(1000);
+        builder.Property(profile => profile.Version).HasDefaultValue(1);
+
+        builder.HasIndex(profile => profile.UserId);
+        builder.HasIndex(profile => new { profile.UserId, profile.IsDefault });
+        builder.HasIndex(profile => new { profile.IsSystem, profile.Name });
+    }
+}
+
+public class FaceConfiguration : IEntityTypeConfiguration<Face>
+{
+    public void Configure(EntityTypeBuilder<Face> builder)
+    {
+        builder.ToTable("faces");
+        builder.HasKey(face => face.Id);
+        builder.Property(face => face.Label).HasMaxLength(500);
+        builder.Property(face => face.PrimarySourceKey).HasMaxLength(200);
+        builder.Property(face => face.CustomFields).HasColumnType("jsonb");
+        builder.Property(face => face.DetectionCount).HasDefaultValue(0);
+        builder.Property(face => face.AppearanceCount).HasDefaultValue(0);
+        builder.Property(face => face.FrameSampleCount).HasDefaultValue(0);
+        builder.Property(face => face.SceneCount).HasDefaultValue(0);
+        builder.Property(face => face.ImageCount).HasDefaultValue(0);
+
+        builder.HasOne(face => face.Performer)
+            .WithMany()
+            .HasForeignKey(face => face.PerformerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(face => face.MergedIntoFace)
+            .WithMany(face => face.MergedFaces)
+            .HasForeignKey(face => face.MergedIntoFaceId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasMany(face => face.Appearances)
+            .WithOne(appearance => appearance.Face)
+            .HasForeignKey(appearance => appearance.FaceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(face => face.PerformerId);
+        builder.HasIndex(face => face.MergedIntoFaceId);
+        builder.HasIndex(face => face.Ignored);
+        builder.HasIndex(face => face.PrimarySourceKey);
+        builder.HasIndex(face => face.Label);
+    }
+}
+
+public class FaceAppearanceConfiguration : IEntityTypeConfiguration<FaceAppearance>
+{
+    public void Configure(EntityTypeBuilder<FaceAppearance> builder)
+    {
+        builder.ToTable("face_appearances");
+        builder.HasKey(appearance => appearance.Id);
+        builder.Property(appearance => appearance.SourceKey).IsRequired().HasMaxLength(200);
+        builder.Property(appearance => appearance.SourceRunId).HasMaxLength(200);
+        builder.Property(appearance => appearance.GroupKey).HasMaxLength(200);
+        builder.Property(appearance => appearance.Payload).HasColumnType("jsonb");
+        builder.Property(appearance => appearance.SampleCount).HasDefaultValue(0);
+        builder.Property(appearance => appearance.RetainedSpatialSampleCount).HasDefaultValue(0);
+        builder.Property(appearance => appearance.SegmentCount).HasDefaultValue(0);
+
+        builder.HasOne(appearance => appearance.Face)
+            .WithMany(face => face.Appearances)
+            .HasForeignKey(appearance => appearance.FaceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(appearance => appearance.FaceId);
+        builder.HasIndex(appearance => new { appearance.HostType, appearance.HostId });
+        builder.HasIndex(appearance => new { appearance.FaceId, appearance.HostType, appearance.HostId });
+        builder.HasIndex(appearance => appearance.GroupKey);
+        builder.HasIndex(appearance => appearance.SourceKey);
+        builder.HasIndex(appearance => appearance.SourceRunId);
+    }
+}
+
+public class EmbeddingConfiguration : IEntityTypeConfiguration<Embedding>
+{
+    public void Configure(EntityTypeBuilder<Embedding> builder)
+    {
+        builder.ToTable("embeddings");
+        builder.HasKey(embedding => embedding.Id);
+        builder.Property(embedding => embedding.Kind).IsRequired().HasMaxLength(200);
+        builder.Property(embedding => embedding.KindFamily).HasMaxLength(200);
+        builder.Property(embedding => embedding.SourceKey).IsRequired().HasMaxLength(200);
+        builder.Property(embedding => embedding.SourceRunId).HasMaxLength(200);
+        builder.Property(embedding => embedding.Vector).HasColumnType("text");
+        builder.Property(embedding => embedding.Meta).HasColumnType("jsonb");
+
+        builder.HasIndex(embedding => new { embedding.HostType, embedding.HostId });
+        builder.HasIndex(embedding => new { embedding.KindFamily, embedding.Modality });
+        builder.HasIndex(embedding => new { embedding.Kind, embedding.Dim });
+        builder.HasIndex(embedding => embedding.SourceKey);
+        builder.HasIndex(embedding => embedding.SourceRunId);
+    }
+}
+
+
+public class FaceSuggestionDecisionConfiguration : IEntityTypeConfiguration<FaceSuggestionDecision>
+{
+    public void Configure(EntityTypeBuilder<FaceSuggestionDecision> builder)
+    {
+        builder.ToTable("face_suggestion_decisions");
+        builder.HasKey(decision => decision.Id);
+        builder.Property(decision => decision.Decision).IsRequired().HasMaxLength(16);
+
+        builder.HasOne(decision => decision.Face)
+            .WithMany()
+            .HasForeignKey(decision => decision.FaceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(decision => decision.Performer)
+            .WithMany()
+            .HasForeignKey(decision => decision.PerformerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(decision => new { decision.FaceId, decision.PerformerId, decision.UserId }).IsUnique();
+        builder.HasIndex(decision => new { decision.FaceId, decision.UserId });
+        builder.HasIndex(decision => new { decision.UserId, decision.Decision });
+    }
+}
+
+public class AiRunConfiguration : IEntityTypeConfiguration<AiRun>
+{
+    public void Configure(EntityTypeBuilder<AiRun> builder)
+    {
+        builder.ToTable("ai_runs");
+        builder.HasKey(run => run.Id);
+        builder.Property(run => run.RunKey).IsRequired().HasMaxLength(200);
+        builder.Property(run => run.SourceKey).IsRequired().HasMaxLength(200);
+        builder.Property(run => run.Trigger).HasMaxLength(100);
+        builder.Property(run => run.JobId).HasMaxLength(100);
+        builder.Property(run => run.LoadPolicy).HasMaxLength(100);
+        builder.Property(run => run.Error).HasMaxLength(4000);
+        builder.Property(run => run.Request).HasColumnType("jsonb");
+        builder.Property(run => run.Models).HasColumnType("jsonb");
+        builder.Property(run => run.Summary).HasColumnType("jsonb");
+
+        builder.HasIndex(run => run.RunKey).IsUnique();
+        builder.HasIndex(run => new { run.TargetType, run.TargetId, run.CreatedAt });
+        builder.HasIndex(run => run.Status);
+        builder.HasIndex(run => run.SourceKey);
+        builder.HasIndex(run => run.JobId);
+    }
+}
+
+public class UserEntityAffinityConfiguration : IEntityTypeConfiguration<UserEntityAffinity>
+{
+    public void Configure(EntityTypeBuilder<UserEntityAffinity> builder)
+    {
+        builder.ToTable("user_entity_affinities");
+        builder.HasKey(affinity => affinity.Id);
+        builder.HasIndex(affinity => new { affinity.UserId, affinity.HostType, affinity.HostId }).IsUnique();
+        builder.HasIndex(affinity => new { affinity.UserId, affinity.IsFavorite });
+        builder.HasIndex(affinity => new { affinity.UserId, affinity.LastConsumedAt });
+        builder.Property(affinity => affinity.TotalConsumedSec).HasDefaultValue(0d);
+        builder.Property(affinity => affinity.ViewCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.CompleteCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.OCount).HasDefaultValue(0);
+    }
+}
+
+public class InteractionConfiguration : IEntityTypeConfiguration<Interaction>
+{
+    public void Configure(EntityTypeBuilder<Interaction> builder)
+    {
+        builder.ToTable("interactions");
+        builder.HasKey(interaction => interaction.Id);
+        builder.Property(interaction => interaction.Meta).HasColumnType("jsonb");
+        builder.HasIndex(interaction => new { interaction.UserId, interaction.HostType, interaction.HostId, interaction.At });
+    }
+}
+
+public class RatingConfiguration : IEntityTypeConfiguration<Rating>
+{
+    public void Configure(EntityTypeBuilder<Rating> builder)
+    {
+        builder.ToTable("ratings");
+        builder.HasKey(rating => rating.Id);
+        builder.Property(rating => rating.Aspect).IsRequired().HasMaxLength(100);
+        builder.Property(rating => rating.Value).HasAnnotation("Range", new[] { 0, 100 });
+        builder.HasIndex(rating => new { rating.UserId, rating.HostType, rating.HostId, rating.Aspect }).IsUnique();
+        builder.HasIndex(rating => new { rating.HostType, rating.HostId, rating.Aspect });
+    }
+}
+
+public class DetectionConfiguration : IEntityTypeConfiguration<Detection>
+{
+    public void Configure(EntityTypeBuilder<Detection> builder)
+    {
+        builder.ToTable("detections");
+        builder.HasKey(detection => detection.Id);
+        builder.Property(detection => detection.Extra).HasColumnType("jsonb");
+        builder.Property(detection => detection.Class).IsRequired();
+        builder.Property(detection => detection.SourceKey).IsRequired();
+
+        builder.HasIndex(detection => new { detection.HostType, detection.HostId, detection.ObservedAtSec });
+        builder.HasIndex(detection => detection.SourceKey);
+        builder.HasIndex(detection => detection.SourceRunId);
+        builder.HasIndex(detection => detection.Class);
+        builder.HasIndex(detection => new { detection.RefKind, detection.RefId });
+        builder.HasIndex(detection => detection.GroupKey);
+    }
+}
+
 public class SavedFilterConfiguration : IEntityTypeConfiguration<SavedFilter>
 {
     public void Configure(EntityTypeBuilder<SavedFilter> builder)
@@ -607,3 +873,6 @@ public class ExtensionDataConfiguration : IEntityTypeConfiguration<ExtensionData
         builder.HasIndex(e => e.ExtensionId);
     }
 }
+
+
+

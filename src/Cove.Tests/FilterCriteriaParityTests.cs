@@ -33,7 +33,6 @@ public class FilterCriteriaParityTests
         Assert.Null(filter.StudiosCriterion);
         Assert.Null(filter.GroupsCriterion);
         Assert.Null(filter.OrganizedCriterion);
-        Assert.Null(filter.HasMarkersCriterion);
         Assert.Null(filter.InteractiveCriterion);
         Assert.Null(filter.PathCriterion);
         Assert.Null(filter.VideoCodecCriterion);
@@ -145,7 +144,6 @@ public class FilterCriteriaParityTests
         Assert.Null(filter.PiercingsCriterion);
         Assert.Null(filter.AliasesCriterion);
         Assert.Null(filter.DeathDateCriterion);
-        Assert.Null(filter.MarkerCountCriterion);
         Assert.Null(filter.PlayCountCriterion);
         Assert.Null(filter.OCounterCriterion);
         Assert.Null(filter.GroupsCriterion);
@@ -481,7 +479,7 @@ public class FilterCriteriaParityTests
     {
         var dto = new SceneDto(1, "Title", "Code", "Details", "Director", "2024-01-01",
             85, false, null, null, 0, 0, 0, null, 0, "English", 50,
-            [], [], [], [], [], [], [], [], null, "2024-01-01", "2024-01-01");
+            [], [], [], [], [], [], [], null, "2024-01-01", "2024-01-01");
         Assert.Equal("English", dto.Captions);
         Assert.Equal(50, dto.InteractiveSpeed);
     }
@@ -500,14 +498,6 @@ public class FilterCriteriaParityTests
         var dto = new ImageCreateDto("Image", null, null, null, null, false, null, null, null, null, null, [10]);
         Assert.NotNull(dto.GalleryIds);
         Assert.Single(dto.GalleryIds);
-    }
-
-    [Fact]
-    public void SceneMarkerUpdateDto_HasTagIds()
-    {
-        var dto = new SceneMarkerUpdateDto("Title", 10.0, null, 1, [5, 6]);
-        Assert.NotNull(dto.TagIds);
-        Assert.Equal(2, dto.TagIds.Count);
     }
 
     [Fact]
@@ -576,7 +566,6 @@ public class FilterCriteriaParityTests
             PiercingsCriterion = new StringCriterion { Value = "ear", Modifier = CriterionModifier.Includes },
             AliasesCriterion = new StringCriterion { Value = "alias1", Modifier = CriterionModifier.Includes },
             DeathDateCriterion = new DateCriterion { Value = "2023-01-01", Modifier = CriterionModifier.IsNull },
-            MarkerCountCriterion = new IntCriterion { Value = 0, Modifier = CriterionModifier.GreaterThan },
             PlayCountCriterion = new IntCriterion { Value = 10, Modifier = CriterionModifier.GreaterThan },
             OCounterCriterion = new IntCriterion { Value = 5, Modifier = CriterionModifier.LessThan },
             GroupsCriterion = new MultiIdCriterion { Value = [1], Modifier = CriterionModifier.Includes },

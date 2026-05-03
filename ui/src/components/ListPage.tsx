@@ -5,9 +5,10 @@ import type { FindFilter } from "../api/types";
 import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi } from "../api/client";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { SavedFilterMenu } from "./SavedFilterMenu";
-import { FilterDialog, FilterButton, type CriterionDefinition } from "./FilterDialog";
+import { FilterDialog, FilterButton, type CriterionDefinition, type FilterDialogCustomSection } from "./FilterDialog";
 import { useKeySequence } from "../hooks/useKeySequence";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
+import { trackInteraction } from "../utils/interactionTracking";
 
 export type DisplayMode = "grid" | "list" | "wall" | "tagger" | "graph";
 
@@ -23,7 +24,7 @@ interface ListPageProps {
   displayMode?: DisplayMode;
   onDisplayModeChange?: (mode: DisplayMode) => void;
   availableDisplayModes?: DisplayMode[];
-  selectedIds?: Set<number>;
+  selectedIds?: Set<string | number>;
   onSelectAll?: () => void;
   onSelectNone?: () => void;
   selectionActions?: ReactNode;
@@ -40,6 +41,7 @@ interface ListPageProps {
   wallColumnCount?: number;
   onWallColumnCountChange?: (count: number) => void;
   showPagingControls?: boolean;
+  customFilterSections?: FilterDialogCustomSection[];
 }
 
 const PER_PAGE_OPTIONS = [20, 40, 60, 120, 250, 500, 1000];
@@ -197,6 +199,7 @@ export function ListPage({
   wallColumnCount,
   onWallColumnCountChange,
   showPagingControls = true,
+  customFilterSections,
 }: ListPageProps) {
   const [searchText, setSearchText] = useState(filter.q ?? "");
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -325,6 +328,18 @@ export function ListPage({
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    if (pageKey && searchText.trim().length > 0) {
+      trackInteraction({
+        hostType: "collection",
+        kind: "searchQuery",
+        meta: {
+          pageKey,
+          query: searchText.trim(),
+          source: "listPageToolbar",
+          activeFilterCount: Object.keys(objectFilter ?? {}).length,
+        },
+      });
+    }
     onFilterChange({ ...filter, q: searchText || undefined, page: 1 });
   };
 
@@ -570,14 +585,26 @@ export function ListPage({
       {objectFilter && onObjectFilterChange && criteriaDefinitions && Object.keys(objectFilter).length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 bg-surface/50 border border-border rounded-lg px-3 py-1.5 mx-1 mt-1">
           {Object.entries(objectFilter).map(([key, value]) => {
+            const customSection = customFilterSections?.find((section) => section.filterKey === key);
             const def = criteriaDefinitions.find((d) => d.id === key || d.filterKey === key);
-            const label = def?.label ?? key;
+            const label = customSection?.label ?? def?.label ?? key;
             const nameMap = def?.entityType ? entityNameMaps[def.entityType] : undefined;
-            const displayValue = formatFilterChipValue(def, value, nameMap);
+            const displayValue = customSection?.summarize?.(value) ?? formatFilterChipValue(def, value, nameMap);
             return (
               <button
                 key={key}
                 onClick={() => {
+                  if (pageKey) {
+                    trackInteraction({
+                      hostType: "collection",
+                      kind: "filterClear",
+                      meta: {
+                        pageKey,
+                        source: "filterChip",
+                        criteriaKeys: [key],
+                      },
+                    });
+                  }
                   const next = { ...objectFilter };
                   delete next[key];
                   onObjectFilterChange(next);
@@ -593,7 +620,21 @@ export function ListPage({
             );
           })}
           <button
-            onClick={() => { onObjectFilterChange({}); onFilterChange({ ...filter, page: 1 }); }}
+            onClick={() => {
+              if (pageKey) {
+                trackInteraction({
+                  hostType: "collection",
+                  kind: "filterClear",
+                  meta: {
+                    pageKey,
+                    source: "filterChip",
+                    clearedAll: true,
+                  },
+                });
+              }
+              onObjectFilterChange({});
+              onFilterChange({ ...filter, page: 1 });
+            }}
             className="text-xs text-muted hover:text-red-300"
           >
             Clear all
@@ -645,7 +686,19 @@ export function ListPage({
           onClose={() => { setFilterDialogOpen(false); setFilterDialogPreselect(undefined); }}
           criteria={criteriaDefinitions}
           activeFilter={objectFilter ?? {}}
+          customSections={customFilterSections}
           onApply={(f) => {
+            if (pageKey) {
+              trackInteraction({
+                hostType: "collection",
+                kind: Object.keys(f).length === 0 ? "filterClear" : "filterApply",
+                meta: {
+                  pageKey,
+                  source: "filterDialog",
+                  criteriaKeys: Object.keys(f),
+                },
+              });
+            }
             onObjectFilterChange(f);
             onFilterChange({ ...filter, page: 1 });
           }}

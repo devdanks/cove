@@ -66,7 +66,7 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
             ["thumbnails", "Thumbnails / Screenshots"],
             ["previews", "Video Previews"],
             ["sprites", "Sprite Sheets"],
-            ["markers", "Marker Screenshots"],
+            ["markers", "Segment Screenshots"],
             ["phashes", "Perceptual Hashes"],
             ["md5", "MD5 Checksums"],
           ] as const).map(([key, labelText]) => (

@@ -463,32 +463,15 @@ public class PerformerRepository : IPerformerRepository
                 var gIds = filter.GroupsCriterion.Value;
                 query = filter.GroupsCriterion.Modifier switch
                 {
-                    CriterionModifier.Includes => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.SceneGroups.Any(sg => gIds.Contains(sg.GroupId)))),
-                    CriterionModifier.Excludes => query.Where(p => !p.ScenePerformers.Any(sp => sp.Scene!.SceneGroups.Any(sg => gIds.Contains(sg.GroupId)))),
-                    _ => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.SceneGroups.Any(sg => gIds.Contains(sg.GroupId)))),
+                    CriterionModifier.Includes => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
+                    CriterionModifier.Excludes => query.Where(p => !p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
+                    _ => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
                 };
             }
 
             // IgnoreAutoTag criterion
             if (filter.IgnoreAutoTagCriterion != null)
                 query = query.Where(p => p.IgnoreAutoTag == filter.IgnoreAutoTagCriterion.Value);
-
-            // Marker count criterion
-            if (filter.MarkerCountCriterion != null)
-            {
-                var mcVal = filter.MarkerCountCriterion.Value;
-                var mcVal2 = filter.MarkerCountCriterion.Value2 ?? mcVal;
-                query = filter.MarkerCountCriterion.Modifier switch
-                {
-                    CriterionModifier.Equals => query.Where(p => p.ScenePerformers.SelectMany(sp => sp.Scene!.SceneMarkers).Count() == mcVal),
-                    CriterionModifier.NotEquals => query.Where(p => p.ScenePerformers.SelectMany(sp => sp.Scene!.SceneMarkers).Count() != mcVal),
-                    CriterionModifier.GreaterThan => query.Where(p => p.ScenePerformers.SelectMany(sp => sp.Scene!.SceneMarkers).Count() > mcVal),
-                    CriterionModifier.LessThan => query.Where(p => p.ScenePerformers.SelectMany(sp => sp.Scene!.SceneMarkers).Count() < mcVal),
-                    CriterionModifier.Between => query.Where(p => p.ScenePerformers.SelectMany(sp => sp.Scene!.SceneMarkers).Count() >= mcVal &&
-                        p.ScenePerformers.SelectMany(sp => sp.Scene!.SceneMarkers).Count() <= mcVal2),
-                    _ => query,
-                };
-            }
 
             // RemoteId criterion
             if (filter.RemoteIdCriterion != null)
@@ -850,9 +833,6 @@ public class TagRepository : ITagRepository
         query = filter.SceneCountIncludesChildren
             ? query
             : FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, t => t.SceneCount);
-        query = filter.MarkerCountIncludesChildren
-            ? query
-            : FilterHelpers.ApplyInt(query, filter.MarkerCountCriterion, t => t.SceneMarkerCount);
         query = filter.PerformerCountIncludesChildren
             ? query
             : FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, t => t.PerformerCount);
@@ -887,7 +867,6 @@ public class TagRepository : ITagRepository
         var rootTagIdsByDescendantTagId = BuildRootTagIdsByDescendantTagId(tagAndDescendantIdsByTagId);
 
         Dictionary<int, int>? sceneCountsByTagId = null;
-        Dictionary<int, int>? markerCountsByTagId = null;
         Dictionary<int, int>? performerCountsByTagId = null;
         Dictionary<int, int>? imageCountsByTagId = null;
         Dictionary<int, int>? galleryCountsByTagId = null;
@@ -903,22 +882,6 @@ public class TagRepository : ITagRepository
                     .Select(sceneTag => new TagEntityPair(sceneTag.TagId, sceneTag.SceneId))
                     .ToListAsync(ct),
                 rootTagIdsByDescendantTagId);
-        }
-
-        if (filter.MarkerCountIncludesChildren && filter.MarkerCountCriterion != null)
-        {
-            var primaryMarkerPairs = await _db.SceneMarkers
-                .AsNoTracking()
-                .Where(marker => relevantTagIds.Contains(marker.PrimaryTagId))
-                .Select(marker => new TagEntityPair(marker.PrimaryTagId, marker.Id))
-                .ToListAsync(ct);
-            var secondaryMarkerPairs = await _db.Set<SceneMarkerTag>()
-                .AsNoTracking()
-                .Where(sceneMarkerTag => relevantTagIds.Contains(sceneMarkerTag.TagId))
-                .Select(sceneMarkerTag => new TagEntityPair(sceneMarkerTag.TagId, sceneMarkerTag.SceneMarkerId))
-                .ToListAsync(ct);
-
-            markerCountsByTagId = CountDistinctEntitiesByRootTagId(primaryMarkerPairs.Concat(secondaryMarkerPairs), rootTagIdsByDescendantTagId);
         }
 
         if (filter.PerformerCountIncludesChildren && filter.PerformerCountCriterion != null)
@@ -979,7 +942,6 @@ public class TagRepository : ITagRepository
         var matchingTagIds = candidateTagIds.Where(tagId =>
         {
             return MatchesTagCountCriterion(filter.SceneCountCriterion, filter.SceneCountIncludesChildren, tagId, sceneCountsByTagId)
-                && MatchesTagCountCriterion(filter.MarkerCountCriterion, filter.MarkerCountIncludesChildren, tagId, markerCountsByTagId)
                 && MatchesTagCountCriterion(filter.PerformerCountCriterion, filter.PerformerCountIncludesChildren, tagId, performerCountsByTagId)
                 && MatchesTagCountCriterion(filter.ImageCountCriterion, filter.ImageCountIncludesChildren, tagId, imageCountsByTagId)
                 && MatchesTagCountCriterion(filter.GalleryCountCriterion, filter.GalleryCountIncludesChildren, tagId, galleryCountsByTagId)
@@ -1038,7 +1000,6 @@ public class TagRepository : ITagRepository
 
     private static bool NeedsChildTagCountAggregation(TagFilter filter)
         => (filter.SceneCountIncludesChildren && filter.SceneCountCriterion != null)
-        || (filter.MarkerCountIncludesChildren && filter.MarkerCountCriterion != null)
         || (filter.PerformerCountIncludesChildren && filter.PerformerCountCriterion != null)
         || (filter.ImageCountIncludesChildren && filter.ImageCountCriterion != null)
         || (filter.GalleryCountIncludesChildren && filter.GalleryCountCriterion != null)
@@ -1104,39 +1065,6 @@ public class TagRepository : ITagRepository
         }
 
         return MatchesIntCriterion(criterion, value);
-    }
-
-    private IQueryable<Tag> ApplyDirectMarkerCountCriterion(IQueryable<Tag> query, IntCriterion? criterion)
-    {
-        if (criterion == null)
-        {
-            return query;
-        }
-
-        var markerCountVal = criterion.Value;
-        var markerCountVal2 = criterion.Value2 ?? markerCountVal;
-        return criterion.Modifier switch
-        {
-            CriterionModifier.Equals => query.Where(tag =>
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) == markerCountVal),
-            CriterionModifier.NotEquals => query.Where(tag =>
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) != markerCountVal),
-            CriterionModifier.GreaterThan => query.Where(tag =>
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) > markerCountVal),
-            CriterionModifier.LessThan => query.Where(tag =>
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) < markerCountVal),
-            CriterionModifier.Between => query.Where(tag =>
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) >= markerCountVal &&
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) <= markerCountVal2),
-            CriterionModifier.NotBetween => query.Where(tag =>
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) < markerCountVal ||
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) > markerCountVal2),
-            CriterionModifier.IsNull => query.Where(tag =>
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) == 0),
-            CriterionModifier.NotNull => query.Where(tag =>
-                _db.SceneMarkers.Count(marker => marker.PrimaryTagId == tag.Id || marker.SceneMarkerTags.Any(sceneMarkerTag => sceneMarkerTag.TagId == tag.Id)) > 0),
-            _ => query,
-        };
     }
 
     private static bool MatchesIntCriterion(IntCriterion criterion, int value)
@@ -2262,7 +2190,7 @@ public class GroupRepository : IGroupRepository
         => await _db.Groups
             .Include(g => g.Studio).Include(g => g.Urls)
             .Include(g => g.GroupTags).ThenInclude(gt => gt.Tag)
-            .Include(g => g.SceneGroups).ThenInclude(sg => sg.Scene)
+            .Include(g => g.GroupItems)
             .Include(g => g.SubGroupRelations)
             .Include(g => g.ContainingGroupRelations)
             .AsSplitQuery()
@@ -2294,7 +2222,11 @@ public class GroupRepository : IGroupRepository
 
     public async Task<(IReadOnlyList<Group> Items, int TotalCount)> FindAsync(GroupFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
     {
-        var query = _db.Groups.Include(g => g.GroupTags).ThenInclude(gt => gt.Tag).AsSplitQuery().AsQueryable();
+        var query = _db.Groups
+            .Include(g => g.GroupTags).ThenInclude(gt => gt.Tag)
+            .Include(g => g.GroupItems)
+            .AsSplitQuery()
+            .AsQueryable();
         if (filter != null)
         {
             if (!string.IsNullOrEmpty(filter.Name)) query = query.Where(g => EF.Functions.ILike(g.Name, $"%{filter.Name}%"));
@@ -2338,7 +2270,7 @@ public class GroupRepository : IGroupRepository
             query = FilterHelpers.ApplyString(query, filter.SynopsisCriterion, g => g.Synopsis);
 
             // Count criteria
-            query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, g => g.SceneGroups.Count);
+            query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, g => g.GroupItems.Select(item => item.SceneId).Distinct().Count());
             query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, g => g.GroupTags.Count);
 
             // Performers criterion (performers in scenes belonging to this group)
@@ -2347,10 +2279,10 @@ public class GroupRepository : IGroupRepository
                 var pIds = filter.PerformersCriterion.Value;
                 query = filter.PerformersCriterion.Modifier switch
                 {
-                    CriterionModifier.Includes => query.Where(g => g.SceneGroups.Any(sg => sg.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
-                    CriterionModifier.Excludes => query.Where(g => !g.SceneGroups.Any(sg => sg.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
-                    CriterionModifier.IncludesAll => query.Where(g => pIds.All(pid => g.SceneGroups.Any(sg => sg.Scene!.ScenePerformers.Any(sp => sp.PerformerId == pid)))),
-                    _ => query.Where(g => g.SceneGroups.Any(sg => sg.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
+                    CriterionModifier.Includes => query.Where(g => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
+                    CriterionModifier.Excludes => query.Where(g => !g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
+                    CriterionModifier.IncludesAll => query.Where(g => pIds.All(pid => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => sp.PerformerId == pid)))),
+                    _ => query.Where(g => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
                 };
             }
         }
@@ -2402,30 +2334,4 @@ public class SavedFilterRepository : ISavedFilterRepository
         if (entity != null) { _db.SavedFilters.Remove(entity); await _db.SaveChangesAsync(ct); }
     }
     public async Task<int> CountAsync(CancellationToken ct = default) => await _db.SavedFilters.CountAsync(ct);
-}
-
-public class SceneMarkerRepository : ISceneMarkerRepository
-{
-    private readonly CoveContext _db;
-    public SceneMarkerRepository(CoveContext db) => _db = db;
-
-    public async Task<SceneMarker?> GetByIdAsync(int id, CancellationToken ct = default) => await _db.SceneMarkers.FindAsync([id], ct);
-    public async Task<IReadOnlyList<SceneMarker>> GetAllAsync(CancellationToken ct = default) => await _db.SceneMarkers.AsNoTracking().ToListAsync(ct);
-    public async Task<IReadOnlyList<SceneMarker>> GetBySceneIdAsync(int sceneId, CancellationToken ct = default)
-        => await _db.SceneMarkers.Include(m => m.PrimaryTag).Where(m => m.SceneId == sceneId).AsNoTracking().ToListAsync(ct);
-
-    public async Task<SceneMarker> AddAsync(SceneMarker entity, CancellationToken ct = default)
-    {
-        _db.SceneMarkers.Add(entity);
-        await _db.SaveChangesAsync(ct);
-        return entity;
-    }
-
-    public async Task UpdateAsync(SceneMarker entity, CancellationToken ct = default) { _db.SceneMarkers.Update(entity); await _db.SaveChangesAsync(ct); }
-    public async Task DeleteAsync(int id, CancellationToken ct = default)
-    {
-        var entity = await _db.SceneMarkers.FindAsync([id], ct);
-        if (entity != null) { _db.SceneMarkers.Remove(entity); await _db.SaveChangesAsync(ct); }
-    }
-    public async Task<int> CountAsync(CancellationToken ct = default) => await _db.SceneMarkers.CountAsync(ct);
 }

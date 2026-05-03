@@ -60,11 +60,6 @@ public interface ISavedFilterRepository : IRepository<SavedFilter>
     Task<IReadOnlyList<SavedFilter>> GetByModeAsync(Cove.Core.Enums.FilterMode mode, CancellationToken ct = default);
 }
 
-public interface ISceneMarkerRepository : IRepository<SceneMarker>
-{
-    Task<IReadOnlyList<SceneMarker>> GetBySceneIdAsync(int sceneId, CancellationToken ct = default);
-}
-
 // Filter models
 public class FindFilter
 {
@@ -117,7 +112,6 @@ public class SceneFilter
     public MultiIdCriterion? StudiosCriterion { get; set; }
     public MultiIdCriterion? GroupsCriterion { get; set; }
     public BoolCriterion? OrganizedCriterion { get; set; }
-    public BoolCriterion? HasMarkersCriterion { get; set; }
     public BoolCriterion? InteractiveCriterion { get; set; }
     public StringCriterion? PathCriterion { get; set; }
     public FingerprintCriterion? FingerprintCriterion { get; set; }
@@ -199,7 +193,6 @@ public class PerformerFilter
     public StringCriterion? PiercingsCriterion { get; set; }
     public StringCriterion? AliasesCriterion { get; set; }
     public DateCriterion? DeathDateCriterion { get; set; }
-    public IntCriterion? MarkerCountCriterion { get; set; }
     public IntCriterion? PlayCountCriterion { get; set; }
     public IntCriterion? OCounterCriterion { get; set; }
     public MultiIdCriterion? GroupsCriterion { get; set; }
@@ -215,8 +208,6 @@ public class TagFilter
     public BoolCriterion? FavoriteCriterion { get; set; }
     public IntCriterion? SceneCountCriterion { get; set; }
     public bool SceneCountIncludesChildren { get; set; }
-    public IntCriterion? MarkerCountCriterion { get; set; }
-    public bool MarkerCountIncludesChildren { get; set; }
     public IntCriterion? PerformerCountCriterion { get; set; }
     public bool PerformerCountIncludesChildren { get; set; }
     public MultiIdCriterion? ParentsCriterion { get; set; }

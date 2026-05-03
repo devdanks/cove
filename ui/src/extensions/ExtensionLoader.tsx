@@ -45,15 +45,25 @@ function resolveIcon(name?: string): LucideIcon | undefined {
 
 /** Global registry mapping componentName → React component. */
 const componentRegistry = new Map<string, FC<any>>();
+type ExtensionActionHandler = (action: ExtensionAction, payload: Record<string, unknown>) => Promise<unknown> | unknown;
+const actionHandlerRegistry = new Map<string, ExtensionActionHandler>();
 
 /** Resolve a component by name from the registry. */
 export function resolveComponent(name: string): FC<any> | undefined {
   return componentRegistry.get(name);
 }
 
+export function resolveActionHandler(name: string): ExtensionActionHandler | undefined {
+  return actionHandlerRegistry.get(name);
+}
+
 /** Register a component into the global registry (for external extensions). */
 export function registerComponent(name: string, component: FC<any>) {
   componentRegistry.set(name, component);
+}
+
+export function registerActionHandler(name: string, handler: ExtensionActionHandler) {
+  actionHandlerRegistry.set(name, handler);
 }
 
 // ============================================================================
@@ -91,6 +101,8 @@ interface ExtensionState {
   getActionsForContext: (entityType?: string, page?: string, actionType?: string) => ExtensionAction[];
   /** Resolve a React component by name */
   resolveComponent: (name: string) => FC<any> | undefined;
+  /** Resolve a runtime action handler by name */
+  resolveActionHandler: (name: string) => ExtensionActionHandler | undefined;
 }
 
 const ExtensionContext = createContext<ExtensionState>({
@@ -115,6 +127,7 @@ const ExtensionContext = createContext<ExtensionState>({
   actions: [],
   getActionsForContext: () => [],
   resolveComponent: () => undefined,
+  resolveActionHandler: () => undefined,
 });
 
 export function useExtensions() {
@@ -294,6 +307,15 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
               for (const [name, component] of Object.entries(mod.default.components)) {
                 if (typeof component === "function") {
                   registerComponent(name, component as FC<any>);
+                }
+              }
+            }
+
+            const actionHandlers = mod.default?.actionHandlers ?? mod.default?.handlers;
+            if (actionHandlers && typeof actionHandlers === "object") {
+              for (const [name, handler] of Object.entries(actionHandlers)) {
+                if (typeof handler === "function") {
+                  registerActionHandler(name, handler as ExtensionActionHandler);
                 }
               }
             }
@@ -513,7 +535,8 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
     (tab: string, section?: string) => {
       return settingsPanels
         .filter((p) => {
-          if (p.targetTab !== tab) return false;
+          const resolvedTargetTab = p.targetTab ?? "extensions";
+          if (resolvedTargetTab !== tab) return false;
           if (section == null) return !p.targetSection;
           return p.targetSection === section;
         })
@@ -559,6 +582,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         actions,
         getActionsForContext,
         resolveComponent,
+        resolveActionHandler,
       }}
     >
       {children}

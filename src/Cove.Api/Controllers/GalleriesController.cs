@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Core.Auth;
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -12,7 +13,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.GalleriesRead)]
-public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db) : ControllerBase
+public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, ITagProvenanceService? tagProvenanceService = null) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -29,7 +30,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         {
             Title = title, Rating = rating, Organized = organized, StudioId = studioId,
             ImageId = imageId,
-            TagIds = ParseIntList(tagIds), PerformerIds = ParseIntList(performerIds)
+            TagIds = QueryParsing.ParseIntList(tagIds)?.ToList(), PerformerIds = QueryParsing.ParseIntList(performerIds)?.ToList()
         };
         var findFilter = new FindFilter
         {
@@ -60,7 +61,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         var gallery = await galleryRepo.GetByIdWithRelationsAsync(id, ct);
         if (gallery == null) return NotFound();
 
-        return Ok(MapToDto(gallery));
+        return Ok(await MapToDtoWithProvenanceAsync(gallery, ct));
     }
 
     [HttpGet("{id:int}/cover")]
@@ -103,8 +104,13 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         if (dto.SceneIds?.Count > 0) gallery.SceneGalleries = dto.SceneIds.Select(id => new SceneGallery { SceneId = id }).ToList();
 
         gallery = await galleryRepo.AddAsync(gallery, ct);
+        if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
+        {
+            await tagProvenanceService.SyncTagSetAsync(AffinityHostType.Gallery, gallery.Id, [], dto.TagIds, cancellationToken: ct);
+            await db.SaveChangesAsync(ct);
+        }
         var result = await galleryRepo.GetByIdWithRelationsAsync(gallery.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = gallery.Id }, MapToDto(result!));
+        return CreatedAtAction(nameof(GetById), new { id = gallery.Id }, await MapToDtoWithProvenanceAsync(result!, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -114,6 +120,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     {
         var gallery = await galleryRepo.GetByIdWithRelationsAsync(id, ct);
         if (gallery == null) return NotFound();
+        var previousTagIds = dto.TagIds != null ? gallery.GalleryTags.Select(galleryTag => galleryTag.TagId).ToArray() : [];
 
         if (dto.Title != null) gallery.Title = dto.Title;
         if (dto.Code != null) gallery.Code = dto.Code;
@@ -146,9 +153,19 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         }
         if (dto.CustomFields != null) gallery.CustomFields = dto.CustomFields;
 
+        if (dto.TagIds != null && tagProvenanceService != null)
+        {
+            await tagProvenanceService.SyncTagSetAsync(
+                AffinityHostType.Gallery,
+                id,
+                previousTagIds,
+                gallery.GalleryTags.Select(galleryTag => galleryTag.TagId).ToArray(),
+                cancellationToken: ct);
+        }
+
         await galleryRepo.UpdateAsync(gallery, ct);
         var updated = await galleryRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDtoWithProvenanceAsync(updated!, ct));
     }
 
     [HttpDelete("{id:int}")]
@@ -158,15 +175,31 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     {
         var g = await galleryRepo.GetByIdAsync(id, ct);
         if (g == null) return NotFound();
+        if (tagProvenanceService != null)
+            await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Gallery, id, ct);
         await galleryRepo.DeleteAsync(id, ct);
         return NoContent();
     }
 
-    private static GalleryDto MapToDto(Gallery g, int? imageCount = null, int? sceneCount = null) => new(
+    private async Task<GalleryDto> MapToDtoWithProvenanceAsync(Gallery gallery, CancellationToken cancellationToken = default)
+    {
+        var tagIds = gallery.GalleryTags
+            .Where(galleryTag => galleryTag.Tag != null)
+            .Select(galleryTag => galleryTag.Tag!.Id)
+            .Distinct()
+            .ToArray();
+        var provenanceLookup = tagProvenanceService == null
+            ? null
+            : await tagProvenanceService.GetLookupAsync(AffinityHostType.Gallery, gallery.Id, tagIds, cancellationToken);
+
+        return MapToDto(gallery, null, null, provenanceLookup);
+    }
+
+    private static GalleryDto MapToDto(Gallery g, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
         g.Id, g.Title, g.Code, g.Date?.ToString("yyyy-MM-dd"), g.Details, g.Photographer,
         g.Rating, g.Organized, g.StudioId, g.Studio?.Name,
         g.Urls.Select(u => u.Url).ToList(),
-        g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => new TagDto(gt.Tag!.Id, gt.Tag.Name, gt.Tag.Description, gt.Tag.Favorite, gt.Tag.IgnoreAutoTag, [])).ToList(),
+        g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => new TagDto(gt.Tag!.Id, gt.Tag.Name, gt.Tag.Description, gt.Tag.Favorite, gt.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, gt.Tag!.Id))).ToList(),
         g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => new PerformerSummaryDto(gp.Performer!.Id, gp.Performer.Name, gp.Performer.Disambiguation, gp.Performer.Gender?.ToString(), gp.Performer.Birthdate?.ToString("yyyy-MM-dd"), gp.Performer.Favorite, gp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(gp.Performer.Id, gp.Performer.UpdatedAt) : null)).ToList(),
         imageCount ?? g.ImageCount,
         sceneCount ?? g.SceneCount,
@@ -202,8 +235,10 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         return items.Select(g => MapToDto(g)).ToList();
     }
 
+    private static List<TagProvenanceDto> GetTagProvenance(IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup, int tagId)
+        => provenanceLookup != null && provenanceLookup.TryGetValue(tagId, out var provenance) ? provenance : [];
+
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
-    private static List<int>? ParseIntList(string? csv) => string.IsNullOrEmpty(csv) ? null : csv.Split(',').Select(int.Parse).ToList();
 
     // ===== Image Management =====
 

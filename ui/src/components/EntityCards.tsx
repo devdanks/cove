@@ -5,7 +5,7 @@ import { scenes, images, performers, galleries, studios, groups, entityImages } 
 import type { Gallery, Group, Image, Performer, Scene, Studio } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
-import { Building2, FolderOpen, Layers, Tag, User, Film, MapPin, Box, Images as ImagesIcon, Heart, Eye } from "lucide-react";
+import { Building2, FolderOpen, Layers, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye } from "lucide-react";
 import { createRouteLinkProps, createNestedRouteLinkProps } from "./cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "./RouteCardLinkOverlay";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
@@ -286,7 +286,7 @@ export function GroupsPopoverContent({ filter }: { filter: Record<string, string
 export function SceneCardPopovers({ scene, onNavigate }: { scene: Scene; onNavigate?: (r: any) => void }) {
   const hasPopovers =
     scene.tags.length > 0 || scene.performers.length > 0 || scene.groups.length > 0 ||
-    scene.galleries.length > 0 || scene.markers.length > 0 || scene.oCounter > 0 || scene.organized;
+    scene.galleries.length > 0 || scene.oCounter > 0 || scene.organized;
   return (
     <>
       <hr className="border-border/50 my-0" />
@@ -337,19 +337,6 @@ export function SceneCardPopovers({ scene, onNavigate }: { scene: Scene; onNavig
                 return (
                 <a key={g.id} {...navigationHandlers}
                   className="block text-xs text-accent hover:underline cursor-pointer truncate text-left px-2 py-1 rounded hover:bg-card-hover transition-colors">{g.title || "Untitled"}</a>
-              );})}
-            </div>
-          </PopoverButton>
-        )}
-        {scene.markers.length > 0 && (
-          <PopoverButton icon={<MapPin className="w-3.5 h-3.5" />} count={scene.markers.length} title="Markers" preferBelow>
-            <div className="flex flex-col gap-0.5">
-              {scene.markers.map((m: any) => {
-                const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page: "scene", id: scene.id }, onNavigate);
-
-                return (
-                <a key={m.id} {...navigationHandlers}
-                  className="block text-xs text-accent hover:underline cursor-pointer truncate text-left px-2 py-1 rounded hover:bg-card-hover transition-colors">{m.title} ({formatDuration(m.seconds)})</a>
               );})}
             </div>
           </PopoverButton>
@@ -441,6 +428,7 @@ export function SceneCard({ scene, onClick, selected, onSelect, onNavigate, sele
   const file = scene.files[0];
   const duration = file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
+  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
   const previewUrl = scenes.previewUrl(scene.id);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -464,7 +452,22 @@ export function SceneCard({ scene, onClick, selected, onSelect, onNavigate, sele
     <div onClick={selecting ? onClick : undefined} className={`scene-card relative cursor-pointer group rounded border bg-card overflow-hidden flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border"}`}>
       <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={onClick} label={`Open scene ${cardTitle}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <div className="scene-card-preview relative aspect-video bg-black overflow-hidden">
-        <img src={screenshotUrl} alt={scene.title || ""} className="scene-card-preview-image w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        <img
+          src={coverUrl}
+          alt={scene.title || ""}
+          className="scene-card-preview-image w-full h-full object-cover"
+          loading="lazy"
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            if (target.dataset.fallbackApplied !== "true") {
+              target.dataset.fallbackApplied = "true";
+              target.src = screenshotUrl;
+              return;
+            }
+
+            target.style.display = "none";
+          }}
+        />
         <video ref={videoRef} disableRemotePlayback playsInline muted loop preload="none" src={previewUrl} className="scene-card-preview-video" />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
         {scene.studioName && scene.studioId && !selecting && (
@@ -533,12 +536,29 @@ export function SceneTile({ scene, onClick }: SceneTileProps) {
   const file = scene.files[0];
   const duration = file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
+  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 960);
+  const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: scene.id }, onClick);
 
   return (
     <a {...linkProps} className="group text-left">
       <div className="relative aspect-video overflow-hidden rounded-lg border border-border bg-card shadow-md shadow-black/30">
-        <img src={scenes.screenshotUrl(scene.id, scene.updatedAt)} alt={scene.title || ""} className="h-full w-full object-cover" loading="lazy" />
+        <img
+          src={coverUrl}
+          alt={scene.title || ""}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            if (target.dataset.fallbackApplied !== "true") {
+              target.dataset.fallbackApplied = "true";
+              target.src = screenshotUrl;
+              return;
+            }
+
+            target.style.display = "none";
+          }}
+        />
         {duration > 0 && <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[11px] text-white">{formatDuration(duration)}</span>}
         {resLabel && <span className="absolute top-1.5 right-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent">{resLabel}</span>}
         <RatingBanner rating={scene.rating} />

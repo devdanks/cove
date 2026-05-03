@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tags } from "../api/client";
-import type { FindFilter, Tag, TagCreate, TagFilterCriteria } from "../api/types";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
+import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
+import type { EntityEngagement, FindFilter, Tag, TagCreate, TagFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
-import { Tag as TagIcon, Film, MapPin, Trash2, Loader2, Edit, Merge, Heart, Image, LayoutGrid, Layers, Users, Building2 } from "lucide-react";
+import { Tag as TagIcon, Film, Trash2, Loader2, Edit, Merge, Heart, Image, LayoutGrid, Layers, Users, Building2 } from "lucide-react";
 import { MergeDialog } from "../components/MergeDialog";
 import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
@@ -86,6 +89,7 @@ export function TagsPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const { engagementById } = useEntityEngagementBatch("tag", items.map((item) => item.id));
   const selectionItems: Array<Pick<Tag, "id" | "name" | "imagePath">> = displayMode === "graph" ? graphData?.items ?? [] : items;
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(selectionItems);
   const selecting = selectedIds.size > 0;
@@ -206,11 +210,12 @@ export function TagsPage({ onNavigate }: Props) {
           } : undefined}
         />
       ) : displayMode === "grid" ? (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 200px), 1fr))" }}>
+        <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {items.map((tag) => (
             <TagCard
               key={tag.id}
               tag={tag}
+              engagement={engagementById.get(tag.id)}
               onClick={() => selecting ? toggle(tag.id) : onNavigate({ page: "tag", id: tag.id })}
               onNavigate={onNavigate}
               selected={selectedIds.has(tag.id)}
@@ -218,7 +223,7 @@ export function TagsPage({ onNavigate }: Props) {
               selecting={selecting}
             />
           ))}
-        </div>
+        </EntityCardGrid>
       ) : (
         <TagListTable tags={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}
@@ -290,13 +295,16 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
   );
 }
 
-function TagCard({ tag, onClick, onNavigate, selected, onSelect, selecting }: { tag: Tag; onClick: () => void; onNavigate: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+function TagCard({ tag, engagement, onClick, onNavigate, selected, onSelect, selecting }: { tag: Tag; engagement?: EntityEngagement; onClick: () => void; onNavigate: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const { slots } = useRouteRegistry();
-  const queryClient = useQueryClient();
   const hasExtensionFooter = slots.some((slot) => slot.slot === "tag-card-footer");
-  const favMut = useMutation({
-    mutationFn: () => tags.update(tag.id, { favorite: !tag.favorite }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tags"] }),
+  const {
+    favorite,
+    setFavorite,
+    favoritePending,
+  } = useEntityEngagement("tag", tag.id, {
+    enabled: false,
+    fallbackFavorite: engagement?.isFavorite ?? tag.favorite,
   });
 
   return (
@@ -306,11 +314,16 @@ function TagCard({ tag, onClick, onNavigate, selected, onSelect, selecting }: { 
         <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
         {/* Favorite heart overlay */}
         <button
-          onClick={(e) => { e.stopPropagation(); favMut.mutate(); }}
-          className={`absolute top-1 right-1 p-1 z-10 transition-opacity ${tag.favorite ? "opacity-100" : "opacity-0 group-hover:opacity-70"}`}
-          title={tag.favorite ? "Unfavorite" : "Favorite"}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setFavorite(!favorite);
+          }}
+          disabled={favoritePending}
+          className={`absolute top-1 right-1 p-1 z-10 transition-opacity ${favorite ? "opacity-100" : "opacity-0 group-hover:opacity-70"}`}
+          title={favorite ? "Unfavorite" : "Favorite"}
         >
-          <Heart className={`w-5 h-5 ${tag.favorite ? "fill-red-500 text-red-500" : "text-white drop-shadow-md"}`} />
+          <Heart className={`w-5 h-5 ${favorite ? "fill-red-500 text-red-500" : "text-white drop-shadow-md"}`} />
         </button>
         {tag.imagePath ? (
           <img src={tag.imagePath} alt={tag.name} className="w-full h-full object-cover" loading="lazy" />
@@ -324,7 +337,7 @@ function TagCard({ tag, onClick, onNavigate, selected, onSelect, selecting }: { 
           <p className="text-xs text-secondary mt-0.5 line-clamp-1">{tag.description}</p>
         )}
       </div>
-      {(tag.sceneCount || tag.sceneMarkerCount || tag.imageCount || tag.galleryCount || tag.groupCount || tag.performerCount || tag.studioCount || hasExtensionFooter) ? (
+      {(tag.sceneCount || tag.segmentCount || tag.imageCount || tag.galleryCount || tag.groupCount || tag.performerCount || tag.studioCount || hasExtensionFooter) ? (
         <div className="relative z-10 flex items-center justify-center gap-2 px-2 pb-2 border-t border-border/50 pt-1.5 flex-wrap">
           {tag.sceneCount != null && tag.sceneCount > 0 && (
             <PopoverButton icon={<Film className="w-3 h-3" />} count={tag.sceneCount} title="Scenes" wide preferBelow>
@@ -346,9 +359,9 @@ function TagCard({ tag, onClick, onNavigate, selected, onSelect, selecting }: { 
               <GroupsPopoverContent filter={{ tagIds: String(tag.id) }} />
             </PopoverButton>
           )}
-          {tag.sceneMarkerCount != null && tag.sceneMarkerCount > 0 && (
-            <span className="flex items-center gap-0.5 text-xs text-muted" title="Markers">
-              <MapPin className="w-3 h-3" /> {tag.sceneMarkerCount}
+          {tag.segmentCount != null && tag.segmentCount > 0 && (
+            <span className="flex items-center gap-0.5 text-xs text-muted" title="Segments">
+              <Layers className="w-3 h-3" /> {tag.segmentCount}
             </span>
           )}
           {tag.performerCount != null && tag.performerCount > 0 && (

@@ -1,16 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, images, scenes, entityImages } from "../api/client";
-import type { FindFilter, GalleryChapter } from "../api/types";
+import type { FindFilter } from "../api/types";
 import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, BookOpen, Download, Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, UserRound, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
+import { Download, Film, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, UserRound, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GalleryEditModal } from "./GalleryEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { DetailSkeleton } from "../components/DetailSkeleton";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { Lightbox, type LightboxImage } from "../components/Lightbox";
 import { InteractiveRating } from "../components/Rating";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { SceneCard, ImageTile } from "../components/EntityCards";
+import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { EntityDetailTabs } from "../components/EntityDetailTabs";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
@@ -21,16 +25,17 @@ import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
 
 interface Props {
   id: number;
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "images" | "scenes" | "chapters" | "fileinfo" | (string & {});
+type TabKey = "images" | "scenes" | "fileinfo" | (string & {});
 
 export function GalleryDetailPage({ id, onNavigate }: Props) {
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 60, direction: "desc" });
   const { data: gallery, isLoading } = useQuery({
     queryKey: ["gallery", id],
@@ -41,11 +46,12 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
     queryFn: () => images.find(imageFilter, { galleryId: id }),
     enabled: !!gallery,
   });
+  const effectiveImageCount = galleryImages?.totalCount ?? gallery?.imageCount ?? 0;
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("images");
   const { allTabs: galleryTabs, renderExtensionTab } = useExtensionTabs("gallery", [
-    { key: "images", label: "Images", count: gallery?.imageCount },
+    { key: "images", label: "Images", count: effectiveImageCount },
     { key: "scenes", label: "Scenes" },
     { key: "fileinfo", label: "File Info" },
   ]);
@@ -60,15 +66,27 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "galleries" }, onNavigate);
   const canWriteGallery = canWriteEntity("gallery", hasPermission);
+  const canEngageGallery = canReadEntity("gallery", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeleteGallery = canDeleteEntity("gallery", hasPermission);
   const canDownloadGallery = hasPermission("jobs.run") && canWriteGallery;
   const canReadGalleryImages = canReadEntity("image", hasPermission);
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canReadStudios = canReadEntity("studio", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
+  const {
+    favorite: galleryFavorite,
+    rating: galleryRating,
+    setFavorite: setGalleryFavorite,
+    setRating: setGalleryRating,
+    favoritePending: galleryFavoritePending,
+  } = useEntityEngagement("gallery", id, {
+    enabled: !!gallery,
+    fallbackRating: gallery?.rating,
+  });
   const visibleGalleryTabs = filterItemsByPermission(galleryTabs, {
     images: "images.read",
     scenes: "scenes.read",
+    fileinfo: "galleries.read",
   }, hasPermission);
 
   useEffect(() => {
@@ -85,20 +103,51 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
     return () => document.removeEventListener("mousedown", handler);
   }, [showOpsMenu]);
 
-  // Keyboard shortcuts
+  const galleryKeyboardShortcuts = useMemo(() => ([
+    {
+      key: "e",
+      description: "Edit gallery",
+      handler: () => {
+        if (canWriteGallery) {
+          setEditing(true);
+        }
+      },
+    },
+    {
+      key: "a",
+      description: "Open images tab",
+      handler: () => {
+        if (canReadGalleryImages) {
+          setActiveTab("images");
+        }
+      },
+    },
+    {
+      key: "s",
+      description: "Open scenes tab",
+      handler: () => setActiveTab("scenes"),
+    },
+    {
+      key: "f",
+      description: "Open file info tab",
+      handler: () => setActiveTab("fileinfo"),
+    },
+  ]), [canReadGalleryImages, canWriteGallery]);
+
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const el = (e.target as HTMLElement).tagName;
-      if (el === "INPUT" || el === "TEXTAREA" || el === "SELECT") return;
-      switch (e.key) {
-        case "e": if (canWriteGallery) setEditing((v) => !v); break;
-        case "a": if (canReadGalleryImages) setActiveTab("images"); break;
-        case "f": setActiveTab("fileinfo"); break;
-      }
+    if (galleryKeyboardShortcuts.length === 0) return;
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName;
+      if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT" || target?.isContentEditable) return;
+      const shortcut = galleryKeyboardShortcuts.find((entry) => entry.key === event.key);
+      if (!shortcut) return;
+      event.preventDefault();
+      shortcut.handler();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canReadGalleryImages, canWriteGallery]);
+  }, [galleryKeyboardShortcuts]);
 
   useEffect(() => {
     if (visibleGalleryTabs.length > 0 && !visibleGalleryTabs.some((tab) => tab.key === activeTab)) {
@@ -115,7 +164,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   });
 
   const galleryUpdateMut = useMutation({
-    mutationFn: (data: { rating?: number; organized?: boolean }) => galleries.update(id, data),
+    mutationFn: (data: { organized?: boolean }) => galleries.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gallery", id] });
       queryClient.invalidateQueries({ queryKey: ["galleries"] });
@@ -139,39 +188,21 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  const setCoverMut = useMutation({
-    mutationFn: (imageId: number) => galleries.setCover(id, imageId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gallery", id] });
-    },
-  });
-
-  const resetCoverMut = useMutation({
-    mutationFn: () => galleries.resetCover(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gallery", id] });
-    },
-  });
-
-  const coverImageUrl = useMemo(() => {
-    if (gallery && (gallery.coverPath || gallery.imageCount > 0)) {
-      return galleries.coverUrl(gallery.id, gallery.updatedAt, 1600);
-    }
-    const firstImage = galleryImages?.items[0];
-    return firstImage ? images.thumbnailUrl(firstImage.id, 1600) : null;
-  }, [gallery, galleryImages]);
-
-  const coverImage = useMemo(() => galleryImages?.items[0], [galleryImages]);
-
   const lightboxImages: LightboxImage[] = useMemo(
-    () => (galleryImages?.items ?? []).map((img) => ({ id: img.id, src: images.imageUrl(img.id), title: img.title })),
-    [galleryImages],
+    () => (galleryImages?.items ?? []).map((img) => ({
+      id: img.id,
+      src: images.imageUrl(img.id),
+      title: img.title,
+      interactionSource: "galleryDetailPage",
+      interactionMeta: { galleryId: id },
+    })),
+    [galleryImages, id],
   );
 
   if (isLoading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-accent" />
+      <div className="px-1 py-2">
+        <DetailSkeleton />
       </div>
     );
   }
@@ -179,6 +210,29 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   if (!gallery) {
     return <div className="py-16 text-center text-secondary">Gallery not found</div>;
   }
+
+  const activeContent =
+    activeTab === "images"
+      ? (
+          <GalleryImagesPanel
+            galleryId={id}
+            filter={imageFilter}
+            setFilter={setImageFilter}
+            onNavigate={onNavigate}
+            galleryImages={galleryImages}
+            onShowAddImages={() => setShowAddImages(true)}
+            onLightbox={(idx) => { setLightboxIndex(idx); setLightboxOpen(true); }}
+            removeImagesMut={removeImagesMut}
+            imageZoom={imageZoom}
+            setImageZoom={setImageZoom}
+            canWriteGallery={canWriteGallery}
+          />
+        )
+      : activeTab === "scenes"
+        ? <GalleryScenesPanel galleryId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+        : activeTab === "fileinfo"
+          ? <GalleryFileInfo gallery={gallery} />
+          : renderExtensionTab(activeTab, id, onNavigate);
 
   return (
     <div className="min-h-screen">
@@ -188,134 +242,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         onClose={() => setShowDownloadDialog(false)}
         onNavigate={onNavigate}
       />
-      <div className="relative overflow-hidden border-b border-border bg-surface">
-        {coverImageUrl ? (
-          <>
-            <img src={coverImageUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-20 blur-sm" />
-            <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/30" />
-          </>
-        ) : (
-          <div className="absolute inset-0 detail-hero-gradient" />
-        )}
-
-        <div className="relative mx-auto max-w-7xl px-4 py-8">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <button
-              onClick={goBack}
-              className="flex items-center gap-1 text-sm text-secondary hover:text-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" /> {backLabel}
-            </button>
-            <div className="flex items-center gap-2">
-              <ExtensionSlot slot="gallery-detail-actions" context={{ gallery, onNavigate }} />
-              {canWriteGallery ? <button
-                onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
-              >
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </button> : null}
-              <div className="relative" ref={opsMenuRef}>
-                <button
-                  onClick={() => setShowOpsMenu(!showOpsMenu)}
-                  className="p-1.5 rounded text-secondary hover:text-foreground hover:bg-card"
-                  title="Operations"
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-                {showOpsMenu && (
-                  <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] bg-card border border-border rounded shadow-lg py-1">
-                    {canWriteGallery ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Pencil className="w-3.5 h-3.5" /> Edit</button> : null}
-                    {gallery.files.length === 0 && canDownloadGallery ? <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><Download className="w-3.5 h-3.5" /> Download Media…</button> : null}
-                    <button onClick={() => { setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5" /> Rescan</button>
-                    {canDeleteGallery ? <div className="border-t border-border my-1" /> : null}
-                    {canDeleteGallery ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button> : null}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-6 md:flex-row md:items-end">
-            <div className="flex h-40 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/35 sm:h-52 sm:w-40">
-              {coverImageUrl ? (
-                <img src={coverImageUrl} alt={gallery.title || ""} className="h-full w-full object-cover" />
-              ) : (
-                <FolderOpen className="h-14 w-14 text-muted" />
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-2xl sm:text-3xl md:text-4xl font-bold text-foreground">{gallery.title || "Untitled Gallery"}</h1>
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-secondary">
-                {gallery.date && <span>{formatDate(gallery.date)}</span>}
-                {gallery.studioName && gallery.studioId && (canReadStudios ? (
-                  <button onClick={() => onNavigate({ page: "studio", id: gallery.studioId })} className="text-accent hover:underline">
-                    {gallery.studioName}
-                  </button>
-                ) : <span>{gallery.studioName}</span>)}
-                {gallery.photographer && <span>Photographer: {gallery.photographer}</span>}
-                {gallery.code && <span>Code: {gallery.code}</span>}
-                <span className="flex items-center gap-1"><ImageIcon className="h-4 w-4" /> {gallery.imageCount} images</span>
-                <span title={`Created ${formatDate(gallery.createdAt)}`}>Updated {formatDate(gallery.updatedAt)}</span>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/60 px-4 py-3">
-                <InteractiveRating value={gallery.rating} onChange={(value) => galleryUpdateMut.mutate({ rating: value })} readOnly={!canWriteGallery} />
-                <div className="flex items-center gap-2">
-                  {canWriteGallery ? <button
-                    onClick={() => galleryUpdateMut.mutate({ organized: !gallery.organized })}
-                    className={`p-1.5 rounded transition-colors ${gallery.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground border border-border"}`}
-                    title={gallery.organized ? "Organized" : "Not organized"}
-                  >
-                    <Check className="w-4 h-4" />
-                  </button> : gallery.organized ? <span className="rounded bg-green-600 p-1.5 text-white" title="Organized gallery"><Check className="w-4 h-4" /></span> : null}
-                </div>
-              </div>
-              {gallery.details && (
-                <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{gallery.details}</p>
-              )}
-              {canReadTags && gallery.tags.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  {gallery.tags.map((tag) => (
-                    <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
-                  ))}
-                </div>
-              )}
-              {gallery.urls.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                  {gallery.urls.map((url, index) => (
-                    <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-accent hover:underline truncate max-w-xs">
-                      <LinkIcon className="h-3.5 w-3.5 flex-shrink-0" />{new URL(url).hostname}
-                    </a>
-                  ))}
-                </div>
-              )}
-              <CustomFieldsDisplay customFields={gallery.customFields} />
-            </div>
-          </div>
-
-          {/* Tabs */}
-          <div className="mt-6 flex gap-1 border-b border-border">
-            {visibleGalleryTabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                  activeTab === tab.key
-                    ? "border-b-2 border-accent text-accent"
-                    : "text-secondary hover:text-foreground"
-                }`}
-              >
-                {tab.label}
-                {tab.count !== undefined && (
-                  <span className={`min-w-[20px] rounded-full px-1.5 py-0.5 text-center text-xs ${
-                    activeTab === tab.key ? "bg-accent/20 text-accent" : "bg-surface text-muted"
-                  }`}>{tab.count}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
       <GalleryEditModal gallery={gallery} open={editing} onClose={() => setEditing(false)} />
       <ConfirmDialog
         open={confirmDelete}
@@ -325,48 +251,131 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         onCancel={() => setConfirmDelete(false)}
       />
 
-      <div className="px-4 py-6">
-          {canReadPerformers && gallery.performers.length > 0 && (
-              <div className="mb-6 rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Performers</h2>
-                <div className="flex flex-wrap justify-center gap-3">
-                  {gallery.performers.map((performer) => (
-                    <GalleryPerformerCard key={performer.id} performer={performer} onClick={() => onNavigate({ page: "performer", id: performer.id })} />
-                  ))}
+      <EntityHeroLayout
+        backLabel={backLabel}
+        onGoBack={goBack}
+        imageUrl={gallery.coverPath}
+        imageAlt={gallery.title || "Gallery cover"}
+        imageFallback={<ImageIcon className="h-14 w-14" />}
+        title={gallery.title || "Untitled Gallery"}
+        aliases={
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+            {gallery.date ? <span>{formatDate(gallery.date)}</span> : null}
+            {gallery.studioName && gallery.studioId ? (
+              canReadStudios ? (
+                <button onClick={() => onNavigate({ page: "studio", id: gallery.studioId })} className="text-accent hover:underline">{gallery.studioName}</button>
+              ) : (
+                <span>{gallery.studioName}</span>
+              )
+            ) : null}
+            {gallery.photographer ? <span>Photographer: {gallery.photographer}</span> : null}
+            {gallery.code ? <span>Code: {gallery.code}</span> : null}
+          </span>
+        }
+        description={gallery.details}
+        counts={[
+          { key: "images", label: "Images", value: effectiveImageCount, icon: <ImageIcon className="h-4 w-4" /> },
+          { key: "scenes", label: "Scenes", value: gallery.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "files", label: "Files", value: gallery.files.length, icon: <HardDrive className="h-4 w-4" /> },
+        ]}
+        metaRow={
+          <>
+            <span title={`Created ${formatDate(gallery.createdAt)}`}>Updated {formatDate(gallery.updatedAt)}</span>
+            {gallery.organized ? (
+              <span className="inline-flex items-center gap-1 rounded bg-green-500/15 px-1.5 py-0.5 text-green-300">
+                <Check className="h-3 w-3" /> Organized
+              </span>
+            ) : null}
+            <InteractiveRating value={galleryRating} onChange={(value) => setGalleryRating(value)} readOnly={!canEngageGallery} />
+          </>
+        }
+        favorite={canEngageGallery ? galleryFavorite : undefined}
+        onFavoriteToggle={canEngageGallery && !galleryFavoritePending ? () => setGalleryFavorite(!galleryFavorite) : undefined}
+        actions={
+          <>
+            <ExtensionSlot slot="gallery-detail-actions" context={{ gallery, onNavigate }} />
+            {canWriteGallery ? (
+              <button
+                type="button"
+                onClick={() => galleryUpdateMut.mutate({ organized: !gallery.organized })}
+                className={`flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm transition-colors ${gallery.organized ? "border-green-500/40 bg-green-600 text-white" : "border-border bg-card text-secondary hover:text-foreground"}`}
+                title={gallery.organized ? "Organized" : "Mark organized"}
+              >
+                <Check className="h-3.5 w-3.5" /> {gallery.organized ? "Organized" : "Organize"}
+              </button>
+            ) : null}
+            {canWriteGallery ? (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </button>
+            ) : null}
+            <div className="relative" ref={opsMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowOpsMenu(!showOpsMenu)}
+                aria-label="Open gallery operations"
+                className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground"
+                title="Operations"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+              {showOpsMenu ? (
+                <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded border border-border bg-card py-1 shadow-lg">
+                  {canWriteGallery ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
+                  {gallery.files.length === 0 && canDownloadGallery ? <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Download className="h-3.5 w-3.5" /> Download Media...</button> : null}
+                  <button onClick={() => { setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button>
+                  {canDeleteGallery ? <div className="my-1 border-t border-border" /> : null}
+                  {canDeleteGallery ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
                 </div>
+              ) : null}
+            </div>
+          </>
+        }
+      >
+        {(canReadTags && gallery.tags.length > 0) || gallery.urls.length > 0 || gallery.customFields ? (
+          <div className="mb-6 space-y-3 text-sm text-secondary">
+            {canReadTags && gallery.tags.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {gallery.tags.map((tag) => (
+                  <TagBadge key={tag.id} name={tag.name} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                ))}
               </div>
-            )}
+            ) : null}
+            {gallery.urls.length > 0 ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {gallery.urls.map((url, index) => (
+                  <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="flex max-w-xs items-center gap-1 truncate text-accent hover:underline">
+                    <LinkIcon className="h-3.5 w-3.5 flex-shrink-0" />{new URL(url).hostname}
+                  </a>
+                ))}
+              </div>
+            ) : null}
+            <CustomFieldsDisplay customFields={gallery.customFields} />
+          </div>
+        ) : null}
 
-            {activeTab === "images" && (
-              <GalleryImagesPanel
-                galleryId={id}
-                filter={imageFilter}
-                setFilter={setImageFilter}
-                onNavigate={onNavigate}
-                galleryImages={galleryImages}
-                onShowAddImages={() => setShowAddImages(true)}
-                onLightbox={(idx) => { setLightboxIndex(idx); setLightboxOpen(true); }}
-                removeImagesMut={removeImagesMut}
-                imageZoom={imageZoom}
-                setImageZoom={setImageZoom}
-                canWriteGallery={canWriteGallery}
-              />
-            )}
+        {canReadPerformers && gallery.performers.length > 0 ? (
+          <section className="mb-6 rounded-2xl border border-border bg-card/70 p-5">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Performers</h2>
+            <div className="flex flex-wrap justify-center gap-3">
+              {gallery.performers.map((performer) => (
+                <GalleryPerformerCard key={performer.id} performer={performer} onClick={() => onNavigate({ page: "performer", id: performer.id })} />
+              ))}
+            </div>
+          </section>
+        ) : null}
 
-            {activeTab === "scenes" && (
-              <GalleryScenesPanel galleryId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
-            )}
+        <EntityDetailTabs tabs={visibleGalleryTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto mb-4 max-w-7xl" />
 
-            {activeTab === "fileinfo" && (
-              <GalleryFileInfo gallery={gallery} />
-            )}
+        {activeContent}
+        <ExtensionSlot slot="gallery-detail-main-bottom" context={{ gallery, onNavigate }} />
+      </EntityHeroLayout>
 
-            {renderExtensionTab(activeTab, id, onNavigate)}
-
-            <ExtensionSlot slot="gallery-detail-main-bottom" context={{ gallery, onNavigate }} />
-
-        <ExtensionSlot slot="gallery-detail-bottom" context={{ gallery, onNavigate }} />
-      </div>
+      <ExtensionSlot slot="gallery-detail-bottom" context={{ gallery, onNavigate }} />
 
       {/* Add Images Dialog */}
       {showAddImages && canWriteGallery && (
@@ -459,11 +468,11 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
         onSelectNone={selectNone}
         selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={data.items} onNavigate={onNavigate} />}
       />
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
         {data.items.map((scene) => (
           <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -538,7 +547,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
           <Plus className="w-3 h-3" /> Add Images
         </button>
       </div> : null}
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + imageZoom * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${160 + imageZoom * 50}px`}>
         {galleryImages.items.map((image, idx) => (
           <ImageTile
             key={image.id}
@@ -551,137 +560,11 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
             selecting={selecting}
           />
         ))}
-      </div>
+      </EntityCardGrid>
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
     </>
-  );
-}
-
-function GalleryChaptersPanel({ galleryId, chapters }: { galleryId: number; chapters: GalleryChapter[] }) {
-  const queryClient = useQueryClient();
-  const [adding, setAdding] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newIndex, setNewIndex] = useState(0);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editIndex, setEditIndex] = useState(0);
-
-  const createMut = useMutation({
-    mutationFn: () => galleries.createChapter(galleryId, { title: newTitle, imageIndex: newIndex }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gallery-chapters", galleryId] });
-      setAdding(false);
-      setNewTitle("");
-      setNewIndex(0);
-    },
-  });
-
-  const updateMut = useMutation({
-    mutationFn: (chapterId: number) => galleries.updateChapter(galleryId, chapterId, { title: editTitle, imageIndex: editIndex }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gallery-chapters", galleryId] });
-      setEditingId(null);
-    },
-  });
-
-  const deleteMut = useMutation({
-    mutationFn: (chapterId: number) => galleries.deleteChapter(galleryId, chapterId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gallery-chapters", galleryId] });
-    },
-  });
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Chapters</h3>
-        <button
-          onClick={() => setAdding(true)}
-          className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
-        >
-          <Plus className="h-3.5 w-3.5" /> Add Chapter
-        </button>
-      </div>
-
-      {adding && (
-        <div className="rounded-xl border border-accent/40 bg-card p-4">
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto_auto]">
-            <input
-              type="text"
-              placeholder="Chapter title"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="rounded border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:border-accent focus:outline-none"
-            />
-            <input
-              type="number"
-              placeholder="Image index"
-              value={newIndex}
-              onChange={(e) => setNewIndex(parseInt(e.target.value) || 0)}
-              className="w-24 rounded border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:border-accent focus:outline-none"
-            />
-            <button onClick={() => createMut.mutate()} disabled={!newTitle} className="rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover disabled:opacity-50">Save</button>
-            <button onClick={() => setAdding(false)} className="rounded border border-border px-3 py-1.5 text-sm text-secondary hover:text-foreground">Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {chapters.length === 0 ? (
-        <EmptyPanel icon={<BookOpen className="h-12 w-12" />} message="No chapters" />
-      ) : (
-        <div className="divide-y divide-border rounded-xl border border-border bg-card">
-          {chapters.map((ch) => (
-            <div key={ch.id} className="flex items-center justify-between px-4 py-3">
-              {editingId === ch.id ? (
-                <div className="flex flex-1 items-center gap-3">
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    className="flex-1 rounded border border-border bg-surface px-3 py-1 text-sm text-foreground focus:border-accent focus:outline-none"
-                  />
-                  <input
-                    type="number"
-                    value={editIndex}
-                    onChange={(e) => setEditIndex(parseInt(e.target.value) || 0)}
-                    className="w-20 rounded border border-border bg-surface px-3 py-1 text-sm text-foreground focus:border-accent focus:outline-none"
-                  />
-                  <button onClick={() => updateMut.mutate(ch.id)} className="text-sm text-accent hover:underline">Save</button>
-                  <button onClick={() => setEditingId(null)} className="text-sm text-secondary hover:text-foreground">Cancel</button>
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{ch.title}</p>
-                    <p className="text-xs text-secondary">Image #{ch.imageIndex}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setEditingId(ch.id);
-                        setEditTitle(ch.title);
-                        setEditIndex(ch.imageIndex);
-                      }}
-                      className="rounded p-1 text-muted hover:text-accent"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => deleteMut.mutate(ch.id)}
-                      className="rounded p-1 text-muted hover:text-red-400"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 

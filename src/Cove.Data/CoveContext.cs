@@ -1,10 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Cove.Core.Auth;
 using Cove.Core.Entities;
 using Cove.Core.Entities.Auth;
 using Cove.Plugins;
+using System.Text.Json;
 using System.Linq.Expressions;
+using Pgvector;
 
 namespace Cove.Data;
 
@@ -34,6 +37,21 @@ public partial class CoveContext : DbContext
     public DbSet<Image> Images => Set<Image>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<SceneMarker> SceneMarkers => Set<SceneMarker>();
+    public DbSet<TagApplication> TagApplications => Set<TagApplication>();
+    public DbSet<Segment> Segments => Set<Segment>();
+    public DbSet<SegmentDisplayProfile> SegmentDisplayProfiles => Set<SegmentDisplayProfile>();
+    public DbSet<SegmentDisplayRule> SegmentDisplayRules => Set<SegmentDisplayRule>();
+    public DbSet<Detection> Detections => Set<Detection>();
+    public DbSet<Face> Faces => Set<Face>();
+    public DbSet<FaceAppearance> FaceAppearances => Set<FaceAppearance>();
+    public DbSet<FaceSuggestionDecision> FaceSuggestionDecisions => Set<FaceSuggestionDecision>();
+    public DbSet<Embedding> Embeddings => Set<Embedding>();
+    public DbSet<AiRun> AiRuns => Set<AiRun>();
+    public DbSet<UserEntityAffinity> UserEntityAffinities => Set<UserEntityAffinity>();
+    public DbSet<Interaction> Interactions => Set<Interaction>();
+    public DbSet<PlaybackSession> PlaybackSessions => Set<PlaybackSession>();
+    public DbSet<PlaybackInterval> PlaybackIntervals => Set<PlaybackInterval>();
+    public DbSet<Rating> Ratings => Set<Rating>();
     public DbSet<SavedFilter> SavedFilters => Set<SavedFilter>();
     public DbSet<GalleryChapter> GalleryChapters => Set<GalleryChapter>();
     public DbSet<ScrapeAttempt> ScrapeAttempts => Set<ScrapeAttempt>();
@@ -64,6 +82,7 @@ public partial class CoveContext : DbContext
     public DbSet<GalleryFile> GalleryFiles => Set<GalleryFile>();
     public DbSet<FileFingerprint> FileFingerprints => Set<FileFingerprint>();
     public DbSet<VideoCaption> VideoCaptions => Set<VideoCaption>();
+    public DbSet<GroupItem> GroupItems => Set<GroupItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -100,14 +119,177 @@ public partial class CoveContext : DbContext
             .HasForeignKey(c => c.FileId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        modelBuilder.Entity<PlaybackSession>(entity =>
+        {
+            entity.HasIndex(session => new { session.UserId, session.HostType, session.HostId, session.StartedAt });
+            entity.HasIndex(session => new { session.UserId, session.SessionId }).IsUnique();
+            entity.HasMany(session => session.Intervals)
+                .WithOne(interval => interval.Session)
+                .HasForeignKey(interval => interval.PlaybackSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlaybackInterval>(entity =>
+        {
+            entity.HasIndex(interval => new { interval.UserId, interval.HostType, interval.HostId });
+            entity.HasIndex(interval => new { interval.PlaybackSessionId, interval.StartSec });
+        });
+
         foreach (var ext in _dataExtensions)
         {
             ext.ConfigureModel(modelBuilder);
         }
 
+        ConfigureVectorStorage(modelBuilder);
+
         if (Database.ProviderName?.Contains("Npgsql", StringComparison.Ordinal) == true)
+        {
             ConfigureAuthorizationFilters(modelBuilder);
+        }
+        else
+            ConfigureProviderFallbacks(modelBuilder);
     }
+
+    private static void ConfigureVectorStorage(ModelBuilder modelBuilder)
+    {
+        var vectorConverter = new ValueConverter<Vector?, string?>(
+            vector => vector == null ? null : SerializeVector(vector),
+            json => string.IsNullOrWhiteSpace(json) ? null : DeserializeVector(json));
+
+        var vectorComparer = new ValueComparer<Vector?>(
+            (left, right) => left == null ? right == null : right != null && VectorsEqual(left, right),
+            vector => vector == null ? 0 : GetVectorHash(vector),
+            vector => vector == null ? null : CloneVector(vector));
+
+        foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(entityType => entityType.GetProperties()))
+        {
+            if (property.ClrType != typeof(Vector))
+                continue;
+
+            property.SetValueConverter(vectorConverter);
+            property.SetValueComparer(vectorComparer);
+            property.SetColumnType("text");
+        }
+    }
+
+    private static void ConfigureProviderFallbacks(ModelBuilder modelBuilder)
+    {
+        var jsonConverter = new ValueConverter<JsonDocument?, string?>(
+            document => SerializeJsonDocument(document),
+            json => DeserializeJsonDocument(json));
+
+        var jsonComparer = new ValueComparer<JsonDocument?>(
+            (left, right) => JsonDocumentsEqual(left, right),
+            document => GetJsonDocumentHash(document),
+            document => CloneJsonDocument(document));
+
+        var objectDictionaryConverter = new ValueConverter<Dictionary<string, object>?, string?>(
+            dictionary => SerializeObjectDictionary(dictionary),
+            json => DeserializeObjectDictionary(json));
+
+        var objectDictionaryComparer = new ValueComparer<Dictionary<string, object>?>(
+            (left, right) => string.Equals(GetObjectDictionaryText(left), GetObjectDictionaryText(right), StringComparison.Ordinal),
+            dictionary => GetObjectDictionaryHash(dictionary),
+            dictionary => CloneObjectDictionary(dictionary));
+
+        foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(entityType => entityType.GetProperties()))
+        {
+            if (property.ClrType == typeof(JsonDocument))
+            {
+                property.SetValueConverter(jsonConverter);
+                property.SetValueComparer(jsonComparer);
+            }
+
+            if (property.ClrType == typeof(Dictionary<string, object>))
+            {
+                property.SetValueConverter(objectDictionaryConverter);
+                property.SetValueComparer(objectDictionaryComparer);
+            }
+        }
+    }
+
+    private static string? SerializeJsonDocument(JsonDocument? document) =>
+        document is null ? null : document.RootElement.GetRawText();
+
+    private static JsonDocument? DeserializeJsonDocument(string? json) =>
+        string.IsNullOrWhiteSpace(json) ? null : JsonDocument.Parse(json);
+
+    private static bool JsonDocumentsEqual(JsonDocument? left, JsonDocument? right) =>
+        string.Equals(GetJsonText(left), GetJsonText(right), StringComparison.Ordinal);
+
+    private static int GetJsonDocumentHash(JsonDocument? document) =>
+        GetJsonText(document)?.GetHashCode(StringComparison.Ordinal) ?? 0;
+
+    private static JsonDocument? CloneJsonDocument(JsonDocument? document) =>
+        document is null ? null : JsonDocument.Parse(document.RootElement.GetRawText());
+
+    private static string? GetJsonText(JsonDocument? document) =>
+        document is null ? null : document.RootElement.GetRawText();
+
+    private static string? SerializeObjectDictionary(Dictionary<string, object>? dictionary)
+    {
+        if (dictionary is null)
+        {
+            return null;
+        }
+
+        var normalized = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (key, value) in dictionary)
+        {
+            normalized[key] = value;
+        }
+
+        return JsonSerializer.Serialize(normalized);
+    }
+
+    private static Dictionary<string, object>? DeserializeObjectDictionary(string? json) =>
+        string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+
+    private static string? GetObjectDictionaryText(Dictionary<string, object>? dictionary) =>
+        SerializeObjectDictionary(dictionary);
+
+    private static int GetObjectDictionaryHash(Dictionary<string, object>? dictionary) =>
+        GetObjectDictionaryText(dictionary) is { } json ? json.GetHashCode(StringComparison.Ordinal) : 0;
+
+    private static Dictionary<string, object>? CloneObjectDictionary(Dictionary<string, object>? dictionary) =>
+        DeserializeObjectDictionary(SerializeObjectDictionary(dictionary));
+
+    private static string SerializeVector(Vector vector) =>
+        JsonSerializer.Serialize(vector.ToArray());
+
+    private static Vector DeserializeVector(string json)
+    {
+        var values = JsonSerializer.Deserialize<float[]>(json) ?? [];
+        return new Vector(values);
+    }
+
+    private static bool VectorsEqual(Vector left, Vector right)
+    {
+        var leftValues = left.ToArray();
+        var rightValues = right.ToArray();
+
+        if (leftValues.Length != rightValues.Length)
+            return false;
+
+        for (var index = 0; index < leftValues.Length; index++)
+        {
+            if (!leftValues[index].Equals(rightValues[index]))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static int GetVectorHash(Vector vector)
+    {
+        var hash = new HashCode();
+        foreach (var value in vector.ToArray())
+            hash.Add(value);
+        return hash.ToHashCode();
+    }
+
+    private static Vector CloneVector(Vector vector) =>
+        new(vector.ToArray());
 
     public override int SaveChanges()
     {
@@ -152,6 +334,8 @@ public partial class CoveContext : DbContext
         // Strategy: collect parent ids whose link rows changed in this unit of work,
         // then for each parent rebuild the array from the join table in one query per
         // (parent type, link type). This is O(changed parents) round-trips, not O(rows).
+
+        InitializeAddedParentIdArrays();
 
         var sceneTagParents = CollectChangedParentIds<SceneTag>(e => e.SceneId);
         var scenePerformerParents = CollectChangedParentIds<ScenePerformer>(e => e.SceneId);
@@ -358,6 +542,7 @@ public partial class CoveContext : DbContext
         CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryTag>(), entry => entry.TagId, nameof(GalleryTag.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<StudioTag>(), entry => entry.TagId, nameof(StudioTag.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<GroupTag>(), entry => entry.TagId, nameof(GroupTag.TagId));
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Segment>(), entry => entry.TagId, nameof(Segment.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<SceneMarkerTag>(), entry => entry.TagId, nameof(SceneMarkerTag.TagId));
 
         foreach (var entry in ChangeTracker.Entries<SceneMarker>())
@@ -567,12 +752,9 @@ public partial class CoveContext : DbContext
             .GroupBy(sceneTag => sceneTag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
-        var primaryMarkerCounts = SceneMarkers.AsNoTracking().Where(marker => ids.Contains(marker.PrimaryTagId))
-            .GroupBy(marker => marker.PrimaryTagId)
-            .Select(group => new { group.Key, Count = group.Count() })
-            .ToDictionary(x => x.Key, x => x.Count);
-        var secondaryMarkerCounts = Set<SceneMarkerTag>().AsNoTracking().Where(sceneMarkerTag => ids.Contains(sceneMarkerTag.TagId))
-            .GroupBy(sceneMarkerTag => sceneMarkerTag.TagId)
+        var sceneSegmentCounts = Segments.AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
+            .GroupBy(segment => segment.TagId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
         var imageCounts = Set<ImageTag>().AsNoTracking().Where(imageTag => ids.Contains(imageTag.TagId))
@@ -599,7 +781,7 @@ public partial class CoveContext : DbContext
         foreach (var tag in tags.Values)
         {
             tag.SceneCount = sceneCounts.GetValueOrDefault(tag.Id, 0);
-            tag.SceneMarkerCount = primaryMarkerCounts.GetValueOrDefault(tag.Id, 0) + secondaryMarkerCounts.GetValueOrDefault(tag.Id, 0);
+            tag.SceneMarkerCount = sceneSegmentCounts.GetValueOrDefault(tag.Id, 0);
             tag.ImageCount = imageCounts.GetValueOrDefault(tag.Id, 0);
             tag.GalleryCount = galleryCounts.GetValueOrDefault(tag.Id, 0);
             tag.GroupCount = groupCounts.GetValueOrDefault(tag.Id, 0);
@@ -619,12 +801,9 @@ public partial class CoveContext : DbContext
             .GroupBy(sceneTag => sceneTag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
-        var primaryMarkerCounts = await SceneMarkers.AsNoTracking().Where(marker => ids.Contains(marker.PrimaryTagId))
-            .GroupBy(marker => marker.PrimaryTagId)
-            .Select(group => new { group.Key, Count = group.Count() })
-            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
-        var secondaryMarkerCounts = await Set<SceneMarkerTag>().AsNoTracking().Where(sceneMarkerTag => ids.Contains(sceneMarkerTag.TagId))
-            .GroupBy(sceneMarkerTag => sceneMarkerTag.TagId)
+        var sceneSegmentCounts = await Segments.AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
+            .GroupBy(segment => segment.TagId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
         var imageCounts = await Set<ImageTag>().AsNoTracking().Where(imageTag => ids.Contains(imageTag.TagId))
@@ -651,7 +830,7 @@ public partial class CoveContext : DbContext
         foreach (var tag in tags.Values)
         {
             tag.SceneCount = sceneCounts.GetValueOrDefault(tag.Id, 0);
-            tag.SceneMarkerCount = primaryMarkerCounts.GetValueOrDefault(tag.Id, 0) + secondaryMarkerCounts.GetValueOrDefault(tag.Id, 0);
+            tag.SceneMarkerCount = sceneSegmentCounts.GetValueOrDefault(tag.Id, 0);
             tag.ImageCount = imageCounts.GetValueOrDefault(tag.Id, 0);
             tag.GalleryCount = galleryCounts.GetValueOrDefault(tag.Id, 0);
             tag.GroupCount = groupCounts.GetValueOrDefault(tag.Id, 0);
@@ -1306,9 +1485,64 @@ public partial class CoveContext : DbContext
         foreach (var entry in ChangeTracker.Entries<TLink>())
         {
             if (entry.State is EntityState.Added or EntityState.Deleted or EntityState.Modified)
-                ids.Add(parentId(entry.Entity));
+            {
+                var id = parentId(entry.Entity);
+                if (id > 0)
+                    ids.Add(id);
+            }
         }
         return ids;
+    }
+
+    private void InitializeAddedParentIdArrays()
+    {
+        foreach (var entry in ChangeTracker.Entries<Scene>().Where(e => e.State == EntityState.Added))
+        {
+            entry.Entity.TagIds = entry.Entity.SceneTags
+                .Select(sceneTag => sceneTag.TagId)
+                .Where(tagId => tagId > 0)
+                .Distinct()
+                .OrderBy(tagId => tagId)
+                .ToArray();
+            entry.Entity.PerformerIds = entry.Entity.ScenePerformers
+                .Select(scenePerformer => scenePerformer.PerformerId)
+                .Where(performerId => performerId > 0)
+                .Distinct()
+                .OrderBy(performerId => performerId)
+                .ToArray();
+        }
+
+        foreach (var entry in ChangeTracker.Entries<Image>().Where(e => e.State == EntityState.Added))
+        {
+            entry.Entity.TagIds = entry.Entity.ImageTags
+                .Select(imageTag => imageTag.TagId)
+                .Where(tagId => tagId > 0)
+                .Distinct()
+                .OrderBy(tagId => tagId)
+                .ToArray();
+            entry.Entity.PerformerIds = entry.Entity.ImagePerformers
+                .Select(imagePerformer => imagePerformer.PerformerId)
+                .Where(performerId => performerId > 0)
+                .Distinct()
+                .OrderBy(performerId => performerId)
+                .ToArray();
+        }
+
+        foreach (var entry in ChangeTracker.Entries<Gallery>().Where(e => e.State == EntityState.Added))
+        {
+            entry.Entity.TagIds = entry.Entity.GalleryTags
+                .Select(galleryTag => galleryTag.TagId)
+                .Where(tagId => tagId > 0)
+                .Distinct()
+                .OrderBy(tagId => tagId)
+                .ToArray();
+            entry.Entity.PerformerIds = entry.Entity.GalleryPerformers
+                .Select(galleryPerformer => galleryPerformer.PerformerId)
+                .Where(performerId => performerId > 0)
+                .Distinct()
+                .OrderBy(performerId => performerId)
+                .ToArray();
+        }
     }
 
     private void RebuildArray<TParent, TLink>(
@@ -1561,3 +1795,4 @@ public partial class CoveContext : DbContext
         }
     }
 }
+

@@ -56,7 +56,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         var jsBundles = extensionManager.GetEnabledJsBundles();
         if (jsBundles.Count == 0)
         {
-            return Content("export default { components: {} };", "application/javascript");
+            return Content("export default { components: {}, actionHandlers: {}, handlers: {} };", "application/javascript");
         }
 
         var lines = new List<string>();
@@ -68,11 +68,13 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         }
 
         lines.Add("const components = {};");
+        lines.Add("const actionHandlers = {};");
         for (var i = 0; i < jsBundles.Count; i++)
         {
             lines.Add($"Object.assign(components, (m{i}.default && m{i}.default.components) || {{}});");
+            lines.Add($"Object.assign(actionHandlers, (m{i}.default && (m{i}.default.actionHandlers || m{i}.default.handlers)) || m{i}.actionHandlers || m{i}.handlers || {{}});");
         }
-        lines.Add("export default { components };\n");
+        lines.Add("export default { components, actionHandlers, handlers: actionHandlers };\n");
 
         return Content(string.Join("\n", lines), "application/javascript");
     }
@@ -98,36 +100,86 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
 
     /// <summary>Returns a list of all registered extensions with capability and category info.</summary>
     [HttpGet]
-    public ActionResult<IEnumerable<ExtensionInfo>> GetExtensions([FromQuery] string? category = null) =>
-        Ok(extensionManager.Extensions
+    public ActionResult<IEnumerable<ExtensionInfo>> GetExtensions([FromQuery] string? category = null)
+    {
+        var loadedIds = extensionManager.Extensions
+            .Select(e => e.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var items = extensionManager.Extensions
             .Where(e => category == null || e.Categories.Any(c => string.Equals(c, category, StringComparison.OrdinalIgnoreCase)))
             .Select(e =>
-        {
-            var install = extensionManager.GetInstallation(e.Id);
-            return new ExtensionInfo(
-                e.Id,
-                e.Name,
-                e.Version,
-                e.Description,
-                e.Author,
-                e.Url,
-                e.IconUrl,
-                extensionManager.IsEnabled(e.Id),
-                e is IUIExtension,
-                e is IApiExtension,
-                e is IStatefulExtension,
-                e is IJobExtension,
-                e is IEventExtension,
-                e is IDataExtension,
-                e is IMiddlewareExtension,
-                e is IActionExtension,
-                e.Categories.ToList(),
-                e.MinCoveVersion,
-                e.Dependencies.ToDictionary(kv => kv.Key, kv => kv.Value),
-                install?.Source ?? "unknown",
-                install?.InstalledAt,
-                e is IJobExtension je ? je.Jobs.Select(j => new JobInfo(j.Id, j.Name, j.Description)).ToList() : []);
-        }));
+            {
+                var install = extensionManager.GetInstallation(e.Id);
+                var manifest = extensionManager.GetManifestFile(e.Id);
+                return new ExtensionInfo(
+                    e.Id,
+                    e.Name,
+                    e.Version,
+                    e.Description,
+                    e.Author,
+                    e.Url,
+                    e.IconUrl,
+                    extensionManager.IsEnabled(e.Id),
+                    e is IUIExtension,
+                    e is IApiExtension,
+                    e is IStatefulExtension,
+                    e is IJobExtension,
+                    e is IEventExtension,
+                    e is IDataExtension,
+                    e is IMiddlewareExtension,
+                    e is IActionExtension,
+                    e.Categories.ToList(),
+                    e.MinCoveVersion,
+                    e.Dependencies.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    manifest?.Kind ?? "extension",
+                    install?.Source ?? "unknown",
+                    install?.InstalledAt,
+                    e is IJobExtension je ? je.Jobs.Select(j => new JobInfo(j.Id, j.Name, j.Description)).ToList() : []);
+            })
+            .ToList();
+
+        items.AddRange(extensionManager.Installations.Values
+            .Where(install => !loadedIds.Contains(install.ExtensionId) && extensionManager.IsManifestOnlyExtension(install.ExtensionId))
+            .Select(install =>
+            {
+                var manifest = extensionManager.GetManifestFile(install.ExtensionId);
+                if (manifest == null)
+                    return null;
+
+                if (category != null && !manifest.Categories.Any(c => string.Equals(c, category, StringComparison.OrdinalIgnoreCase)))
+                    return null;
+
+                return new ExtensionInfo(
+                    manifest.Id,
+                    manifest.Name,
+                    install.Version,
+                    manifest.Description,
+                    manifest.Author,
+                    manifest.Url,
+                    manifest.IconUrl,
+                    install.Enabled,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    manifest.Categories.ToList(),
+                    manifest.MinCoveVersion,
+                    manifest.Dependencies,
+                    manifest.Kind,
+                    install.Source,
+                    install.InstalledAt,
+                    []);
+            })
+            .Where(info => info != null)
+            .Cast<ExtensionInfo>());
+
+        return Ok(items);
+    }
 
     /// <summary>Get all available extension categories (from loaded extensions + registry).</summary>
     [HttpGet("categories")]
@@ -301,7 +353,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         [FromServices] IExtensionRegistry registry = null!,
         CancellationToken ct = default)
     {
-        var installed = extensionManager.Extensions.Select(e => (e.Id, e.Version));
+        var installed = extensionManager.Installations.Values.Select(i => (i.ExtensionId, i.Version));
         var updates = await registry.CheckForUpdatesAsync(installed, ct);
         return Ok(updates);
     }
@@ -334,7 +386,8 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
 
         // Find the specific version's details (or use latest if no deps differ per version)
         var missingDeps = new List<DependencyInfo>();
-        var installedIds = new HashSet<string>(extensionManager.Extensions.Select(e => e.Id), StringComparer.OrdinalIgnoreCase);
+        var installedIds = new HashSet<string>(extensionManager.Installations.Keys, StringComparer.OrdinalIgnoreCase);
+        var installDependencies = request.InstallDependencies || string.Equals(detail.Kind, "bundle", StringComparison.OrdinalIgnoreCase);
 
         if (detail.Dependencies.Count > 0)
         {
@@ -354,7 +407,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         }
 
         // If there are missing deps and the client didn't opt in to auto-install, return them
-        if (missingDeps.Count > 0 && !request.InstallDependencies)
+        if (missingDeps.Count > 0 && !installDependencies)
         {
             return Ok(new
             {
@@ -509,6 +562,7 @@ public record ExtensionInfo(
     List<string> Categories,
     string? MinCoveVersion,
     Dictionary<string, string> Dependencies,
+    string Kind,
     string Source,
     DateTime? InstalledAt,
     List<JobInfo> Jobs);

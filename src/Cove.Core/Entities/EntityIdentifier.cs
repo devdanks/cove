@@ -37,6 +37,7 @@ public static class EntityKinds
 {
     public const string Scene = "scene";
     public const string Performer = "performer";
+    public const string Face = "face";
     public const string Tag = "tag";
     public const string Studio = "studio";
     public const string Gallery = "gallery";

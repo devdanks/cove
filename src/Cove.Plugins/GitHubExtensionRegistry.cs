@@ -105,6 +105,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             meta.Author ??= source.Author;
             meta.Url ??= source.Url;
             meta.IconUrl ??= source.IconUrl;
+            meta.Kind ??= source.Kind;
             meta.Categories ??= source.Categories;
             meta.MinCoveVersion ??= source.MinCoveVersion;
             meta.Dependencies ??= source.Dependencies;
@@ -207,6 +208,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             Description = meta.Description,
             Author = meta.Author,
             IconUrl = meta.IconUrl,
+            Kind = meta.Kind ?? "extension",
             Url = meta.Url,
             Categories = meta.Categories ?? [],
             UpdatedAt = validVersions.Max(v => v.ReleasedAt) ?? meta.UpdatedAt,
@@ -276,7 +278,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         var actualChecksum = await ComputeSha256Async(zipPath, ct);
         if (!string.Equals(expectedChecksum, actualChecksum, StringComparison.OrdinalIgnoreCase))
         {
-            TryDeleteFileWithRetries(zipPath, ct);
+            await TryDeleteFileWithRetriesAsync(zipPath, ct);
             throw new InvalidOperationException(
                 $"Checksum validation failed for {extensionId} v{version}. Expected {expectedChecksum}, got {actualChecksum}.");
         }
@@ -305,7 +307,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         }
         finally
         {
-            TryDeleteFileWithRetries(zipPath, ct);
+            await TryDeleteFileWithRetriesAsync(zipPath, ct);
         }
 
         return extensionDir;
@@ -378,6 +380,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
                 Description = meta.Description,
                 Author = meta.Author,
                 IconUrl = meta.IconUrl,
+                Kind = meta.Kind ?? "extension",
                 Categories = meta.Categories ?? [],
                 UpdatedAt = latest.ReleasedAt ?? meta.UpdatedAt,
                 MinCoveVersion = latest.MinCoveVersion ?? meta.MinCoveVersion,
@@ -428,7 +431,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static void TryDeleteFileWithRetries(string filePath, CancellationToken ct)
+    private static async Task TryDeleteFileWithRetriesAsync(string filePath, CancellationToken ct)
     {
         if (!System.IO.File.Exists(filePath))
             return;
@@ -453,7 +456,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
                 authError = ex;
             }
 
-            Thread.Sleep(50 * attempt);
+            await Task.Delay(50 * attempt, ct);
         }
 
         if (ioError != null) throw ioError;
@@ -490,6 +493,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         public string? Description { get; set; }
         public string? Author { get; set; }
         public string? IconUrl { get; set; }
+        public string? Kind { get; set; }
         public string? Url { get; set; }
         public string? RepositoryUrl { get; set; }
         public List<string>? Categories { get; set; }
@@ -510,6 +514,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         public string? Author { get; set; }
         public string? Url { get; set; }
         public string? IconUrl { get; set; }
+        public string? Kind { get; set; }
         public string? MinCoveVersion { get; set; }
         public List<string>? Categories { get; set; }
         public Dictionary<string, string>? Dependencies { get; set; }

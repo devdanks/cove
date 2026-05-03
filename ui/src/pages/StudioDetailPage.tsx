@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, groups, images, metadata, performers, scenes, studios, entityImages } from "../api/client";
 import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerStudioMatch, Performer, Scene, Studio } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ArrowLeft, Check, ChevronDown, Building2, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link as LinkIcon, Link2, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
+import { Check, ChevronDown, Building2, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link as LinkIcon, Link2, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { StudioEditModal } from "./StudioEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -16,10 +16,14 @@ import { DetailListToolbar } from "../components/DetailListToolbar";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
+import { EntityDetailTabs } from "../components/EntityDetailTabs";
+import { EntityCardGrid } from "../components/EntityCardGrid";
+import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 
@@ -60,7 +64,7 @@ type TabKey = "scenes" | "performers" | "galleries" | "images" | "studios" | "gr
 
 export function StudioDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: studio, isLoading } = useQuery({
     queryKey: ["studio", id],
@@ -89,6 +93,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "studios" }, onNavigate);
   const canWriteStudio = canWriteEntity("studio", hasPermission);
+  const canEngageStudio = canReadEntity("studio", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeleteStudio = canDeleteEntity("studio", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
   const canAutoTagStudio = hasPermission("library.autotag") && canWriteStudio;
@@ -101,6 +106,16 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
     studios: "studios.read",
     groups: "groups.read",
   }, hasPermission);
+
+  const {
+    favorite: studioFavorite,
+    rating: studioRating,
+    setFavorite: setStudioFavorite,
+    setRating: setStudioRating,
+  } = useEntityEngagement("studio", id, {
+    fallbackFavorite: studio?.favorite,
+    fallbackRating: studio?.rating,
+  });
 
   useEffect(() => {
     if (studio) document.title = `${studio.name} | Cove`;
@@ -125,12 +140,12 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       switch (e.key) {
         case "e": if (canWriteStudio) setEditing((v) => !v); break;
-        case "f": if (studio && canWriteStudio) updateMut.mutate({ favorite: !studio.favorite }); break;
+        case "f": if (studio && canEngageStudio) setStudioFavorite(!studioFavorite); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canWriteStudio, studio]);
+  }, [canEngageStudio, canWriteStudio, studio, studioFavorite, setStudioFavorite]);
 
   useEffect(() => {
     if (visibleStudioTabs.length > 0 && !visibleStudioTabs.some((tab) => tab.key === activeTab)) {
@@ -147,7 +162,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   });
 
   const updateMut = useMutation({
-    mutationFn: (data: { favorite?: boolean; rating?: number; organized?: boolean }) => studios.update(id, data),
+    mutationFn: (data: { organized?: boolean }) => studios.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["studio", id] });
       queryClient.invalidateQueries({ queryKey: ["studios"] });
@@ -176,178 +191,144 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   const studioImageUrl = studio.imagePath || entityImages.studioImageUrl(studio.id, studio.updatedAt);
 
   return (
-    <div className="min-h-screen">
-      <div className="relative overflow-hidden border-b border-border detail-hero-gradient">
-        {/* Background studio image */}
-        <img
-          src={entityImages.studioImageUrl(studio.id, studio.updatedAt, 1600)}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover opacity-10 blur-md scale-110"
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-transparent" />
-        <div className="relative mx-auto max-w-7xl px-4 py-8">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <button
-              onClick={goBack}
-              className="flex items-center gap-1 text-sm text-secondary hover:text-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" /> {backLabel}
+    <>
+      <EntityHeroLayout
+        backLabel={backLabel}
+        onGoBack={goBack}
+        backgroundImageUrl={entityImages.studioImageUrl(studio.id, studio.updatedAt, 1600)}
+        imageUrl={studioImageUrl}
+        imageAlt={studio.name}
+        imageClassName="h-full w-full object-contain p-3"
+        imageFallback={<Building2 className="h-14 w-14 text-accent" />}
+        title={studio.name}
+        subtitle={studio.parentName && studio.parentId ? (
+          canReadEntity("studio", hasPermission) ? (
+            <button onClick={() => onNavigate({ page: "studio", id: studio.parentId })} className="text-accent hover:underline">
+              Part of {studio.parentName}
             </button>
-            <div className="flex items-center gap-2">
-              <ExtensionSlot slot="studio-detail-actions" context={{ studio, onNavigate }} />
-              {showStudioOpsMenu ? (
-                <div className="relative" ref={opsMenuRef}>
-                  <button
-                    onClick={() => setShowOpsMenu(!showOpsMenu)}
-                    className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground"
-                    title="Actions"
-                  >
-                    <MoreVertical className="h-4 w-4" />
-                  </button>
-                  {showOpsMenu && (
-                    <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
-                      {canWriteStudio ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                        <Pencil className="h-3.5 w-3.5" /> Edit
-                      </button> : null}
-                      {canAutoTagStudio ? <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">
-                        {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
-                      </button> : null}
-                      {canWriteStudio ? <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface">
-                        <GitMerge className="h-3.5 w-3.5" /> Merge...
-                      </button> : null}
-                      {canDeleteStudio ? <div className="my-1 border-t border-border" /> : null}
-                      {canDeleteStudio ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface">
-                        <Trash2 className="h-3.5 w-3.5" /> Delete
-                      </button> : null}
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-6 md:flex-row md:items-start">
-            <div className="flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/35 md:h-36 md:w-36">
-              <img
-                src={studioImageUrl}
-                alt={studio.name}
-                className="h-full w-full object-contain p-3"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                  const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
-                  if (fallback) fallback.style.display = "flex";
-                }}
-              />
-              <div className="hidden h-full w-full items-center justify-center bg-card">
-                <Building2 className="h-14 w-14 text-accent" />
-              </div>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="mb-2 flex items-start gap-4">
-                <div className="min-w-0 flex-1">
-                  <h1 className="truncate text-2xl sm:text-3xl md:text-4xl font-bold text-foreground">{studio.name}</h1>
-                  {studio.parentName && studio.parentId && (
-                    canReadEntity("studio", hasPermission) ? (
-                      <button
-                        onClick={() => onNavigate({ page: "studio", id: studio.parentId })}
-                        className="mt-1 text-sm text-accent hover:underline"
-                      >
-                        Part of {studio.parentName}
-                      </button>
-                    ) : <span className="mt-1 block text-sm text-secondary">Part of {studio.parentName}</span>
-                  )}
-                  {studio.aliases.length > 0 && (
-                    <p className="mt-1 text-sm text-secondary">Also known as: {studio.aliases.join(", ")}</p>
-                  )}
-                </div>
-                {canWriteStudio ? (
-                  <button
-                    onClick={() => updateMut.mutate({ favorite: !studio.favorite })}
-                    className={`rounded-full p-2 transition-colors ${
-                      studio.favorite
-                        ? "bg-red-500/15 text-red-500"
-                        : "bg-card text-muted hover:text-red-400"
-                    }`}
-                    title={studio.favorite ? "Remove from favorites" : "Add to favorites"}
-                  >
-                    <Heart className={`h-6 w-6 ${studio.favorite ? "fill-current" : ""}`} />
-                  </button>
-                ) : studio.favorite ? (
-                  <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite studio">
-                    <Heart className="h-6 w-6 fill-current" />
-                  </span>
-                ) : null}
-                {canWriteStudio ? (
-                  <button
-                    onClick={() => updateMut.mutate({ organized: !studio.organized })}
-                    className={`rounded-full p-2 transition-colors ${
-                      studio.organized
-                        ? "bg-green-500/15 text-green-500"
-                        : "bg-card text-muted hover:text-green-400"
-                    }`}
-                    title={studio.organized ? "Mark as unorganized" : "Mark as organized"}
-                  >
-                    <Check className="h-6 w-6" />
-                  </button>
-                ) : studio.organized ? (
-                  <span className="rounded-full bg-green-500/15 p-2 text-green-500" title="Organized studio">
-                    <Check className="h-6 w-6" />
-                  </span>
-                ) : null}
-              </div>
-
-              <InteractiveRating value={studio.rating} onChange={(value) => updateMut.mutate({ rating: value })} readOnly={!canWriteStudio} />
-
-              <div className="mt-4 flex flex-wrap gap-3">
-                <CountCard label="Scenes" value={studio.sceneCount} icon={<Film className="h-4 w-4" />} />
-                <CountCard label="Performers" value={studio.performerCount} icon={<UserRound className="h-4 w-4" />} />
-                <CountCard label="Images" value={studio.imageCount} icon={<ImageIcon className="h-4 w-4" />} />
-                <CountCard label="Galleries" value={studio.galleryCount} icon={<FolderOpen className="h-4 w-4" />} />
-                <CountCard label="Sub-studios" value={studio.childStudioCount} icon={<Building2 className="h-4 w-4" />} />
-                <CountCard label="Groups" value={studio.groupCount} icon={<Layers className="h-4 w-4" />} />
-                {extensionCounts.map((ec) => (
-                  <CountCard key={ec.key} label={ec.label} value={ec.count} icon={ec.icon === "music" ? <Music className="h-4 w-4" /> : undefined} />
+          ) : <span>Part of {studio.parentName}</span>
+        ) : undefined}
+        aliases={studio.aliases.length > 0 ? studio.aliases.join(", ") : undefined}
+        favorite={studioFavorite}
+        onFavoriteToggle={canEngageStudio ? () => setStudioFavorite(!studioFavorite) : undefined}
+        titleActions={canWriteStudio ? (
+          <button
+            onClick={() => updateMut.mutate({ organized: !studio.organized })}
+            className={`rounded-full p-2 transition-colors ${studio.organized ? "bg-green-500/15 text-green-500" : "bg-card text-muted hover:text-green-400"}`}
+            title={studio.organized ? "Mark as unorganized" : "Mark as organized"}
+          >
+            <Check className="h-6 w-6" />
+          </button>
+        ) : studio.organized ? (
+          <span className="rounded-full bg-green-500/15 p-2 text-green-500" title="Organized studio">
+            <Check className="h-6 w-6" />
+          </span>
+        ) : null}
+        counts={[
+          { key: "scenes", label: "Scenes", value: studio.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "performers", label: "Performers", value: studio.performerCount, icon: <UserRound className="h-4 w-4" /> },
+          { key: "images", label: "Images", value: studio.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
+          { key: "galleries", label: "Galleries", value: studio.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
+          { key: "studios", label: "Sub-studios", value: studio.childStudioCount, icon: <Building2 className="h-4 w-4" /> },
+          { key: "groups", label: "Groups", value: studio.groupCount, icon: <Layers className="h-4 w-4" /> },
+          ...extensionCounts.map((ec) => ({
+            key: ec.key,
+            label: ec.label,
+            value: ec.count,
+            icon: ec.icon === "music" ? <Music className="h-4 w-4" /> : undefined,
+          })),
+        ]}
+        metaRow={(
+          <>
+            {studio.ignoreAutoTag ? <span className="rounded bg-yellow-500/15 px-1.5 py-0.5 text-yellow-400">Ignores Auto-Tag</span> : null}
+            {studio.remoteIds?.map((sid) => (
+              <span key={`${sid.endpoint}:${sid.remoteId}`} className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs text-secondary">
+                <Link2 className="h-2.5 w-2.5 text-accent" />{sid.remoteId.slice(0, 12)}…
+              </span>
+            ))}
+            <span title={`Created ${formatDate(studio.createdAt)}`}>Updated {formatDate(studio.updatedAt)}</span>
+          </>
+        )}
+        heroContent={(
+          <>
+            <InteractiveRating value={studioRating} onChange={(value) => setStudioRating(value)} readOnly={!canEngageStudio} />
+            {studio.details ? <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{studio.details}</p> : null}
+            {canReadTags && studio.tags.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {studio.tags.map((tag) => (
+                  <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
                 ))}
               </div>
-
-              {studio.details && (
-                <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{studio.details}</p>
-              )}
-              {canReadTags && studio.tags.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  {studio.tags.map((tag) => (
-                    <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
-                  ))}
-                </div>
-              )}
-              {studio.urls.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                  {studio.urls.map((url, index) => (
-                    <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-accent hover:underline truncate max-w-xs">
-                      <LinkIcon className="h-3.5 w-3.5 flex-shrink-0" />{new URL(url).hostname}
-                    </a>
-                  ))}
-                </div>
-              )}
-              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
-                {studio.ignoreAutoTag && <span className="rounded bg-yellow-500/15 px-1.5 py-0.5 text-yellow-400">Ignores Auto-Tag</span>}
-                {studio.remoteIds && studio.remoteIds.length > 0 && studio.remoteIds.map((sid) => (
-                  <span key={`${sid.endpoint}:${sid.remoteId}`} className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs text-secondary">
-                    <Link2 className="h-2.5 w-2.5 text-accent" />{sid.remoteId.slice(0, 12)}…
-                  </span>
+            ) : null}
+            {studio.urls.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                {studio.urls.map((url, index) => (
+                  <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="flex max-w-xs items-center gap-1 truncate text-accent hover:underline">
+                    <LinkIcon className="h-3.5 w-3.5 flex-shrink-0" />{new URL(url).hostname}
+                  </a>
                 ))}
-                <span title={`Created ${formatDate(studio.createdAt)}`}>Updated {formatDate(studio.updatedAt)}</span>
               </div>
-              <CustomFieldsDisplay customFields={studio.customFields} />
-              <StudioMetadataServerPanel studio={studio} metadataServers={metadataServers} onNavigate={onNavigate} />
-              {autoTagMut.isSuccess && (
-                <p className="mt-3 text-sm text-emerald-300">Auto-tag job queued.</p>
-              )}
-            </div>
-          </div>
+            ) : null}
+            <CustomFieldsDisplay customFields={studio.customFields} />
+            <StudioMetadataServerPanel studio={studio} metadataServers={metadataServers} onNavigate={onNavigate} />
+            {autoTagMut.isSuccess ? <p className="mt-3 text-sm text-emerald-300">Auto-tag job queued.</p> : null}
+          </>
+        )}
+        actions={(
+          <>
+            <ExtensionSlot slot="studio-detail-actions" context={{ studio, onNavigate }} />
+            {showStudioOpsMenu ? (
+              <div className="relative" ref={opsMenuRef}>
+                <button
+                  onClick={() => setShowOpsMenu(!showOpsMenu)}
+                  className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground"
+                  title="Actions"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+                {showOpsMenu ? (
+                  <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
+                    {canWriteStudio ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
+                    {canAutoTagStudio ? <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">{autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag</button> : null}
+                    {canWriteStudio ? <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><GitMerge className="h-3.5 w-3.5" /> Merge...</button> : null}
+                    {canDeleteStudio ? <div className="my-1 border-t border-border" /> : null}
+                    {canDeleteStudio ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
+        heroRowClassName="flex flex-col gap-6 md:flex-row md:items-start"
+      >
+        <ExtensionSlot slot="studio-detail-sidebar-bottom" context={{ studio, onNavigate }} />
+
+        <EntityDetailTabs tabs={visibleStudioTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl mt-6" />
+
+        <div className="py-6">
+          {activeTab === "scenes" && (
+            <StudioScenesPanel studioId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "performers" && (
+            <StudioPerformersPanel studioId={id} filter={performerFilter} setFilter={setPerformerFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "galleries" && (
+            <StudioGalleriesPanel studioId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "images" && (
+            <StudioImagesPanel studioId={id} filter={imageFilter} setFilter={setImageFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "studios" && (
+            <ChildStudiosPanel studioId={id} filter={childFilter} setFilter={setChildFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "groups" && (
+            <StudioGroupsPanel studioId={id} filter={groupFilter} setFilter={setGroupFilter} onNavigate={onNavigate} />
+          )}
+          {renderExtensionTab(activeTab, id, onNavigate)}
         </div>
-      </div>
+
+        <ExtensionSlot slot="studio-detail-bottom" context={{ studio, onNavigate }} />
+      </EntityHeroLayout>
 
       <StudioEditModal studio={studio} open={editing} onClose={() => setEditing(false)} />
       <ConfirmDialog
@@ -375,53 +356,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         invalidateQueryKeys={[["studio", id], ["studios"]]}
       />
 
-      <div className="px-4 py-6">
-            <ExtensionSlot slot="studio-detail-sidebar-bottom" context={{ studio, onNavigate }} />
-
-        <div className="mx-auto max-w-7xl border-b border-border mt-6">
-          <div className="flex gap-1 overflow-x-auto">
-            {visibleStudioTabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key as TabKey)}
-                className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-                  activeTab === tab.key
-                    ? "border-accent text-foreground"
-                    : "border-transparent text-secondary hover:border-muted hover:text-foreground"
-                }`}
-              >
-                {tab.label}
-                {(tab.count ?? 0) > 0 && <span className="ml-1.5 text-xs text-muted bg-surface rounded-full px-1.5 py-0.5">{tab.count}</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="py-6">
-          {activeTab === "scenes" && (
-            <StudioScenesPanel studioId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "performers" && (
-            <StudioPerformersPanel studioId={id} filter={performerFilter} setFilter={setPerformerFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "galleries" && (
-            <StudioGalleriesPanel studioId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "images" && (
-            <StudioImagesPanel studioId={id} filter={imageFilter} setFilter={setImageFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "studios" && (
-            <ChildStudiosPanel studioId={id} filter={childFilter} setFilter={setChildFilter} onNavigate={onNavigate} />
-          )}
-          {activeTab === "groups" && (
-            <StudioGroupsPanel studioId={id} filter={groupFilter} setFilter={setGroupFilter} onNavigate={onNavigate} />
-          )}
-          {renderExtensionTab(activeTab, id, onNavigate)}
-        </div>
-
-        <ExtensionSlot slot="studio-detail-bottom" context={{ studio, onNavigate }} />
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -601,18 +536,6 @@ function StudioMetadataServerPanel({ studio, metadataServers, onNavigate }: { st
   );
 }
 
-function CountCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
-      <span className="text-accent">{icon}</span>
-      <div>
-        <div className="text-lg font-semibold text-foreground">{value}</div>
-        <div className="text-xs text-muted">{label}</div>
-      </div>
-    </div>
-  );
-}
-
 function StudioScenesPanel({ studioId, filter, setFilter, onNavigate }: {
   studioId: number;
   filter: FindFilter;
@@ -634,11 +557,11 @@ function StudioScenesPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={data.items} onNavigate={onNavigate} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`}>
         {data.items.map((scene) => (
           <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
@@ -667,11 +590,11 @@ function StudioGalleriesPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`}>
         {data.items.map((gallery) => (
           <GalleryTile key={gallery.id} gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
@@ -698,11 +621,11 @@ function StudioImagesPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${160 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${160 + zoomLevel * 50}px`}>
         {data.items.map((image) => (
           <ImageTile key={image.id} image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
@@ -731,11 +654,11 @@ function ChildStudiosPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={STUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="studios" selectedIds={selectedIds} onDone={selectNone} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${200 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${200 + zoomLevel * 50}px`}>
         {data.items.map((childStudio) => (
           <StudioTile key={childStudio.id} studio={childStudio} onClick={() => selecting ? toggle(childStudio.id) : onNavigate({ page: "studio", id: childStudio.id })} selected={selectedIds.has(childStudio.id)} onSelect={() => toggle(childStudio.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
@@ -761,11 +684,11 @@ function StudioPerformersPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={PERFORMER_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${180 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${180 + zoomLevel * 50}px`}>
         {data.items.map((performer) => (
           <PerformerTile key={performer.id} performer={performer} onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })} selected={selectedIds.has(performer.id)} onSelect={() => toggle(performer.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
@@ -791,11 +714,11 @@ function StudioGroupsPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GROUP_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} />} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${200 + zoomLevel * 50}px, 1fr))` }}>
+      <EntityCardGrid minCardWidth={`${200 + zoomLevel * 50}px`}>
         {data.items.map((group) => (
           <GroupTile key={group.id} group={group} onClick={() => selecting ? toggle(group.id) : onNavigate({ page: "group", id: group.id })} selected={selectedIds.has(group.id)} onSelect={() => toggle(group.id)} selecting={selecting} />
         ))}
-      </div>
+      </EntityCardGrid>
       <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );

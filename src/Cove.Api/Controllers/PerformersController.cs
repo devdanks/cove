@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
 using Cove.Core.Auth;
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -27,7 +28,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         [FromQuery] int? studioId = null,
         CancellationToken ct = default)
     {
-        var filter = new PerformerFilter { Name = name, Favorite = favorite, Rating = rating, TagIds = ParseIntList(tagIds), StudioId = studioId };
+        var filter = new PerformerFilter { Name = name, Favorite = favorite, Rating = rating, TagIds = QueryParsing.ParseIntList(tagIds)?.ToList(), StudioId = studioId };
         var findFilter = new FindFilter
         {
             Q = q, Page = page, PerPage = perPage, Sort = sort,
@@ -379,7 +380,6 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
     private static T? ParseEnum<T>(string? value) where T : struct, Enum => Enum.TryParse<T>(value, true, out var e) ? e : null;
-    private static List<int>? ParseIntList(string? csv) => string.IsNullOrEmpty(csv) ? null : csv.Split(',').Select(int.Parse).ToList();
 
     private async Task<List<int>> ResolveSelectedPerformerIdsAsync(MetadataServerPerformerBatchTagRequestDto dto, CancellationToken ct)
     {

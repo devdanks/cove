@@ -39,6 +39,56 @@ public class JobServiceTests
         }
     }
 
+    [Fact]
+    public async Task RunBatchAsync_AggregatesUnitProgressAndKeepsParentCompletedWhenSomeUnitsFail()
+    {
+        var service = new JobService(new EventBus(), new FakeHubContext(), NullLogger<JobService>.Instance);
+        await service.StartAsync(CancellationToken.None);
+
+        try
+        {
+            IJobService jobs = service;
+            var jobId = service.Enqueue(
+                "ai-batch",
+                "Analyzing scenes",
+                async (progress, ct) =>
+                {
+                    var result = await jobs.RunBatchAsync(
+                        units: new[] { "scene-a", "scene-b", "scene-c" },
+                        maxInFlight: 2,
+                        work: async (sceneId, unit, innerCt) =>
+                        {
+                            unit.Report(0.5, $"Analyzing {sceneId}");
+                            await Task.Delay(20, innerCt);
+                            if (sceneId == "scene-b")
+                                throw new InvalidOperationException("analysis failed");
+
+                            unit.Complete(JobUnitOutcome.Succeeded, $"Finished {sceneId}");
+                        },
+                        progress: progress,
+                        ct: ct);
+
+                    progress.Report(1d, result.Summary);
+                });
+
+            var job = await WaitForTerminalStateAsync(service, jobId, TimeSpan.FromSeconds(5));
+
+            Assert.NotNull(job);
+            Assert.Equal(JobStatus.Completed, job.Status);
+            Assert.Equal(1.0, job.Progress, 3);
+            Assert.Equal(3, job.UnitsTotal);
+            Assert.Equal(3, job.UnitsCompleted);
+            Assert.Equal(2, job.UnitsSucceeded);
+            Assert.Equal(1, job.UnitsFailed);
+            Assert.Equal(0, job.UnitsSkipped);
+            Assert.Equal("2 succeeded, 1 failed, 0 skipped", job.Summary);
+        }
+        finally
+        {
+            await service.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static async Task<JobInfo?> WaitForTerminalStateAsync(IJobService service, string jobId, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;

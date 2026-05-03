@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tags, entityImages } from "../api/client";
 import type { TagDetail, TagUpdate, Tag } from "../api/types";
-import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
+import { EditModal, Field, NumberInput, SaveButton, SelectInput, TextArea, TextInput } from "../components/EditModal";
 import { ImageInput } from "../components/ImageInput";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
@@ -13,6 +13,8 @@ interface Props {
   onClose: () => void;
 }
 
+type PlayerBarMode = "default" | "always" | "never";
+
 export function TagEditModal({ tag, open, onClose }: Props) {
   const queryClient = useQueryClient();
 
@@ -20,6 +22,9 @@ export function TagEditModal({ tag, open, onClose }: Props) {
   const [sortName, setSortName] = useState(tag.sortName ?? "");
   const [description, setDescription] = useState(tag.description ?? "");
   const [ignoreAutoTag, setIgnoreAutoTag] = useState(tag.ignoreAutoTag);
+  const [playerBarMode, setPlayerBarMode] = useState<PlayerBarMode>(() => readPlayerBarMode(tag.showAsSegment));
+  const [segmentColorOverride, setSegmentColorOverride] = useState(tag.segmentColorOverride ?? "");
+  const [segmentLaneOverride, setSegmentLaneOverride] = useState<number | undefined>(tag.segmentLaneOverride ?? undefined);
   const [aliases, setAliases] = useState(tag.aliases);
   const [selectedParentIds, setSelectedParentIds] = useState<number[]>(tag.parents.map((t) => t.id));
   const [selectedChildIds, setSelectedChildIds] = useState<number[]>(tag.children.map((t) => t.id));
@@ -42,6 +47,9 @@ export function TagEditModal({ tag, open, onClose }: Props) {
     setSortName(tag.sortName ?? "");
     setDescription(tag.description ?? "");
     setIgnoreAutoTag(tag.ignoreAutoTag);
+    setPlayerBarMode(readPlayerBarMode(tag.showAsSegment));
+    setSegmentColorOverride(tag.segmentColorOverride ?? "");
+    setSegmentLaneOverride(tag.segmentLaneOverride ?? undefined);
     setAliases(tag.aliases);
     setSelectedParentIds(tag.parents.map((t) => t.id));
     setSelectedChildIds(tag.children.map((t) => t.id));
@@ -64,6 +72,9 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       sortName: sortName || undefined,
       description: description || undefined,
       ignoreAutoTag,
+      showAsSegment: playerBarMode === "default" ? null : playerBarMode === "always",
+      segmentColorOverride: playerBarMode === "always" ? (segmentColorOverride.trim() || null) : null,
+      segmentLaneOverride: playerBarMode === "always" ? (segmentLaneOverride ?? null) : null,
       aliases: aliasList,
       parentIds: selectedParentIds,
       childIds: selectedChildIds,
@@ -122,6 +133,35 @@ export function TagEditModal({ tag, open, onClose }: Props) {
           Ignore Auto Tag
         </label>
       </div>
+
+      <Field label="Player Bar">
+        <div className="space-y-3 rounded-xl border border-border bg-surface/40 p-3">
+          <SelectInput
+            value={playerBarMode}
+            onChange={(value) => setPlayerBarMode(value as PlayerBarMode)}
+            options={[
+              { value: "default", label: "Default - follow display profiles" },
+              { value: "always", label: "Always - force visible on the player bar" },
+              { value: "never", label: "Never - suppress this tag on the player bar" },
+            ]}
+          />
+          <p className="text-xs text-secondary">
+            Tag-level overrides win over profile visibility. Use Default to hand control back to display profiles.
+          </p>
+          {playerBarMode === "always" ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Color override</div>
+                <TextInput value={segmentColorOverride} onChange={setSegmentColorOverride} placeholder="#ffaa00" />
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Lane override</div>
+                <NumberInput value={segmentLaneOverride} onChange={setSegmentLaneOverride} min={0} />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Field>
 
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} />
@@ -203,4 +243,16 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       </div>
     </EditModal>
   );
+}
+
+function readPlayerBarMode(showAsSegment?: boolean | null): PlayerBarMode {
+  if (showAsSegment === true) {
+    return "always";
+  }
+
+  if (showAsSegment === false) {
+    return "never";
+  }
+
+  return "default";
 }
