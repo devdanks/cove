@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using Cove.Api.Startup;
 using Cove.Core.Interfaces;
@@ -14,6 +16,7 @@ using Npgsql;
 
 namespace Cove.Tests;
 
+[Collection("Managed Postgres integration")]
 public sealed class Phase12SchemaParityTests
 {
     [Fact]
@@ -24,7 +27,7 @@ public sealed class Phase12SchemaParityTests
             return;
 
         var databaseName = $"phase12_idempotent_{Guid.NewGuid():N}";
-        await using var environment = await CreateEnvironmentAsync(managedRoot, 5548);
+        await using var environment = await CreateEnvironmentAsync(managedRoot);
         await CreateDatabaseAsync(environment.AdminConnectionString, databaseName);
 
         try
@@ -65,7 +68,7 @@ public sealed class Phase12SchemaParityTests
         var freshDatabaseName = $"phase12_fresh_{Guid.NewGuid():N}";
         var bootstrapDatabaseName = $"phase12_bootstrap_{Guid.NewGuid():N}";
 
-        await using var environment = await CreateEnvironmentAsync(managedRoot, 5549);
+        await using var environment = await CreateEnvironmentAsync(managedRoot);
         await CreateDatabaseAsync(environment.AdminConnectionString, freshDatabaseName);
         await CreateDatabaseAsync(environment.AdminConnectionString, bootstrapDatabaseName);
 
@@ -312,21 +315,51 @@ public sealed class Phase12SchemaParityTests
         await drop.ExecuteNonQueryAsync();
     }
 
-    private static async Task<PostgresTestEnvironment> CreateEnvironmentAsync(string managedRoot, int port)
+    private static async Task<PostgresTestEnvironment> CreateEnvironmentAsync(string managedRoot)
     {
-        var postgresConfig = new PostgresConfig
+        Exception? lastError = null;
+
+        for (var attempt = 0; attempt < 5; attempt++)
         {
-            Managed = true,
-            DataPath = managedRoot,
-            Port = port,
-            Database = "postgres",
-        };
+            var port = ReserveLoopbackPort();
+            var postgresConfig = new PostgresConfig
+            {
+                Managed = true,
+                DataPath = managedRoot,
+                Port = port,
+                Database = "postgres",
+            };
 
-        var manager = new PostgresManagerService(Options.Create(postgresConfig), NullLogger<PostgresManagerService>.Instance);
-        await manager.StartAsync(CancellationToken.None);
+            var manager = new PostgresManagerService(Options.Create(postgresConfig), NullLogger<PostgresManagerService>.Instance);
 
-        var pgDumpPath = Path.Combine(managedRoot, "pgsql", "bin", Exe("pg_dump"));
-        return new PostgresTestEnvironment(manager, port, BuildConnectionString(port, "postgres"), pgDumpPath);
+            try
+            {
+                await manager.StartAsync(CancellationToken.None);
+
+                var pgDumpPath = Path.Combine(managedRoot, "pgsql", "bin", Exe("pg_dump"));
+                return new PostgresTestEnvironment(manager, port, BuildConnectionString(port, "postgres"), pgDumpPath);
+            }
+            catch (Exception ex) when (attempt < 4)
+            {
+                lastError = ex;
+                try
+                {
+                    await manager.StopAsync(CancellationToken.None);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        throw new InvalidOperationException("Failed to start managed Postgres for schema parity tests.", lastError);
+    }
+
+    private static int ReserveLoopbackPort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private static string? ResolveManagedPostgresRoot()

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageDetailPage } from "../pages/ImageDetailPage";
 
@@ -8,6 +8,7 @@ const { mockImages, mockFaces, mockSetFavorite, mockSetRating, mockGoBack } = vi
     get: vi.fn(),
     delete: vi.fn(),
     update: vi.fn(),
+    incrementO: vi.fn(),
     thumbnailUrl: vi.fn(() => "/thumb.jpg"),
     imageUrl: vi.fn(() => "/image.jpg"),
     detections: {
@@ -151,9 +152,10 @@ describe("ImageDetailPage", () => {
     expect(screen.getByText("Beach")).toBeInTheDocument();
   });
 
-  it("supports keyboard shortcuts for related tab, lightbox, and favorite", async () => {
+  it("supports keyboard shortcuts for related tab, lightbox, and favorites count", async () => {
     mockImages.get.mockResolvedValue(buildImage());
     mockImages.detections.list.mockResolvedValue([]);
+    mockImages.incrementO.mockResolvedValue(undefined);
 
     renderPage();
 
@@ -166,6 +168,6 @@ describe("ImageDetailPage", () => {
     expect(await screen.findByRole("button", { name: "Close (Esc)" })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "o" });
-    expect(mockSetFavorite).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(mockImages.incrementO).toHaveBeenCalledWith(12));
   });
 });

@@ -160,7 +160,7 @@ describe("GroupDetailPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the shared layout, inline compilation media, and metadata tab", async () => {
+  it("renders the shared hero layout and switches to the metadata tab", async () => {
     mockGroups.get.mockResolvedValue(buildGroup());
     mockGroups.items.list.mockResolvedValue([
       { id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 },
@@ -175,8 +175,9 @@ describe("GroupDetailPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "Summer Compilation" })).toBeInTheDocument();
-    expect(screen.getByTestId("compilation-player")).toBeInTheDocument();
     expect(await screen.findByText("Group Items")).toBeInTheDocument();
+    expect(screen.queryByTestId("compilation-player")).not.toBeInTheDocument();
+    expect(screen.getByTitle("Standalone Compilation")).toBeInTheDocument();
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
     fireEvent.click(within(tabs).getByRole("tab", { name: /metadata/i }));
@@ -185,7 +186,7 @@ describe("GroupDetailPage", () => {
     expect(screen.getByText("Sub-Group Count")).toBeInTheDocument();
   });
 
-  it("supports keyboard tab shortcuts for metadata and edit", async () => {
+  it("switches between metadata and edit tabs", async () => {
     mockGroups.get.mockResolvedValue(buildGroup());
     mockGroups.items.list.mockResolvedValue([
       { id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 },
@@ -200,11 +201,12 @@ describe("GroupDetailPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Summer Compilation" });
+    const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
 
-    fireEvent.keyDown(window, { key: "m" });
+    fireEvent.click(within(tabs).getByRole("tab", { name: /metadata/i }));
     expect(await screen.findByText("Sub-Group Count")).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "e" });
+    fireEvent.click(within(tabs).getByRole("tab", { name: /^edit$/i }));
     expect(await screen.findByRole("heading", { name: "Edit Group" })).toBeInTheDocument();
   });
 });

@@ -940,7 +940,7 @@ public class SegmentCoreControllerTests
         var globalProfilesResult = await controller.List(CancellationToken.None);
         var globalProfilesOk = Assert.IsType<OkObjectResult>(globalProfilesResult.Result);
         var globalProfiles = Assert.IsAssignableFrom<IReadOnlyList<SegmentDisplayProfileDto>>(globalProfilesOk.Value);
-        var rawProfile = Assert.Single(globalProfiles.Where(profile => profile.UserId == null && profile.Name == "Raw"));
+        var rawProfile = Assert.Single(globalProfiles, profile => profile.UserId == null && profile.Name == "Raw");
 
         var globalCreate = await controller.CreateRule(rawProfile.Id, new SegmentDisplayRuleCreateDto(
             "import:stash",
@@ -1416,15 +1416,21 @@ public class SegmentCoreControllerTests
         }
     }
 
-    private sealed class TestContextScope(CoveContext context, SqliteConnection connection) : IAsyncDisposable
+    private sealed class TestContextScope : IAsyncDisposable
     {
-        public CoveContext Context { get; } = context;
-        public SqliteConnection Connection { get; } = connection;
+        public TestContextScope(CoveContext context, SqliteConnection connection)
+        {
+            Context = context;
+            Connection = connection;
+        }
+
+        public CoveContext Context { get; }
+        public SqliteConnection Connection { get; }
 
         public async ValueTask DisposeAsync()
         {
             await Context.DisposeAsync();
-            await connection.DisposeAsync();
+            await Connection.DisposeAsync();
         }
     }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Download, Edit, Loader2, Trash2, Search, Merge, Play } from "lucide-react";
+import { Download, Edit, Loader2, Trash2, Search, Play } from "lucide-react";
 import { scenes as scenesApi, images, galleries, performers, groups, studios, tags } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
@@ -164,15 +164,6 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
         >
           <Search className="w-3 h-3" />
           Identify
-        </button>
-      )}
-      {isScenes && canWrite && selectedIds.size >= 2 && (
-        <button
-          onClick={() => {/* TODO: merge dialog */}}
-          className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/20"
-        >
-          <Merge className="w-3 h-3" />
-          Merge
         </button>
       )}
       {isScenes && sceneItems && onNavigate && (

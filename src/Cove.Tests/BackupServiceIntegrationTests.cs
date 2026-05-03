@@ -7,6 +7,10 @@ using Npgsql;
 
 namespace Cove.Tests;
 
+[CollectionDefinition("Managed Postgres integration", DisableParallelization = true)]
+public sealed class ManagedPostgresIntegrationCollection;
+
+[Collection("Managed Postgres integration")]
 public class BackupServiceIntegrationTests
 {
     [Fact]
