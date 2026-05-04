@@ -134,6 +134,7 @@ public partial class StashMigrationService
         var idMap = new Dictionary<int, int>();
         const int SceneBatchSize = 50;
         var pendingBatch = new List<(int StashId, Scene Entity)>(SceneBatchSize);
+        _logger.LogInformation("Importing {Total} scenes...", sceneRows.Count);
         progress.Report(startProgress, "Importing scenes...");
 
         void FlushSceneBatch()

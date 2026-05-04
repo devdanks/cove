@@ -11,28 +11,50 @@ namespace Cove.Api.Services;
 
 public partial class StashMigrationService
 {
-    private async Task<Dictionary<string, string>> ImportBlobsAsync(SqliteConnection conn, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
+    private async Task<Dictionary<string, string>> ImportBlobsAsync(SqliteConnection conn, string? blobFilesPath, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var total = await CountAsync(conn, "blobs", ct);
         var processed = 0;
+        var storedOnDisk = !string.IsNullOrWhiteSpace(blobFilesPath) && Directory.Exists(blobFilesPath);
+        _logger.LogInformation("Importing {Total} blobs (cover images){Mode}...",
+            total, storedOnDisk ? $" from disk ({blobFilesPath})" : " from SQLite");
         progress.Report(startProgress, "Importing blobs...");
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT checksum, blob FROM blobs WHERE blob IS NOT NULL";
+        // Fetch all checksums; blob column may be NULL when Stash uses blob_files_path
+        cmd.CommandText = "SELECT checksum, blob FROM blobs";
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
             processed++;
-            if (r.IsDBNull(1)) continue;
             var checksum = r.GetString(0);
             try
             {
-                var bytes = (byte[])r.GetValue(1);
-                using var ms = new MemoryStream(bytes);
-                var contentType = DetectImageContentType(ms);
-                ms.Position = 0;
-                var blobId = await _blobService.StoreBlobAsync(ms, contentType, ct);
-                map[checksum] = blobId;
+                Stream? blobStream = null;
+
+                if (!r.IsDBNull(1))
+                {
+                    // Inline SQLite blob
+                    var bytes = (byte[])r.GetValue(1);
+                    blobStream = new MemoryStream(bytes);
+                }
+                else if (storedOnDisk)
+                {
+                    // Stash blob_files_path: files stored as {blobFilesPath}/{checksum}
+                    var blobFile = Path.Combine(blobFilesPath!, checksum);
+                    if (File.Exists(blobFile))
+                        blobStream = new FileStream(blobFile, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                }
+
+                if (blobStream == null) continue;
+
+                await using (blobStream)
+                {
+                    var contentType = DetectImageContentType(blobStream);
+                    blobStream.Position = 0;
+                    var blobId = await _blobService.StoreBlobAsync(blobStream, contentType, ct);
+                    map[checksum] = blobId;
+                }
             }
             catch (Exception ex)
             {
@@ -40,7 +62,10 @@ public partial class StashMigrationService
             }
 
             if (processed % 100 == 0 || processed == total)
+            {
                 ReportPhase(progress, startProgress, endProgress, processed, total, $"Importing blobs ({processed}/{total})");
+                _logger.LogInformation("Imported {Count}/{Total} blobs ({Stored} stored)...", processed, total, map.Count);
+            }
         }
         _logger.LogInformation("Imported {Count} blobs", map.Count);
         return map;
@@ -74,6 +99,25 @@ public partial class StashMigrationService
 
         progress.Report(startProgress, "Importing folders...");
 
+        const int FolderBatchSize = 200;
+        // Tracks stash IDs of folders added to the current unsaved batch so we can detect
+        // when a child'''s parent is in-flight and needs an early flush.
+        var pendingStashIds = new HashSet<int>();
+        var pendingBatch = new List<(int StashId, Folder Entity)>(FolderBatchSize);
+
+        async Task FlushFolderBatchAsync()
+        {
+            if (pendingBatch.Count == 0) return;
+            await _db.SaveChangesAsync(ct);
+            foreach (var (stashId, entity) in pendingBatch)
+            {
+                folderIdMap[stashId] = entity.Id;
+                existingFoldersByPath[entity.Path] = entity.Id;
+            }
+            pendingBatch.Clear();
+            pendingStashIds.Clear();
+        }
+
         foreach (var stashFolderId in ordered)
         {
             var fd = folderData[stashFolderId];
@@ -84,6 +128,11 @@ public partial class StashMigrationService
                 continue;
             }
 
+            // If this folder'''s parent is in the current unsaved batch, flush first so we
+            // can resolve the parent'''s DB-assigned ID before building the child entity.
+            if (fd.ParentId.HasValue && pendingStashIds.Contains(fd.ParentId.Value))
+                await FlushFolderBatchAsync();
+
             var folder = new Folder
             {
                 Path = normalizedPath,
@@ -93,13 +142,19 @@ public partial class StashMigrationService
                 UpdatedAt = fd.ModTime,
             };
             _db.Folders.Add(folder);
-            await _db.SaveChangesAsync(ct);
-            folderIdMap[stashFolderId] = folder.Id;
-            existingFoldersByPath[normalizedPath] = folder.Id;
+            pendingBatch.Add((stashFolderId, folder));
+            pendingStashIds.Add(stashFolderId);
 
-            if (folderIdMap.Count % 100 == 0 || folderIdMap.Count == ordered.Count)
+            if (pendingBatch.Count >= FolderBatchSize)
+            {
+                await FlushFolderBatchAsync();
                 ReportPhase(progress, startProgress, endProgress, folderIdMap.Count, ordered.Count, $"Importing folders ({folderIdMap.Count}/{ordered.Count})");
+                _logger.LogInformation("Imported {Count}/{Total} folders...", folderIdMap.Count, ordered.Count);
+            }
         }
+
+        await FlushFolderBatchAsync();
+        ReportPhase(progress, startProgress, endProgress, folderIdMap.Count, ordered.Count, $"Importing folders ({folderIdMap.Count}/{ordered.Count})");
         _logger.LogInformation("Imported {Count} folders", folderIdMap.Count);
         return folderIdMap;
     }
@@ -312,16 +367,11 @@ WHERE files.zip_file_id IS NOT NULL";
         _logger.LogInformation("Updated Cove generated path to {Path} before Stash import", normalizedPath);
     }
 
-    private async Task CopyGeneratedContentAsync(string stashDbPath, Dictionary<int, SceneGeneratedData> sceneGeneratedMap, StashImportOptions options, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
+    private async Task CopyGeneratedContentAsync(StashConfigData stashConfig, Dictionary<int, SceneGeneratedData> sceneGeneratedMap, StashImportOptions options, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
         try
         {
             progress.Report(startProgress, "Copying generated scene assets...");
-            var configDir = Path.GetDirectoryName(stashDbPath)!;
-            var configPath = Path.Combine(configDir, "config.yml");
-            var stashConfig = File.Exists(configPath)
-                ? ParseStashConfig(configPath)
-                : new StashConfigData([], null, "OSHASH");
             var stashGeneratedPath = stashConfig.GeneratedPath;
             if (string.IsNullOrWhiteSpace(stashGeneratedPath) || !Directory.Exists(stashGeneratedPath))
             {
@@ -595,6 +645,7 @@ WHERE files.zip_file_id IS NOT NULL";
     {
         var paths = new List<(string Path, bool ExcludeImage, bool ExcludeVideo)>();
         string? generatedPath = null;
+        string? blobFilesPath = null;
         string? videoFileNamingAlgorithm = null;
         bool? calculateMd5 = null;
 
@@ -612,6 +663,13 @@ WHERE files.zip_file_id IS NOT NULL";
                 if (genMatch.Success)
                 {
                     generatedPath = genMatch.Groups[1].Value.Trim().Trim('"', '\'');
+                    continue;
+                }
+
+                var blobPathMatch = Regex.Match(rawLine, @"^blob_files_path:\s*(.+)$", RegexOptions.IgnoreCase);
+                if (blobPathMatch.Success)
+                {
+                    blobFilesPath = blobPathMatch.Groups[1].Value.Trim().Trim('"', ''');
                     continue;
                 }
 
@@ -691,6 +749,7 @@ WHERE files.zip_file_id IS NOT NULL";
         return new StashConfigData(
             paths,
             generatedPath,
-            videoFileNamingAlgorithm ?? (calculateMd5 == true ? "MD5" : "OSHASH"));
+            videoFileNamingAlgorithm ?? (calculateMd5 == true ? "MD5" : "OSHASH"),
+            blobFilesPath);
     }
 }
