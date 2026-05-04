@@ -669,7 +669,7 @@ WHERE files.zip_file_id IS NOT NULL";
                 var blobPathMatch = Regex.Match(rawLine, @"^blob_files_path:\s*(.+)$", RegexOptions.IgnoreCase);
                 if (blobPathMatch.Success)
                 {
-                    blobFilesPath = blobPathMatch.Groups[1].Value.Trim().Trim('"', ''');
+                    blobFilesPath = blobPathMatch.Groups[1].Value.Trim().Trim('"', '\'');
                     continue;
                 }
 
