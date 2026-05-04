@@ -37,6 +37,7 @@ public partial class StashMigrationService
         var byId = rows.ToDictionary(r => r.Id);
         var ordered = TopologicalSort(rows.Select(r => r.Id).ToList(), id => tagParents.GetValueOrDefault(id, []));
 
+        _logger.LogInformation("Importing {Total} tags...", rows.Count);
         var idMap = new Dictionary<int, int>();
         progress.Report(startProgress, "Importing tags...");
         foreach (var stashId in ordered)
@@ -56,8 +57,11 @@ public partial class StashMigrationService
             await _db.SaveChangesAsync(ct);
             idMap[stashId] = entity.Id;
 
-            if (idMap.Count % 50 == 0 || idMap.Count == ordered.Count)
+            if (idMap.Count % 200 == 0 || idMap.Count == ordered.Count)
+            {
                 ReportPhase(progress, startProgress, endProgress, idMap.Count, ordered.Count, $"Importing tags ({idMap.Count}/{ordered.Count})");
+                _logger.LogInformation("Imported {Count}/{Total} tags...", idMap.Count, ordered.Count);
+            }
         }
 
         if (tagParents.Count > 0)

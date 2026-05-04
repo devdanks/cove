@@ -48,6 +48,7 @@ public partial class StashMigrationService
             }
         }
 
+        _logger.LogInformation("Importing {Total} performers...", rows.Count);
         var idMap = new Dictionary<int, int>(rows.Count);
         progress.Report(startProgress, "Importing performers...");
         foreach (var row in rows)
@@ -140,7 +141,10 @@ public partial class StashMigrationService
             _db.ChangeTracker.Clear();
 
             if (idMap.Count % 100 == 0 || idMap.Count == rows.Count)
+            {
                 ReportPhase(progress, startProgress, endProgress, idMap.Count, rows.Count, $"Importing performers ({idMap.Count}/{rows.Count})");
+                _logger.LogInformation("Imported {Count}/{Total} performers...", idMap.Count, rows.Count);
+            }
         }
         _logger.LogInformation("Imported {Count} performers", idMap.Count);
         return idMap;
