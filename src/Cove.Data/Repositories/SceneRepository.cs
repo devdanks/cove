@@ -163,7 +163,7 @@ public class SceneRepository : ISceneRepository
 
             // Advanced criteria
             query = ApplyIntCriterion(query, filter.RatingCriterion, s => s.Rating ?? 0);
-            query = ApplyIntCriterion(query, filter.OCounterCriterion, s => s.OCounter);
+            query = ApplyIntCriterion(query, filter.LikeCounterCriterion, s => s.LikeCounter);
             query = ApplyIntCriterion(query, filter.PlayCountCriterion, s => s.PlayCount);
 
             if (filter.PerformerCountCriterion != null)
@@ -356,8 +356,8 @@ public class SceneRepository : ISceneRepository
             ? query.OrderBy(s => s.Rating == null || s.Rating <= 0 ? 1 : 0).ThenByDescending(s => s.Rating)
             : query.OrderBy(s => s.Rating == null || s.Rating <= 0 ? 0 : 1).ThenBy(s => s.Rating),
         "play_count" => desc ? query.OrderByDescending(s => s.PlayCount) : query.OrderBy(s => s.PlayCount),
-        "o_counter" => desc ? query.OrderByDescending(s => s.OCounter) : query.OrderBy(s => s.OCounter),
-        "last_o_at" => ApplyLastFavoriteSort(query, desc),
+        "like_counter" => desc ? query.OrderByDescending(s => s.LikeCounter) : query.OrderBy(s => s.LikeCounter),
+        "last_like_at" => ApplyLastFavoriteSort(query, desc),
         "organized" => desc ? query.OrderByDescending(s => s.Organized) : query.OrderBy(s => s.Organized),
         "last_played_at" => desc
             ? query.OrderBy(s => s.LastPlayedAt == null ? 1 : 0).ThenByDescending(s => s.LastPlayedAt)
@@ -394,7 +394,7 @@ public class SceneRepository : ISceneRepository
         var sortQuery = query.Select(scene => new
         {
             Scene = scene,
-            LastFavoriteAt = scene.OHistory.Select(history => (DateTime?)history.OccurredAt).Max(),
+            LastFavoriteAt = scene.LikeHistory.Select(history => (DateTime?)history.OccurredAt).Max(),
         });
 
         return desc

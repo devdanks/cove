@@ -88,7 +88,7 @@ export function VideoPlayer({
   autostart,
   autostartToken,
   showAbLoop,
-  trackActivity = true,
+  trackingEnabled = true,
   playbackTracking,
   onEnded: onEndedProp,
   clip,
@@ -105,13 +105,13 @@ export function VideoPlayer({
   segments?: Segment[];
   faces?: FaceOverlayInfo[];
   captions?: { id: number; languageCode: string; captionType: string; filename: string }[];
-  onPlay: () => void;
+  onPlay?: () => void;
   onSeekRegister?: (fn: (time: number) => void) => void;
   onTimeUpdate?: (time: number) => void;
   autostart?: boolean;
   autostartToken?: number;
   showAbLoop?: boolean;
-  trackActivity?: boolean;
+  trackingEnabled?: boolean;
   playbackTracking?: PlaybackTrackingTarget;
   onEnded?: () => void;
   clip?: { start: number; end?: number; loop?: boolean };
@@ -160,12 +160,12 @@ export function VideoPlayer({
   const visibleCurrentTime = clip ? Math.max(0, currentTime - clipStart) : currentTime;
   const visibleBuffered = clip ? Math.max(0, Math.min(buffered, clipEnd) - clipStart) : buffered;
   const playbackTrackingTarget = useMemo<PlaybackTrackingTarget | null>(() => {
-    if (!trackActivity) {
+    if (!trackingEnabled) {
       return null;
     }
 
     return playbackTracking ?? { hostType: "scene", hostId: sceneId, scopeKey: `scene:${sceneId}` };
-  }, [playbackTracking, sceneId, trackActivity]);
+  }, [playbackTracking, sceneId, trackingEnabled]);
 
   useEffect(() => {
     intervalStart.current = null;
@@ -774,7 +774,7 @@ export function VideoPlayer({
           const currentPos = roundPlaybackTime(videoRef.current?.currentTime ?? currentTime);
           intervalStart.current = currentPos;
           lastSeenTime.current = currentPos;
-          if (!playTriggered.current) { playTriggered.current = true; onPlay(); }
+          if (!playTriggered.current) { playTriggered.current = true; onPlay?.(); }
         }}
         onPause={() => {
           setPlaying(false);
@@ -801,7 +801,7 @@ export function VideoPlayer({
           setCurTime(time);
           onTimeUpdateProp?.(time);
           lastSeenTime.current = time;
-          if (trackActivity && intervalStart.current !== null) {
+          if (trackingEnabled && intervalStart.current !== null) {
             const now = Date.now();
             if (now - lastKeepaliveSentAt.current >= 10000) {
               lastKeepaliveSentAt.current = now;

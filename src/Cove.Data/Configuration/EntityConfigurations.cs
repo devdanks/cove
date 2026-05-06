@@ -23,7 +23,7 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
         builder.HasMany(s => s.SceneMarkers).WithOne(m => m.Scene).HasForeignKey(m => m.SceneId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(s => s.RemoteIds).WithOne(si => si.Scene).HasForeignKey(si => si.SceneId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(s => s.PlayHistory).WithOne(h => h.Scene).HasForeignKey(h => h.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasMany(s => s.OHistory).WithOne(h => h.Scene).HasForeignKey(h => h.SceneId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(s => s.LikeHistory).WithOne(h => h.Scene).HasForeignKey(h => h.SceneId).OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(s => s.Title);
         builder.HasIndex(s => s.StudioId);
@@ -719,7 +719,9 @@ public class UserEntityAffinityConfiguration : IEntityTypeConfiguration<UserEnti
         builder.Property(affinity => affinity.TotalConsumedSec).HasDefaultValue(0d);
         builder.Property(affinity => affinity.ViewCount).HasDefaultValue(0);
         builder.Property(affinity => affinity.CompleteCount).HasDefaultValue(0);
-        builder.Property(affinity => affinity.OCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.LikeCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.DerivedLikeCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.PageVisitCount).HasDefaultValue(0);
     }
 }
 

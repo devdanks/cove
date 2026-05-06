@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, images } from "../api/client";
+import { faces, images, playback } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Heart, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -17,7 +17,8 @@ import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import type { FaceHostFace } from "../api/types";
-import { trackInteraction } from "../utils/interactionTracking";
+import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
+import { ImageVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 
 const ImageEditModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageEditModal })));
 const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
@@ -27,7 +28,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type ImageTab = "details" | "file-info" | "detections" | "related";
+type ImageTab = "details" | "file-info" | "similar" | "detections" | "related";
 
 export function ImageDetailPage({ id, onNavigate }: Props) {
   const { data: image, isLoading } = useQuery({
@@ -43,7 +44,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<ImageTab>("details");
   const queryClient = useQueryClient();
-  const trackedDetailViewFor = useRef<number | null>(null);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const { backLabel, goBack } = useBackNavigation({ page: "images" }, onNavigate);
   const canWriteImage = canWriteEntity("image", hasPermission);
@@ -55,19 +55,21 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const canReadStudios = canReadEntity("studio", hasPermission);
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
+  const trackingEnabled = user?.uiPreferences?.tracking?.enabled ?? true;
+  const trackImageActivity = canEngageImage && trackingEnabled;
   const {
+    engagement: imageEngagement,
     rating: imageRating,
     setRating: setImageRating,
   } = useEntityEngagement("image", id, {
-    enabled: !!image,
+    enabled: !!image && canEngageImage,
     fallbackRating: image?.rating,
   });
   const { data: imageFaces = [] } = useQuery({
     queryKey: ["image", id, "faces"],
     queryFn: () => faces.imageFaces(id),
     enabled: canReadFaces,
-  });
-  const deleteMut = useMutation({
+  });  const deleteMut = useMutation({
     mutationFn: () => images.delete(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["images"] }); goBack(); },
   });
@@ -75,19 +77,22 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     mutationFn: (data: { organized?: boolean }) => images.update(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["image", id] }),
   });
-  const incrementOMut = useMutation({
-    mutationFn: () => images.incrementO(id),
+  const incrementLikeMut = useMutation({
+    mutationFn: () => images.incrementLike(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["image", id] });
       queryClient.invalidateQueries({ queryKey: ["engagement", "image", id] });
     },
   });
-  const imageOCount = image?.oCounter ?? 0;
+  const imageLikeCount = imageEngagement?.likeCount ?? image?.likeCounter ?? 0;
+  const imageDerivedLikeCount = imageEngagement?.derivedLikeCount ?? 0;
+  const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
   const displayTitle = image ? getImageDisplayTitle(image) : `Image ${id}`;
   const tabs = useMemo(() => {
     const nextTabs = [
       { key: "details", label: "Details" },
       ...(canReadFiles ? [{ key: "file-info", label: "File Info", count: image?.files.length ?? 0 }] : []),
+      { key: "similar", label: "Similar" },
       { key: "detections", label: "Faces", count: imageFaces.length },
       {
         key: "related",
@@ -110,18 +115,42 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   }, [displayTitle, image]);
 
   useEffect(() => {
-    if (!image || !canEngageImage || trackedDetailViewFor.current === image.id) {
-      return;
-    }
+    if (!image || !trackImageActivity) return;
 
-    trackedDetailViewFor.current = image.id;
+    const imageId = image.id;
+    const startedAt = performance.now();
+    const sessionId = createPlaybackSessionId();
     trackInteraction({
       hostType: "image",
-      hostId: image.id,
-      kind: "openDetail",
+      hostId: imageId,
+      kind: "pageVisit",
       meta: { source: "imageDetailPage" },
     });
-  }, [canEngageImage, image]);
+    queryClient.invalidateQueries({ queryKey: ["engagement", "image", imageId] });
+
+    let flushed = false;
+    const flushDwell = (state: "ended" | "abandoned") => {
+      if (flushed) return;
+      flushed = true;
+      const durationSec = Math.max(0.001, (performance.now() - startedAt) / 1000);
+      void playback.recordIntervals({
+        hostType: "image",
+        hostId: imageId,
+        sessionId,
+        mediaDurationSec: durationSec,
+        currentPositionSec: durationSec,
+        state,
+        intervals: [{ startSec: 0, endSec: durationSec }],
+      }).catch(() => {});
+      queryClient.invalidateQueries({ queryKey: ["engagement", "image", imageId] });
+    };
+    const handlePageHide = () => flushDwell("abandoned");
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      flushDwell("ended");
+    };
+  }, [image?.id, queryClient, trackImageActivity]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -146,7 +175,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       return;
     }
 
-    if (canEngageImage && !lightboxOpen) {
+    if (trackImageActivity && !lightboxOpen) {
       trackInteraction({
         hostType: "image",
         hostId: id,
@@ -156,10 +185,10 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     }
 
     setLightboxOpen(true);
-  }, [canEngageImage, id, imageLoadFailed, lightboxOpen]);
+  }, [id, imageLoadFailed, lightboxOpen, trackImageActivity]);
 
   const closeLightbox = useCallback(() => {
-    if (canEngageImage && lightboxOpen) {
+    if (trackImageActivity && lightboxOpen) {
       trackInteraction({
         hostType: "image",
         hostId: id,
@@ -169,7 +198,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     }
 
     setLightboxOpen(false);
-  }, [canEngageImage, id, lightboxOpen]);
+  }, [id, lightboxOpen, trackImageActivity]);
   const imageKeyboardShortcuts = useMemo(() => ([
     {
       key: "e",
@@ -181,11 +210,11 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       },
     },
     {
-      key: "o",
-      description: "Increment favorites count",
+      key: "l",
+      description: "Add like",
       handler: () => {
         if (canEngageImage) {
-          incrementOMut.mutate();
+          incrementLikeMut.mutate();
         }
       },
     },
@@ -215,7 +244,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       description: "Close lightbox",
       handler: () => closeLightbox(),
     },
-  ]), [canEngageImage, canWriteImage, closeLightbox, incrementOMut, lightboxOpen, openLightbox]);
+  ]), [canEngageImage, canWriteImage, closeLightbox, incrementLikeMut, lightboxOpen, openLightbox]);
 
   if (isLoading) {
     return (
@@ -390,6 +419,8 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
 
   const activeContent = activeTab === "file-info"
     ? fileInfoContent
+    : activeTab === "similar"
+      ? <ImageVisualSimilarityPanel imageId={image.id} onNavigate={onNavigate} />
     : activeTab === "detections"
       ? detectionsContent
       : activeTab === "related"
@@ -490,12 +521,25 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
           ),
           additionalMetrics: [
             {
-              label: "Favorites",
-              value: imageOCount,
-              icon: <Heart className={["h-4 w-4", imageOCount > 0 ? "fill-red-400 text-red-400" : ""].join(" ")} />,
-              title: "Increment favorites count",
-              onClick: canEngageImage ? () => incrementOMut.mutate() : undefined,
-              active: imageOCount > 0,
+              label: "Likes",
+              value: imageLikeCount,
+              icon: <ThumbsUp className={["h-4 w-4", imageLikeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />,
+              title: "Add like",
+              onClick: canEngageImage ? () => incrementLikeMut.mutate() : undefined,
+              active: imageLikeCount > 0,
+            },
+            {
+              label: "Derived Likes",
+              value: imageDerivedLikeCount,
+              icon: <ThumbsUp className={["h-4 w-4", imageDerivedLikeCount > 0 ? "text-accent" : ""].join(" ")} />,
+              title: "Derived likes",
+              active: imageDerivedLikeCount > 0,
+            },
+            {
+              label: "Page Visits",
+              value: imagePageVisitCount,
+              icon: <Eye className="h-4 w-4" />,
+              title: "Page visits",
             },
           ],
         }}
@@ -570,10 +614,9 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
 }
 
 function formatImageFaceSummary(face: FaceHostFace) {
-  const confidence = face.topConfidence != null ? `${Math.round((face.topConfidence <= 1 ? face.topConfidence * 100 : face.topConfidence))}%` : null;
+  const confidence = face.topConfidence != null ? `${Math.round(face.topConfidence <= 1 ? face.topConfidence * 100 : face.topConfidence)}%` : null;
   return confidence || "AI face";
 }
-
 function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-border bg-surface/40 px-4 py-3">

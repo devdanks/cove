@@ -17,7 +17,7 @@ describe("Scene tag provenance", () => {
       studioId: null,
       resumeTime: 0,
       rating: null,
-      oCounter: 0,
+      likeCounter: 0,
       organized: false,
       details: null,
       date: null,

@@ -239,7 +239,20 @@ public sealed class UserService : IUserService
 
         try
         {
-            return NormalizeUiPreferences(JsonSerializer.Deserialize<UserUiPreferencesDto>(raw, UiPreferencesJsonOptions));
+            var parsed = NormalizeUiPreferences(JsonSerializer.Deserialize<UserUiPreferencesDto>(raw, UiPreferencesJsonOptions));
+            using var document = JsonDocument.Parse(raw);
+            var legacyTrackingEnabledKey = "record" + "PlaybackHistory";
+            if (parsed?.Tracking is null
+                && document.RootElement.TryGetProperty(legacyTrackingEnabledKey, out var legacyEnabled)
+                && legacyEnabled.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                var tracking = new UserTrackingPreferencesDto(legacyEnabled.GetBoolean(), null, null, null, null, null);
+                parsed = parsed is null
+                    ? new UserUiPreferencesDto(null, null, tracking)
+                    : parsed with { Tracking = tracking };
+            }
+
+            return NormalizeUiPreferences(parsed);
         }
         catch
         {
@@ -267,13 +280,55 @@ public sealed class UserService : IUserService
 
         var theme = NormalizeThemePreferences(preferences.Theme);
         var ratingSystemOptions = NormalizeRatingSystemOptions(preferences.RatingSystemOptions);
-        var recordPlaybackHistory = preferences.RecordPlaybackHistory;
-        if (theme is null && ratingSystemOptions is null && recordPlaybackHistory is null)
+        var tracking = NormalizeTrackingPreferences(preferences.Tracking);
+        if (theme is null && ratingSystemOptions is null && tracking is null)
         {
             return null;
         }
 
-        return new UserUiPreferencesDto(theme, ratingSystemOptions, recordPlaybackHistory);
+        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking);
+    }
+
+    private static UserTrackingPreferencesDto? NormalizeTrackingPreferences(UserTrackingPreferencesDto? tracking)
+    {
+        if (tracking is null)
+        {
+            return null;
+        }
+
+        int? minViewSeconds = tracking.MinViewSeconds.HasValue
+            ? Math.Clamp(tracking.MinViewSeconds.Value, 0, 86_400)
+            : null;
+        double? viewCompletionRatio = tracking.ViewCompletionRatio.HasValue
+            ? Math.Clamp(tracking.ViewCompletionRatio.Value, 0.01d, 1d)
+            : null;
+        int? minImageDetailViewSeconds = tracking.MinImageDetailViewSeconds.HasValue
+            ? Math.Clamp(tracking.MinImageDetailViewSeconds.Value, 0, 86_400)
+            : null;
+        int? minDerivedLikeSessionSeconds = tracking.MinDerivedLikeSessionSeconds.HasValue
+            ? Math.Clamp(tracking.MinDerivedLikeSessionSeconds.Value, 0, 86_400)
+            : null;
+        int? sessionIdleTimeoutSec = tracking.SessionIdleTimeoutSec.HasValue
+            ? Math.Clamp(tracking.SessionIdleTimeoutSec.Value, 10, 86_400)
+            : null;
+
+        if (tracking.Enabled is null
+            && minViewSeconds is null
+            && viewCompletionRatio is null
+            && minImageDetailViewSeconds is null
+            && minDerivedLikeSessionSeconds is null
+            && sessionIdleTimeoutSec is null)
+        {
+            return null;
+        }
+
+        return new UserTrackingPreferencesDto(
+            tracking.Enabled,
+            minViewSeconds,
+            viewCompletionRatio,
+            minImageDetailViewSeconds,
+            minDerivedLikeSessionSeconds,
+            sessionIdleTimeoutSec);
     }
 
     private static UserThemePreferencesDto? NormalizeThemePreferences(UserThemePreferencesDto? theme)

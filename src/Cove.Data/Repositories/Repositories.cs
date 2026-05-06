@@ -91,7 +91,7 @@ public class PerformerRepository : IPerformerRepository
         {
             Performer = performer,
             LastFavoriteAt = performer.ScenePerformers
-                .SelectMany(scenePerformer => scenePerformer.Scene!.OHistory)
+                .SelectMany(scenePerformer => scenePerformer.Scene!.LikeHistory)
                 .Select(history => (DateTime?)history.OccurredAt)
                 .Max(),
         });
@@ -455,7 +455,7 @@ public class PerformerRepository : IPerformerRepository
             // Count criteria
             query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, p => p.TagCount);
             query = FilterHelpers.ApplyInt(query, filter.PlayCountCriterion, p => p.ScenePerformers.Sum(sp => sp.Scene!.PlayCount));
-            query = FilterHelpers.ApplyInt(query, filter.OCounterCriterion, p => p.ScenePerformers.Sum(sp => sp.Scene!.OCounter));
+            query = FilterHelpers.ApplyInt(query, filter.LikeCounterCriterion, p => p.ScenePerformers.Sum(sp => sp.Scene!.LikeCounter));
 
             // Groups criterion
             if (filter.GroupsCriterion != null)
@@ -524,11 +524,11 @@ public class PerformerRepository : IPerformerRepository
             "weight" => desc ? query.OrderByDescending(p => p.Weight) : query.OrderBy(p => p.Weight),
             "measurements" => ApplyMeasurementsSort(query, desc),
             "tag_count" => desc ? query.OrderByDescending(p => p.TagCount) : query.OrderBy(p => p.TagCount),
-            "o_counter" => desc
-                ? query.OrderByDescending(p => p.ScenePerformers.Sum(sp => sp.Scene!.OCounter))
-                : query.OrderBy(p => p.ScenePerformers.Sum(sp => sp.Scene!.OCounter)),
+            "like_counter" => desc
+                ? query.OrderByDescending(p => p.ScenePerformers.Sum(sp => sp.Scene!.LikeCounter))
+                : query.OrderBy(p => p.ScenePerformers.Sum(sp => sp.Scene!.LikeCounter)),
             "play_count" => ApplyPlayCountSort(query, desc),
-            "last_o_at" => ApplyLastFavoriteSort(query, desc),
+            "last_like_at" => ApplyLastFavoriteSort(query, desc),
             "last_played_at" => ApplyLastPlayedAtSort(query, desc),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, p => p.Id, desc),
             _ => desc ? query.OrderByDescending(p => p.UpdatedAt) : query.OrderBy(p => p.UpdatedAt),
@@ -1830,8 +1830,8 @@ public class ImageRepository : IImageRepository
         // Advanced criteria
         if (filter.RatingCriterion != null)
             query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, i => i.Rating ?? 0);
-        if (filter.OCounterCriterion != null)
-            query = FilterHelpers.ApplyInt(query, filter.OCounterCriterion, i => i.OCounter);
+        if (filter.LikeCounterCriterion != null)
+            query = FilterHelpers.ApplyInt(query, filter.LikeCounterCriterion, i => i.LikeCounter);
         if (filter.OrganizedCriterion != null)
             query = query.Where(i => i.Organized == filter.OrganizedCriterion.Value);
         if (filter.ResolutionCriterion != null)
@@ -1925,7 +1925,7 @@ public class ImageRepository : IImageRepository
         "rating" => desc
             ? query.OrderBy(i => i.Rating == null || i.Rating <= 0 ? 1 : 0).ThenByDescending(i => i.Rating)
             : query.OrderBy(i => i.Rating == null || i.Rating <= 0 ? 0 : 1).ThenBy(i => i.Rating),
-        "o_counter" => desc ? query.OrderByDescending(i => i.OCounter) : query.OrderBy(i => i.OCounter),
+        "like_counter" => desc ? query.OrderByDescending(i => i.LikeCounter) : query.OrderBy(i => i.LikeCounter),
         "random" => query.OrderBy(i => i.Id),
         "file_mod_time" => ApplyFileModTimeSort(query, desc),
         "file_size" => desc ? query.OrderByDescending(i => i.MaxFileSize) : query.OrderBy(i => i.MaxFileSize),

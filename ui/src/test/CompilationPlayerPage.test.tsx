@@ -58,7 +58,7 @@ describe("Compilation player autoplay token wiring", () => {
         onPlay={onPlay}
         autostart
         autostartToken={0}
-        trackActivity={false}
+        trackingEnabled={false}
         clip={{ start: 5, end: 15, loop: false }}
       />,
     );
@@ -82,7 +82,7 @@ describe("Compilation player autoplay token wiring", () => {
         onPlay={onPlay}
         autostart
         autostartToken={1}
-        trackActivity={false}
+        trackingEnabled={false}
         clip={{ start: 20, end: 30, loop: false }}
       />,
     );

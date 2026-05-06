@@ -102,7 +102,7 @@ public class SceneFilter
     public List<int>? PerformerIds { get; set; }
     // Advanced criteria
     public IntCriterion? RatingCriterion { get; set; }
-    public IntCriterion? OCounterCriterion { get; set; }
+    public IntCriterion? LikeCounterCriterion { get; set; }
     public IntCriterion? DurationCriterion { get; set; }
     public IntCriterion? ResolutionCriterion { get; set; }
     public IntCriterion? PlayCountCriterion { get; set; }
@@ -194,7 +194,7 @@ public class PerformerFilter
     public StringCriterion? AliasesCriterion { get; set; }
     public DateCriterion? DeathDateCriterion { get; set; }
     public IntCriterion? PlayCountCriterion { get; set; }
-    public IntCriterion? OCounterCriterion { get; set; }
+    public IntCriterion? LikeCounterCriterion { get; set; }
     public MultiIdCriterion? GroupsCriterion { get; set; }
     public BoolCriterion? IgnoreAutoTagCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
@@ -318,7 +318,7 @@ public class ImageFilter
     public MultiIdCriterion? StudiosCriterion { get; set; }
     public MultiIdCriterion? GalleriesCriterion { get; set; }
     public StringCriterion? TitleCriterion { get; set; }
-    public IntCriterion? OCounterCriterion { get; set; }
+    public IntCriterion? LikeCounterCriterion { get; set; }
     public IntCriterion? ResolutionCriterion { get; set; }
     public StringCriterion? PathCriterion { get; set; }
     public FingerprintCriterion? FingerprintCriterion { get; set; }

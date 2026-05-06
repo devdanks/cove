@@ -1,15 +1,15 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, scenes, segmentDisplayProfiles, tags, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay } from "../components/shared";
 import { 
-  Pencil, Plus, Trash2, Search, Eye, EyeOff, Heart, ArrowLeft,
+  Pencil, Plus, Trash2, Search, Eye, EyeOff, Heart, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
   Gauge, Clapperboard, Monitor, FolderOpen, Layers,
   RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import type { Detection, FaceHostFace, ResolvedSpan, Scene, SceneUpdate, Segment } from "../api/types";
+import type { Detection, Face, ResolvedSpan, Scene, SceneUpdate, Segment } from "../api/types";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { InteractiveRating } from "../components/Rating";
@@ -28,6 +28,8 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { trackInteraction } from "../utils/interactionTracking";
+import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 
 const SceneEditModal = lazy(() => import("./SceneEditModal").then((module) => ({ default: module.SceneEditModal })));
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
@@ -102,8 +104,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const canLibraryAutoTag = hasPermission("library.autotag");
   const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
   const canEngageScene = canReadScene && (user?.kind === "user" || user?.kind === "system");
-  const recordPlaybackHistory = user?.uiPreferences?.recordPlaybackHistory ?? true;
-  const trackPlaybackActivity = canEngageScene && config?.ui.trackActivity !== false && recordPlaybackHistory;
+  const trackingEnabled = user?.uiPreferences?.tracking?.enabled ?? true;
+  const trackPlaybackActivity = canEngageScene && trackingEnabled;
   const canGenerateScene = canRunJobs && canWriteScene;
   const canIdentifyScene = canLibraryAutoTag && canWriteScene;
   const canDownloadScene = canRunJobs && canWriteScene;
@@ -121,13 +123,21 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     favoritePending: sceneFavoritePending,
   } = useEntityEngagement("scene", id, {
     enabled: !!scene && canReadScene,
-    fallbackFavorite: (scene?.oCounter ?? 0) > 0,
+    fallbackFavorite: (scene?.likeCounter ?? 0) > 0,
     fallbackRating: scene?.rating,
   });
   const scenePlayCount = sceneEngagement?.playCount ?? scene?.playCount ?? 0;
   const sceneResumeTime = sceneEngagement?.resumeTime ?? scene?.resumeTime;
-  const sceneOCount = sceneEngagement?.oCount ?? scene?.oCounter ?? 0;
+  const sceneLikeCount = sceneEngagement?.likeCount ?? scene?.likeCounter ?? 0;
+  const sceneDerivedLikeCount = sceneEngagement?.derivedLikeCount ?? 0;
+  const scenePageVisitCount = sceneEngagement?.pageVisitCount ?? 0;
   const effectiveResumeTime = initialSeekTo ?? sceneResumeTime;
+
+  useEffect(() => {
+    if (!scene || !trackPlaybackActivity) return;
+    trackInteraction({ hostType: "scene", hostId: id, kind: "pageVisit" });
+    queryClient.invalidateQueries({ queryKey: ["engagement", "scene", id] });
+  }, [id, queryClient, scene, trackPlaybackActivity]);
 
   useEffect(() => {
     if (scene) document.title = `${scene.title || scene.files?.[0]?.basename || `Scene ${id}`} | Cove`;
@@ -177,17 +187,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     },
   });
 
-  const incrementPlayMut = useMutation({
-    mutationFn: () => scenes.recordPlay(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", id] });
-      queryClient.invalidateQueries({ queryKey: ["engagement", "scene", id] });
-      queryClient.invalidateQueries({ queryKey: ["scene-history", id] });
-    },
-  });
-
-  const incrementOMut = useMutation({
-    mutationFn: () => scenes.incrementO(id),
+  const incrementLikeMut = useMutation({
+    mutationFn: () => scenes.incrementLike(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scene", id] });
       queryClient.invalidateQueries({ queryKey: ["engagement", "scene", id] });
@@ -263,11 +264,39 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     enabled: canReadMarkers,
   });
 
-  const { data: sceneFaces = [] } = useQuery({
-    queryKey: ["scene", id, "faces"],
-    queryFn: () => faces.sceneFaces(id),
-    enabled: canReadFaces,
+  const sceneFaceIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const detection of detections) {
+      if (detection.refId != null && detection.refKind?.toLowerCase() === "face") {
+        ids.add(detection.refId);
+      }
+    }
+
+    return Array.from(ids);
+  }, [detections]);
+
+  const sceneFaceQueries = useQueries({
+    queries: sceneFaceIds.map((faceId) => ({
+      queryKey: ["face", faceId],
+      queryFn: () => faces.get(faceId),
+      enabled: canReadFaces && canReadMarkers,
+    })),
   });
+
+  const sceneFaces = useMemo(() => {
+    const countsByFaceId = new Map<number, number>();
+    for (const detection of detections) {
+      if (detection.refId != null && detection.refKind?.toLowerCase() === "face") {
+        countsByFaceId.set(detection.refId, (countsByFaceId.get(detection.refId) ?? 0) + 1);
+      }
+    }
+
+    return sceneFaceQueries
+      .map((query) => query.data)
+      .filter((face): face is Face => face != null)
+      .map((face) => ({ face, detectionCount: countsByFaceId.get(face.id) ?? 0 }))
+      .sort((left, right) => right.detectionCount - left.detectionCount || left.face.id - right.face.id);
+  }, [detections, sceneFaceQueries]);
 
   const rescanMut = useMutation({
     mutationFn: () => scenes.rescan(id),
@@ -280,6 +309,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const tabs = filterItemsByPermission([
     { key: "details", label: "Details" },
     { key: "segments", label: `Segments${segments.length ? ` (${segments.length})` : ""}` },
+    { key: "similar", label: "Similar" },
     ...(scene?.groups.length ? [{ key: "groups" as TabKey, label: "Groups" }] : []),
     ...(scene?.galleries.length ? [{ key: "galleries" as TabKey, label: "Galleries" }] : []),
     { key: "filters", label: "Filters" },
@@ -481,6 +511,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         onSeek={(time) => seekRef.current?.(time)}
       />
     </div>
+  ) : activeTab === "similar" ? (
+    <SceneVisualSimilarityPanel sceneId={scene.id} onNavigate={onNavigate} />
   ) : activeTab === "filters" ? (
     <VideoFiltersTab filters={videoFilters} onChange={setVideoFilters} />
   ) : activeTab === "file-info" && scene.files.length > 0 ? (
@@ -492,7 +524,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       favorite={sceneFavorite}
       favoritePending={sceneFavoritePending}
       setFavorite={setSceneFavorite}
-      oCount={sceneOCount}
+      likeCount={sceneLikeCount}
       canEngageScene={canEngageScene}
     />
   ) : activeTab === "edit" ? (
@@ -518,18 +550,15 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             resumeTime={effectiveResumeTime}
             sceneId={id}
             detections={detections}
-            segments={segments}
-            faces={sceneFaces}
             captions={file.captions}
             onSeekRegister={(fn) => { seekRef.current = fn; }}
             onTimeUpdate={setVideoTime}
             autostart={config?.ui.autostartVideo}
             showAbLoop={config?.ui.showAbLoopControls}
-            trackActivity={trackPlaybackActivity}
+            trackingEnabled={trackPlaybackActivity}
             onEnded={() => { if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
             onPrev={hasPrev && prevId != null ? () => onNavigate({ page: "scene", id: prevId }) : undefined}
             onNext={hasNext && nextId != null ? () => onNavigate({ page: "scene", id: nextId }) : undefined}
-            onPlay={canEngageScene ? () => incrementPlayMut.mutate() : () => {}}
           />
         ) : (
           <div className="flex h-48 items-center justify-center text-muted">No video file available</div>
@@ -542,7 +571,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           spans={resolvedSpans}
           rawSegments={segments}
           detections={detections}
-          faces={sceneFaces}
+          faces={sceneFaces.map(({ face }) => face)}
           onSeek={(time) => seekRef.current?.(time)}
           currentTime={videoTime}
           profileName={activeProfileName}
@@ -640,16 +669,27 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
               label: "Plays",
               value: scenePlayCount,
               icon: <Eye className="h-4 w-4" />,
-              title: "Record play",
-              onClick: canEngageScene ? () => incrementPlayMut.mutate() : undefined,
             },
             {
-              label: "Favorites",
-              value: sceneOCount,
-              icon: <Heart className={["h-4 w-4", sceneOCount > 0 ? "fill-red-400 text-red-400" : ""].join(" ")} />,
-              title: "Increment favorites count",
-              onClick: canEngageScene ? () => incrementOMut.mutate() : undefined,
-              active: sceneOCount > 0,
+              label: "Likes",
+              value: sceneLikeCount,
+              icon: <ThumbsUp className={["h-4 w-4", sceneLikeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />,
+              title: "Add like",
+              onClick: canEngageScene ? () => incrementLikeMut.mutate() : undefined,
+              active: sceneLikeCount > 0,
+            },
+            {
+              label: "Derived Likes",
+              value: sceneDerivedLikeCount,
+              icon: <ThumbsUp className={["h-4 w-4", sceneDerivedLikeCount > 0 ? "text-accent" : ""].join(" ")} />,
+              title: "Derived likes",
+              active: sceneDerivedLikeCount > 0,
+            },
+            {
+              label: "Page Visits",
+              value: scenePageVisitCount,
+              icon: <Eye className="h-4 w-4" />,
+              title: "Page visits",
             },
           ],
         }}
@@ -672,7 +712,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
 }
 
 // Details Tab Content
-export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scene; onNavigate: (r: any) => void; sceneFaces?: FaceHostFace[] }) {
+export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scene; onNavigate: (r: any) => void; sceneFaces?: Array<{ face: Face; detectionCount: number }> }) {
   return (
     <div className="space-y-4">
       {/* Created/Updated + Code/Director at top like original */}
@@ -746,16 +786,16 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
         <div>
           <h6 className="mb-2 text-sm text-muted">Faces in this scene</h6>
           <div className="flex flex-wrap gap-2">
-            {sceneFaces.map((face) => {
-              const title = face.performerName?.trim() || face.label?.trim() || `Face #${face.id}`;
+            {sceneFaces.map(({ face, detectionCount }) => {
+              const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
               return (
                 <button
                   key={face.id}
                   type="button"
                   onClick={() => onNavigate({ page: "face", id: face.id })}
-                  className="flex min-w-[150px] flex-1 items-center gap-2 rounded-lg border border-border bg-surface/35 px-2 py-1.5 text-left transition-colors hover:border-accent sm:flex-none sm:basis-[calc(50%-0.25rem)]"
+                  className="flex min-w-[180px] flex-1 items-center gap-3 rounded-xl border border-border bg-card/70 px-3 py-2 text-left transition-colors hover:border-accent sm:flex-none sm:basis-[calc(50%-0.25rem)]"
                 >
-                  <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-surface/80">
+                  <div className="h-14 w-14 overflow-hidden rounded-lg bg-surface/80">
                     {face.coverImageUrl ? (
                       <img src={face.coverImageUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
                     ) : (
@@ -766,8 +806,8 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-foreground">{title}</div>
-                    <div className="text-[11px] text-secondary">
-                      {formatSceneFaceSummary(face)}
+                    <div className="mt-1 text-xs text-secondary">
+                      {detectionCount} detection{detectionCount === 1 ? "" : "s"}
                     </div>
                   </div>
                 </button>
@@ -814,16 +854,6 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       <CustomFieldsDisplay customFields={scene.customFields} />
     </div>
   );
-}
-
-function formatSceneFaceSummary(face: FaceHostFace) {
-  const timeRange = face.firstSeenAtSec != null
-    ? face.lastSeenAtSec != null && Math.round(face.lastSeenAtSec) !== Math.round(face.firstSeenAtSec)
-      ? `${formatDuration(face.firstSeenAtSec)}-${formatDuration(face.lastSeenAtSec)}`
-      : formatDuration(face.firstSeenAtSec)
-    : null;
-  const confidence = face.topConfidence != null ? `${Math.round((face.topConfidence <= 1 ? face.topConfidence * 100 : face.topConfidence))}%` : null;
-  return [timeRange, confidence].filter(Boolean).join(" · ") || "AI face";
 }
 
 function GroupsTab({ scene, onNavigate }: { scene: Scene; onNavigate: (r: any) => void }) {
@@ -1015,7 +1045,7 @@ function HistoryTab({
   favorite,
   favoritePending,
   setFavorite,
-  oCount,
+  likeCount,
   canEngageScene,
 }: {
   scene: Scene;
@@ -1023,7 +1053,7 @@ function HistoryTab({
   favorite: boolean;
   favoritePending: boolean;
   setFavorite: (isFavorite: boolean) => void;
-  oCount: number;
+  likeCount: number;
   canEngageScene: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -1053,7 +1083,9 @@ function HistoryTab({
     switch (kind) {
       case "pause": return "Paused";
       case "seek": return "Seeked";
-      case "oCount": return "O count";
+      case "likeCount": return "Liked";
+      case "pageVisit": return "Page visit";
+      case "derivedLike": return "Derived like";
       case "hide": return "Backgrounded";
       case "share": return "Shared";
       default: return kind;
@@ -1113,18 +1145,18 @@ function HistoryTab({
 
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">Favorites</h3>
+          <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">Likes</h3>
           <div className="flex items-center gap-1.5 rounded border border-border bg-card px-2.5 py-1 text-xs text-secondary">
-            <Heart className={`w-3.5 h-3.5 ${oCount > 0 ? "fill-red-400 text-red-400" : ""}`} />
-            <span>{oCount}</span>
+            <ThumbsUp className={`w-3.5 h-3.5 ${likeCount > 0 ? "fill-accent text-accent" : ""}`} />
+            <span>{likeCount}</span>
           </div>
         </div>
         <div className="mb-2">
-          <span className="text-muted">Count:</span> <span className="text-foreground">{oCount}</span>
+          <span className="text-muted">Count:</span> <span className="text-foreground">{likeCount}</span>
         </div>
-        {history?.oHistory && history.oHistory.length > 0 && (
+        {history?.likeHistory && history.likeHistory.length > 0 && (
           <div className="max-h-40 overflow-y-auto space-y-0.5 border-t border-border pt-2">
-            {history.oHistory.map((date, i) => (
+            {history.likeHistory.map((date, i) => (
               <div key={i} className="text-xs text-secondary">{new Date(date).toLocaleString()}</div>
             ))}
           </div>
@@ -1298,7 +1330,7 @@ function SceneScrubber({
   spans: Pick<ResolvedSpan, "spanKey" | "startSec" | "endSec" | "tagName" | "kind" | "colorHint" | "sourceKey" | "lane">[];
   rawSegments: Pick<Segment, "id" | "startSec" | "endSec" | "title" | "kind" | "sourceKey">[];
   detections: Pick<Detection, "id" | "observedAtSec" | "class" | "score" | "refKind" | "refId">[];
-  faces?: Pick<FaceHostFace, "id" | "label" | "performerName" | "performerId" | "firstSeenAtSec" | "lastSeenAtSec">[];
+  faces?: Pick<Face, "id" | "label" | "performerName" | "performerId">[];
   onSeek?: (time: number) => void;
   currentTime?: number;
   profileName?: string;
@@ -1389,26 +1421,8 @@ function SceneScrubber({
   ), [spans]);
   const faceLanes = useMemo(() => {
     if (!facesEnabled) return [] as ReturnType<typeof buildTimelineLanes<{ key: string; startSec: number; endSec: number; label: string; faceId: number }>>;
-    const facesById = new Map<number, Pick<FaceHostFace, "id" | "label" | "performerName" | "performerId" | "firstSeenAtSec" | "lastSeenAtSec">>();
+    const facesById = new Map<number, Pick<Face, "id" | "label" | "performerName" | "performerId">>();
     for (const face of faces ?? []) facesById.set(face.id, face);
-
-    const appearanceItems = Array.from(facesById.values())
-      .filter((face) => face.firstSeenAtSec != null || face.lastSeenAtSec != null)
-      .map((face) => {
-        const startSec = Math.max(0, face.firstSeenAtSec ?? face.lastSeenAtSec ?? 0);
-        const endSec = Math.min(duration, Math.max(face.lastSeenAtSec ?? startSec, startSec + 0.4));
-        return {
-          key: `face-${face.id}`,
-          startSec,
-          endSec,
-          label: formatFaceTimelineLabel(face),
-          faceId: face.id,
-        };
-      });
-
-    if (appearanceItems.length > 0) {
-      return buildTimelineLanes(appearanceItems);
-    }
 
     // Group detection observations per face id and merge close detections into
     // continuous appearance windows.
@@ -1442,11 +1456,13 @@ function SceneScrubber({
       let windowEnd = times[0];
       let runIndex = 0;
       const flush = () => {
+        const face = facesById.get(faceId);
+        const label = face?.performerName?.trim() || face?.label?.trim() || (faceId > 0 ? `Face #${faceId}` : "Face");
         items.push({
           key: `face-${faceId}-${runIndex++}`,
           startSec: windowStart,
           endSec: Math.max(windowEnd, windowStart + 0.4),
-          label: formatFaceTimelineLabel(facesById.get(faceId), faceId),
+          label,
           faceId,
         });
       };
@@ -1464,16 +1480,15 @@ function SceneScrubber({
     }
 
     return buildTimelineLanes(items);
-  }, [detections, rawSegments, faces, facesEnabled, duration]);
+  }, [detections, rawSegments, faces, facesEnabled]);
   const visibleResolvedLanes = showAllResolvedLanes ? segmentLanes : segmentLanes.slice(0, 4);
   const visibleFaceLanes = showAllFaceLanes ? faceLanes : faceLanes.slice(0, 2);
   const hiddenResolvedLaneCount = Math.max(0, segmentLanes.length - visibleResolvedLanes.length);
   const hiddenFaceLaneCount = Math.max(0, faceLanes.length - visibleFaceLanes.length);
   const hasFaceDetections = useMemo(
-    () => (faces?.some((face) => face.firstSeenAtSec != null || face.lastSeenAtSec != null) ?? false)
-      || detections.some((det) => det.refKind?.toLowerCase() === "face" && det.refId != null)
+    () => detections.some((det) => det.refKind?.toLowerCase() === "face" && det.refId != null)
       || rawSegments.some((segment) => isFaceTimelineSegment(segment)),
-    [detections, faces, rawSegments],
+    [detections, rawSegments],
   );
 
   // Determine which thumbnail index is active based on current video time
@@ -1633,6 +1648,23 @@ function SceneScrubber({
           ) : null}
         </div>
       )}
+      {detections.length > 0 && (
+        <div className="relative h-5 border-b border-black/20 bg-[#1f2c35]">
+          {detections.map((detection) => {
+            const time = detection.observedAtSec ?? 0;
+            return (
+              <button
+                key={detection.id}
+                className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/30 bg-sky-400/80 hover:bg-sky-300"
+                style={{ left: `${clampPercent((time / duration) * 100)}%` }}
+                title={`${detection.class} (${Math.round(detection.score * 100)}%) at ${formatTimelineTime(time)}${detection.refKind && detection.refId != null ? ` • ${detection.refKind} #${detection.refId}` : ""}`}
+                onClick={() => onSeek?.(time)}
+              />
+            );
+          })}
+        </div>
+      )}
+
       {/* Thumbnails scrubber - uses sprite sheet if available, falls back to individual screenshots */}
       <div className="relative flex overflow-hidden" ref={containerRef}>
         <button onClick={() => scroll(-1)} className="flex-shrink-0 w-7 bg-[#222] hover:bg-[#333] text-muted border-r border-border z-10">
@@ -1715,12 +1747,6 @@ function isFaceTimelineSegment(segment: Pick<Segment, "title" | "kind" | "source
   const normalizedSource = segment.sourceKey?.trim().toLowerCase() ?? "";
   const normalizedTitle = segment.title?.trim().toLowerCase() ?? "";
   return normalizedKind === "face" || normalizedSource.includes("face") || normalizedTitle.startsWith("face-");
-}
-
-function formatFaceTimelineLabel(face?: Pick<FaceHostFace, "id" | "label" | "performerName">, fallbackFaceId?: number) {
-  return face?.performerName?.trim()
-    || face?.label?.trim()
-    || (face?.id != null ? `Face #${face.id}` : fallbackFaceId != null && fallbackFaceId > 0 ? `Face #${fallbackFaceId}` : "Face");
 }
 
 function parseVttTime(timeStr: string): number {

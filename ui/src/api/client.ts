@@ -14,6 +14,8 @@ import type {
   AiDataPurgeResult,
   AiDataSelector,
   AiDataSummary,
+  AiVisualSimilarImage,
+  AiVisualSimilarScene,
   AffinityHostType,
   Segment, SegmentCreate, SegmentRecord, SegmentUpdate,
   ResolvedSpanDetail, ResolvedSpanList, SceneResolvedSpans, SegmentDisplayProfile,
@@ -321,9 +323,9 @@ export const scenes = {
   merge: (targetId: number, sourceIds: number[]) =>
     request<Scene>("/scenes/merge", { method: "POST", body: JSON.stringify({ targetId, sourceIds }) }),
   recordPlay: (id: number) => request<void>(`/scenes/${id}/play`, { method: "POST" }),
-  incrementO: (id: number) => request<number>(`/scenes/${id}/o`, { method: "POST" }),
-  decrementO: (id: number) => request<void>(`/scenes/${id}/o`, { method: "DELETE" }),
-  resetO: (id: number) => request<void>(`/scenes/${id}/o/reset`, { method: "POST" }),
+  incrementLike: (id: number) => request<number>(`/scenes/${id}/like`, { method: "POST" }),
+  decrementLike: (id: number) => request<void>(`/scenes/${id}/like`, { method: "DELETE" }),
+  resetLike: (id: number) => request<void>(`/scenes/${id}/like/reset`, { method: "POST" }),
   deletePlay: (id: number) => request<void>(`/scenes/${id}/play`, { method: "DELETE" }),
   resetPlay: (id: number) => request<void>(`/scenes/${id}/play/reset`, { method: "POST" }),
   getHistory: (id: number) => request<SceneHistory>(`/scenes/${id}/history`),
@@ -557,6 +559,14 @@ export const aiVisual = {
     request<PaginatedResponse<Scene>>("/ext/ai-visual/scenes/search", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
   searchImages: (req: FilteredQueryRequest<ImageFilterCriteria>) =>
     request<PaginatedResponse<Image>>("/ext/ai-visual/images/search", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
+  similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>
+    request<{ items: AiVisualSimilarScene[] }>(`/ext/ai-visual/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
+  similarScenesForImage: (imageId: number, params?: { perPage?: number }) =>
+    request<{ items: AiVisualSimilarScene[] }>(`/ext/ai-visual/images/${imageId}/similar-scenes${buildQuery(params)}`),
+  similarImagesForImage: (imageId: number, params?: { perPage?: number }) =>
+    request<{ items: AiVisualSimilarImage[] }>(`/ext/ai-visual/images/${imageId}/similar-images${buildQuery(params)}`),
+  similarScenesForSceneSegment: (sceneId: number, data: { intervals: Array<{ startSec: number; endSec?: number }>; perPage?: number }) =>
+    request<{ items: AiVisualSimilarScene[] }>(`/ext/ai-visual/scenes/${sceneId}/similar-scenes/segment`, { method: "POST", body: JSON.stringify(data) }),
 };
 
 // ===== Studios =====
@@ -638,9 +648,9 @@ export const images = {
   bulkUpdate: (data: BulkImageUpdate) => request<void>("/images/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/images/${id}`, { method: "DELETE" }),
   bulkDelete: (ids: number[]) => request<void>("/images/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),
-  incrementO: (id: number) => request<number>(`/images/${id}/o`, { method: "POST" }),
-  decrementO: (id: number) => request<number>(`/images/${id}/o`, { method: "DELETE" }),
-  resetO: (id: number) => request<number>(`/images/${id}/o/reset`, { method: "POST" }),
+  incrementLike: (id: number) => request<number>(`/images/${id}/like`, { method: "POST" }),
+  decrementLike: (id: number) => request<number>(`/images/${id}/like`, { method: "DELETE" }),
+  resetLike: (id: number) => request<number>(`/images/${id}/like/reset`, { method: "POST" }),
   detections: {
     list: (imageId: number) => request<Detection[]>(`/images/${imageId}/detections`),
     create: (imageId: number, data: DetectionCreate) =>

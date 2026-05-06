@@ -24,7 +24,7 @@ public enum InteractionKind
     Seek = 5,
     Like = 6,
     Dislike = 7,
-    OCount = 8,
+    LikeCount = 8,
     Share = 9,
     Hide = 10,
     OpenDetail = 11,
@@ -36,6 +36,8 @@ public enum InteractionKind
     SearchSelect = 17,
     FilterApply = 18,
     FilterClear = 19,
+    PageVisit = 20,
+    DerivedLike = 21,
 }
 
 /// <summary>Non-playback engagement event (search, filter, image open, etc.). Playback is tracked in PlaybackSession/PlaybackInterval.</summary>

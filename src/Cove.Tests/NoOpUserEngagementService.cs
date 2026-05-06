@@ -43,13 +43,22 @@ internal sealed class NoOpUserEngagementService : IUserEngagementService
     public Task<UserEngagementSnapshot?> ResetScenePlayAsync(int sceneId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> IncrementSceneOAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> IncrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> DecrementSceneOAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> DecrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> ResetSceneOAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> ResetSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
+        => Task.FromResult<UserEngagementSnapshot?>(null);
+
+    public Task<UserEngagementSnapshot?> IncrementImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
+        => Task.FromResult<UserEngagementSnapshot?>(null);
+
+    public Task<UserEngagementSnapshot?> DecrementImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
+        => Task.FromResult<UserEngagementSnapshot?>(null);
+
+    public Task<UserEngagementSnapshot?> ResetImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
     public Task<UserEngagementSnapshot?> ResetSceneActivityAsync(int sceneId, CancellationToken cancellationToken = default)

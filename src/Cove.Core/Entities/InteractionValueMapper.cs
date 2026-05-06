@@ -47,7 +47,7 @@ public static class InteractionValueMapper
             "seek" => Assign(InteractionKind.Seek, out parsed),
             "like" => Assign(InteractionKind.Like, out parsed),
             "dislike" => Assign(InteractionKind.Dislike, out parsed),
-            "ocount" => Assign(InteractionKind.OCount, out parsed),
+            "likecount" => Assign(InteractionKind.LikeCount, out parsed),
             "share" => Assign(InteractionKind.Share, out parsed),
             "hide" => Assign(InteractionKind.Hide, out parsed),
             "opendetail" => Assign(InteractionKind.OpenDetail, out parsed),
@@ -59,6 +59,8 @@ public static class InteractionValueMapper
             "searchselect" => Assign(InteractionKind.SearchSelect, out parsed),
             "filterapply" => Assign(InteractionKind.FilterApply, out parsed),
             "filterclear" => Assign(InteractionKind.FilterClear, out parsed),
+            "pagevisit" => Assign(InteractionKind.PageVisit, out parsed),
+            "derivedlike" => Assign(InteractionKind.DerivedLike, out parsed),
             _ => false,
         };
     }
@@ -69,7 +71,7 @@ public static class InteractionValueMapper
         InteractionKind.Seek => "seek",
         InteractionKind.Like => "like",
         InteractionKind.Dislike => "dislike",
-        InteractionKind.OCount => "oCount",
+        InteractionKind.LikeCount => "likeCount",
         InteractionKind.Share => "share",
         InteractionKind.Hide => "hide",
         InteractionKind.OpenDetail => "openDetail",
@@ -81,6 +83,8 @@ public static class InteractionValueMapper
         InteractionKind.SearchSelect => "searchSelect",
         InteractionKind.FilterApply => "filterApply",
         InteractionKind.FilterClear => "filterClear",
+        InteractionKind.PageVisit => "pageVisit",
+        InteractionKind.DerivedLike => "derivedLike",
         _ => kind.ToString(),
     };
 

@@ -3,17 +3,20 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageDetailPage } from "../pages/ImageDetailPage";
 
-const { mockImages, mockFaces, mockSetFavorite, mockSetRating, mockGoBack } = vi.hoisted(() => ({
+const { mockImages, mockFaces, mockPlayback, mockSetFavorite, mockSetRating, mockGoBack } = vi.hoisted(() => ({
   mockImages: {
     get: vi.fn(),
     delete: vi.fn(),
     update: vi.fn(),
-    incrementO: vi.fn(),
+    incrementLike: vi.fn(),
     thumbnailUrl: vi.fn(() => "/thumb.jpg"),
     imageUrl: vi.fn(() => "/image.jpg"),
   },
   mockFaces: {
     imageFaces: vi.fn(),
+  },
+  mockPlayback: {
+    recordIntervals: vi.fn(() => Promise.resolve()),
   },
   mockSetFavorite: vi.fn(),
   mockSetRating: vi.fn(),
@@ -23,10 +26,12 @@ const { mockImages, mockFaces, mockSetFavorite, mockSetRating, mockGoBack } = vi
 vi.mock("../api/client", () => ({
   images: mockImages,
   faces: mockFaces,
+  playback: mockPlayback,
 }));
 
 vi.mock("../hooks/useEntityEngagement", () => ({
   useEntityEngagement: () => ({
+    engagement: { likeCount: 0, derivedLikeCount: 0, pageVisitCount: 0 },
     favorite: false,
     rating: 4,
     setFavorite: mockSetFavorite,
@@ -74,6 +79,7 @@ vi.mock("../auth/AuthContext", () => ({
 }));
 
 vi.mock("../utils/interactionTracking", () => ({
+  createPlaybackSessionId: () => "test-session",
   trackInteraction: vi.fn(),
 }));
 
@@ -85,7 +91,7 @@ function buildImage(overrides: Record<string, unknown> = {}) {
     studioId: 9,
     studioName: "Sunset Studio",
     photographer: "Riley Smith",
-    oCounter: 0,
+    likeCounter: 0,
     rating: 4,
     organized: false,
     details: "A beach sunset still.",
@@ -153,10 +159,10 @@ describe("ImageDetailPage", () => {
     expect(screen.getByText("Beach")).toBeInTheDocument();
   });
 
-  it("supports keyboard shortcuts for related tab, lightbox, and favorites count", async () => {
+  it("supports keyboard shortcuts for related tab, lightbox, and likes count", async () => {
     mockImages.get.mockResolvedValue(buildImage());
     mockFaces.imageFaces.mockResolvedValue([]);
-    mockImages.incrementO.mockResolvedValue(undefined);
+    mockImages.incrementLike.mockResolvedValue(undefined);
 
     renderPage();
 
@@ -168,7 +174,7 @@ describe("ImageDetailPage", () => {
     fireEvent.keyDown(window, { key: "f" });
     expect(await screen.findByRole("button", { name: "Close (Esc)" })).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "o" });
-    await waitFor(() => expect(mockImages.incrementO).toHaveBeenCalledWith(12));
+    fireEvent.keyDown(window, { key: "l" });
+    await waitFor(() => expect(mockImages.incrementLike).toHaveBeenCalledWith(12));
   });
 });

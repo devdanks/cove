@@ -325,7 +325,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         preferUserSnapshot ? engagement?.PlayDuration ?? 0d : engagement?.PlayDuration ?? s.PlayDuration,
         preferUserSnapshot ? engagement?.PlayCount ?? 0 : engagement?.PlayCount ?? s.PlayCount,
         preferUserSnapshot ? engagement?.LastPlayedAt?.ToString("o") : engagement?.LastPlayedAt?.ToString("o") ?? s.LastPlayedAt?.ToString("o"),
-        preferUserSnapshot ? engagement?.OCount ?? 0 : engagement?.OCount ?? s.OCounter,
+        preferUserSnapshot ? engagement?.LikeCount ?? 0 : engagement?.LikeCount ?? s.LikeCounter,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
@@ -361,7 +361,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         preferUserSnapshot ? engagement?.PlayDuration ?? 0d : engagement?.PlayDuration ?? s.PlayDuration,
         preferUserSnapshot ? engagement?.PlayCount ?? 0 : engagement?.PlayCount ?? s.PlayCount,
         preferUserSnapshot ? engagement?.LastPlayedAt?.ToString("o") : engagement?.LastPlayedAt?.ToString("o") ?? s.LastPlayedAt?.ToString("o"),
-        preferUserSnapshot ? engagement?.OCount ?? 0 : engagement?.OCount ?? s.OCounter,
+        preferUserSnapshot ? engagement?.LikeCount ?? 0 : engagement?.LikeCount ?? s.LikeCounter,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
@@ -423,32 +423,32 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         return NoContent();
     }
 
-    [HttpPost("{id:int}/o")]
+    [HttpPost("{id:int}/like")]
     [RequiresPermission(Permissions.ScenesRead)]
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
-    public async Task<ActionResult<int>> IncrementO(int id, CancellationToken ct)
+    public async Task<ActionResult<int>> IncrementLike(int id, CancellationToken ct)
     {
-        var snapshot = await engagementService.IncrementSceneOAsync(id, ct);
+        var snapshot = await engagementService.IncrementSceneLikeAsync(id, ct);
         if (snapshot == null) return NotFound();
-        return Ok(snapshot.OCount);
+        return Ok(snapshot.LikeCount);
     }
 
-    [HttpDelete("{id:int}/o")]
+    [HttpDelete("{id:int}/like")]
     [RequiresPermission(Permissions.ScenesRead)]
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead)]
-    public async Task<IActionResult> DecrementO(int id, CancellationToken ct)
+    public async Task<IActionResult> DecrementLike(int id, CancellationToken ct)
     {
-        var snapshot = await engagementService.DecrementSceneOAsync(id, ct);
+        var snapshot = await engagementService.DecrementSceneLikeAsync(id, ct);
         if (snapshot == null) return NotFound();
         return NoContent();
     }
 
-    [HttpPost("{id:int}/o/reset")]
+    [HttpPost("{id:int}/like/reset")]
     [RequiresPermission(Permissions.ScenesWrite)]
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
-    public async Task<IActionResult> ResetO(int id, CancellationToken ct)
+    public async Task<IActionResult> ResetLike(int id, CancellationToken ct)
     {
-        var snapshot = await engagementService.ResetSceneOAsync(id, ct);
+        var snapshot = await engagementService.ResetSceneLikeAsync(id, ct);
         if (snapshot == null) return NotFound();
         return NoContent();
     }
@@ -720,7 +720,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
                 target.ScenePerformers.Add(new ScenePerformer { PerformerId = sp.PerformerId, SceneId = target.Id });
             // Accumulate play counts & o-counters
             target.PlayCount += source.PlayCount;
-            target.OCounter += source.OCounter;
+            target.LikeCounter += source.LikeCounter;
             target.PlayDuration += source.PlayDuration;
             // Delete source
             if (tagProvenanceService != null)

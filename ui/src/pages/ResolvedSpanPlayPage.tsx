@@ -1,10 +1,11 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Info, ListVideo, Repeat, RotateCcw, SkipBack, SkipForward, SlidersHorizontal } from "lucide-react";
+import { ExternalLink, Info, ListVideo, Repeat, RotateCcw, SkipBack, SkipForward, SlidersHorizontal, Sparkles } from "lucide-react";
 import { faces, performers, scenes, segmentDisplayProfiles, segmentLibrary, tags } from "../api/client";
 import type { ResolvedSpanDetail, ResolvedSpanInterval, SegmentDerivedQueryDescriptor, SegmentRecord, SegmentSpanOperator } from "../api/types";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { SegmentVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 
@@ -16,7 +17,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type ResolvedSpanTab = "overview" | "intervals" | "provenance";
+type ResolvedSpanTab = "overview" | "intervals" | "similar" | "provenance";
 
 export function ResolvedSpanPlayPage({ sceneId, spanKey, profileId, derivedQueryDescriptor, onNavigate }: Props) {
   const { backLabel, goBack } = useBackNavigation({ page: "scene", id: sceneId }, onNavigate);
@@ -318,6 +319,7 @@ function ResolvedSpanPlayerCard({
   const tabs = useMemo(() => [
     { key: "overview", label: "Overview", icon: <Info className="h-4 w-4" /> },
     { key: "intervals", label: "Intervals", icon: <ListVideo className="h-4 w-4" />, count: intervals.length },
+    { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
     { key: "provenance", label: "Provenance", icon: <SlidersHorizontal className="h-4 w-4" /> },
   ], [intervals.length]);
 
@@ -430,8 +432,18 @@ function ResolvedSpanPlayerCard({
     </div>
   );
 
+  const similarContent = (
+    <SegmentVisualSimilarityPanel
+      sceneId={detail.sceneId}
+      intervals={intervals.map((interval) => ({ startSec: interval.startSec, endSec: interval.endSec }))}
+      onNavigate={onNavigate}
+    />
+  );
+
   const activeContent = activeTab === "intervals"
     ? intervalsContent
+    : activeTab === "similar"
+      ? similarContent
     : activeTab === "provenance"
       ? provenanceContent
       : overviewContent;

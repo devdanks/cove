@@ -28,6 +28,7 @@ public class PlaybackSession : BaseEntity
     public double TotalWatchedSec { get; set; }
     public bool IsCompleted { get; set; }
     public bool CountsAsView { get; set; }
+    public bool DerivedLikeAwarded { get; set; }
     public List<PlaybackInterval> Intervals { get; set; } = [];
 }
 

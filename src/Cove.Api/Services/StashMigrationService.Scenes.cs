@@ -173,7 +173,7 @@ public partial class StashMigrationService
                 Director = row.Director,
                 ResumeTime = row.ResumeTime,
                 PlayDuration = row.PlayDuration,
-                OCounter = oHistory.Count,
+                LikeCounter = oHistory.Count,
                 PlayCount = viewHistory.Count,
                 LastPlayedAt = importedLastPlayedAt ?? (viewHistory.Count > 0 ? viewHistory.Max() : null),
                 CreatedAt = ParseDateTime(row.CreatedAt),
@@ -193,7 +193,7 @@ public partial class StashMigrationService
                         OrderIndex = g.Index,
                         Kind = GroupItemKind.Scene,
                     }).ToList(),
-                OHistory = oHistory.Select(d => new SceneOHistory { OccurredAt = d }).ToList(),
+                LikeHistory = oHistory.Select(d => new SceneLikeHistory { OccurredAt = d }).ToList(),
                 PlayHistory = viewHistory.Select(d => new ScenePlayHistory { PlayedAt = d }).ToList(),
                 RemoteIds = sceneStashIds.GetValueOrDefault(row.Id, [])
                     .Select(s => new SceneRemoteId { Endpoint = s.Ep, RemoteId = s.Rid }).ToList(),

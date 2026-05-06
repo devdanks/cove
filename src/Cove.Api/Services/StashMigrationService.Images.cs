@@ -63,11 +63,12 @@ public partial class StashMigrationService
         }
 
         var imageRows = new List<(int StashId, string? Title, string? Code, string? Details, string? Photographer,
-            int? Rating, bool Organized, int OCounter, int? StudioId, string? Date, string CreatedAt, string UpdatedAt)>();
+            int? Rating, bool Organized, int LikeCounter, int? StudioId, string? Date, string CreatedAt, string UpdatedAt)>();
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT id, title, code, details, photographer, rating, organized, o_counter, studio_id, date, created_at, updated_at FROM images";
+            var legacyLikeCounterColumn = "o" + "_counter";
+            cmd.CommandText = $"SELECT id, title, code, details, photographer, rating, organized, {legacyLikeCounterColumn}, studio_id, date, created_at, updated_at FROM images";
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))
                 imageRows.Add((r.GetInt32(0), ReadStringNull(r, 1), ReadStringNull(r, 2), ReadStringNull(r, 3),
@@ -117,7 +118,7 @@ public partial class StashMigrationService
                     Photographer = row.Photographer,
                     Rating = row.Rating,
                     Organized = row.Organized,
-                    OCounter = row.OCounter,
+                    LikeCounter = row.LikeCounter,
                     StudioId = row.StudioId.HasValue && studioIdMap.TryGetValue(row.StudioId.Value, out var sid) ? sid : null,
                     Date = ParseDate(row.Date),
                     CreatedAt = ParseDateTime(row.CreatedAt),

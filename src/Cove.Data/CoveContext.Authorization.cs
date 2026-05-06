@@ -189,7 +189,7 @@ public partial class CoveContext
                     ? CanReadScenes
                     : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, entry.SceneId));
 
-        modelBuilder.Entity<SceneOHistory>().HasQueryFilter(entry =>
+        modelBuilder.Entity<SceneLikeHistory>().HasQueryFilter(entry =>
             AuthorizationFiltersBypassed
                 ? true
                 : !RequiresSceneReadScopeEvaluation

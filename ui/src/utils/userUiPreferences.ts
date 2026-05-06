@@ -1,7 +1,7 @@
 import { auth } from "../api/client";
 import { authStore } from "../auth/authStore";
 import type { AuthUser } from "../auth/authStore";
-import type { RatingSystemOptions, UserThemePreferences, UserUiPreferences } from "../api/types";
+import type { RatingSystemOptions, UserThemePreferences, UserTrackingPreferences, UserUiPreferences } from "../api/types";
 
 const SAVE_DEBOUNCE_MS = 250;
 
@@ -68,20 +68,64 @@ function normalizeRatingSystemOptions(options: RatingSystemOptions | null | unde
   return { type, starPrecision };
 }
 
+function clampNumber(value: number | null | undefined, min: number, max: number): number | null {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return null;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeTrackingPreferences(
+  tracking: UserTrackingPreferences | null | undefined,
+  legacyTrackingEnabled?: unknown,
+): UserTrackingPreferences | null {
+  const enabled = typeof tracking?.enabled === "boolean"
+    ? tracking.enabled
+    : typeof legacyTrackingEnabled === "boolean"
+      ? legacyTrackingEnabled
+      : null;
+  const minViewSeconds = clampNumber(tracking?.minViewSeconds, 0, 86_400);
+  const viewCompletionRatio = clampNumber(tracking?.viewCompletionRatio, 0.01, 1);
+  const minImageDetailViewSeconds = clampNumber(tracking?.minImageDetailViewSeconds, 0, 86_400);
+  const minDerivedLikeSessionSeconds = clampNumber(tracking?.minDerivedLikeSessionSeconds, 0, 86_400);
+  const sessionIdleTimeoutSec = clampNumber(tracking?.sessionIdleTimeoutSec, 10, 86_400);
+
+  if (enabled == null
+    && minViewSeconds == null
+    && viewCompletionRatio == null
+    && minImageDetailViewSeconds == null
+    && minDerivedLikeSessionSeconds == null
+    && sessionIdleTimeoutSec == null) {
+    return null;
+  }
+
+  return {
+    enabled,
+    minViewSeconds,
+    viewCompletionRatio,
+    minImageDetailViewSeconds,
+    minDerivedLikeSessionSeconds,
+    sessionIdleTimeoutSec,
+  };
+}
+
 function normalizeUiPreferences(preferences: UserUiPreferences | null | undefined): UserUiPreferences | null {
   const theme = normalizeThemePreferences(preferences?.theme);
   const ratingSystemOptions = normalizeRatingSystemOptions(preferences?.ratingSystemOptions);
-  const recordPlaybackHistory = typeof preferences?.recordPlaybackHistory === "boolean"
-    ? preferences.recordPlaybackHistory
-    : null;
-  if (!theme && !ratingSystemOptions && recordPlaybackHistory == null) {
+  const legacyTrackingEnabledKey = "record" + "PlaybackHistory";
+  const legacyTrackingEnabled = preferences && typeof preferences === "object"
+    ? (preferences as Record<string, unknown>)[legacyTrackingEnabledKey]
+    : undefined;
+  const tracking = normalizeTrackingPreferences(preferences?.tracking, legacyTrackingEnabled);
+  if (!theme && !ratingSystemOptions && !tracking) {
     return null;
   }
 
   return {
     theme,
     ratingSystemOptions,
-    recordPlaybackHistory,
+    tracking,
   };
 }
 

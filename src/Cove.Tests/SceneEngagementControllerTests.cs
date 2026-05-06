@@ -45,7 +45,7 @@ public class SceneEngagementControllerTests
             "scene", sceneId, sessionId, 120.0, 120.0, "ended",
             [new PlaybackIntervalInputDto(73.5, 120.0)]), CancellationToken.None));
 
-        var incrementResult = await scenesController.IncrementO(sceneId, CancellationToken.None);
+        var incrementResult = await scenesController.IncrementLike(sceneId, CancellationToken.None);
         var incrementOk = Assert.IsType<OkObjectResult>(incrementResult.Result);
         Assert.Equal(1, Assert.IsType<int>(incrementOk.Value));
 
@@ -69,14 +69,14 @@ public class SceneEngagementControllerTests
         Assert.Equal(88, userOneScene.Rating);
         Assert.Equal(120.0, userOneScene.ResumeTime);
         Assert.Equal(52.0, userOneScene.PlayDuration, precision: 5);  // 5.5 + 46.5
-        Assert.Equal(1, userOneScene.PlayCount);
-        Assert.Equal(1, userOneScene.OCounter);
+        Assert.Equal(2, userOneScene.PlayCount);
+        Assert.Equal(1, userOneScene.LikeCounter);
 
         var historyResult = await scenesController.GetHistory(sceneId, CancellationToken.None);
         var historyOk = Assert.IsType<OkObjectResult>(historyResult.Result);
         var history = Assert.IsType<SceneHistoryDto>(historyOk.Value);
         Assert.Single(history.PlayHistory);
-        Assert.Single(history.OHistory);
+        Assert.Single(history.LikeHistory);
         Assert.NotNull(history.AllTimeWatchedIntervals);
         Assert.Equal(2, history.AllTimeWatchedIntervals!.Count);
         Assert.Equal(42.5, history.AllTimeWatchedIntervals[0].StartSec);
@@ -101,7 +101,7 @@ public class SceneEngagementControllerTests
         Assert.Equal(0d, userTwoScene.ResumeTime);
         Assert.Equal(0d, userTwoScene.PlayDuration);
         Assert.Equal(0, userTwoScene.PlayCount);
-        Assert.Equal(0, userTwoScene.OCounter);
+        Assert.Equal(0, userTwoScene.LikeCounter);
 
         var userTwoRatingsResult = await scenesController.GetRatings(sceneId, CancellationToken.None);
         var userTwoRatingsOk = Assert.IsType<OkObjectResult>(userTwoRatingsResult.Result);
@@ -111,8 +111,8 @@ public class SceneEngagementControllerTests
         var affinityRows = await context.UserEntityAffinities.IgnoreQueryFilters().ToListAsync();
         var affinity = Assert.Single(affinityRows);
         Assert.Equal(7, affinity.UserId);
-        Assert.Equal(1, affinity.ViewCount);
-        Assert.Equal(1, affinity.OCount);
+        Assert.Equal(2, affinity.ViewCount);
+        Assert.Equal(1, affinity.LikeCount);
         Assert.Equal(1, affinity.CompleteCount);
         Assert.Equal(52.0, affinity.TotalConsumedSec, precision: 5);
 

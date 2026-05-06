@@ -10,7 +10,7 @@ import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen, Search, Download } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
-import { FavoriteCounter, GalleriesPopoverContent, PerformerPreviewGrid, PopoverButton } from "../components/EntityCards";
+import { GalleriesPopoverContent, LikeCounter, PerformerPreviewGrid, PopoverButton } from "../components/EntityCards";
 import type { LightboxImage } from "../components/Lightbox";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
@@ -54,7 +54,7 @@ const SORT_OPTIONS = [
   { value: "path", label: "Path" },
   { value: "title", label: "Title" },
   { value: "rating", label: "Rating" },
-  { value: "o_counter", label: "Favorites" },
+  { value: "like_counter", label: "Likes" },
   { value: "performer_count", label: "Performer Count" },
   { value: "tag_count", label: "Tag Count" },
   { value: "random", label: "Random" },
@@ -373,7 +373,7 @@ function ImageCard({ image, engagement, onPreview, onDetails, onNavigate, select
   const thumbnailUrl = images.thumbnailUrl(image.id);
   const displayTitle = getImageDisplayTitle(image);
   const rating = engagement?.rating ?? image.rating;
-  const favoriteCount = engagement?.oCount ?? image.oCounter;
+  const likeCount = engagement?.likeCount ?? image.likeCounter;
 
   return (
     <div
@@ -409,7 +409,7 @@ function ImageCard({ image, engagement, onPreview, onDetails, onNavigate, select
           {displayTitle}
         </p>
       </div>
-      {(image.performers.length > 0 || image.tags.length > 0 || favoriteCount > 0 || image.galleryCount > 0 || image.organized) && (
+      {(image.performers.length > 0 || image.tags.length > 0 || likeCount > 0 || image.galleryCount > 0 || image.organized) && (
         <div className="flex items-center justify-center gap-1 px-1.5 pb-1.5 border-t border-border/50 pt-1">
           {image.tags.length > 0 && (
             <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={image.tags.length} title="Tags" preferBelow>
@@ -433,8 +433,8 @@ function ImageCard({ image, engagement, onPreview, onDetails, onNavigate, select
               <GalleriesPopoverContent filter={{ imageId: image.id }} />
             </PopoverButton>
           )}
-          {favoriteCount > 0 && (
-            <FavoriteCounter count={favoriteCount} />
+          {likeCount > 0 && (
+            <LikeCounter count={likeCount} />
           )}
           {image.organized && (
             <span className="text-muted" title="Organized">

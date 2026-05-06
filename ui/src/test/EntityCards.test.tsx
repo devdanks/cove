@@ -37,7 +37,7 @@ const baseScene = {
   studioId: null,
   resumeTime: 0,
   rating: null,
-  oCounter: 1,
+  likeCounter: 1,
   organized: false,
   details: null,
   date: null,
@@ -130,10 +130,10 @@ describe("SceneCard navigation", () => {
     expect(screen.getByRole("link", { name: /Popover Performer/i })).toHaveAttribute("href", "/performer/9");
   });
 
-  it("renders a heart-based favorites counter instead of the legacy O badge", () => {
+  it("renders a likes counter instead of the legacy O badge", () => {
     render(<SceneCard scene={baseScene as any} onClick={vi.fn()} />);
 
-    expect(screen.getByTitle("Favorites: 1")).toBeInTheDocument();
+    expect(screen.getByTitle("Likes: 1")).toBeInTheDocument();
     expect(screen.queryByText(/^O$/)).not.toBeInTheDocument();
   });
 });

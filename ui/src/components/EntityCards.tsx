@@ -5,7 +5,7 @@ import { scenes, images, performers, galleries, studios, groups, entityImages } 
 import type { Gallery, Group, Image, Performer, Scene, Studio } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
-import { Building2, FolderOpen, Layers, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye } from "lucide-react";
+import { Building2, FolderOpen, Layers, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp } from "lucide-react";
 import { createRouteLinkProps, createNestedRouteLinkProps } from "./cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "./RouteCardLinkOverlay";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
@@ -14,10 +14,10 @@ function createNestedEntityNavigationHandlers<T extends HTMLAnchorElement>(route
   return createNestedRouteLinkProps<T>(route, () => onNavigate?.(route));
 }
 
-export function FavoriteCounter({ count }: { count: number }) {
+export function LikeCounter({ count }: { count: number }) {
   return (
-    <span className="flex items-center gap-1 p-1 text-muted" title={`Favorites: ${count}`}>
-      <Heart className="h-3.5 w-3.5 fill-accent text-accent" />
+    <span className="flex items-center gap-1 p-1 text-muted" title={`Likes: ${count}`}>
+      <ThumbsUp className="h-3.5 w-3.5 fill-accent text-accent" />
       <span className="text-xs">{count}</span>
     </span>
   );
@@ -286,7 +286,7 @@ export function GroupsPopoverContent({ filter }: { filter: Record<string, string
 export function SceneCardPopovers({ scene, onNavigate }: { scene: Scene; onNavigate?: (r: any) => void }) {
   const hasPopovers =
     scene.tags.length > 0 || scene.performers.length > 0 || scene.groups.length > 0 ||
-    scene.galleries.length > 0 || scene.oCounter > 0 || scene.organized;
+    scene.galleries.length > 0 || scene.likeCounter > 0 || scene.organized;
   return (
     <>
       <hr className="border-border/50 my-0" />
@@ -312,8 +312,8 @@ export function SceneCardPopovers({ scene, onNavigate }: { scene: Scene; onNavig
             </div>
           </PopoverButton>
         )}
-        {scene.oCounter > 0 && (
-          <FavoriteCounter count={scene.oCounter} />
+        {scene.likeCounter > 0 && (
+          <LikeCounter count={scene.likeCounter} />
         )}
         {scene.groups.length > 0 && (
           <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={scene.groups.length} title="Groups" preferBelow>
@@ -719,7 +719,7 @@ interface ImageTileProps {
 }
 
 export function ImageTile({ image, onClick, onNavigate, onQuickView, selected, onSelect, selecting }: ImageTileProps) {
-  const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || image.oCounter > 0 || image.organized;
+  const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || image.likeCounter > 0 || image.organized;
   const displayTitle = getImageDisplayTitle(image);
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left shadow-md shadow-black/20 flex flex-col h-full transition-colors ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
@@ -773,8 +773,8 @@ export function ImageTile({ image, onClick, onNavigate, onQuickView, selected, o
                 <GalleriesPopoverContent filter={{ imageId: image.id }} />
               </PopoverButton>
             )}
-            {image.oCounter > 0 && (
-              <FavoriteCounter count={image.oCounter} />
+            {image.likeCounter > 0 && (
+              <LikeCounter count={image.likeCounter} />
             )}
             {image.organized && (
               <span className="p-1 text-muted" title="Organized"><Box className="w-3.5 h-3.5" /></span>

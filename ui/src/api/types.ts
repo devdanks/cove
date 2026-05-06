@@ -15,7 +15,7 @@ export interface Scene {
   playDuration: number;
   playCount: number;
   lastPlayedAt?: string;
-  oCounter: number;
+  likeCounter: number;
   urls: string[];
   tags: Tag[];
   performers: PerformerSummary[];
@@ -400,7 +400,7 @@ export interface Image {
   photographer?: string;
   rating?: number;
   organized: boolean;
-  oCounter: number;
+  likeCounter: number;
   studioId?: number;
   studioName?: string;
   date?: string;
@@ -416,6 +416,19 @@ export interface Image {
   updatedAt: string;
 }
 
+
+export interface AiVisualSimilarScene {
+  scene: Scene;
+  distance: number;
+  sectionIndex: number;
+  startSec?: number;
+  endSec?: number;
+}
+
+export interface AiVisualSimilarImage {
+  image: Image;
+  distance: number;
+}
 export interface ImageCreate {
   title?: string;
   code?: string;
@@ -1116,7 +1129,9 @@ export interface EntityEngagement {
   playDuration: number;
   playCount: number;
   lastPlayedAt?: string;
-  oCount: number;
+  likeCount: number;
+  derivedLikeCount: number;
+  pageVisitCount: number;
   completeCount: number;
 }
 
@@ -1193,7 +1208,7 @@ export interface ScenePlaybackSession {
 
 export interface SceneHistory {
   playHistory: string[];
-  oHistory: string[];
+  likeHistory: string[];
   events?: SceneInteractionEvent[];
   allTimeWatchedIntervals?: PlaybackInterval[];
   totalDistinctWatchedSec?: number;
@@ -1255,7 +1270,16 @@ export interface UserThemePreferences {
 export interface UserUiPreferences {
   theme?: UserThemePreferences | null;
   ratingSystemOptions?: RatingSystemOptions | null;
-  recordPlaybackHistory?: boolean | null;
+  tracking?: UserTrackingPreferences | null;
+}
+
+export interface UserTrackingPreferences {
+  enabled?: boolean | null;
+  minViewSeconds?: number | null;
+  viewCompletionRatio?: number | null;
+  minImageDetailViewSeconds?: number | null;
+  minDerivedLikeSessionSeconds?: number | null;
+  sessionIdleTimeoutSec?: number | null;
 }
 
 export interface MeResponse {
@@ -1295,7 +1319,6 @@ export interface UiConfig {
   autostartVideoOnPlaySelected: boolean;
   continuePlaylistDefault: boolean;
   showAbLoopControls: boolean;
-  trackActivity: boolean;
   soundOnPreview: boolean;
   previewSegmentDuration: number;
   previewSegments: number;
@@ -1825,7 +1848,7 @@ export interface SceneFilterCriteria {
   tagIds?: number[];
   performerIds?: number[];
   ratingCriterion?: IntCriterion;
-  oCounterCriterion?: IntCriterion;
+  likeCounterCriterion?: IntCriterion;
   durationCriterion?: IntCriterion;
   resolutionCriterion?: IntCriterion;
   playCountCriterion?: IntCriterion;
@@ -1914,7 +1937,7 @@ export interface PerformerFilterCriteria {
   aliasesCriterion?: StringCriterion;
   deathDateCriterion?: DateCriterion;
   playCountCriterion?: IntCriterion;
-  oCounterCriterion?: IntCriterion;
+  likeCounterCriterion?: IntCriterion;
   groupsCriterion?: MultiIdCriterion;
   ignoreAutoTagCriterion?: BoolCriterion;
   tagCountCriterion?: IntCriterion;
@@ -2029,7 +2052,7 @@ export interface ImageFilterCriteria {
   studiosCriterion?: MultiIdCriterion;
   galleriesCriterion?: MultiIdCriterion;
   titleCriterion?: StringCriterion;
-  oCounterCriterion?: IntCriterion;
+  likeCounterCriterion?: IntCriterion;
   resolutionCriterion?: IntCriterion;
   pathCriterion?: StringCriterion;
   fingerprintCriterion?: FingerprintCriterion;

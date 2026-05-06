@@ -159,7 +159,7 @@ public class EntityEngagementController(IUserEngagementService engagementService
 
     private static EntityEngagementDto ToDto(int hostId, UserEngagementSnapshot? snapshot)
     {
-        snapshot ??= new UserEngagementSnapshot(false, null, 0d, 0d, 0, null, 0, 0);
+        snapshot ??= new UserEngagementSnapshot(false, null, 0d, 0d, 0, null, 0, 0, 0, 0);
         return new EntityEngagementDto(
             hostId,
             snapshot.IsFavorite,
@@ -168,7 +168,9 @@ public class EntityEngagementController(IUserEngagementService engagementService
             snapshot.PlayDuration,
             snapshot.PlayCount,
             snapshot.LastPlayedAt?.ToString("o"),
-            snapshot.OCount,
+            snapshot.LikeCount,
+            snapshot.DerivedLikeCount,
+            snapshot.PageVisitCount,
             snapshot.CompleteCount);
     }
 }

@@ -158,7 +158,6 @@ public class UiConfig
     public bool AutostartVideoOnPlaySelected { get; set; } = true;
     public bool ContinuePlaylistDefault { get; set; }
     public bool ShowAbLoopControls { get; set; } = true;
-    public bool TrackActivity { get; set; } = true;
     // Preview
     public bool SoundOnPreview { get; set; }
     public double PreviewSegmentDuration { get; set; } = 0.75;

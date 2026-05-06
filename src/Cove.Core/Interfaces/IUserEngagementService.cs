@@ -11,7 +11,9 @@ public sealed record UserEngagementSnapshot(
     double PlayDuration,
     int PlayCount,
     DateTime? LastPlayedAt,
-    int OCount,
+    int LikeCount,
+    int DerivedLikeCount,
+    int PageVisitCount,
     int CompleteCount);
 
 public interface IUserEngagementService
@@ -38,11 +40,17 @@ public interface IUserEngagementService
 
     Task<UserEngagementSnapshot?> ResetScenePlayAsync(int sceneId, CancellationToken cancellationToken = default);
 
-    Task<UserEngagementSnapshot?> IncrementSceneOAsync(int sceneId, CancellationToken cancellationToken = default);
+    Task<UserEngagementSnapshot?> IncrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default);
 
-    Task<UserEngagementSnapshot?> DecrementSceneOAsync(int sceneId, CancellationToken cancellationToken = default);
+    Task<UserEngagementSnapshot?> DecrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default);
 
-    Task<UserEngagementSnapshot?> ResetSceneOAsync(int sceneId, CancellationToken cancellationToken = default);
+    Task<UserEngagementSnapshot?> ResetSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default);
+
+    Task<UserEngagementSnapshot?> IncrementImageLikeAsync(int imageId, CancellationToken cancellationToken = default);
+
+    Task<UserEngagementSnapshot?> DecrementImageLikeAsync(int imageId, CancellationToken cancellationToken = default);
+
+    Task<UserEngagementSnapshot?> ResetImageLikeAsync(int imageId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Record a batch of contiguous watched intervals for a playback session.

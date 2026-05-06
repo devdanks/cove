@@ -24,5 +24,7 @@ public class UserEntityAffinity : BaseEntity
     public double TotalConsumedSec { get; set; }
     public double? LastPositionSec { get; set; }
     public DateTime? LastConsumedAt { get; set; }
-    public int OCount { get; set; }
+    public int LikeCount { get; set; }
+    public int DerivedLikeCount { get; set; }
+    public int PageVisitCount { get; set; }
 }

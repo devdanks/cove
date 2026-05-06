@@ -320,31 +320,31 @@ public class RepositorySortBehaviorTests
         {
             Title = "leader-scene",
             PlayCount = 12,
-            OCounter = 8,
+            LikeCounter = 8,
             LastPlayedAt = new DateTime(2024, 1, 15, 12, 0, 0, DateTimeKind.Utc),
         };
         leaderScene.ScenePerformers.Add(new ScenePerformer { Scene = leaderScene, Performer = leader });
-        leaderScene.OHistory.Add(new SceneOHistory { OccurredAt = new DateTime(2024, 1, 16, 12, 0, 0, DateTimeKind.Utc) });
+        leaderScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 16, 12, 0, 0, DateTimeKind.Utc) });
 
         var middleScene = new Scene
         {
             Title = "middle-scene",
             PlayCount = 4,
-            OCounter = 2,
+            LikeCounter = 2,
             LastPlayedAt = new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc),
         };
         middleScene.ScenePerformers.Add(new ScenePerformer { Scene = middleScene, Performer = middle });
-        middleScene.OHistory.Add(new SceneOHistory { OccurredAt = new DateTime(2024, 1, 11, 12, 0, 0, DateTimeKind.Utc) });
+        middleScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 11, 12, 0, 0, DateTimeKind.Utc) });
 
         var compactScene = new Scene
         {
             Title = "compact-scene",
             PlayCount = 1,
-            OCounter = 1,
+            LikeCounter = 1,
             LastPlayedAt = new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc),
         };
         compactScene.ScenePerformers.Add(new ScenePerformer { Scene = compactScene, Performer = compact });
-        compactScene.OHistory.Add(new SceneOHistory { OccurredAt = new DateTime(2024, 1, 6, 12, 0, 0, DateTimeKind.Utc) });
+        compactScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 6, 12, 0, 0, DateTimeKind.Utc) });
 
         context.Performers.AddRange(leader, middle, compact, quiet);
         context.Scenes.AddRange(leaderScene, middleScene, compactScene);
@@ -353,12 +353,12 @@ public class RepositorySortBehaviorTests
         var repository = new PerformerRepository(context);
 
         var (careerItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "career_length", Direction = Cove.Core.Enums.SortDirection.Desc });
-        var (favoriteItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "last_o_at", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (favoriteItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "last_like_at", Direction = Cove.Core.Enums.SortDirection.Desc });
         var (playedItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "last_played_at", Direction = Cove.Core.Enums.SortDirection.Desc });
         var (heightDescItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "height", Direction = Cove.Core.Enums.SortDirection.Desc });
         var (heightAscItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "height", Direction = Cove.Core.Enums.SortDirection.Asc });
         var (measurementItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "measurements", Direction = Cove.Core.Enums.SortDirection.Desc });
-        var (favoritesItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "o_counter", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (favoritesItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "like_counter", Direction = Cove.Core.Enums.SortDirection.Desc });
         var (playCountItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "play_count", Direction = Cove.Core.Enums.SortDirection.Desc });
 
         Assert.Equal(["Leader", "Middle", "Compact", "Quiet"], careerItems.Select(performer => performer.Name).ToArray());
@@ -474,7 +474,7 @@ public class RepositorySortBehaviorTests
             performer: youngerPerformer,
             fingerprints: [new FileFingerprint { Type = "phash", Value = "00aa" }]);
         alphaScene.Date = new DateOnly(2024, 1, 20);
-        alphaScene.OHistory.Add(new SceneOHistory { OccurredAt = new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc) });
+        alphaScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc) });
 
         var betaScene = CreateSceneWithFile(
             "beta-scene",
@@ -486,7 +486,7 @@ public class RepositorySortBehaviorTests
             performer: olderPerformer,
             fingerprints: [new FileFingerprint { Type = "phash", Value = "00ff" }]);
         betaScene.Date = new DateOnly(2024, 1, 20);
-        betaScene.OHistory.Add(new SceneOHistory { OccurredAt = new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc) });
+        betaScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc) });
 
         context.Scenes.AddRange(alphaScene, betaScene);
         await context.SaveChangesAsync();
@@ -494,7 +494,7 @@ public class RepositorySortBehaviorTests
         var repository = new SceneRepository(context);
 
         var (fileModItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "file_mod_time", Direction = Cove.Core.Enums.SortDirection.Desc });
-        var (favoriteItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "last_o_at", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (favoriteItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "last_like_at", Direction = Cove.Core.Enums.SortDirection.Desc });
         var (pathItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "path", Direction = Cove.Core.Enums.SortDirection.Asc });
         var (phashItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "phash", Direction = Cove.Core.Enums.SortDirection.Asc });
         var (ageItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "performer_age", Direction = Cove.Core.Enums.SortDirection.Asc });

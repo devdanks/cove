@@ -2,6 +2,7 @@ using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
+using Cove.Data.Auth;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -9,7 +10,16 @@ namespace Cove.Data.Services;
 
 public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAccessor principalAccessor) : IUserEngagementService
 {
-    private static readonly UserEngagementSnapshot EmptySnapshot = new(false, null, 0d, 0d, 0, null, 0, 0);
+    private static readonly UserEngagementSnapshot EmptySnapshot = new(false, null, 0d, 0d, 0, null, 0, 0, 0, 0);
+    private static readonly TrackingSettings DefaultTrackingSettings = new(true, 30, 0.9d, 5, 60, 120);
+
+    private sealed record TrackingSettings(
+        bool Enabled,
+        int MinViewSeconds,
+        double ViewCompletionRatio,
+        int MinImageDetailViewSeconds,
+        int MinDerivedLikeSessionSeconds,
+        int SessionIdleTimeoutSec);
 
     public async Task<UserEngagementSnapshot?> GetSnapshotAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
     {
@@ -133,9 +143,22 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         if (!userId.HasValue)
             return false;
 
+        var tracking = await GetTrackingSettingsAsync(userId.Value, cancellationToken);
+        if (!tracking.Enabled)
+            return true;
+
         var normalizedHostId = InteractionValueMapper.RequiresConcreteHost(hostType) ? hostId : 0;
         if (InteractionValueMapper.RequiresConcreteHost(hostType) && !await InteractionHostExistsAsync(hostType, normalizedHostId, cancellationToken))
             return false;
+
+        if (kind == InteractionKind.PageVisit && TryMapAffinityHostType(hostType, out var affinityHostType))
+        {
+            var affinity = await GetOrCreateAffinityAsync(affinityHostType, normalizedHostId, cancellationToken);
+            if (affinity != null)
+            {
+                affinity.PageVisitCount++;
+            }
+        }
 
         db.Interactions.Add(new Interaction
         {
@@ -273,77 +296,94 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
     }
 
-    public async Task<UserEngagementSnapshot?> IncrementSceneOAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> IncrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
+        => IncrementLikeAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+
+    public Task<UserEngagementSnapshot?> DecrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
+        => DecrementLikeAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+
+    public Task<UserEngagementSnapshot?> ResetSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
+        => ResetLikeAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+
+    public Task<UserEngagementSnapshot?> IncrementImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
+        => IncrementLikeAsync(AffinityHostType.Image, imageId, cancellationToken);
+
+    public Task<UserEngagementSnapshot?> DecrementImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
+        => DecrementLikeAsync(AffinityHostType.Image, imageId, cancellationToken);
+
+    public Task<UserEngagementSnapshot?> ResetImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
+        => ResetLikeAsync(AffinityHostType.Image, imageId, cancellationToken);
+
+    private async Task<UserEngagementSnapshot?> IncrementLikeAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken)
     {
-        var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == sceneId, cancellationToken);
-        if (scene is null)
+        if (!await EntityExistsAsync(hostType, hostId, cancellationToken))
             return null;
 
         var now = DateTime.UtcNow;
-        var affinity = await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken);
+        var affinity = await GetOrCreateAffinityAsync(hostType, hostId, cancellationToken);
         if (affinity != null)
         {
-            affinity.OCount++;
+            affinity.LikeCount++;
             db.Interactions.Add(new Interaction
             {
                 UserId = affinity.UserId,
-                HostType = InteractionHostType.Scene,
-                HostId = sceneId,
-                Kind = InteractionKind.OCount,
+                HostType = ToInteractionHostType(hostType),
+                HostId = hostId,
+                Kind = InteractionKind.LikeCount,
                 At = now,
             });
         }
 
-        scene.OCounter = affinity?.OCount ?? (scene.OCounter + 1);
+        await MirrorLegacyLikeAsync(hostType, hostId, affinity?.LikeCount, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
-        return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
+        return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
     }
 
-    public async Task<UserEngagementSnapshot?> DecrementSceneOAsync(int sceneId, CancellationToken cancellationToken = default)
+    private async Task<UserEngagementSnapshot?> DecrementLikeAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken)
     {
-        var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == sceneId, cancellationToken);
-        if (scene is null)
+        if (!await EntityExistsAsync(hostType, hostId, cancellationToken))
             return null;
 
-        var affinity = await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken, createIfMissing: false);
+        var interactionHostType = ToInteractionHostType(hostType);
+        var affinity = await GetOrCreateAffinityAsync(hostType, hostId, cancellationToken, createIfMissing: false);
         if (affinity != null)
         {
-            affinity.OCount = Math.Max(0, affinity.OCount - 1);
+            affinity.LikeCount = Math.Max(0, affinity.LikeCount - 1);
             var lastInteraction = await db.Interactions
-                .Where(interaction => interaction.UserId == affinity.UserId && interaction.HostType == InteractionHostType.Scene && interaction.HostId == sceneId && interaction.Kind == InteractionKind.OCount)
+                .Where(interaction => interaction.UserId == affinity.UserId && interaction.HostType == interactionHostType && interaction.HostId == hostId && interaction.Kind == InteractionKind.LikeCount)
                 .OrderByDescending(interaction => interaction.At)
                 .FirstOrDefaultAsync(cancellationToken);
             if (lastInteraction != null)
                 db.Interactions.Remove(lastInteraction);
         }
 
-        scene.OCounter = affinity?.OCount ?? 0;
+        await MirrorLegacyLikeAsync(hostType, hostId, affinity?.LikeCount ?? 0, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
-        return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
+        return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
     }
 
-    public async Task<UserEngagementSnapshot?> ResetSceneOAsync(int sceneId, CancellationToken cancellationToken = default)
+    private async Task<UserEngagementSnapshot?> ResetLikeAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken)
     {
-        var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == sceneId, cancellationToken);
-        if (scene is null)
+        if (!await EntityExistsAsync(hostType, hostId, cancellationToken))
             return null;
 
-        var affinity = await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken);
+        var interactionHostType = ToInteractionHostType(hostType);
+        var affinity = await GetOrCreateAffinityAsync(hostType, hostId, cancellationToken);
         if (affinity != null)
         {
-            affinity.OCount = 0;
+            affinity.LikeCount = 0;
             var interactions = await db.Interactions
-                .Where(interaction => interaction.UserId == affinity.UserId && interaction.HostType == InteractionHostType.Scene && interaction.HostId == sceneId && interaction.Kind == InteractionKind.OCount)
+                .Where(interaction => interaction.UserId == affinity.UserId && interaction.HostType == interactionHostType && interaction.HostId == hostId && interaction.Kind == InteractionKind.LikeCount)
                 .ToListAsync(cancellationToken);
             db.Interactions.RemoveRange(interactions);
         }
 
-        scene.OCounter = 0;
+        await MirrorLegacyLikeAsync(hostType, hostId, 0, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
-        return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
+        return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
     }
 
     /// <summary>
@@ -363,6 +403,10 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         var userId = principalAccessor.Current?.UserId;
         if (!userId.HasValue)
             return false;
+
+        var tracking = await GetTrackingSettingsAsync(userId.Value, cancellationToken);
+        if (!tracking.Enabled)
+            return true;
 
         var now = DateTime.UtcNow;
         if (!TryParseSessionState(dto.State, out var state))
@@ -424,35 +468,56 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         if (mediaDuration > 0) session.MediaDurationSec = mediaDuration;
         if (dto.CurrentPositionSec >= 0) session.LastPositionSec = dto.CurrentPositionSec;
 
-        // Check completion: ended state AND current position is >= 90% of media duration
+        var isFinalState = state is PlaybackSessionState.Ended or PlaybackSessionState.Abandoned;
         var wasCompleted = session.IsCompleted;
-        if (state == PlaybackSessionState.Ended && mediaDuration > 0 && dto.CurrentPositionSec >= mediaDuration * 0.90)
+        var wasCountsAsView = session.CountsAsView;
+        var completedByPosition = isFinalState
+            && hostType == InteractionHostType.Scene
+            && mediaDuration > 0
+            && dto.CurrentPositionSec >= mediaDuration * tracking.ViewCompletionRatio;
+        if (completedByPosition)
         {
             session.IsCompleted = true;
             session.EndedAt ??= now;
         }
-        else if (state == PlaybackSessionState.Ended || state == PlaybackSessionState.Abandoned)
+        else if (isFinalState)
         {
             session.EndedAt ??= now;
         }
 
-        // Update affinity
-        var affinityHostType = hostType == InteractionHostType.Scene ? AffinityHostType.Scene : (AffinityHostType?)null;
-        if (affinityHostType.HasValue)
+        var countsAsView = isFinalState && hostType switch
         {
-            var affinity = await GetOrCreateAffinityAsync(affinityHostType.Value, dto.HostId, cancellationToken);
+            InteractionHostType.Image => session.TotalWatchedSec >= tracking.MinImageDetailViewSeconds,
+            InteractionHostType.Scene => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
+            _ => false,
+        };
+
+        if (countsAsView)
+        {
+            session.CountsAsView = true;
+        }
+
+        // Update affinity
+        if (TryMapAffinityHostType(hostType, out var affinityHostType))
+        {
+            var affinity = await GetOrCreateAffinityAsync(affinityHostType, dto.HostId, cancellationToken);
             if (affinity != null)
             {
                 var delta = session.TotalWatchedSec - prevTotal;
                 if (delta > 0d)
                     affinity.TotalConsumedSec = Math.Max(0d, affinity.TotalConsumedSec + delta);
 
-                if (dto.CurrentPositionSec >= 0)
+                if (hostType == InteractionHostType.Scene && dto.CurrentPositionSec >= 0)
                     affinity.LastPositionSec = dto.CurrentPositionSec;
-                affinity.LastConsumedAt = now;
+
+                if (delta > 0d || countsAsView)
+                    affinity.LastConsumedAt = now;
 
                 if (!wasCompleted && session.IsCompleted)
                     affinity.CompleteCount++;
+
+                if (!wasCountsAsView && session.CountsAsView)
+                    affinity.ViewCount++;
 
                 // Update scene-level resume/duration cache
                 if (hostType == InteractionHostType.Scene)
@@ -464,6 +529,25 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                         scene.PlayDuration = affinity.TotalConsumedSec;
                         scene.LastPlayedAt = now;
                     }
+                }
+
+                if (isFinalState
+                    && !session.DerivedLikeAwarded
+                    && session.TotalWatchedSec >= tracking.MinDerivedLikeSessionSeconds
+                    && !await db.PlaybackSessions.AnyAsync(
+                        other => other.UserId == userId.Value && other.Id != session.Id && other.StartedAt > session.StartedAt,
+                        cancellationToken))
+                {
+                    affinity.DerivedLikeCount++;
+                    session.DerivedLikeAwarded = true;
+                    db.Interactions.Add(new Interaction
+                    {
+                        UserId = userId.Value,
+                        HostType = hostType,
+                        HostId = dto.HostId,
+                        Kind = InteractionKind.DerivedLike,
+                        At = now,
+                    });
                 }
             }
         }
@@ -596,18 +680,18 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 .OrderByDescending(history => history.PlayedAt)
                 .Select(history => history.PlayedAt.ToString("o"))
                 .ToListAsync(cancellationToken);
-            var oHistory = await db.Set<SceneOHistory>()
+            var likeHistory = await db.Set<SceneLikeHistory>()
                 .Where(history => history.SceneId == sceneId)
                 .OrderByDescending(history => history.OccurredAt)
                 .Select(history => history.OccurredAt.ToString("o"))
                 .ToListAsync(cancellationToken);
             var events = playHistory
                 .Select(date => (At: date, Event: new InteractionEventDto("playStart", date)))
-                .Concat(oHistory.Select(date => (At: date, Event: new InteractionEventDto("oCount", date))))
+                .Concat(likeHistory.Select(date => (At: date, Event: new InteractionEventDto("likeCount", date))))
                 .OrderByDescending(item => item.At, StringComparer.Ordinal)
                 .Select(item => item.Event)
                 .ToList();
-            return new SceneHistoryDto(playHistory, oHistory, events);
+            return new SceneHistoryDto(playHistory, likeHistory, events);
         }
 
         var interactions = await db.Interactions
@@ -625,8 +709,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             .OrderByDescending(history => history.PlayedAt)
             .Select(history => history.PlayedAt.ToString("o"))
             .ToListAsync(cancellationToken);
-        var oHistoryForUser = interactions
-            .Where(interaction => interaction.Kind == InteractionKind.OCount)
+        var likeHistoryForUser = interactions
+            .Where(interaction => interaction.Kind == InteractionKind.LikeCount)
             .Select(interaction => interaction.At.ToString("o"))
             .ToList();
         var eventsForUser = interactions
@@ -643,7 +727,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         var sessionsForUser = playbackSessions
             .Select(ToScenePlaybackSessionDto)
             .ToList();
-        return new SceneHistoryDto(playHistoryForUser, oHistoryForUser, eventsForUser, allTimeWatchedIntervals, totalDistinctWatchedSec, sessionsForUser);
+        return new SceneHistoryDto(playHistoryForUser, likeHistoryForUser, eventsForUser, allTimeWatchedIntervals, totalDistinctWatchedSec, sessionsForUser);
     }
 
     private Task<UserEntityAffinity?> GetOrCreateSceneAffinityAsync(int sceneId, CancellationToken cancellationToken, bool createIfMissing = true)
@@ -671,6 +755,71 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         }
 
         return affinity;
+    }
+
+    private async Task<TrackingSettings> GetTrackingSettingsAsync(int userId, CancellationToken cancellationToken)
+    {
+        var rawPreferences = await db.Users
+            .Where(user => user.Id == userId)
+            .Select(user => user.UiPreferencesJson)
+            .FirstOrDefaultAsync(cancellationToken);
+        var preferences = UserService.ParseUiPreferences(rawPreferences)?.Tracking;
+        if (preferences is null)
+            return DefaultTrackingSettings;
+
+        return new TrackingSettings(
+            preferences.Enabled ?? DefaultTrackingSettings.Enabled,
+            Math.Clamp(preferences.MinViewSeconds ?? DefaultTrackingSettings.MinViewSeconds, 0, 86_400),
+            Math.Clamp(preferences.ViewCompletionRatio ?? DefaultTrackingSettings.ViewCompletionRatio, 0.01d, 1d),
+            Math.Clamp(preferences.MinImageDetailViewSeconds ?? DefaultTrackingSettings.MinImageDetailViewSeconds, 0, 86_400),
+            Math.Clamp(preferences.MinDerivedLikeSessionSeconds ?? DefaultTrackingSettings.MinDerivedLikeSessionSeconds, 0, 86_400),
+            Math.Clamp(preferences.SessionIdleTimeoutSec ?? DefaultTrackingSettings.SessionIdleTimeoutSec, 10, 86_400));
+    }
+
+    private static bool TryMapAffinityHostType(InteractionHostType hostType, out AffinityHostType affinityHostType)
+    {
+        affinityHostType = hostType switch
+        {
+            InteractionHostType.Scene => AffinityHostType.Scene,
+            InteractionHostType.Image => AffinityHostType.Image,
+            InteractionHostType.Performer => AffinityHostType.Performer,
+            InteractionHostType.Face => AffinityHostType.Face,
+            InteractionHostType.Tag => AffinityHostType.Tag,
+            InteractionHostType.Studio => AffinityHostType.Studio,
+            InteractionHostType.Gallery => AffinityHostType.Gallery,
+            InteractionHostType.Group => AffinityHostType.Group,
+            _ => default,
+        };
+        return affinityHostType != default;
+    }
+
+    private static InteractionHostType ToInteractionHostType(AffinityHostType hostType) => hostType switch
+    {
+        AffinityHostType.Scene => InteractionHostType.Scene,
+        AffinityHostType.Image => InteractionHostType.Image,
+        AffinityHostType.Performer => InteractionHostType.Performer,
+        AffinityHostType.Face => InteractionHostType.Face,
+        AffinityHostType.Tag => InteractionHostType.Tag,
+        AffinityHostType.Studio => InteractionHostType.Studio,
+        AffinityHostType.Gallery => InteractionHostType.Gallery,
+        AffinityHostType.Group => InteractionHostType.Group,
+        _ => throw new ArgumentOutOfRangeException(nameof(hostType), hostType, null),
+    };
+
+    private async Task MirrorLegacyLikeAsync(AffinityHostType hostType, int hostId, int? value, CancellationToken cancellationToken)
+    {
+        var likeCount = Math.Max(0, value ?? 0);
+        switch (hostType)
+        {
+            case AffinityHostType.Scene:
+                var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
+                if (scene != null) scene.LikeCounter = likeCount;
+                break;
+            case AffinityHostType.Image:
+                var image = await db.Images.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
+                if (image != null) image.LikeCounter = likeCount;
+                break;
+        }
     }
 
     private async Task<UserEngagementSnapshot> BuildSceneSnapshotAsync(int sceneId, Scene scene, UserEntityAffinity? affinity, CancellationToken cancellationToken)
@@ -831,6 +980,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         affinity?.TotalConsumedSec ?? scene?.PlayDuration ?? 0d,
         affinity?.ViewCount ?? scene?.PlayCount ?? 0,
         affinity?.LastConsumedAt ?? scene?.LastPlayedAt,
-        affinity?.OCount ?? scene?.OCounter ?? 0,
+        affinity?.LikeCount ?? scene?.LikeCounter ?? 0,
+        affinity?.DerivedLikeCount ?? 0,
+        affinity?.PageVisitCount ?? 0,
         affinity?.CompleteCount ?? 0);
 }

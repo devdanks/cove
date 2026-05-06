@@ -298,7 +298,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 PlayDuration = 200 + (index % 900),
                 PlayCount = index % 12,
                 LastPlayedAt = baseDate.AddHours(index),
-                OCounter = index % 20,
+                LikeCounter = index % 20,
                 Captions = index % 3 == 0 ? "en" : null,
                 InteractiveSpeed = index % 6 == 0 ? 2 + (index % 3) : null,
                 CreatedAt = baseDate.AddDays(-240 + index),
@@ -311,7 +311,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
             if (index % 4 == 0)
             {
-                scene.OHistory.Add(new SceneOHistory { OccurredAt = baseDate.AddDays(-index) });
+                scene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = baseDate.AddDays(-index) });
             }
 
             scenes.Add(scene);
@@ -405,7 +405,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 Photographer = $"Photographer {index % 10}",
                 Rating = 25 + (index % 70),
                 Organized = index % 3 != 0,
-                OCounter = index % 15,
+                LikeCounter = index % 15,
                 StudioId = studio.Id,
                 Date = DateOnly.FromDateTime(baseDate.AddDays(-160 + index)),
                 CreatedAt = baseDate.AddDays(-200 + index),

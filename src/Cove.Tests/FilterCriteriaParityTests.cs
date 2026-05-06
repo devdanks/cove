@@ -25,7 +25,7 @@ public class FilterCriteriaParityTests
         var filter = new SceneFilter();
         // Original criteria
         Assert.Null(filter.RatingCriterion);
-        Assert.Null(filter.OCounterCriterion);
+        Assert.Null(filter.LikeCounterCriterion);
         Assert.Null(filter.DurationCriterion);
         Assert.Null(filter.ResolutionCriterion);
         Assert.Null(filter.TagsCriterion);
@@ -145,7 +145,7 @@ public class FilterCriteriaParityTests
         Assert.Null(filter.AliasesCriterion);
         Assert.Null(filter.DeathDateCriterion);
         Assert.Null(filter.PlayCountCriterion);
-        Assert.Null(filter.OCounterCriterion);
+        Assert.Null(filter.LikeCounterCriterion);
         Assert.Null(filter.GroupsCriterion);
         Assert.Null(filter.IgnoreAutoTagCriterion);
         Assert.Null(filter.TagCountCriterion);
@@ -567,7 +567,7 @@ public class FilterCriteriaParityTests
             AliasesCriterion = new StringCriterion { Value = "alias1", Modifier = CriterionModifier.Includes },
             DeathDateCriterion = new DateCriterion { Value = "2023-01-01", Modifier = CriterionModifier.IsNull },
             PlayCountCriterion = new IntCriterion { Value = 10, Modifier = CriterionModifier.GreaterThan },
-            OCounterCriterion = new IntCriterion { Value = 5, Modifier = CriterionModifier.LessThan },
+            LikeCounterCriterion = new IntCriterion { Value = 5, Modifier = CriterionModifier.LessThan },
             GroupsCriterion = new MultiIdCriterion { Value = [1], Modifier = CriterionModifier.Includes },
             IgnoreAutoTagCriterion = new BoolCriterion { Value = false },
             TagCountCriterion = new IntCriterion { Value = 3, Modifier = CriterionModifier.Equals }

@@ -54,7 +54,7 @@ describe("filter criteria definitions", () => {
     expect(sceneCriteriaById.get("code")?.label).toBe("Studio Code");
     expect(sceneCriteriaById.get("hash")?.filterKey).toBe("fingerprintCriterion");
     expect(sceneCriteriaById.get("hash")?.options?.map((option) => option.value)).toEqual(["oshash", "md5", "phash"]);
-    expect(sceneCriteriaById.get("oCounter")?.label).toBe("Favorites");
+    expect(sceneCriteriaById.get("likeCounter")?.label).toBe("Likes");
     expect(sceneCriteriaById.has("isMissing")).toBe(false);
     expect(sceneCriteriaById.has("interactive")).toBe(false);
     expect(sceneCriteriaById.has("interactiveSpeed")).toBe(false);
@@ -82,7 +82,7 @@ describe("filter criteria definitions", () => {
     expect(performerCriteriaById.get("galleryCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.has("markerCount")).toBe(false);
     expect(performerCriteriaById.get("playCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
-    expect(performerCriteriaById.get("oCounter")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(performerCriteriaById.get("likeCounter")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.get("careerLength")?.label).toBe("Career Length");
     expect(performerCriteriaById.get("careerLength")?.type).toBe("careerLength");
     expect(performerCriteriaById.get("careerLength")?.modifiers).toBeUndefined();

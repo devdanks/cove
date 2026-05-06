@@ -13,7 +13,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.ImagesRead)]
-public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
 {
     private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
     private static string GetVisibleBasename(string path, string basename) => string.IsNullOrWhiteSpace(basename) ? System.IO.Path.GetFileName(path) : basename;
@@ -181,12 +181,16 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             ? null
             : await tagProvenanceService.GetLookupAsync(AffinityHostType.Image, image.Id, tagIds, cancellationToken);
 
-        return MapToDto(image, null, provenanceLookup);
+        var snapshot = (await engagementService.GetSnapshotsAsync(AffinityHostType.Image, [image.Id], cancellationToken)).GetValueOrDefault(image.Id);
+        return MapToDto(image, null, provenanceLookup, snapshot, principalAccessor?.Current?.UserId != null);
     }
 
-    private ImageDto MapToDto(Image i, int? galleryCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
+    private ImageDto MapToDto(Image i, int? galleryCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
-        i.Rating, i.Organized, i.OCounter, i.StudioId, i.Studio?.Name,
+        preferUserSnapshot ? engagement?.Rating : engagement?.Rating ?? i.Rating,
+        i.Organized,
+        preferUserSnapshot ? engagement?.LikeCount ?? 0 : engagement?.LikeCount ?? i.LikeCounter,
+        i.StudioId, i.Studio?.Name,
         i.Date?.ToString("yyyy-MM-dd"),
         i.Urls.Select(u => u.Url).ToList(),
         i.ImageTags.Where(it => it.Tag != null).Select(it => new TagDto(it.Tag!.Id, it.Tag.Name, it.Tag.Description, it.Tag.Favorite, it.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, it.Tag!.Id))).ToList(),
@@ -206,14 +210,22 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         i.CreatedAt.ToString("o"), i.UpdatedAt.ToString("o")
     );
 
-    private Task<List<ImageDto>> MapListToDtos(IReadOnlyList<Image> items, CancellationToken ct)
+    private async Task<List<ImageDto>> MapListToDtos(IReadOnlyList<Image> items, CancellationToken ct)
     {
-        return Task.FromResult(items.Count == 0 ? [] : items.Select(i => MapListToDto(i, i.GalleryCount)).ToList());
+        if (items.Count == 0)
+            return [];
+
+        var preferUserSnapshot = principalAccessor?.Current?.UserId != null;
+        var snapshots = await engagementService.GetSnapshotsAsync(AffinityHostType.Image, items.Select(item => item.Id), ct);
+        return items.Select(i => MapListToDto(i, i.GalleryCount, snapshots.GetValueOrDefault(i.Id), preferUserSnapshot)).ToList();
     }
 
-    private ImageDto MapListToDto(Image i, int galleryCount) => new(
+    private ImageDto MapListToDto(Image i, int galleryCount, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
-        i.Rating, i.Organized, i.OCounter, i.StudioId, i.Studio?.Name,
+        preferUserSnapshot ? engagement?.Rating : engagement?.Rating ?? i.Rating,
+        i.Organized,
+        preferUserSnapshot ? engagement?.LikeCount ?? 0 : engagement?.LikeCount ?? i.LikeCounter,
+        i.StudioId, i.Studio?.Name,
         i.Date?.ToString("yyyy-MM-dd"),
         i.Urls.Select(u => u.Url).ToList(),
         i.ImageTags.Where(it => it.Tag != null).Select(it => new TagDto(it.Tag!.Id, it.Tag.Name, it.Tag.Description, it.Tag.Favorite, it.Tag.IgnoreAutoTag, [])).ToList(),
@@ -235,40 +247,34 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
 
     // ===== Activity Tracking =====
 
-    [HttpPost("{id:int}/o")]
+    [HttpPost("{id:int}/like")]
     [RequiresPermission(Permissions.ImagesWrite)]
     [RequiresEntityAccess(EntityKinds.Image, Permissions.ImagesWrite)]
-    public async Task<ActionResult<int>> IncrementO(int id, CancellationToken ct)
+    public async Task<ActionResult<int>> IncrementLike(int id, CancellationToken ct)
     {
-        var image = await imageRepo.GetByIdAsync(id, ct);
-        if (image == null) return NotFound();
-        image.OCounter++;
-        await imageRepo.UpdateAsync(image, ct);
-        return Ok(image.OCounter);
+        var snapshot = await engagementService.IncrementImageLikeAsync(id, ct);
+        if (snapshot == null) return NotFound();
+        return Ok(snapshot.LikeCount);
     }
 
-    [HttpDelete("{id:int}/o")]
+    [HttpDelete("{id:int}/like")]
     [RequiresPermission(Permissions.ImagesWrite)]
     [RequiresEntityAccess(EntityKinds.Image, Permissions.ImagesWrite)]
-    public async Task<ActionResult<int>> DecrementO(int id, CancellationToken ct)
+    public async Task<ActionResult<int>> DecrementLike(int id, CancellationToken ct)
     {
-        var image = await imageRepo.GetByIdAsync(id, ct);
-        if (image == null) return NotFound();
-        image.OCounter = Math.Max(0, image.OCounter - 1);
-        await imageRepo.UpdateAsync(image, ct);
-        return Ok(image.OCounter);
+        var snapshot = await engagementService.DecrementImageLikeAsync(id, ct);
+        if (snapshot == null) return NotFound();
+        return Ok(snapshot.LikeCount);
     }
 
-    [HttpPost("{id:int}/o/reset")]
+    [HttpPost("{id:int}/like/reset")]
     [RequiresPermission(Permissions.ImagesWrite)]
     [RequiresEntityAccess(EntityKinds.Image, Permissions.ImagesWrite)]
-    public async Task<ActionResult<int>> ResetO(int id, CancellationToken ct)
+    public async Task<ActionResult<int>> ResetLike(int id, CancellationToken ct)
     {
-        var image = await imageRepo.GetByIdAsync(id, ct);
-        if (image == null) return NotFound();
-        image.OCounter = 0;
-        await imageRepo.UpdateAsync(image, ct);
-        return Ok(image.OCounter);
+        var snapshot = await engagementService.ResetImageLikeAsync(id, ct);
+        if (snapshot == null) return NotFound();
+        return Ok(snapshot.LikeCount);
     }
 
     // ===== Bulk Operations =====

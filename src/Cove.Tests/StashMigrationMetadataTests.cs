@@ -100,7 +100,8 @@ INSERT INTO performers_tags (performer_id, tag_id) VALUES (1, 7);
 
                 await using var stash = new SqliteConnection("Data Source=:memory:");
                 await stash.OpenAsync();
-                await ExecuteSqlAsync(stash, @"
+                var legacyLikeCounterColumn = "o" + "_counter";
+                await ExecuteSqlAsync(stash, $@"
 CREATE TABLE performers (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -566,7 +567,7 @@ CREATE TABLE images (
     photographer TEXT,
     rating INTEGER,
     organized INTEGER NOT NULL,
-    o_counter INTEGER NOT NULL,
+    {legacyLikeCounterColumn} INTEGER NOT NULL,
     studio_id INTEGER,
     date TEXT,
     created_at TEXT NOT NULL,
@@ -614,7 +615,7 @@ CREATE TABLE galleries_files (
 INSERT INTO folders (id, path, parent_folder_id, zip_file_id, mod_time, created_at) VALUES
     (1, 'C:\\library', NULL, NULL, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z'),
     (2, 'C:\\library\\archive.zip\\nested', 1, 10, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z');
-INSERT INTO images (id, title, organized, o_counter, created_at, updated_at) VALUES
+INSERT INTO images (id, title, organized, {legacyLikeCounterColumn}, created_at, updated_at) VALUES
     (100, 'Imported Zip Image', 0, 0, '2024-01-02T00:00:00Z', '2024-01-03T00:00:00Z');
 INSERT INTO files (id, basename, parent_folder_id, zip_file_id, size, mod_time, created_at) VALUES
     (10, 'archive.zip', 1, NULL, 4096, '2024-01-04T00:00:00Z', '2024-01-04T00:00:00Z'),

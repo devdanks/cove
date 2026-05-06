@@ -47,6 +47,7 @@ import type {
   DownloaderPathOverrideConfig,
   IdentifyDefaultsConfig,
   MetadataServerValidationResult,
+  UserTrackingPreferences,
 } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
 import { getScraperSiteKey } from "../components/sceneScrapeUtils";
@@ -68,6 +69,35 @@ import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } fro
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 
 type SettingsTab = "tasks" | "library" | "interface" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
+
+type ResolvedTrackingPreferences = {
+  enabled: boolean;
+  minViewSeconds: number;
+  viewCompletionRatio: number;
+  minImageDetailViewSeconds: number;
+  minDerivedLikeSessionSeconds: number;
+  sessionIdleTimeoutSec: number;
+};
+
+const defaultTrackingPreferences: ResolvedTrackingPreferences = {
+  enabled: true,
+  minViewSeconds: 30,
+  viewCompletionRatio: 0.9,
+  minImageDetailViewSeconds: 5,
+  minDerivedLikeSessionSeconds: 60,
+  sessionIdleTimeoutSec: 120,
+};
+
+function resolveTrackingPreferences(preferences?: UserTrackingPreferences | null): ResolvedTrackingPreferences {
+  return {
+    enabled: preferences?.enabled ?? defaultTrackingPreferences.enabled,
+    minViewSeconds: preferences?.minViewSeconds ?? defaultTrackingPreferences.minViewSeconds,
+    viewCompletionRatio: preferences?.viewCompletionRatio ?? defaultTrackingPreferences.viewCompletionRatio,
+    minImageDetailViewSeconds: preferences?.minImageDetailViewSeconds ?? defaultTrackingPreferences.minImageDetailViewSeconds,
+    minDerivedLikeSessionSeconds: preferences?.minDerivedLikeSessionSeconds ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds,
+    sessionIdleTimeoutSec: preferences?.sessionIdleTimeoutSec ?? defaultTrackingPreferences.sessionIdleTimeoutSec,
+  };
+}
 
 const primaryTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
   { key: "tasks", label: "Tasks", icon: PlayCircle },
@@ -1136,11 +1166,6 @@ export function SettingsPage() {
                   checked={draft.ui.showAbLoopControls}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, showAbLoopControls: checked } }))}
                 />
-                <CheckboxLabel
-                  label="Track activity"
-                  checked={draft.ui.trackActivity}
-                  onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, trackActivity: checked } }))}
-                />
               </div>
             </SectionCard>
 
@@ -1254,10 +1279,7 @@ export function SettingsPage() {
             <ThemeSelector />
             </>
           ) : (
-            <LocalInterfacePanel
-              serverRatingOptions={draftState?.ui.ratingSystemOptions}
-              serverTrackActivity={draftState?.ui.trackActivity}
-            />
+            <LocalInterfacePanel serverRatingOptions={draftState?.ui.ratingSystemOptions} />
           )
         )}
 
@@ -2134,23 +2156,21 @@ export function SettingsPage() {
 
 function LocalInterfacePanel({
   serverRatingOptions,
-  serverTrackActivity = true,
 }: {
   serverRatingOptions?: Partial<RatingSystemOptions> | null;
-  serverTrackActivity?: boolean;
 }) {
   const { authEnabled, user } = useAuth();
   const accountBackedPreferences = supportsServerBackedUiPreferences(user);
   const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
   const [localRatingOverride, setLocalRatingOverride] = useState<RatingSystemOptions | null>(() => readStoredRatingOptionsOverride());
-  const [recordPlaybackHistory, setRecordPlaybackHistory] = useState<boolean>(user?.uiPreferences?.recordPlaybackHistory ?? true);
+  const [trackingPreferences, setTrackingPreferences] = useState<ResolvedTrackingPreferences>(() => resolveTrackingPreferences(user?.uiPreferences?.tracking));
 
   useEffect(() => {
     setLocalRatingOverride(readStoredRatingOptionsOverride());
   }, [serverRatingOptions, user]);
 
   useEffect(() => {
-    setRecordPlaybackHistory(user?.uiPreferences?.recordPlaybackHistory ?? true);
+    setTrackingPreferences(resolveTrackingPreferences(user?.uiPreferences?.tracking));
   }, [user]);
 
   const effectiveRatingOptions = localRatingOverride ?? normalizeRatingOptions(serverRatingOptions ?? defaultRatingSystemOptions);
@@ -2160,11 +2180,16 @@ function LocalInterfacePanel({
     setLocalRatingOverride(nextOptions);
   };
 
-  const updatePlaybackHistory = (checked: boolean) => {
-    setRecordPlaybackHistory(checked);
+  const updateTrackingPreferences = (patch: Partial<ResolvedTrackingPreferences>) => {
+    const nextTracking = {
+      ...defaultTrackingPreferences,
+      ...trackingPreferences,
+      ...patch,
+    };
+    setTrackingPreferences(nextTracking);
     updateAuthenticatedUserUiPreferences((current) => ({
       ...(current ?? {}),
-      recordPlaybackHistory: checked,
+      tracking: nextTracking,
     }));
   };
 
@@ -2226,22 +2251,50 @@ function LocalInterfacePanel({
 
       {accountBackedPreferences ? (
         <SectionCard
-          title={sharedProfilePreferences ? "Shared Playback History" : "Personal Playback History"}
+          title={sharedProfilePreferences ? "Shared Interaction Tracking" : "Personal Interaction Tracking"}
           description={sharedProfilePreferences
-            ? "This preference is stored in Cove's shared built-in profile and controls whether your playback sessions are written back to the server."
-            : "This preference follows your signed-in account and controls whether playback progress and watch history are written back to the server."}
+            ? "These preferences are stored in Cove's shared built-in profile and control activity recording for the current profile."
+            : "These preferences follow your signed-in account and control activity recording for your own profile."}
         >
-          <div className="space-y-3">
+          <div className="space-y-4">
             <CheckboxLabel
-              label="Record playback history"
-              checked={recordPlaybackHistory}
-              onChange={updatePlaybackHistory}
+              label="Enable interaction tracking"
+              checked={trackingPreferences.enabled ?? defaultTrackingPreferences.enabled}
+              onChange={(checked) => updateTrackingPreferences({ enabled: checked })}
             />
-            {!serverTrackActivity ? (
-              <p className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-secondary">
-                System-wide activity tracking is currently disabled, so playback history stays off until that setting is re-enabled.
-              </p>
-            ) : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <NumberField
+                label="Minimum scene view seconds"
+                value={trackingPreferences.minViewSeconds ?? defaultTrackingPreferences.minViewSeconds}
+                min={0}
+                onChange={(value) => updateTrackingPreferences({ minViewSeconds: value ?? defaultTrackingPreferences.minViewSeconds })}
+              />
+              <NumberField
+                label="Scene completion ratio"
+                value={trackingPreferences.viewCompletionRatio ?? defaultTrackingPreferences.viewCompletionRatio}
+                min={0.01}
+                max={1}
+                onChange={(value) => updateTrackingPreferences({ viewCompletionRatio: value ?? defaultTrackingPreferences.viewCompletionRatio })}
+              />
+              <NumberField
+                label="Minimum image view seconds"
+                value={trackingPreferences.minImageDetailViewSeconds ?? defaultTrackingPreferences.minImageDetailViewSeconds}
+                min={0}
+                onChange={(value) => updateTrackingPreferences({ minImageDetailViewSeconds: value ?? defaultTrackingPreferences.minImageDetailViewSeconds })}
+              />
+              <NumberField
+                label="Minimum derived like seconds"
+                value={trackingPreferences.minDerivedLikeSessionSeconds ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds}
+                min={0}
+                onChange={(value) => updateTrackingPreferences({ minDerivedLikeSessionSeconds: value ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds })}
+              />
+              <NumberField
+                label="Session idle timeout seconds"
+                value={trackingPreferences.sessionIdleTimeoutSec ?? defaultTrackingPreferences.sessionIdleTimeoutSec}
+                min={10}
+                onChange={(value) => updateTrackingPreferences({ sessionIdleTimeoutSec: value ?? defaultTrackingPreferences.sessionIdleTimeoutSec })}
+              />
+            </div>
           </div>
         </SectionCard>
       ) : null}

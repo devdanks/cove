@@ -19,7 +19,7 @@ public record SceneDto(
     int Id, string? Title, string? Code, string? Details, string? Director,
     string? Date, int? Rating, bool Organized, int? StudioId, string? StudioName,
     double ResumeTime, double PlayDuration, int PlayCount, string? LastPlayedAt,
-    int OCounter, string? Captions, int? InteractiveSpeed,
+    int LikeCounter, string? Captions, int? InteractiveSpeed,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     List<VideoFileDto> Files,
     List<GroupSummaryDto> Groups, List<GallerySummaryDto> Galleries,
@@ -214,7 +214,7 @@ public record GalleryUpdateDto(string? Title, string? Code, string? Date, string
 
 // ===== IMAGE DTOs =====
 public record ImageDto(int Id, string? Title, string? Code, string? Details, string? Photographer,
-    int? Rating, bool Organized, int OCounter, int? StudioId, string? StudioName, string? Date,
+    int? Rating, bool Organized, int LikeCounter, int? StudioId, string? StudioName, string? Date,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     int GalleryCount, List<int> GalleryIds, List<GallerySummaryDto> Galleries, List<ImageFileDto> Files, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
 
@@ -1326,7 +1326,9 @@ public record EntityEngagementDto(
     double PlayDuration,
     int PlayCount,
     string? LastPlayedAt,
-    int OCount,
+    int LikeCount,
+    int DerivedLikeCount,
+    int PageVisitCount,
     int CompleteCount);
 
 public record EntityRatingsDto(int HostId, Dictionary<string, int> Ratings);
@@ -1351,8 +1353,8 @@ public record EngagementInteractionDto(
 
 public record SceneHistoryDto(
     List<string> PlayHistory,
-    List<string> OHistory,
-    /// <summary>Non-playback engagement events (search, filter, O-count, etc.).</summary>
+    List<string> LikeHistory,
+    /// <summary>Non-playback engagement events (search, filter, likes, etc.).</summary>
     List<InteractionEventDto>? Events = null,
     /// <summary>Merged watched intervals across all sessions (the unique sections this user has ever watched).</summary>
     List<PlaybackIntervalDto>? AllTimeWatchedIntervals = null,

@@ -14,7 +14,7 @@ public class Scene : BaseEntity
     public double PlayDuration { get; set; }
     public int PlayCount { get; set; }
     public DateTime? LastPlayedAt { get; set; }
-    public int OCounter { get; set; }
+    public int LikeCounter { get; set; }
     public string? Captions { get; set; }
     public int? InteractiveSpeed { get; set; }
     public string? ImageBlobId { get; set; }
@@ -55,7 +55,7 @@ public class Scene : BaseEntity
     public ICollection<GroupItem> GroupItems { get; set; } = [];
     public ICollection<SceneRemoteId> RemoteIds { get; set; } = [];
     public ICollection<ScenePlayHistory> PlayHistory { get; set; } = [];
-    public ICollection<SceneOHistory> OHistory { get; set; } = [];
+    public ICollection<SceneLikeHistory> LikeHistory { get; set; } = [];
     public Dictionary<string, object>? CustomFields { get; set; }
 }
 
@@ -108,7 +108,7 @@ public class ScenePlayHistory
     public Scene? Scene { get; set; }
 }
 
-public class SceneOHistory
+public class SceneLikeHistory
 {
     public int Id { get; set; }
     public int SceneId { get; set; }

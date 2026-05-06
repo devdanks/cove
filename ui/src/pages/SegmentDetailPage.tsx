@@ -11,13 +11,14 @@ import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { formatDate } from "../components/shared";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { SegmentVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 
 interface Props {
   id: number;
   onNavigate: (r: any) => void;
 }
 
-type SegmentTab = "overview" | "metadata" | "context" | "spans" | "payload";
+type SegmentTab = "overview" | "metadata" | "context" | "similar" | "spans" | "payload";
 
 export function SegmentDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
@@ -214,6 +215,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
   const tabs = useMemo(() => {
     const baseTabs = [
       { key: "overview", label: "Overview" },
+      { key: "similar", label: "Similar" },
       { key: "metadata", label: canWriteSegments ? "Edit" : "Metadata" },
       { key: "context", label: "Context", count: Math.max(0, orderedSiblingSegments.length - 1) },
     ];
@@ -628,6 +630,10 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
       ? editContent
       : activeTab === "context"
         ? relatedContent
+        : activeTab === "similar"
+          ? segment.hostType === "scene"
+            ? <SegmentVisualSimilarityPanel sceneId={segment.hostId} startSec={segment.startSec} endSec={segment.endSec} onNavigate={onNavigate} />
+            : <EmptyPanel icon={<Film className="h-10 w-10" />} message="Visual similarity is only available for scene-backed segments." />
         : activeTab === "spans"
           ? spansContent
           : activeTab === "payload"
@@ -909,7 +915,7 @@ function SegmentPlaybackPanel({
               captions={file.captions}
               onPlay={() => {}}
               showAbLoop
-              trackActivity={false}
+              trackingEnabled={false}
               clip={{ start: segment.startSec, end: segment.endSec ?? file.duration, loop: true }}
             />
           </div>

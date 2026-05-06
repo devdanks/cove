@@ -71,10 +71,18 @@ public sealed record UserRatingSystemOptionsDto(
     string? Type,
     string? StarPrecision);
 
+public sealed record UserTrackingPreferencesDto(
+    bool? Enabled,
+    int? MinViewSeconds,
+    double? ViewCompletionRatio,
+    int? MinImageDetailViewSeconds,
+    int? MinDerivedLikeSessionSeconds,
+    int? SessionIdleTimeoutSec);
+
 public sealed record UserUiPreferencesDto(
     UserThemePreferencesDto? Theme,
     UserRatingSystemOptionsDto? RatingSystemOptions,
-    bool? RecordPlaybackHistory);
+    UserTrackingPreferencesDto? Tracking);
 
 public sealed record CreateUserRequest(
     string Username,
