@@ -190,6 +190,7 @@ INSERT INTO performer_urls (performer_id, url) VALUES
             service,
             "ImportBlobsAsync",
             stash,
+            null,
             NullJobProgress.Instance,
             0d,
             1d,
