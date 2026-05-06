@@ -1,5 +1,7 @@
+using Cove.Core.Auth;
 using Cove.Data.Auth;
 using Cove.Core.Entities;
+using Cove.Core.Entities.Auth;
 using Cove.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -9,7 +11,9 @@ namespace Cove.PerformanceTests.Infrastructure;
 public sealed class PostgresPerformanceFixture : IAsyncLifetime
 {
     private readonly string _databaseName = $"cove_perf_{Guid.NewGuid():N}";
+    private readonly CurrentPrincipalAccessor _principalAccessor = new();
     private string? _databaseConnectionString;
+    private int? _benchmarkUserId;
     private PostgresSettings? _settings;
 
     public int SampleSceneId { get; private set; }
@@ -68,12 +72,28 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
     public CoveContext CreateContext()
     {
+        if (_benchmarkUserId is int benchmarkUserId)
+        {
+            _principalAccessor.Set(new CovePrincipal
+            {
+                UserId = benchmarkUserId,
+                Username = "perf-user",
+                Kind = PrincipalKind.User,
+                Permissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "*" },
+                Roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            });
+        }
+        else
+        {
+            _principalAccessor.Set(null);
+        }
+
         var options = new DbContextOptionsBuilder<CoveContext>()
             .UseNpgsql(DatabaseConnectionString)
             .EnableDetailedErrors()
             .Options;
 
-        return new CoveContext(options);
+        return new CoveContext(options, _principalAccessor);
     }
 
     private static async Task CreateDatabaseAsync(PostgresSettings settings, string databaseName)
@@ -90,6 +110,18 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
     {
         var baseDate = new DateTime(2024, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         var random = new Random(7331);
+
+        var benchmarkUser = new User
+        {
+            Username = "perf-user",
+            DisplayName = "Performance User",
+            PasswordHash = "not-used",
+            PasswordAlgo = "test",
+            IsActive = true,
+        };
+        db.Users.Add(benchmarkUser);
+        await db.SaveChangesAsync();
+        _benchmarkUserId = benchmarkUser.Id;
 
         var folders = Enumerable.Range(1, 96)
             .Select(index => new Folder
@@ -124,7 +156,6 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
             .Select(index => new Studio
             {
                 Name = $"Studio {index:000}",
-                Rating = 35 + (index % 60),
                 Favorite = index % 4 == 0,
                 Details = $"Studio details {index:000}",
                 IgnoreAutoTag = index % 6 == 0,
@@ -148,7 +179,6 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
             {
                 Name = $"Studio Child {index + 1:000}",
                 Parent = studios[index],
-                Rating = 45 + index,
                 Favorite = index % 2 == 0,
                 Details = $"Child studio details {index + 1:000}",
                 Organized = true,
@@ -171,7 +201,6 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 Weight = 50 + (index % 35),
                 Measurements = $"{30 + index % 6}-{25 + index % 6}-{34 + index % 6}",
                 Favorite = index % 6 == 0,
-                Rating = 40 + (index % 55),
                 Details = $"Performer details {index:000}",
                 CreatedAt = baseDate.AddDays(-220 + index),
                 UpdatedAt = baseDate.AddDays(-16 + index),
@@ -189,14 +218,16 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
         await db.SaveChangesAsync();
 
-        foreach (var (performer, index) in performers.Select((item, idx) => (item, idx)))
+        for (var index = 0; index < performers.Count; index++)
         {
+            var performer = performers[index];
             performer.PerformerTags.Add(new PerformerTag { PerformerId = performer.Id, TagId = tags[index % tags.Count].Id });
             performer.PerformerTags.Add(new PerformerTag { PerformerId = performer.Id, TagId = tags[(index + 5) % tags.Count].Id });
         }
 
-        foreach (var (studio, index) in studios.Select((item, idx) => (item, idx)))
+        for (var index = 0; index < studios.Count; index++)
         {
+            var studio = studios[index];
             studio.StudioTags.Add(new StudioTag { StudioId = studio.Id, TagId = tags[(index + 3) % tags.Count].Id });
             studio.StudioTags.Add(new StudioTag { StudioId = studio.Id, TagId = tags[(index + 11) % tags.Count].Id });
         }
@@ -214,7 +245,6 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 Date = DateOnly.FromDateTime(baseDate.AddDays(-120 + index)),
                 Details = $"Gallery details {index:000}",
                 Photographer = $"Photographer {index % 9}",
-                Rating = 30 + (index % 65),
                 Organized = index % 3 != 0,
                 StudioId = studio.Id,
                 CreatedAt = baseDate.AddDays(-150 + index),
@@ -250,7 +280,6 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 Aliases = $"group-alias-{index:000}",
                 Duration = 600 + (index * 35),
                 Date = DateOnly.FromDateTime(baseDate.AddDays(-100 + index)),
-                Rating = 35 + (index % 60),
                 StudioId = studio.Id,
                 Director = $"Director {index % 8}",
                 Synopsis = $"Group synopsis {index:000}",
@@ -270,12 +299,14 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
         await db.SaveChangesAsync();
 
-        foreach (var (gallery, index) in galleries.Select((item, idx) => (item, idx + 1)))
+        for (var index = 0; index < galleries.Count; index++)
         {
-            gallery.GalleryTags.Add(new GalleryTag { GalleryId = gallery.Id, TagId = tags[index % tags.Count].Id });
-            gallery.GalleryTags.Add(new GalleryTag { GalleryId = gallery.Id, TagId = tags[(index + 7) % tags.Count].Id });
-            gallery.GalleryPerformers.Add(new GalleryPerformer { GalleryId = gallery.Id, PerformerId = performers[index % performers.Count].Id });
-            gallery.GalleryPerformers.Add(new GalleryPerformer { GalleryId = gallery.Id, PerformerId = performers[(index + 9) % performers.Count].Id });
+            var gallery = galleries[index];
+            var galleryOrdinal = index + 1;
+            gallery.GalleryTags.Add(new GalleryTag { GalleryId = gallery.Id, TagId = tags[galleryOrdinal % tags.Count].Id });
+            gallery.GalleryTags.Add(new GalleryTag { GalleryId = gallery.Id, TagId = tags[(galleryOrdinal + 7) % tags.Count].Id });
+            gallery.GalleryPerformers.Add(new GalleryPerformer { GalleryId = gallery.Id, PerformerId = performers[galleryOrdinal % performers.Count].Id });
+            gallery.GalleryPerformers.Add(new GalleryPerformer { GalleryId = gallery.Id, PerformerId = performers[(galleryOrdinal + 9) % performers.Count].Id });
         }
 
         await db.SaveChangesAsync();
@@ -291,14 +322,8 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 Details = $"Scene details {index:000}",
                 Director = $"Director {index % 12}",
                 Date = DateOnly.FromDateTime(baseDate.AddDays(-200 + index)),
-                Rating = 30 + (index % 70),
                 Organized = index % 4 != 0,
                 StudioId = studio.Id,
-                ResumeTime = index % 240,
-                PlayDuration = 200 + (index % 900),
-                PlayCount = index % 12,
-                LastPlayedAt = baseDate.AddHours(index),
-                LikeCounter = index % 20,
                 Captions = index % 3 == 0 ? "en" : null,
                 InteractiveSpeed = index % 6 == 0 ? 2 + (index % 3) : null,
                 CreatedAt = baseDate.AddDays(-240 + index),
@@ -320,23 +345,25 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
         await db.SaveChangesAsync();
 
-        foreach (var (scene, index) in scenes.Select((item, idx) => (item, idx + 1)))
+        for (var index = 0; index < scenes.Count; index++)
         {
-            var gallery = galleries[(index - 1) % galleries.Count];
-            var group = groups[(index - 1) % groups.Count];
+            var scene = scenes[index];
+            var sceneOrdinal = index + 1;
+            var gallery = galleries[index % galleries.Count];
+            var group = groups[index % groups.Count];
 
-            scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tags[index % tags.Count].Id });
-            scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tags[(index + 9) % tags.Count].Id });
-            scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performers[index % performers.Count].Id });
-            scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performers[(index + 11) % performers.Count].Id });
+            scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tags[sceneOrdinal % tags.Count].Id });
+            scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tags[(sceneOrdinal + 9) % tags.Count].Id });
+            scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performers[sceneOrdinal % performers.Count].Id });
+            scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performers[(sceneOrdinal + 11) % performers.Count].Id });
             scene.SceneGalleries.Add(new SceneGallery { SceneId = scene.Id, GalleryId = gallery.Id });
-            scene.GroupItems.Add(new GroupItem { SceneId = scene.Id, GroupId = group.Id, OrderIndex = (index % 8) + 1, Kind = GroupItemKind.Scene });
+            scene.GroupItems.Add(new GroupItem { SceneId = scene.Id, GroupId = group.Id, OrderIndex = (sceneOrdinal % 8) + 1, Kind = GroupItemKind.Scene });
 
-            var fileCount = index % 3 == 0 ? 2 : 1;
+            var fileCount = sceneOrdinal % 3 == 0 ? 2 : 1;
             for (var fileIndex = 0; fileIndex < fileCount; fileIndex++)
             {
-                var folder = folders[(index + fileIndex) % folders.Count];
-                var orientation = (index + fileIndex) % 3;
+                var folder = folders[(sceneOrdinal + fileIndex) % folders.Count];
+                var orientation = (sceneOrdinal + fileIndex) % 3;
                 var (width, height) = orientation switch
                 {
                     0 => (1920, 1080),
@@ -344,51 +371,51 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                     _ => (1400, 1400),
                 };
 
-                var basename = $"scene-{index:000}-{fileIndex:00}.mp4";
+                var basename = $"scene-{sceneOrdinal:000}-{fileIndex:00}.mp4";
                 var videoFile = new VideoFile
                 {
                     SceneId = scene.Id,
                     Basename = basename,
                     ParentFolderId = folder.Id,
                     Path = BaseFileEntity.ComputePath(folder.Path, basename),
-                    Size = 180_000_000L + (index * 450_000L) + (fileIndex * 80_000L),
-                    ModTime = baseDate.AddDays(-30 + index + fileIndex),
+                    Size = 180_000_000L + (sceneOrdinal * 450_000L) + (fileIndex * 80_000L),
+                    ModTime = baseDate.AddDays(-30 + sceneOrdinal + fileIndex),
                     Format = "mp4",
                     Width = width,
                     Height = height,
-                    Duration = 180 + ((index * 11 + fileIndex * 17) % 1_200),
-                    VideoCodec = index % 2 == 0 ? "h264" : "hevc",
-                    AudioCodec = index % 3 == 0 ? "aac" : "opus",
-                    FrameRate = new[] { 23.976, 24.0, 30.0, 60.0 }[(index + fileIndex) % 4],
-                    BitRate = 1_500_000L + (((index + fileIndex) % 6) * 850_000L),
-                    Interactive = (index + fileIndex) % 6 == 0,
-                    InteractiveSpeed = (index + fileIndex) % 6 == 0 ? 2 + ((index + fileIndex) % 3) : null,
+                    Duration = 180 + ((sceneOrdinal * 11 + fileIndex * 17) % 1_200),
+                    VideoCodec = sceneOrdinal % 2 == 0 ? "h264" : "hevc",
+                    AudioCodec = sceneOrdinal % 3 == 0 ? "aac" : "opus",
+                    FrameRate = new[] { 23.976, 24.0, 30.0, 60.0 }[(sceneOrdinal + fileIndex) % 4],
+                    BitRate = 1_500_000L + (((sceneOrdinal + fileIndex) % 6) * 850_000L),
+                    Interactive = (sceneOrdinal + fileIndex) % 6 == 0,
+                    InteractiveSpeed = (sceneOrdinal + fileIndex) % 6 == 0 ? 2 + ((sceneOrdinal + fileIndex) % 3) : null,
                 };
 
-                videoFile.Fingerprints.Add(new FileFingerprint { Type = "md5", Value = $"scene-md5-{index:000}-{fileIndex:00}" });
-                videoFile.Fingerprints.Add(new FileFingerprint { Type = "oshash", Value = $"scene-osh-{index:000}-{fileIndex:00}" });
-                if ((index + fileIndex) % 4 == 0)
+                videoFile.Fingerprints.Add(new FileFingerprint { Type = "md5", Value = $"scene-md5-{sceneOrdinal:000}-{fileIndex:00}" });
+                videoFile.Fingerprints.Add(new FileFingerprint { Type = "oshash", Value = $"scene-osh-{sceneOrdinal:000}-{fileIndex:00}" });
+                if ((sceneOrdinal + fileIndex) % 4 == 0)
                 {
                     videoFile.Captions.Add(new VideoCaption
                     {
                         LanguageCode = "en",
                         CaptionType = "vtt",
-                        Filename = $"scene-{index:000}-{fileIndex:00}.vtt",
+                        Filename = $"scene-{sceneOrdinal:000}-{fileIndex:00}.vtt",
                     });
                 }
 
                 scene.Files.Add(videoFile);
             }
 
-            if (index % 5 == 0)
+            if (sceneOrdinal % 5 == 0)
             {
                 scene.SceneMarkers.Add(new SceneMarker
                 {
                     SceneId = scene.Id,
-                    Title = $"Marker {index:000}",
+                    Title = $"Marker {sceneOrdinal:000}",
                     Seconds = 30,
                     EndSeconds = 45,
-                    PrimaryTagId = tags[index % tags.Count].Id,
+                    PrimaryTagId = tags[sceneOrdinal % tags.Count].Id,
                 });
             }
         }
@@ -403,9 +430,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 Code = $"IMG-{index:000}",
                 Details = $"Image details {index:000}",
                 Photographer = $"Photographer {index % 10}",
-                Rating = 25 + (index % 70),
                 Organized = index % 3 != 0,
-                LikeCounter = index % 15,
                 StudioId = studio.Id,
                 Date = DateOnly.FromDateTime(baseDate.AddDays(-160 + index)),
                 CreatedAt = baseDate.AddDays(-200 + index),
@@ -422,21 +447,23 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
         await db.SaveChangesAsync();
 
-        foreach (var (image, index) in images.Select((item, idx) => (item, idx + 1)))
+        for (var index = 0; index < images.Count; index++)
         {
-            var gallery = galleries[(index + 5) % galleries.Count];
+            var image = images[index];
+            var imageOrdinal = index + 1;
+            var gallery = galleries[(imageOrdinal + 5) % galleries.Count];
 
-            image.ImageTags.Add(new ImageTag { ImageId = image.Id, TagId = tags[(index + 2) % tags.Count].Id });
-            image.ImageTags.Add(new ImageTag { ImageId = image.Id, TagId = tags[(index + 14) % tags.Count].Id });
-            image.ImagePerformers.Add(new ImagePerformer { ImageId = image.Id, PerformerId = performers[(index + 1) % performers.Count].Id });
-            image.ImagePerformers.Add(new ImagePerformer { ImageId = image.Id, PerformerId = performers[(index + 7) % performers.Count].Id });
+            image.ImageTags.Add(new ImageTag { ImageId = image.Id, TagId = tags[(imageOrdinal + 2) % tags.Count].Id });
+            image.ImageTags.Add(new ImageTag { ImageId = image.Id, TagId = tags[(imageOrdinal + 14) % tags.Count].Id });
+            image.ImagePerformers.Add(new ImagePerformer { ImageId = image.Id, PerformerId = performers[(imageOrdinal + 1) % performers.Count].Id });
+            image.ImagePerformers.Add(new ImagePerformer { ImageId = image.Id, PerformerId = performers[(imageOrdinal + 7) % performers.Count].Id });
             image.ImageGalleries.Add(new ImageGallery { ImageId = image.Id, GalleryId = gallery.Id });
 
-            var fileCount = index % 4 == 0 ? 2 : 1;
+            var fileCount = imageOrdinal % 4 == 0 ? 2 : 1;
             for (var fileIndex = 0; fileIndex < fileCount; fileIndex++)
             {
-                var folder = folders[(index * 3 + fileIndex) % folders.Count];
-                var orientation = (index + fileIndex + 1) % 3;
+                var folder = folders[(imageOrdinal * 3 + fileIndex) % folders.Count];
+                var orientation = (imageOrdinal + fileIndex + 1) % 3;
                 var (width, height) = orientation switch
                 {
                     0 => (2400, 1600),
@@ -444,21 +471,21 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                     _ => (1500, 1500),
                 };
 
-                var basename = $"image-{index:000}-{fileIndex:00}.jpg";
+                var basename = $"image-{imageOrdinal:000}-{fileIndex:00}.jpg";
                 var imageFile = new ImageFile
                 {
                     ImageId = image.Id,
                     Basename = basename,
                     ParentFolderId = folder.Id,
                     Path = BaseFileEntity.ComputePath(folder.Path, basename),
-                    Size = 8_000_000L + (index * 75_000L) + (fileIndex * 10_000L),
-                    ModTime = baseDate.AddDays(-20 + index + fileIndex),
+                    Size = 8_000_000L + (imageOrdinal * 75_000L) + (fileIndex * 10_000L),
+                    ModTime = baseDate.AddDays(-20 + imageOrdinal + fileIndex),
                     Format = "jpg",
                     Width = width,
                     Height = height,
                 };
 
-                imageFile.Fingerprints.Add(new FileFingerprint { Type = "md5", Value = $"image-md5-{index:000}-{fileIndex:00}" });
+                imageFile.Fingerprints.Add(new FileFingerprint { Type = "md5", Value = $"image-md5-{imageOrdinal:000}-{fileIndex:00}" });
                 image.Files.Add(imageFile);
             }
         }
@@ -472,6 +499,60 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
         await db.SaveChangesAsync();
 
+        var benchmarkUserId = _benchmarkUserId ?? throw new InvalidOperationException("Benchmark user was not initialized.");
+
+        for (var index = 0; index < studios.Count; index++)
+        {
+            var studio = studios[index];
+            var rating = index < 18 ? 35 + ((index + 1) % 60) : 45 + (index - 18);
+            AddRating(db, benchmarkUserId, RatingHostType.Studio, studio.Id, rating);
+        }
+
+        for (var index = 0; index < performers.Count; index++)
+        {
+            var performer = performers[index];
+            AddRating(db, benchmarkUserId, RatingHostType.Performer, performer.Id, 40 + ((index + 1) % 55));
+        }
+
+        for (var index = 0; index < galleries.Count; index++)
+        {
+            var gallery = galleries[index];
+            AddRating(db, benchmarkUserId, RatingHostType.Gallery, gallery.Id, 30 + ((index + 1) % 65));
+        }
+
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var group = groups[index];
+            AddRating(db, benchmarkUserId, RatingHostType.Group, group.Id, 35 + ((index + 1) % 60));
+        }
+
+        for (var index = 0; index < scenes.Count; index++)
+        {
+            var scene = scenes[index];
+            var sceneOrdinal = index + 1;
+            AddRating(db, benchmarkUserId, RatingHostType.Scene, scene.Id, 30 + (sceneOrdinal % 70));
+            AddAffinity(
+                db,
+                benchmarkUserId,
+                AffinityHostType.Scene,
+                scene.Id,
+                viewCount: sceneOrdinal % 12,
+                totalConsumedSec: 200 + (sceneOrdinal % 900),
+                lastPositionSec: sceneOrdinal % 240,
+                lastConsumedAt: baseDate.AddHours(sceneOrdinal),
+                likeCount: sceneOrdinal % 20);
+        }
+
+        for (var index = 0; index < images.Count; index++)
+        {
+            var image = images[index];
+            var imageOrdinal = index + 1;
+            AddRating(db, benchmarkUserId, RatingHostType.Image, image.Id, 25 + (imageOrdinal % 70));
+            AddAffinity(db, benchmarkUserId, AffinityHostType.Image, image.Id, likeCount: imageOrdinal % 15);
+        }
+
+        await db.SaveChangesAsync();
+
         SampleSceneId = scenes[random.Next(scenes.Count)].Id;
         SampleImageId = images[random.Next(images.Count)].Id;
         SampleTagId = tags[random.Next(tags.Count)].Id;
@@ -481,6 +562,42 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
         SampleGroupId = groups[random.Next(groups.Count)].Id;
 
         db.ChangeTracker.Clear();
+    }
+
+    private static void AddRating(CoveContext db, int userId, RatingHostType hostType, int hostId, int value)
+    {
+        db.Ratings.Add(new Rating
+        {
+            UserId = userId,
+            HostType = hostType,
+            HostId = hostId,
+            Aspect = "overall",
+            Value = value,
+        });
+    }
+
+    private static void AddAffinity(
+        CoveContext db,
+        int userId,
+        AffinityHostType hostType,
+        int hostId,
+        int viewCount = 0,
+        double totalConsumedSec = 0,
+        double? lastPositionSec = null,
+        DateTime? lastConsumedAt = null,
+        int likeCount = 0)
+    {
+        db.UserEntityAffinities.Add(new UserEntityAffinity
+        {
+            UserId = userId,
+            HostType = hostType,
+            HostId = hostId,
+            ViewCount = viewCount,
+            TotalConsumedSec = totalConsumedSec,
+            LastPositionSec = lastPositionSec,
+            LastConsumedAt = lastConsumedAt,
+            LikeCount = likeCount,
+        });
     }
 
     private static async Task EnsureCompatibilityColumnsAsync(CoveContext db)
