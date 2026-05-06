@@ -21,7 +21,7 @@ import type {
   SegmentDisplayRule, SegmentDisplayRuleCreate, SegmentDisplayRuleUpdate,
   SegmentSpanQueryRequest, SegmentSpanSearchRequest, SegmentSpanSearchResponse,
   Detection, DetectionCreate, DetectionUpdate,
-  Face, FaceCreate, FaceUpdate, FaceLink, FaceMerge, FaceIgnore, FaceDeleteImpact, FaceSimilar, FaceSuggestion,
+  Face, FaceAppearance, FaceAppearancesResponse, FaceCreate, FaceUpdate, FaceLink, FaceBatchLinkTopSuggestionRequest, FaceBatchDeleteRequest, FaceBatchOperationResult, FaceCreatePerformer, FaceHostFace, FaceMerge, FaceIgnore, FaceDeleteImpact, FaceSimilar, FaceSuggestion,
   EntityEngagement, EntityFavorite, EntityEngagementBatchRequest, EntityRatings,
   EngagementInteraction, EngagementInteractionWrite,
   SceneHistory,
@@ -411,40 +411,64 @@ export const segmentLibrary = {
 
 // ===== Faces =====
 export const faces: {
-  list: (opts?: { q?: string; performerId?: number; ignored?: boolean; merged?: boolean; page?: number; perPage?: number }) => Promise<PaginatedResponse<Face>>;
+  list: (opts?: { q?: string; performerId?: number; linked?: boolean; ignored?: boolean; merged?: boolean; sort?: string; page?: number; perPage?: number }) => Promise<PaginatedResponse<Face>>;
   get: (id: number) => Promise<Face>;
+  appearances: (id: number, opts?: { q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) => Promise<PaginatedResponse<FaceAppearance>>;
+  sceneFaces: (sceneId: number) => Promise<FaceHostFace[]>;
+  imageFaces: (imageId: number) => Promise<FaceHostFace[]>;
+  performerFaces: (performerId: number) => Promise<Face[]>;
+  reviewUnlinked: (take?: number) => Promise<Face[]>;
+  reviewAiRun: (opts: { startedAt: string; completedAt: string; take?: number }) => Promise<Face[]>;
   detections: (id: number) => Promise<Detection[]>;
   deleteImpact: (id: number) => Promise<FaceDeleteImpact>;
   create: (data: FaceCreate) => Promise<Face>;
   update: (id: number, data: FaceUpdate) => Promise<Face>;
   delete: (id: number) => Promise<void>;
+  batchLinkTopSuggestion: (data: FaceBatchLinkTopSuggestionRequest) => Promise<FaceBatchOperationResult>;
+  batchDelete: (data: FaceBatchDeleteRequest) => Promise<FaceBatchOperationResult>;
+  createPerformer: (id: number, data: FaceCreatePerformer) => Promise<Face>;
   link: (id: number, data: FaceLink) => Promise<Face>;
   mergeInto: (id: number, data: FaceMerge) => Promise<Face>;
   setIgnored: (id: number, data: FaceIgnore) => Promise<Face>;
-  similar: (id: number, opts?: { kindFamily?: string; k?: number }) => Promise<FaceSimilar[]>;
+  similar: (id: number, opts?: { kindFamily?: string; k?: number; q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) => Promise<PaginatedResponse<FaceSimilar>>;
   suggestions: (id: number, maxResults?: number) => Promise<FaceSuggestion[]>;
-  recordSuggestionDecision: (id: number, data: { performerId: number; decision: "accept" | "reject" }) => Promise<void>;
+  recordSuggestionDecision: (id: number, data: { performerId: number; decision: "accept" | "reject"; setPerformerImage?: boolean }) => Promise<void>;
 } = {
-  list: (opts?: { q?: string; performerId?: number; ignored?: boolean; merged?: boolean; page?: number; perPage?: number }) =>
+  list: (opts?: { q?: string; performerId?: number; linked?: boolean; ignored?: boolean; merged?: boolean; sort?: string; page?: number; perPage?: number }) =>
     request<PaginatedResponse<Face>>(`/faces${buildQuery({ page: opts?.page, perPage: opts?.perPage, q: opts?.q }, {
       performerId: opts?.performerId,
+      linked: opts?.linked,
       ignored: opts?.ignored,
       merged: opts?.merged,
+      sort: opts?.sort,
     })}`),
   get: (id: number) => request<Face>(`/faces/${id}`),
+  appearances: (id: number, opts?: { q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) =>
+    request<PaginatedResponse<FaceAppearance>>(`/faces/${id}/appearances${buildQuery({ page: opts?.page, perPage: opts?.perPage, q: opts?.q }, { sort: opts?.sort, direction: opts?.direction })}`),
+  sceneFaces: (sceneId: number) => request<FaceHostFace[]>(`/scenes/${sceneId}/faces`),
+  imageFaces: (imageId: number) => request<FaceHostFace[]>(`/images/${imageId}/faces`),
+  performerFaces: (performerId: number) => request<Face[]>(`/performers/${performerId}/faces`),
+  reviewUnlinked: (take?: number) => request<Face[]>(`/faces/review/unlinked${buildQuery(undefined, { take })}`),
+  reviewAiRun: (opts: { startedAt: string; completedAt: string; take?: number }) =>
+    request<Face[]>(`/faces/review/ai-run${buildQuery(undefined, { startedAt: opts.startedAt, completedAt: opts.completedAt, take: opts.take })}`),
   detections: (id: number) => request<Detection[]>(`/faces/${id}/detections`),
   deleteImpact: (id: number) => request<FaceDeleteImpact>(`/faces/${id}/delete-impact`),
   create: (data: FaceCreate) => request<Face>("/faces", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: FaceUpdate) => request<Face>(`/faces/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/faces/${id}`, { method: "DELETE" }),
+  batchLinkTopSuggestion: (data: FaceBatchLinkTopSuggestionRequest) =>
+    request<FaceBatchOperationResult>("/faces/batch/link-top-suggestion", { method: "POST", body: JSON.stringify(data) }),
+  batchDelete: (data: FaceBatchDeleteRequest) =>
+    request<FaceBatchOperationResult>("/faces/batch/delete", { method: "POST", body: JSON.stringify(data) }),
+  createPerformer: (id: number, data: FaceCreatePerformer) => request<Face>(`/faces/${id}/create-performer`, { method: "POST", body: JSON.stringify(data) }),
   link: (id: number, data: FaceLink) => request<Face>(`/faces/${id}/link`, { method: "POST", body: JSON.stringify(data) }),
   mergeInto: (id: number, data: FaceMerge) => request<Face>(`/faces/${id}/merge-into`, { method: "POST", body: JSON.stringify(data) }),
   setIgnored: (id: number, data: FaceIgnore) => request<Face>(`/faces/${id}/ignore`, { method: "POST", body: JSON.stringify(data) }),
-  similar: (id: number, opts?: { kindFamily?: string; k?: number }) =>
-    request<FaceSimilar[]>(`/faces/${id}/similar${buildQuery(undefined, { kindFamily: opts?.kindFamily, k: opts?.k })}`),
+  similar: (id: number, opts?: { kindFamily?: string; k?: number; q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) =>
+    request<PaginatedResponse<FaceSimilar>>(`/faces/${id}/similar${buildQuery({ page: opts?.page, perPage: opts?.perPage, q: opts?.q }, { kindFamily: opts?.kindFamily, k: opts?.k, sort: opts?.sort, direction: opts?.direction })}`),
   suggestions: (id: number, maxResults?: number) =>
     request<FaceSuggestion[]>(`/faces/${id}/suggestions${buildQuery(undefined, { maxResults })}`),
-  recordSuggestionDecision: (id: number, data: { performerId: number; decision: "accept" | "reject" }) =>
+  recordSuggestionDecision: (id: number, data: { performerId: number; decision: "accept" | "reject"; setPerformerImage?: boolean }) =>
     request<void>(`/faces/${id}/suggestions/decision`, { method: "POST", body: JSON.stringify(data) }),
 };
 
@@ -526,6 +550,13 @@ export const tags = {
 export const aiData = {
   summary: (selector?: AiDataSelector) => request<AiDataSummary>(`/ai-data/summary${buildAiDataQuery(selector)}`),
   purge: (request_: AiDataPurgeRequest) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(request_) }),
+};
+
+export const aiVisual = {
+  searchScenes: (req: FilteredQueryRequest<SceneFilterCriteria>) =>
+    request<PaginatedResponse<Scene>>("/ext/ai-visual/scenes/search", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
+  searchImages: (req: FilteredQueryRequest<ImageFilterCriteria>) =>
+    request<PaginatedResponse<Image>>("/ext/ai-visual/images/search", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
 };
 
 // ===== Studios =====

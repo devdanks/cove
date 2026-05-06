@@ -672,7 +672,40 @@ public record FaceUpdateDto(
     bool Ignored,
     string? PrimarySourceKey);
 
-public record FaceLinkDto(int? PerformerId);
+public record FaceLinkDto(int? PerformerId, bool SetPerformerImage = false);
+
+public record FaceBatchLinkTopSuggestionDto(
+    IReadOnlyList<int> FaceIds,
+    float? MinConfidence = null);
+
+public record FaceBatchDeleteDto(IReadOnlyList<int> FaceIds);
+
+public record FaceBatchOperationResultDto(
+    IReadOnlyList<int> Succeeded,
+    IReadOnlyList<FaceBatchSkippedDto> Skipped,
+    IReadOnlyList<FaceBatchFailedDto> Failed);
+
+public record FaceBatchSkippedDto(int FaceId, string Reason);
+
+public record FaceBatchFailedDto(int FaceId, string Error);
+
+public record FaceCreatePerformerDto(
+    string Name,
+    bool SetPerformerImage = true);
+
+public record FaceHostFaceDto(
+    int Id,
+    string? Label,
+    int? PerformerId,
+    string? PerformerName,
+    string? CoverImageUrl,
+    int AppearanceCount,
+    int FrameSampleCount,
+    int SceneCount,
+    int ImageCount,
+    double? FirstSeenAtSec,
+    double? LastSeenAtSec,
+    float? TopConfidence);
 
 public record FaceMergeDto(int TargetFaceId);
 
@@ -687,7 +720,8 @@ public record FaceDeleteImpactDto(
 
 public record FaceSuggestionDecisionDto(
     int PerformerId,
-    string Decision);
+    string Decision,
+    bool SetPerformerImage = false);
 
 public record FaceSuggestionEvidenceDto(
     int FaceId,
@@ -702,7 +736,9 @@ public record FaceSuggestionDto(
     string Why,
     IReadOnlyList<FaceSuggestionEvidenceDto> Evidence,
     int? LocalPerformerId = null,
-    string? ExternalUrl = null);
+    string? ExternalUrl = null,
+    bool LocalPerformerHasImage = false,
+    bool LocalPerformerIsLocalOnly = false);
 
 public record FaceSimilarDto(
     int Id,
@@ -710,6 +746,16 @@ public record FaceSimilarDto(
     int? PerformerId,
     string? PerformerName,
     string? CoverImageUrl,
+    bool Ignored,
+    int? MergedIntoFaceId,
+    int DetectionCount,
+    int SceneCount,
+    int ImageCount,
+    string? PrimarySourceKey,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    int AppearanceCount,
+    int FrameSampleCount,
     float Distance);
 
 public record EmbeddingDto(

@@ -144,7 +144,15 @@ public sealed class FaceSuggestionControllerTests
     private static FacesController CreateController(CoveContext context, CurrentPrincipalAccessor principalAccessor, params IFaceSuggester[] suggesters)
     {
         var embeddingService = new EmbeddingService(context, []);
-        return new FacesController(context, embeddingService, new StubBlobService(), [], NullLogger<FacesController>.Instance, suggesters, principalAccessor);
+        return new FacesController(
+            context,
+            embeddingService,
+            new StubBlobService(),
+            new FacePerformerPropagationService(context),
+            [],
+            NullLogger<FacesController>.Instance,
+            suggesters,
+            principalAccessor);
     }
 
     private static void SetCurrentUser(CurrentPrincipalAccessor principalAccessor, int userId, string username)

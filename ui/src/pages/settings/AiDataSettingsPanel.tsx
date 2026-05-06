@@ -70,8 +70,7 @@ export function AiDataSettingsPanel() {
     mutationFn: (payload: AiDataPurgeRequest) => aiData.purge(payload),
     onSuccess: async () => {
       setConfirmOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["ai-data", "summary"] });
-      await queryClient.invalidateQueries({ queryKey: ["ai-data", "purge-preview"] });
+      await queryClient.invalidateQueries();
       setPreviewSelector(selector);
       setPreviewKey(selectorKey);
     },

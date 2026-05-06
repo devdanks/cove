@@ -17,7 +17,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type SegmentTab = "overview" | "edit" | "related" | "spans";
+type SegmentTab = "overview" | "metadata" | "context" | "spans" | "payload";
 
 export function SegmentDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
@@ -214,13 +214,15 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
   const tabs = useMemo(() => {
     const baseTabs = [
       { key: "overview", label: "Overview" },
-      { key: "edit", label: canWriteSegments ? "Edit" : "Details" },
-      { key: "related", label: "Related", count: Math.max(0, orderedSiblingSegments.length - 1) },
+      { key: "metadata", label: canWriteSegments ? "Edit" : "Metadata" },
+      { key: "context", label: "Context", count: Math.max(0, orderedSiblingSegments.length - 1) },
     ];
 
     if (hasResolvedSpanPreview) {
       baseTabs.push({ key: "spans", label: "Resolved Spans", count: containingSpans?.spans.length ?? 0 });
     }
+
+    baseTabs.push({ key: "payload", label: "Payload" });
 
     return baseTabs;
   }, [canWriteSegments, containingSpans?.spans.length, hasResolvedSpanPreview, orderedSiblingSegments.length]);
@@ -234,7 +236,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
         key: "e",
         description: canWriteSegments ? "Edit segment" : "Open segment details",
         handler: () => {
-          setActiveTab("edit");
+          setActiveTab("metadata");
           if (canWriteSegments) {
             window.setTimeout(() => titleInputRef.current?.focus(), 0);
           }
@@ -302,54 +304,6 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
         onNavigate={onNavigate}
         showHeading={false}
       />
-
-      <section className="rounded-2xl border border-border bg-card/70 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Scene Context Snapshot</h2>
-            <p className="mt-1 text-sm text-secondary">
-              {sceneContext.currentIndex >= 0
-                ? `Segment ${sceneContext.currentIndex + 1} of ${orderedSiblingSegments.length} in this scene timeline.`
-                : "Open related segments to browse the rest of this scene timeline."}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setActiveTab("related")}
-            className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-          >
-            Open related segments
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <SegmentContextSection
-            title="Previous Segment"
-            items={previousSegment ? [previousSegment] : []}
-            onNavigate={onNavigate}
-            emptyMessage="This is the first segment in the scene."
-            compact
-          />
-          <SegmentContextSection
-            title="Next Segment"
-            items={nextSegment ? [nextSegment] : []}
-            onNavigate={onNavigate}
-            emptyMessage="This is the last segment in the scene."
-            compact
-          />
-        </div>
-      </section>
-
-      <details className="rounded-2xl border border-border bg-card/70 p-5">
-        <summary className="cursor-pointer list-none text-sm font-semibold uppercase tracking-wide text-muted">
-          Payload
-        </summary>
-        {payloadText ? (
-          <pre className="mt-4 overflow-x-auto rounded-xl border border-border bg-surface/70 p-4 text-xs text-secondary">{payloadText}</pre>
-        ) : (
-          <EmptyPanel icon={<Bookmark className="h-10 w-10" />} message="No payload is stored on this segment." />
-        )}
-      </details>
     </div>
   );
 
@@ -655,14 +609,30 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
     </section>
   ) : null;
 
+  const payloadContent = (
+    <section className="rounded-2xl border border-border bg-card/70 p-5">
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Payload</h2>
+        <p className="mt-1 text-sm text-secondary">Raw segment payload as stored by the source that created or updated this record.</p>
+      </div>
+      {payloadText ? (
+        <pre className="mt-4 overflow-x-auto rounded-xl border border-border bg-surface/70 p-4 text-xs text-secondary">{payloadText}</pre>
+      ) : (
+        <EmptyPanel icon={<Bookmark className="h-10 w-10" />} message="No payload is stored on this segment." />
+      )}
+    </section>
+  );
+
   const activeContent =
-    activeTab === "edit"
+    activeTab === "metadata"
       ? editContent
-      : activeTab === "related"
+      : activeTab === "context"
         ? relatedContent
         : activeTab === "spans"
           ? spansContent
-          : overviewContent;
+          : activeTab === "payload"
+            ? payloadContent
+            : overviewContent;
 
   return (
     <MediaDetailLayout
@@ -712,7 +682,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
           ) : null}
           <button
             type="button"
-            onClick={() => setActiveTab("edit")}
+            onClick={() => setActiveTab("metadata")}
             className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
           >
             <Pencil className="h-4 w-4" />

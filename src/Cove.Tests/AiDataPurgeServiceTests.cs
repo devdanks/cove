@@ -1,14 +1,17 @@
 using System.Text.Json;
 
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
+using Cove.Data.Services;
 
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Cove.Tests;
@@ -168,6 +171,182 @@ public sealed class AiDataPurgeServiceTests
         Assert.Single(await db.TagApplications.ToListAsync());
         Assert.Single(await db.Set<SceneTag>().ToListAsync());
         Assert.Equal(manualTag.Id, (await db.Set<SceneTag>().SingleAsync()).TagId);
+    }
+
+    [Fact]
+    public async Task PurgeAsync_RemovesAiRunWhenPurgedArtifactsLeaveNoRemainingRunData()
+    {
+        await using var environment = await CreateEnvironmentAsync();
+        var db = environment.Context;
+
+        var scene = new Scene { Title = "Face Scene" };
+        db.Scenes.Add(scene);
+        await db.SaveChangesAsync();
+
+        db.AiRuns.Add(new AiRun
+        {
+            RunKey = "run-face-purge",
+            SourceKey = "ext:ai.core",
+            TargetType = AiRunTargetType.Scene,
+            TargetId = scene.Id,
+            Status = AiRunStatus.Completed,
+            Models = JsonDocument.Parse("""
+                [
+                  { "config_name": "face_detector_torchexport" },
+                  { "config_name": "face_embedding_torchexport" }
+                ]
+                """),
+        });
+        db.Set<Detection>().Add(new Detection
+        {
+            HostType = DetectionHostType.Scene,
+            HostId = scene.Id,
+            Class = "face",
+            Score = 0.92f,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-face-purge",
+            Extra = JsonDocument.Parse("""{ "modelKey": "face_detector_torchexport" }"""),
+        });
+        db.Embeddings.Add(new Embedding
+        {
+            HostType = EmbeddingHostType.Scene,
+            HostId = scene.Id,
+            Kind = "face",
+            Modality = EmbeddingModality.Face,
+            Dim = 2,
+            Vector = new Pgvector.Vector(new float[] { 0.1f, 0.2f }),
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-face-purge",
+            Meta = JsonDocument.Parse("""{ "modelKey": "face_embedding_torchexport" }"""),
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.PurgeAsync(new AiDataSelectorDto("ext:ai.faces", null, null, null, "scene", scene.Id, ["embedding", "detection"]));
+
+        Assert.Equal(1, result.RemovedCounts["embedding"]);
+        Assert.Equal(1, result.RemovedCounts["detection"]);
+        Assert.Equal(1, result.RemovedCounts["aiRun"]);
+        Assert.Empty(await db.Embeddings.ToListAsync());
+        Assert.Empty(await db.Set<Detection>().ToListAsync());
+        Assert.Empty(await db.AiRuns.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PurgeAsync_KeepsAiRunWhenOtherArtifactsStillReferenceRun()
+    {
+        await using var environment = await CreateEnvironmentAsync();
+        var db = environment.Context;
+
+        var scene = new Scene { Title = "Mixed Scene" };
+        db.Scenes.Add(scene);
+        await db.SaveChangesAsync();
+
+        db.AiRuns.Add(new AiRun
+        {
+            RunKey = "run-mixed-purge",
+            SourceKey = "ext:ai.core",
+            TargetType = AiRunTargetType.Scene,
+            TargetId = scene.Id,
+            Status = AiRunStatus.Completed,
+            Models = JsonDocument.Parse("""
+                [
+                  { "config_name": "face_detector_torchexport" },
+                  { "config_name": "metaclip2_base" }
+                ]
+                """),
+        });
+        db.Set<Detection>().Add(new Detection
+        {
+            HostType = DetectionHostType.Scene,
+            HostId = scene.Id,
+            Class = "face",
+            Score = 0.92f,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-mixed-purge",
+            Extra = JsonDocument.Parse("""{ "modelKey": "face_detector_torchexport" }"""),
+        });
+        db.Segments.Add(new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 0,
+            EndSec = 5,
+            Kind = "visual.section",
+            SourceKey = "ext:ai.visual",
+            SourceRunId = "run-mixed-purge",
+            Payload = JsonDocument.Parse("""{ "modelKey": "metaclip2_base" }"""),
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.PurgeAsync(new AiDataSelectorDto("ext:ai.faces", null, null, null, "scene", scene.Id, ["detection"]));
+
+        Assert.Equal(1, result.RemovedCounts["detection"]);
+        Assert.False(result.RemovedCounts.ContainsKey("aiRun"));
+        Assert.Empty(await db.Set<Detection>().ToListAsync());
+        Assert.Single(await db.Segments.ToListAsync());
+        Assert.Single(await db.AiRuns.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PurgeAsync_RemovesSelectedAiRunWhenNoArtifactsRemain()
+    {
+        await using var environment = await CreateEnvironmentAsync();
+        var db = environment.Context;
+
+        var scene = new Scene { Title = "Empty AI Scene" };
+        db.Scenes.Add(scene);
+        await db.SaveChangesAsync();
+
+        db.AiRuns.Add(new AiRun
+        {
+            RunKey = "run-empty-face-purge",
+            SourceKey = "ext:ai.core",
+            TargetType = AiRunTargetType.Scene,
+            TargetId = scene.Id,
+            Status = AiRunStatus.Completed,
+            Models = JsonDocument.Parse("""
+                [
+                  { "config_name": "face_detector_torchexport" },
+                  { "config_name": "face_embedding_torchexport" }
+                ]
+                """),
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.PurgeAsync(new AiDataSelectorDto("ext:ai.faces", null, null, null, "scene", scene.Id, ["embedding", "detection", "segment", "face"]));
+
+        Assert.Equal(1, result.RemovedCounts["aiRun"]);
+        Assert.Empty(await db.AiRuns.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PurgeAsync_DryRunCountsSelectedAiRunWhenNoArtifactsRemain()
+    {
+        await using var environment = await CreateEnvironmentAsync();
+        var db = environment.Context;
+
+        var scene = new Scene { Title = "Empty AI Scene" };
+        db.Scenes.Add(scene);
+        await db.SaveChangesAsync();
+
+        db.AiRuns.Add(new AiRun
+        {
+            RunKey = "run-empty-face-preview",
+            SourceKey = "ext:ai.core",
+            TargetType = AiRunTargetType.Scene,
+            TargetId = scene.Id,
+            Status = AiRunStatus.Completed,
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.PurgeAsync(new AiDataSelectorDto("ext:ai.faces", null, null, null, "scene", scene.Id, ["embedding", "detection", "segment", "face"]), dryRun: true);
+
+        Assert.Equal(1, result.RemovedCounts["aiRun"]);
+        Assert.Single(await db.AiRuns.ToListAsync());
     }
 
     [Fact]
@@ -380,6 +559,104 @@ public sealed class AiDataPurgeServiceTests
     }
 
     [Fact]
+    public async Task PurgeAsync_ByAiFacesSource_RemovesFacesResolvedFromAppearances()
+    {
+        await using var environment = await CreateEnvironmentAsync();
+        var db = environment.Context;
+
+        var scene = new Scene { Title = "Face Scene" };
+        db.Scenes.Add(scene);
+        await db.SaveChangesAsync();
+
+        var face = new Face
+        {
+            Label = "AI Identity",
+            PrimarySourceKey = "face-0001",
+        };
+        db.Faces.Add(face);
+        await db.SaveChangesAsync();
+
+        db.AiRuns.Add(new AiRun
+        {
+            RunKey = "run-face-appearance-purge",
+            SourceKey = "ext:ai.core",
+            TargetType = AiRunTargetType.Scene,
+            TargetId = scene.Id,
+            Status = AiRunStatus.Completed,
+        });
+        db.FaceAppearances.Add(new FaceAppearance
+        {
+            FaceId = face.Id,
+            HostType = FaceAppearanceHostType.Scene,
+            HostId = scene.Id,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-face-appearance-purge",
+            SampleCount = 2,
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.PurgeAsync(new AiDataSelectorDto("ext:ai.faces", null, null, null, "scene", scene.Id, ["face"]));
+
+        Assert.Equal(1, result.RemovedCounts["face"]);
+        Assert.Equal(1, result.RemovedCounts["aiRun"]);
+        Assert.Empty(await db.Faces.ToListAsync());
+        Assert.Empty(await db.FaceAppearances.ToListAsync());
+        Assert.Empty(await db.AiRuns.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PurgeAsync_EvictsCachedSceneSpanResultsWhenSceneSegmentsAreDeleted()
+    {
+        await using var environment = await CreateEnvironmentAsync();
+        var db = environment.Context;
+
+        var scene = new Scene { Title = "Cached Scene" };
+        db.Scenes.Add(scene);
+        await db.SaveChangesAsync();
+
+        db.Segments.Add(new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 12,
+            EndSec = 18,
+            Kind = "face",
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-cache-evict",
+        });
+        await db.SaveChangesAsync();
+
+        var resolver = new SegmentSpanResolver(db, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
+        var request = new SegmentSpanQueryRequestDto(
+            Profile: null,
+            Operator: "union",
+            Operands:
+            [
+                new SegmentSpanOperandDto(
+                    SourceKey: "ext:ai.faces",
+                    Kind: "face",
+                    TagIds: null,
+                    MinConfidence: null,
+                    RefIds: null),
+            ],
+            MergeGapSec: 0,
+            MinDurationSec: 0);
+
+        var cachedBeforePurge = await resolver.QuerySceneAsync(scene.Id, request, CancellationToken.None);
+        Assert.Single(cachedBeforePurge);
+
+        var service = CreateService(db, resolver);
+        var result = await service.PurgeAsync(new AiDataSelectorDto("ext:ai.faces", null, null, null, "scene", scene.Id, ["segment"]));
+
+        Assert.Equal(1, result.RemovedCounts["segment"]);
+        Assert.Empty(await db.Segments.ToListAsync());
+
+        var cachedAfterPurge = await resolver.QuerySceneAsync(scene.Id, request, CancellationToken.None);
+        Assert.Empty(cachedAfterPurge);
+    }
+
+    [Fact]
     public async Task DeleteEmbeddingsAsync_LargeMatchSet_DeletesInMultipleBatches()
     {
         var saveChangesCounter = new SaveChangesCounterInterceptor();
@@ -417,8 +694,8 @@ public sealed class AiDataPurgeServiceTests
         Assert.Equal(3, saveChangesCounter.SaveChangesCalls);
     }
 
-    private static AiDataPurgeService CreateService(CoveContext context)
-        => new(context, [], new StubBlobService(), NullLogger<AiDataPurgeService>.Instance);
+    private static AiDataPurgeService CreateService(CoveContext context, SegmentSpanResolver? spanResolver = null)
+        => new(context, [], new StubBlobService(), NullLogger<AiDataPurgeService>.Instance, spanResolver);
 
     private static async Task<TestEnvironment> CreateEnvironmentAsync(params IInterceptor[] interceptors)
     {

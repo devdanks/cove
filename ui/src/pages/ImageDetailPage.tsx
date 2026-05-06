@@ -1,4 +1,4 @@
-import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, images } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
 import { Check, Download, Heart, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, Trash2, UserRound, X } from "lucide-react";
@@ -16,7 +16,7 @@ import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
-import type { Face } from "../api/types";
+import type { FaceHostFace } from "../api/types";
 import { trackInteraction } from "../utils/interactionTracking";
 
 const ImageEditModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageEditModal })));
@@ -62,34 +62,11 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     enabled: !!image,
     fallbackRating: image?.rating,
   });
-  const { data: imageDetections = [] } = useQuery({
-    queryKey: ["image-detections", id],
-    queryFn: () => images.detections.list(id),
+  const { data: imageFaces = [] } = useQuery({
+    queryKey: ["image", id, "faces"],
+    queryFn: () => faces.imageFaces(id),
     enabled: canReadFaces,
   });
-  const imageFaceIds = Array.from(new Set(
-    imageDetections
-      .filter((detection) => detection.refId != null && detection.refKind?.toLowerCase() === "face")
-      .map((detection) => detection.refId as number),
-  ));
-  const imageFaceQueries = useQueries({
-    queries: imageFaceIds.map((faceId) => ({
-      queryKey: ["image-face", faceId],
-      queryFn: () => faces.get(faceId),
-      enabled: canReadFaces,
-    })),
-  });
-  const imageFaces = imageFaceQueries.reduce<Array<{ face: Face; detectionCount: number }>>((items, query) => {
-    if (!query.data) {
-      return items;
-    }
-
-    const detectionCount = imageDetections.filter(
-      (detection) => detection.refKind?.toLowerCase() === "face" && detection.refId === query.data?.id,
-    ).length;
-    items.push({ face: query.data, detectionCount });
-    return items;
-  }, []);
   const deleteMut = useMutation({
     mutationFn: () => images.delete(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["images"] }); goBack(); },
@@ -111,7 +88,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     const nextTabs = [
       { key: "details", label: "Details" },
       ...(canReadFiles ? [{ key: "file-info", label: "File Info", count: image?.files.length ?? 0 }] : []),
-      { key: "detections", label: "Detections", count: imageDetections.length },
+      { key: "detections", label: "Faces", count: imageFaces.length },
       {
         key: "related",
         label: "Related",
@@ -119,7 +96,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       },
     ];
     return nextTabs;
-  }, [canReadFiles, image?.files.length, image?.performers.length, image?.studioId, image?.tags.length, imageDetections.length]);
+  }, [canReadFiles, image?.files.length, image?.performers.length, image?.studioId, image?.tags.length, imageFaces.length]);
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
@@ -316,26 +293,26 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     <section>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Detections</h2>
-          <p className="mt-1 text-sm text-secondary">Detected faces attached to this image.</p>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Faces</h2>
+          <p className="mt-1 text-sm text-secondary">Face clusters attached to this image.</p>
         </div>
         <div className="text-xs text-muted">{imageFaces.length} face{imageFaces.length === 1 ? "" : "s"}</div>
       </div>
 
       {canReadFaces ? (
         imageFaces.length > 0 ? (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {imageFaces.map(({ face, detectionCount }) => {
-              const title = face.label?.trim() || face.performerName?.trim() || `Face #${face.id}`;
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {imageFaces.map((face) => {
+              const title = face.performerName?.trim() || face.label?.trim() || `Face #${face.id}`;
               const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "face", id: face.id }, () => onNavigate({ page: "face", id: face.id }));
 
               return (
                 <a
                   key={face.id}
                   {...linkProps}
-                  className="flex items-center gap-3 rounded-xl border border-border bg-surface/40 px-3 py-3 transition-colors hover:border-accent"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-surface/35 px-2 py-2 transition-colors hover:border-accent"
                 >
-                  <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-md bg-surface text-[11px] text-muted">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface text-[10px] text-muted">
                     {face.coverImageUrl ? (
                       <img src={face.coverImageUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
                     ) : (
@@ -344,7 +321,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                   </div>
                   <div className="min-w-0">
                     <div className="truncate text-sm text-foreground">{title}</div>
-                    <div className="text-[11px] text-secondary">{detectionCount} detection{detectionCount === 1 ? "" : "s"}</div>
+                    <div className="text-[11px] text-secondary">{formatImageFaceSummary(face)}</div>
                   </div>
                 </a>
               );
@@ -590,6 +567,11 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       </MediaDetailLayout>
     </>
   );
+}
+
+function formatImageFaceSummary(face: FaceHostFace) {
+  const confidence = face.topConfidence != null ? `${Math.round((face.topConfidence <= 1 ? face.topConfidence * 100 : face.topConfidence))}%` : null;
+  return confidence || "AI face";
 }
 
 function DetailField({ label, value }: { label: string; value: React.ReactNode }) {

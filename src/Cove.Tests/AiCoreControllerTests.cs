@@ -31,6 +31,7 @@ public class AiCoreControllerTests
             context,
             embeddingService,
             new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            new FacePerformerPropagationService(context),
             Array.Empty<IFaceLifecycleParticipant>(),
             NullLogger<FacesController>.Instance);
 
@@ -81,10 +82,10 @@ public class AiCoreControllerTests
             });
         await context.SaveChangesAsync();
 
-        var similarResult = await controller.GetSimilar(firstFace.Id, "face.arcface", 5, CancellationToken.None);
+        var similarResult = await controller.GetSimilar(firstFace.Id, "face.arcface", null, null, null, 1, 5, 5, CancellationToken.None);
         var similarOk = Assert.IsType<OkObjectResult>(similarResult.Result);
-        var similarFaces = Assert.IsAssignableFrom<IReadOnlyList<FaceSimilarDto>>(similarOk.Value);
-        var match = Assert.Single(similarFaces);
+        var similarFaces = Assert.IsType<PaginatedResponse<FaceSimilarDto>>(similarOk.Value);
+        var match = Assert.Single(similarFaces.Items);
         Assert.Equal(secondFace.Id, match.Id);
 
         var mergeResult = await controller.MergeInto(secondFace.Id, new FaceMergeDto(firstFace.Id), CancellationToken.None);
@@ -152,6 +153,7 @@ public class AiCoreControllerTests
             context,
             embeddingService,
             new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            new FacePerformerPropagationService(context),
             Array.Empty<IFaceLifecycleParticipant>(),
             NullLogger<FacesController>.Instance);
 
@@ -183,6 +185,7 @@ public class AiCoreControllerTests
             context,
             embeddingService,
             new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            new FacePerformerPropagationService(context),
             Array.Empty<IFaceLifecycleParticipant>(),
             NullLogger<FacesController>.Instance);
 
@@ -255,6 +258,7 @@ public class AiCoreControllerTests
             context,
             embeddingService,
             new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            new FacePerformerPropagationService(context),
             Array.Empty<IFaceLifecycleParticipant>(),
             NullLogger<FacesController>.Instance);
 

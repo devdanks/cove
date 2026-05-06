@@ -180,7 +180,7 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
           </div>
         </div>
       </div>
-      <JobDrawer open={jobDrawerOpen} onClose={() => setJobDrawerOpen(false)} />
+      <JobDrawer open={jobDrawerOpen} onClose={() => setJobDrawerOpen(false)} onNavigate={navigate} />
       <KeyboardShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       {/* Mobile dropdown menu */}
       {mobileMenuOpen && (

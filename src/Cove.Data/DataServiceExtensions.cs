@@ -53,6 +53,7 @@ public static class DataServiceExtensions
         services.AddScoped<ISavedFilterRepository, SavedFilterRepository>();
         services.AddScoped<EmbeddingService>();
         services.AddScoped<SegmentSpanResolver>();
+        services.AddScoped<FacePerformerPropagationService>();
         services.AddScoped<IUserEngagementService, UserEngagementService>();
         services.AddScoped<IEmbeddingService>(sp => sp.GetRequiredService<EmbeddingService>());
         services.AddScoped<ITextEncoderRegistry>(sp => sp.GetRequiredService<EmbeddingService>());

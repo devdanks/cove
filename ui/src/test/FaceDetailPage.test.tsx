@@ -62,6 +62,8 @@ function renderPage() {
   });
   const onNavigate = vi.fn();
 
+  mockFaces.list.mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 500 });
+
   render(
     <QueryClientProvider client={queryClient}>
       <FaceDetailPage id={7} onNavigate={onNavigate} />
@@ -95,18 +97,33 @@ describe("FaceDetailPage", () => {
       createdAt: "2026-04-01T12:00:00Z",
       updatedAt: "2026-04-02T12:00:00Z",
     });
-    mockFaces.similar.mockResolvedValue([
-      {
-        id: 17,
-        label: "Similar Jane",
-        performerId: 22,
-        performerName: "Jane Roe",
-        coverImageUrl: "/img/faces/17.jpg",
-        distance: 0.1234,
-      },
-    ]);
+    mockFaces.similar.mockResolvedValue({
+      items: [
+        {
+          id: 17,
+          label: "Similar Jane",
+          performerId: 22,
+          performerName: "Jane Roe",
+          coverImageUrl: "/img/faces/17.jpg",
+          ignored: false,
+          mergedIntoFaceId: undefined,
+          detectionCount: 9,
+          sceneCount: 3,
+          imageCount: 1,
+          primarySourceKey: "detector.facebox",
+          createdAt: "2026-03-30T12:00:00Z",
+          updatedAt: "2026-04-03T12:00:00Z",
+          appearanceCount: 4,
+          frameSampleCount: 7,
+          distance: 0.1234,
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      perPage: 18,
+    });
     mockFaces.detections.mockResolvedValue([]);
-    mockFaces.appearances.mockResolvedValue({ items: [], totalScenes: 0, totalImages: 0 });
+    mockFaces.appearances.mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 24 });
     mockEntityEngagement.get.mockResolvedValue(null);
 
     const { onNavigate } = renderPage();
@@ -117,6 +134,7 @@ describe("FaceDetailPage", () => {
 
     expect(await screen.findByText("Nearest neighbors from the face embedding index.")).toBeInTheDocument();
     expect(await screen.findByText("Similar Jane")).toBeInTheDocument();
+    expect(screen.getAllByRole("combobox").length).toBeGreaterThanOrEqual(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Open face Similar Jane" }));
     expect(onNavigate).toHaveBeenCalledWith({ page: "face", id: 17 });
@@ -141,9 +159,9 @@ describe("FaceDetailPage", () => {
       createdAt: "2026-04-01T12:00:00Z",
       updatedAt: "2026-04-02T12:00:00Z",
     });
-    mockFaces.similar.mockResolvedValue([]);
+    mockFaces.similar.mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 18 });
     mockFaces.detections.mockResolvedValue([]);
-    mockFaces.appearances.mockResolvedValue({ items: [], totalScenes: 0, totalImages: 0 });
+    mockFaces.appearances.mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 24 });
     mockEntityEngagement.get.mockResolvedValue(null);
 
     renderPage();

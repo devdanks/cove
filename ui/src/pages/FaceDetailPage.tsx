@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Fingerprint, Image as ImageIcon, Link2, Merge, Pencil, Save, Search, Trash2, Video } from "lucide-react";
-import { faces, images, performers, scenes } from "../api/client";
-import type { Detection, Face, FaceDeleteImpact, FaceSuggestion, Performer } from "../api/types";
+import { ChevronLeft, ChevronRight, Fingerprint, Image as ImageIcon, Link2, Merge, Pencil, Save, Search, Trash2, UserPlus, Video } from "lucide-react";
+import { faces, performers } from "../api/client";
+import type { Face, FaceAppearance, FaceDeleteImpact, FaceSimilar, FaceSuggestion, FindFilter, PaginatedResponse, Performer } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { DetailListToolbar } from "../components/DetailListToolbar";
 import { FaceSuggestionsPanel } from "../components/FaceSuggestionsPanel";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { EditModal } from "../components/EditModal";
+import { EntityCardGrid } from "../components/EntityCardGrid";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { MetadataPanel } from "../components/MetadataPanel";
@@ -22,10 +24,37 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type FaceTab = "overview" | "detections" | "similar";
+type FaceTab = "overview" | "appearances" | "similar";
+
+const EMPTY_APPEARANCES_PAGE: PaginatedResponse<FaceAppearance> = { items: [], totalCount: 0, page: 1, perPage: 24 };
+const EMPTY_SIMILAR_PAGE: PaginatedResponse<FaceSimilar> = { items: [], totalCount: 0, page: 1, perPage: 18 };
+const APPEARANCE_SORT_OPTIONS = [
+  { value: "last_seen", label: "Last Seen" },
+  { value: "first_seen", label: "First Seen" },
+  { value: "sample_count", label: "Frame Samples" },
+  { value: "confidence", label: "Confidence" },
+  { value: "host_type", label: "Host Type" },
+  { value: "title", label: "Title" },
+];
+const SIMILAR_SORT_OPTIONS = [
+  { value: "distance", label: "Closest Match" },
+  { value: "appearance_count", label: "Most Appearances" },
+  { value: "scene_count", label: "Most Scenes" },
+  { value: "image_count", label: "Most Images" },
+  { value: "updated_at", label: "Recently Updated" },
+  { value: "label", label: "Name" },
+];
 
 function readSuggestionPerformerId(value: number | FaceSuggestion) {
   return typeof value === "number" ? value : value.performerId;
+}
+
+function canPromptForPerformerImage(face: Face, suggestion: FaceSuggestion) {
+  const localPerformerId = suggestion.localPerformerId ?? (suggestion.performerId > 0 ? suggestion.performerId : undefined);
+  return localPerformerId != null
+    && !!face.coverImageUrl
+    && suggestion.localPerformerHasImage === false
+    && suggestion.localPerformerIsLocalOnly === true;
 }
 
 export function FaceDetailPage({ id, onNavigate }: Props) {
@@ -36,20 +65,41 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canEngageFace = canReadEntity("face", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const { backLabel, goBack } = useBackNavigation({ page: "faces" }, onNavigate);
+  const [appearanceFilter, setAppearanceFilter] = useState<FindFilter>({ page: 1, perPage: 24, sort: "last_seen", direction: "desc" });
+  const [similarFilter, setSimilarFilter] = useState<FindFilter>({ page: 1, perPage: 18, sort: "distance", direction: "asc" });
+  const [appearanceZoomLevel, setAppearanceZoomLevel] = useState(0);
+  const [similarZoomLevel, setSimilarZoomLevel] = useState(0);
+
+  const appearanceQuery = useMemo(() => ({
+    q: appearanceFilter.q?.trim() || undefined,
+    sort: appearanceFilter.sort,
+    direction: appearanceFilter.direction,
+    page: appearanceFilter.page ?? 1,
+    perPage: appearanceFilter.perPage ?? 24,
+  }), [appearanceFilter.direction, appearanceFilter.page, appearanceFilter.perPage, appearanceFilter.q, appearanceFilter.sort]);
+
+  const similarQuery = useMemo(() => ({
+    q: similarFilter.q?.trim() || undefined,
+    sort: similarFilter.sort,
+    direction: similarFilter.direction,
+    page: similarFilter.page ?? 1,
+    perPage: similarFilter.perPage ?? 18,
+    k: Math.max(80, (similarFilter.page ?? 1) * (similarFilter.perPage ?? 18) * 4),
+  }), [similarFilter.direction, similarFilter.page, similarFilter.perPage, similarFilter.q, similarFilter.sort]);
 
   const { data: face, isLoading } = useQuery({
     queryKey: ["face", id],
     queryFn: () => faces.get(id),
   });
 
-  const { data: similarFaces = [], isLoading: similarLoading } = useQuery({
-    queryKey: ["face", id, "similar"],
-    queryFn: () => faces.similar(id, { k: 12 }),
+  const { data: similarFacesPage = EMPTY_SIMILAR_PAGE, isLoading: similarLoading } = useQuery({
+    queryKey: ["face", id, "similar", similarQuery],
+    queryFn: () => faces.similar(id, similarQuery),
   });
 
-  const { data: faceDetections = [], isLoading: detectionsLoading } = useQuery({
-    queryKey: ["face", id, "detections"],
-    queryFn: () => faces.detections(id),
+  const { data: faceAppearancesPage = EMPTY_APPEARANCES_PAGE, isLoading: appearancesLoading } = useQuery({
+    queryKey: ["face", id, "appearances", appearanceQuery],
+    queryFn: () => faces.appearances(id, appearanceQuery),
   });
 
   const { data: deleteImpact, isLoading: deleteImpactLoading } = useQuery({
@@ -75,8 +125,11 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   const [activeTab, setActiveTab] = useState<FaceTab>("overview");
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [isCreatePerformerModalOpen, setIsCreatePerformerModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [comparingSuggestion, setComparingSuggestion] = useState<FaceSuggestion | null>(null);
+  const [newPerformerName, setNewPerformerName] = useState("");
+  const [setNewPerformerImage, setSetNewPerformerImage] = useState(true);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
   const mergeInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -113,8 +166,17 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     window.setTimeout(() => mergeInputRef.current?.focus(), 0);
   }, [isMergeModalOpen]);
 
+  useEffect(() => {
+    if (!isCreatePerformerModalOpen) {
+      return;
+    }
+
+    setNewPerformerName((current) => current.trim() || face?.label?.trim() || "");
+  }, [face?.label, isCreatePerformerModalOpen]);
+
   const performerSearchTerm = performerSearch.trim();
   const mergeSearchTerm = mergeSearch.trim();
+  const normalizedNewPerformerName = newPerformerName.trim();
 
   const performerMatchesQuery = useQuery({
     queryKey: ["face", id, "performer-search", performerSearchTerm],
@@ -130,7 +192,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
 
   const invalidateFace = (updated?: Face) => {
     queryClient.invalidateQueries({ queryKey: ["face", id] });
-    queryClient.invalidateQueries({ queryKey: ["face", id, "detections"] });
+    queryClient.invalidateQueries({ queryKey: ["face", id, "appearances"] });
     queryClient.invalidateQueries({ queryKey: ["face", id, "suggestions"] });
     queryClient.invalidateQueries({ queryKey: ["face", id, "similar"] });
     queryClient.invalidateQueries({ queryKey: ["faces"] });
@@ -184,9 +246,23 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   });
 
   const suggestionDecisionMutation = useMutation({
-    mutationFn: (data: { performerId: number; decision: "accept" | "reject" }) => faces.recordSuggestionDecision(id, data),
+    mutationFn: (data: { performerId: number; decision: "accept" | "reject"; setPerformerImage?: boolean }) => faces.recordSuggestionDecision(id, data),
     onSuccess: () => {
       invalidateFace();
+    },
+  });
+
+  const createPerformerMutation = useMutation({
+    mutationFn: () => faces.createPerformer(id, { name: normalizedNewPerformerName, setPerformerImage: setNewPerformerImage }),
+    onSuccess: (updated) => {
+      setIsCreatePerformerModalOpen(false);
+      setNewPerformerName("");
+      setSetNewPerformerImage(true);
+      invalidateFace(updated);
+      queryClient.invalidateQueries({ queryKey: ["performers"] });
+      if (updated.performerId != null) {
+        queryClient.invalidateQueries({ queryKey: ["performer", updated.performerId] });
+      }
     },
   });
 
@@ -212,9 +288,9 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   const title = face?.label?.trim() || face?.performerName || `Face #${id}`;
   const tabs = useMemo(() => [
     { key: "overview", label: "Overview" },
-    { key: "detections", label: "Detections", count: faceDetections.length },
-    { key: "similar", label: "Similar Faces", count: similarFaces.length },
-  ], [faceDetections.length, similarFaces.length]);
+    { key: "appearances", label: "Appears In", count: face?.appearanceCount || faceAppearancesPage.totalCount },
+    { key: "similar", label: "Similar Faces", count: similarFacesPage.totalCount },
+  ], [face?.appearanceCount, faceAppearancesPage.totalCount, similarFacesPage.totalCount]);
 
   const faceKeyboardShortcuts = useMemo(() => [
     {
@@ -347,7 +423,19 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
                 ) : null}
               </div>
             ) : (
-              <p className="mt-4 text-sm text-secondary">No performer is linked to this face cluster yet.</p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <p className="text-sm text-secondary">No performer is linked to this face cluster yet.</p>
+                {canWriteFace ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatePerformerModalOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Create Performer
+                  </button>
+                ) : null}
+              </div>
             )}
 
             {canWriteFace ? (
@@ -401,7 +489,14 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
                   isLoading={suggestionsLoading}
                   disabled={suggestionDecisionMutation.isPending}
                   canReadPerformers={canReadPerformers}
-                  onAccept={(value) => suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "accept" })}
+                  onAccept={(value) => {
+                    if (canPromptForPerformerImage(face, value)) {
+                      setComparingSuggestion(value);
+                      return;
+                    }
+
+                    suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "accept" });
+                  }}
                   onReject={(value) => suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "reject" })}
                   onCompare={(value) => setComparingSuggestion(value)}
                   onNavigate={onNavigate}
@@ -419,7 +514,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
               { label: "Primary source", value: face.primarySourceKey || "Unknown" },
               { label: "Created", value: formatDate(face.createdAt) },
               { label: "Updated", value: formatDate(face.updatedAt) },
-              { label: "Detections", value: face.detectionCount },
+              { label: "Appearances", value: face.appearanceCount || faceAppearancesPage.totalCount },
               { label: "Scenes", value: face.sceneCount },
               { label: "Images", value: face.imageCount },
               { label: "Performer", value: face.performerName || "Unlinked" },
@@ -430,24 +525,36 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     </div>
   );
 
-  const detectionsContent = (
+  const appearancesContent = (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Appears In</h2>
-          <p className="mt-1 text-sm text-secondary">Scenes and images where this face has been detected.</p>
+          <p className="mt-1 text-sm text-secondary">Scenes and images where this face appears.</p>
         </div>
-        <div className="text-xs text-muted">{faceDetections.length} detection{faceDetections.length === 1 ? "" : "s"}</div>
+        <div className="text-xs text-muted">{faceAppearancesPage.totalCount} appearance{faceAppearancesPage.totalCount === 1 ? "" : "s"}</div>
       </div>
 
-      {detectionsLoading ? (
-        <div className="text-sm text-secondary">Loading detections...</div>
-      ) : faceDetections.length === 0 ? (
+      {appearancesLoading ? (
+        <div className="text-sm text-secondary">Loading appearances...</div>
+      ) : faceAppearancesPage.totalCount === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-secondary">
-          No detections currently point to this face cluster.
+          No appearances currently point to this face cluster.
         </div>
       ) : (
-        <FaceDetectionsByHost detections={faceDetections} onNavigate={onNavigate} />
+        <>
+          <DetailListToolbar
+            filter={appearanceFilter}
+            onFilterChange={setAppearanceFilter}
+            totalCount={faceAppearancesPage.totalCount}
+            sortOptions={APPEARANCE_SORT_OPTIONS}
+            zoomLevel={appearanceZoomLevel}
+            onZoomChange={setAppearanceZoomLevel}
+            showSearch
+          />
+          <FaceAppearancesGrid appearances={faceAppearancesPage.items} onNavigate={onNavigate} zoomLevel={appearanceZoomLevel} />
+          <FaceTabPager filter={appearanceFilter} setFilter={setAppearanceFilter} totalCount={faceAppearancesPage.totalCount} />
+        </>
       )}
     </section>
   );
@@ -459,29 +566,41 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Similar Faces</h2>
           <p className="mt-1 text-sm text-secondary">Nearest neighbors from the face embedding index.</p>
         </div>
-        <div className="text-xs text-muted">{similarFaces.length} match{similarFaces.length === 1 ? "" : "es"}</div>
+        <div className="text-xs text-muted">{similarFacesPage.totalCount} match{similarFacesPage.totalCount === 1 ? "" : "es"}</div>
       </div>
 
       {similarLoading ? (
         <div className="text-sm text-secondary">Loading similar faces...</div>
-      ) : similarFaces.length === 0 ? (
+      ) : similarFacesPage.totalCount === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-secondary">
           No similar faces are available for this cluster yet.
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {similarFaces.map((candidate) => (
-            <SimilarFaceCard key={candidate.id} face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
-          ))}
-        </div>
+        <>
+          <DetailListToolbar
+            filter={similarFilter}
+            onFilterChange={setSimilarFilter}
+            totalCount={similarFacesPage.totalCount}
+            sortOptions={SIMILAR_SORT_OPTIONS}
+            zoomLevel={similarZoomLevel}
+            onZoomChange={setSimilarZoomLevel}
+            showSearch
+          />
+          <EntityCardGrid minCardWidth={`${280 + similarZoomLevel * 50}px`} gapClassName="gap-4">
+            {similarFacesPage.items.map((candidate) => (
+              <SimilarFaceCard key={candidate.id} face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
+            ))}
+          </EntityCardGrid>
+          <FaceTabPager filter={similarFilter} setFilter={setSimilarFilter} totalCount={similarFacesPage.totalCount} />
+        </>
       )}
     </section>
   );
 
   const activeTabContent = activeTab === "overview"
     ? overviewContent
-    : activeTab === "detections"
-      ? detectionsContent
+    : activeTab === "appearances"
+      ? appearancesContent
       : similarFacesContent;
 
   const faceActions = (
@@ -524,6 +643,16 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
             <Merge className="h-4 w-4" />
             Merge
           </button>
+          {!face.performerId ? (
+            <button
+              type="button"
+              onClick={() => setIsCreatePerformerModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
+            >
+              <UserPlus className="h-4 w-4" />
+              Create Performer
+            </button>
+          ) : null}
         </>
       ) : null}
       {canDeleteFace ? (
@@ -551,7 +680,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         title={title}
         aliases={`Face cluster #${face.id} · Primary source ${face.primarySourceKey || "Unknown"}`}
         counts={[
-          { key: "detections", label: "Detections", value: face.detectionCount },
+          { key: "appearances", label: "Appearances", value: face.appearanceCount || faceAppearancesPage.totalCount },
           { key: "scenes", label: "Scenes", value: face.sceneCount },
           { key: "images", label: "Images", value: face.imageCount },
         ]}
@@ -641,6 +770,45 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         </div>
       </EditModal>
 
+      <EditModal open={isCreatePerformerModalOpen} onClose={() => setIsCreatePerformerModalOpen(false)} title={`Create performer from ${title}`}>
+        <div className="space-y-4 py-5">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
+            Performer name
+            <input
+              type="text"
+              value={newPerformerName}
+              onChange={(event) => setNewPerformerName(event.target.value)}
+              placeholder="Name"
+              className="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
+              autoFocus
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-secondary">
+            <input
+              type="checkbox"
+              checked={setNewPerformerImage}
+              onChange={(event) => setSetNewPerformerImage(event.target.checked)}
+              className="rounded border-border bg-surface accent-accent"
+            />
+            Use this face as the performer image
+          </label>
+          {createPerformerMutation.error ? (
+            <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{String(createPerformerMutation.error.message ?? createPerformerMutation.error)}</p>
+          ) : null}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => createPerformerMutation.mutate()}
+              disabled={!normalizedNewPerformerName || createPerformerMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <UserPlus className="h-4 w-4" />
+              {createPerformerMutation.isPending ? "Creating..." : "Create performer"}
+            </button>
+          </div>
+        </div>
+      </EditModal>
+
       <ConfirmDialog
         open={isDeleteDialogOpen}
         title={`Delete ${title}?`}
@@ -660,9 +828,9 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         disabled={suggestionDecisionMutation.isPending}
         canReadPerformers={canReadPerformers}
         onClose={() => setComparingSuggestion(null)}
-        onConfirm={(value) => {
+        onConfirm={(value, options) => {
           if ("performerId" in value) {
-            suggestionDecisionMutation.mutate({ performerId: value.performerId, decision: "accept" });
+            suggestionDecisionMutation.mutate({ performerId: value.performerId, decision: "accept", setPerformerImage: options?.setPerformerImage });
           }
           setComparingSuggestion(null);
         }}
@@ -736,109 +904,62 @@ function FaceCandidateRow({ face, onSelect, disabled }: { face: Face; onSelect: 
   );
 }
 
-function FaceDetectionCard({ detection, onNavigate }: { detection: Detection; onNavigate: (r: any) => void }) {
-  const hostLabel = detection.hostType === "image" ? `Image #${detection.hostId}` : `Scene #${detection.hostId}`;
-  const previewUrl = detection.hostType === "image"
-    ? images.thumbnailUrl(detection.hostId, 480)
-    : scenes.screenshotUrl(detection.hostId);
-  const openHost = () => onNavigate({ page: detection.hostType, id: detection.hostId });
-
+function FaceAppearancesGrid({ appearances, onNavigate, zoomLevel }: { appearances: FaceAppearance[]; onNavigate: (r: any) => void; zoomLevel: number }) {
   return (
-    <article className="overflow-hidden rounded-2xl border border-border bg-surface/60">
-      <button
-        type="button"
-        onClick={openHost}
-        className="block aspect-[4/3] w-full bg-surface/80 text-left"
-        aria-label={`Open ${hostLabel}`}
-      >
-        <img
-          src={previewUrl}
-          alt={hostLabel}
-          className="h-full w-full object-cover"
-          loading="lazy"
-          onError={(event) => {
-            const target = event.target as HTMLImageElement;
-            target.style.display = "none";
-            const fallback = target.nextElementSibling as HTMLElement | null;
-            if (fallback) {
-              fallback.style.display = "flex";
-            }
-          }}
-        />
-        <div className="hidden h-full w-full items-center justify-center text-muted">
-          <Fingerprint className="h-10 w-10" />
-        </div>
-      </button>
-      <div className="space-y-1.5 p-4 text-sm text-secondary">
-        <button type="button" onClick={openHost} className="text-left font-medium text-foreground hover:text-accent">
-          {hostLabel}
-        </button>
-        <div className="text-xs">{Math.round(detection.score * 100)}% confidence</div>
-        <div className="text-xs">{formatDetectionSubtitle(detection)}</div>
-      </div>
-    </article>
-  );
-}
+    <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
+      {appearances.map((appearance) => {
+        const hostLabel = appearance.title || `${appearance.hostType === "image" ? "Image" : "Scene"} #${appearance.hostId}`;
+        const open = () => onNavigate({ page: appearance.hostType, id: appearance.hostId });
+        const Icon = appearance.hostType === "image" ? ImageIcon : Video;
 
-function FaceDetectionsByHost({ detections, onNavigate }: { detections: Detection[]; onNavigate: (r: any) => void }) {
-  const grouped = useMemo(() => {
-    const map = new Map<string, { hostType: "scene" | "image"; hostId: number; detections: Detection[] }>();
-    for (const d of detections) {
-      const key = `${d.hostType}:${d.hostId}`;
-      const existing = map.get(key);
-      if (existing) {
-        existing.detections.push(d);
-      } else {
-        map.set(key, { hostType: d.hostType as "scene" | "image", hostId: d.hostId, detections: [d] });
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => b.detections.length - a.detections.length);
-  }, [detections]);
-
-  return (
-    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {grouped.map((group) => {
-        const hostKey = `${group.hostType}-${group.hostId}`;
-        const previewUrl = group.hostType === "image"
-          ? images.thumbnailUrl(group.hostId, 480)
-          : scenes.screenshotUrl(group.hostId);
-        const open = () => onNavigate({ page: group.hostType, id: group.hostId });
-        const Icon = group.hostType === "image" ? ImageIcon : Video;
-        const bestScore = Math.max(...group.detections.map((d) => d.score));
         return (
-          <article key={hostKey} className="overflow-hidden rounded-2xl border border-border bg-surface/60">
-            <button type="button" onClick={open} className="block aspect-video w-full bg-surface/80" aria-label={`Open ${group.hostType} ${group.hostId}`}>
+          <article key={appearance.appearanceId} className="entity-card group overflow-hidden rounded-2xl border border-border bg-card/80 shadow-sm transition-colors hover:border-accent/50">
+            <button
+              type="button"
+              onClick={open}
+              className={`block w-full bg-surface/80 text-left ${appearance.hostType === "image" ? "aspect-square" : "aspect-video"}`}
+              aria-label={`Open ${hostLabel}`}
+            >
               <img
-                src={previewUrl}
-                alt=""
-                className="h-full w-full object-cover"
+                src={appearance.thumbnailUrl}
+                alt={hostLabel}
+                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                 loading="lazy"
                 onError={(event) => { (event.target as HTMLImageElement).style.visibility = "hidden"; }}
               />
             </button>
-            <div className="flex items-center justify-between gap-2 p-3 text-sm">
-              <button type="button" onClick={open} className="flex min-w-0 items-center gap-2 text-left text-foreground hover:text-accent">
-                <Icon className="h-4 w-4 shrink-0 text-muted" />
-                <span className="truncate">{group.hostType === "image" ? "Image" : "Scene"} #{group.hostId}</span>
+            <div className="space-y-3 p-4">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted">
+                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/70 px-2 py-0.5">
+                  <Icon className="h-3 w-3" />
+                  {appearance.hostType}
+                </span>
+                <span>{appearance.frameSampleCount} frames</span>
+                {appearance.topConfidence != null ? <span>{Math.round(appearance.topConfidence * 100)}% confidence</span> : null}
+              </div>
+              <button type="button" onClick={open} className="block text-left text-sm font-semibold text-foreground hover:text-accent">
+                {hostLabel}
               </button>
-              <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
-                <span>{group.detections.length}x</span>
-                <span>{Math.round(bestScore * 100)}%</span>
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <FaceMetric label="Frames" value={appearance.frameSampleCount} />
+                <FaceMetric label="Samples" value={appearance.retainedSpatialSampleCount} />
+                <FaceMetric label="Segments" value={appearance.segmentCount} />
+              </div>
+              <div className="text-xs text-secondary">
+                {appearance.hostType === "scene" ? formatAppearanceTimeRange(appearance) : "Image appearance"}
               </div>
             </div>
           </article>
         );
       })}
-    </div>
+    </EntityCardGrid>
   );
 }
 
-function formatDetectionSubtitle(detection: Detection) {
-  if (detection.hostType === "scene" && detection.observedAtSec != null) {
-    return `Scene frame at ${formatDetectionTime(detection.observedAtSec)}`;
-  }
-
-  return detection.class;
+function formatAppearanceTimeRange(appearance: FaceAppearance) {
+  const start = appearance.firstSeenAtSec == null ? null : formatDetectionTime(appearance.firstSeenAtSec);
+  const end = appearance.lastSeenAtSec == null ? null : formatDetectionTime(appearance.lastSeenAtSec);
+  return start && end && start !== end ? `${start} - ${end}` : start ?? end ?? "Scene appearance";
 }
 
 function formatDetectionTime(totalSeconds: number) {
@@ -865,11 +986,43 @@ function formatCount(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
-function SimilarFaceCard({ face, onNavigate, canReadPerformers }: { face: import("../api/types").FaceSimilar; onNavigate: (r: any) => void; canReadPerformers: boolean }) {
+function FaceTabPager({ filter, setFilter, totalCount }: { filter: FindFilter; setFilter: (filter: FindFilter) => void; totalCount: number }) {
+  const perPage = filter.perPage ?? 1;
+  const page = filter.page ?? 1;
+  const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
+
+  if (totalPages <= 1) {
+    return null;
+  }
+
+  return (
+    <div className="mx-auto mt-6 flex max-w-7xl items-center justify-center gap-4">
+      <button
+        type="button"
+        disabled={page <= 1}
+        onClick={() => setFilter({ ...filter, page: page - 1 })}
+        className="rounded-lg border border-border px-3 py-2 text-sm text-secondary transition-colors hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Previous
+      </button>
+      <span className="text-sm text-secondary">Page {page} of {totalPages}</span>
+      <button
+        type="button"
+        disabled={page >= totalPages}
+        onClick={() => setFilter({ ...filter, page: page + 1 })}
+        className="rounded-lg border border-border px-3 py-2 text-sm text-secondary transition-colors hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Next
+      </button>
+    </div>
+  );
+}
+
+function SimilarFaceCard({ face, onNavigate, canReadPerformers }: { face: FaceSimilar; onNavigate: (r: any) => void; canReadPerformers: boolean }) {
   const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-border bg-surface/60">
+    <article className="entity-card group relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-sm transition-colors hover:border-accent/50">
       <button
         type="button"
         onClick={() => onNavigate({ page: "face", id: face.id })}
@@ -877,28 +1030,65 @@ function SimilarFaceCard({ face, onNavigate, canReadPerformers }: { face: import
         aria-label={`Open face ${title}`}
       >
         {face.coverImageUrl ? (
-          <img src={face.coverImageUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
+          <img src={face.coverImageUrl} alt={title} className="h-full w-full bg-surface/85 object-contain p-2 transition-transform duration-300 group-hover:scale-[1.02]" loading="lazy" />
         ) : (
-          <div className="flex h-full items-center justify-center text-muted">
-            <Fingerprint className="h-10 w-10" />
+          <div className="flex h-full items-center justify-center bg-surface text-muted">
+            <Fingerprint className="h-12 w-12" />
           </div>
         )}
+        <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-1 bg-gradient-to-t from-black/80 via-black/35 to-transparent p-3">
+          {face.mergedIntoFaceId ? <FaceBadge icon={<Merge className="h-3 w-3" />} label={`Merged into #${face.mergedIntoFaceId}`} /> : null}
+          {face.performerId ? <FaceBadge icon={<Link2 className="h-3 w-3" />} label="Linked" /> : null}
+        </div>
       </button>
-      <div className="space-y-2 p-4">
-        <button type="button" onClick={() => onNavigate({ page: "face", id: face.id })} className="text-left text-sm font-semibold text-foreground hover:text-accent">
-          {title}
-        </button>
-        <div className="text-xs text-secondary">Distance {face.distance.toFixed(3)}</div>
-        {face.performerId ? (
-          <button
-            type="button"
-            onClick={() => canReadPerformers && onNavigate({ page: "performer", id: face.performerId })}
-            className={`text-left text-xs ${canReadPerformers ? "text-accent hover:underline" : "text-secondary"}`}
-          >
-            {face.performerName || `Performer #${face.performerId}`}
+      <div className="space-y-3 p-4">
+        <div>
+          <button type="button" onClick={() => onNavigate({ page: "face", id: face.id })} className="text-left text-sm font-semibold text-foreground hover:text-accent">
+            {title}
           </button>
-        ) : null}
+          <div className="mt-1 text-xs text-secondary">Updated {formatDate(face.updatedAt)}</div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+          <FaceMetric label="Detections" value={face.detectionCount} />
+          <FaceMetric label="Scenes" value={face.sceneCount} />
+          <FaceMetric label="Images" value={face.imageCount} />
+        </div>
+        <div className="rounded-xl border border-border bg-surface/50 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Closest match</div>
+          <div className="mt-1 text-sm font-medium text-foreground">Distance {face.distance.toFixed(3)}</div>
+          {face.performerId ? (
+            <button
+              type="button"
+              onClick={() => canReadPerformers && onNavigate({ page: "performer", id: face.performerId })}
+              className={`mt-2 text-left text-xs ${canReadPerformers ? "text-accent hover:underline" : "text-secondary"}`}
+            >
+              {face.performerName || `Performer #${face.performerId}`}
+            </button>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between gap-2 text-xs text-secondary">
+          <span>Source: {face.primarySourceKey || "unknown"}</span>
+          <span>{face.frameSampleCount ?? 0} samples</span>
+        </div>
       </div>
     </article>
+  );
+}
+
+function FaceBadge({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/35 px-2 py-0.5 text-[10px] font-medium text-white">
+      {icon}
+      {label}
+    </span>
+  );
+}
+
+function FaceMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface/50 px-2 py-2">
+      <div className="text-sm font-semibold text-foreground">{value}</div>
+      <div className="mt-1 text-[10px] uppercase tracking-wide text-muted">{label}</div>
+    </div>
   );
 }

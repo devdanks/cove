@@ -1,4 +1,4 @@
-import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, scenes, segmentDisplayProfiles, tags, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay } from "../components/shared";
 import { 
@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import type { Detection, Face, ResolvedSpan, Scene, SceneUpdate, Segment } from "../api/types";
+import type { Detection, FaceHostFace, ResolvedSpan, Scene, SceneUpdate, Segment } from "../api/types";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { InteractiveRating } from "../components/Rating";
@@ -263,39 +263,11 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     enabled: canReadMarkers,
   });
 
-  const sceneFaceIds = useMemo(() => {
-    const ids = new Set<number>();
-    for (const detection of detections) {
-      if (detection.refId != null && detection.refKind?.toLowerCase() === "face") {
-        ids.add(detection.refId);
-      }
-    }
-
-    return Array.from(ids);
-  }, [detections]);
-
-  const sceneFaceQueries = useQueries({
-    queries: sceneFaceIds.map((faceId) => ({
-      queryKey: ["face", faceId],
-      queryFn: () => faces.get(faceId),
-      enabled: canReadFaces && canReadMarkers,
-    })),
+  const { data: sceneFaces = [] } = useQuery({
+    queryKey: ["scene", id, "faces"],
+    queryFn: () => faces.sceneFaces(id),
+    enabled: canReadFaces,
   });
-
-  const sceneFaces = useMemo(() => {
-    const countsByFaceId = new Map<number, number>();
-    for (const detection of detections) {
-      if (detection.refId != null && detection.refKind?.toLowerCase() === "face") {
-        countsByFaceId.set(detection.refId, (countsByFaceId.get(detection.refId) ?? 0) + 1);
-      }
-    }
-
-    return sceneFaceQueries
-      .map((query) => query.data)
-      .filter((face): face is Face => face != null)
-      .map((face) => ({ face, detectionCount: countsByFaceId.get(face.id) ?? 0 }))
-      .sort((left, right) => right.detectionCount - left.detectionCount || left.face.id - right.face.id);
-  }, [detections, sceneFaceQueries]);
 
   const rescanMut = useMutation({
     mutationFn: () => scenes.rescan(id),
@@ -546,6 +518,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             resumeTime={effectiveResumeTime}
             sceneId={id}
             detections={detections}
+            segments={segments}
+            faces={sceneFaces}
             captions={file.captions}
             onSeekRegister={(fn) => { seekRef.current = fn; }}
             onTimeUpdate={setVideoTime}
@@ -568,7 +542,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           spans={resolvedSpans}
           rawSegments={segments}
           detections={detections}
-          faces={sceneFaces.map(({ face }) => face)}
+          faces={sceneFaces}
           onSeek={(time) => seekRef.current?.(time)}
           currentTime={videoTime}
           profileName={activeProfileName}
@@ -698,7 +672,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
 }
 
 // Details Tab Content
-export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scene; onNavigate: (r: any) => void; sceneFaces?: Array<{ face: Face; detectionCount: number }> }) {
+export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scene; onNavigate: (r: any) => void; sceneFaces?: FaceHostFace[] }) {
   return (
     <div className="space-y-4">
       {/* Created/Updated + Code/Director at top like original */}
@@ -772,16 +746,16 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
         <div>
           <h6 className="mb-2 text-sm text-muted">Faces in this scene</h6>
           <div className="flex flex-wrap gap-2">
-            {sceneFaces.map(({ face, detectionCount }) => {
-              const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
+            {sceneFaces.map((face) => {
+              const title = face.performerName?.trim() || face.label?.trim() || `Face #${face.id}`;
               return (
                 <button
                   key={face.id}
                   type="button"
                   onClick={() => onNavigate({ page: "face", id: face.id })}
-                  className="flex min-w-[180px] flex-1 items-center gap-3 rounded-xl border border-border bg-card/70 px-3 py-2 text-left transition-colors hover:border-accent sm:flex-none sm:basis-[calc(50%-0.25rem)]"
+                  className="flex min-w-[150px] flex-1 items-center gap-2 rounded-lg border border-border bg-surface/35 px-2 py-1.5 text-left transition-colors hover:border-accent sm:flex-none sm:basis-[calc(50%-0.25rem)]"
                 >
-                  <div className="h-14 w-14 overflow-hidden rounded-lg bg-surface/80">
+                  <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-surface/80">
                     {face.coverImageUrl ? (
                       <img src={face.coverImageUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
                     ) : (
@@ -792,8 +766,8 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-foreground">{title}</div>
-                    <div className="mt-1 text-xs text-secondary">
-                      {detectionCount} detection{detectionCount === 1 ? "" : "s"}
+                    <div className="text-[11px] text-secondary">
+                      {formatSceneFaceSummary(face)}
                     </div>
                   </div>
                 </button>
@@ -840,6 +814,16 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       <CustomFieldsDisplay customFields={scene.customFields} />
     </div>
   );
+}
+
+function formatSceneFaceSummary(face: FaceHostFace) {
+  const timeRange = face.firstSeenAtSec != null
+    ? face.lastSeenAtSec != null && Math.round(face.lastSeenAtSec) !== Math.round(face.firstSeenAtSec)
+      ? `${formatDuration(face.firstSeenAtSec)}-${formatDuration(face.lastSeenAtSec)}`
+      : formatDuration(face.firstSeenAtSec)
+    : null;
+  const confidence = face.topConfidence != null ? `${Math.round((face.topConfidence <= 1 ? face.topConfidence * 100 : face.topConfidence))}%` : null;
+  return [timeRange, confidence].filter(Boolean).join(" · ") || "AI face";
 }
 
 function GroupsTab({ scene, onNavigate }: { scene: Scene; onNavigate: (r: any) => void }) {
@@ -1314,7 +1298,7 @@ function SceneScrubber({
   spans: Pick<ResolvedSpan, "spanKey" | "startSec" | "endSec" | "tagName" | "kind" | "colorHint" | "sourceKey" | "lane">[];
   rawSegments: Pick<Segment, "id" | "startSec" | "endSec" | "title" | "kind" | "sourceKey">[];
   detections: Pick<Detection, "id" | "observedAtSec" | "class" | "score" | "refKind" | "refId">[];
-  faces?: Pick<Face, "id" | "label" | "performerName" | "performerId">[];
+  faces?: Pick<FaceHostFace, "id" | "label" | "performerName" | "performerId" | "firstSeenAtSec" | "lastSeenAtSec">[];
   onSeek?: (time: number) => void;
   currentTime?: number;
   profileName?: string;
@@ -1405,8 +1389,26 @@ function SceneScrubber({
   ), [spans]);
   const faceLanes = useMemo(() => {
     if (!facesEnabled) return [] as ReturnType<typeof buildTimelineLanes<{ key: string; startSec: number; endSec: number; label: string; faceId: number }>>;
-    const facesById = new Map<number, Pick<Face, "id" | "label" | "performerName" | "performerId">>();
+    const facesById = new Map<number, Pick<FaceHostFace, "id" | "label" | "performerName" | "performerId" | "firstSeenAtSec" | "lastSeenAtSec">>();
     for (const face of faces ?? []) facesById.set(face.id, face);
+
+    const appearanceItems = Array.from(facesById.values())
+      .filter((face) => face.firstSeenAtSec != null || face.lastSeenAtSec != null)
+      .map((face) => {
+        const startSec = Math.max(0, face.firstSeenAtSec ?? face.lastSeenAtSec ?? 0);
+        const endSec = Math.min(duration, Math.max(face.lastSeenAtSec ?? startSec, startSec + 0.4));
+        return {
+          key: `face-${face.id}`,
+          startSec,
+          endSec,
+          label: formatFaceTimelineLabel(face),
+          faceId: face.id,
+        };
+      });
+
+    if (appearanceItems.length > 0) {
+      return buildTimelineLanes(appearanceItems);
+    }
 
     // Group detection observations per face id and merge close detections into
     // continuous appearance windows.
@@ -1440,13 +1442,11 @@ function SceneScrubber({
       let windowEnd = times[0];
       let runIndex = 0;
       const flush = () => {
-        const face = facesById.get(faceId);
-        const label = face?.performerName?.trim() || face?.label?.trim() || (faceId > 0 ? `Face #${faceId}` : "Face");
         items.push({
           key: `face-${faceId}-${runIndex++}`,
           startSec: windowStart,
           endSec: Math.max(windowEnd, windowStart + 0.4),
-          label,
+          label: formatFaceTimelineLabel(facesById.get(faceId), faceId),
           faceId,
         });
       };
@@ -1464,15 +1464,16 @@ function SceneScrubber({
     }
 
     return buildTimelineLanes(items);
-  }, [detections, rawSegments, faces, facesEnabled]);
+  }, [detections, rawSegments, faces, facesEnabled, duration]);
   const visibleResolvedLanes = showAllResolvedLanes ? segmentLanes : segmentLanes.slice(0, 4);
   const visibleFaceLanes = showAllFaceLanes ? faceLanes : faceLanes.slice(0, 2);
   const hiddenResolvedLaneCount = Math.max(0, segmentLanes.length - visibleResolvedLanes.length);
   const hiddenFaceLaneCount = Math.max(0, faceLanes.length - visibleFaceLanes.length);
   const hasFaceDetections = useMemo(
-    () => detections.some((det) => det.refKind?.toLowerCase() === "face" && det.refId != null)
+    () => (faces?.some((face) => face.firstSeenAtSec != null || face.lastSeenAtSec != null) ?? false)
+      || detections.some((det) => det.refKind?.toLowerCase() === "face" && det.refId != null)
       || rawSegments.some((segment) => isFaceTimelineSegment(segment)),
-    [detections, rawSegments],
+    [detections, faces, rawSegments],
   );
 
   // Determine which thumbnail index is active based on current video time
@@ -1632,23 +1633,6 @@ function SceneScrubber({
           ) : null}
         </div>
       )}
-      {detections.length > 0 && (
-        <div className="relative h-5 border-b border-black/20 bg-[#1f2c35]">
-          {detections.map((detection) => {
-            const time = detection.observedAtSec ?? 0;
-            return (
-              <button
-                key={detection.id}
-                className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/30 bg-sky-400/80 hover:bg-sky-300"
-                style={{ left: `${clampPercent((time / duration) * 100)}%` }}
-                title={`${detection.class} (${Math.round(detection.score * 100)}%) at ${formatTimelineTime(time)}${detection.refKind && detection.refId != null ? ` • ${detection.refKind} #${detection.refId}` : ""}`}
-                onClick={() => onSeek?.(time)}
-              />
-            );
-          })}
-        </div>
-      )}
-
       {/* Thumbnails scrubber - uses sprite sheet if available, falls back to individual screenshots */}
       <div className="relative flex overflow-hidden" ref={containerRef}>
         <button onClick={() => scroll(-1)} className="flex-shrink-0 w-7 bg-[#222] hover:bg-[#333] text-muted border-r border-border z-10">
@@ -1731,6 +1715,12 @@ function isFaceTimelineSegment(segment: Pick<Segment, "title" | "kind" | "source
   const normalizedSource = segment.sourceKey?.trim().toLowerCase() ?? "";
   const normalizedTitle = segment.title?.trim().toLowerCase() ?? "";
   return normalizedKind === "face" || normalizedSource.includes("face") || normalizedTitle.startsWith("face-");
+}
+
+function formatFaceTimelineLabel(face?: Pick<FaceHostFace, "id" | "label" | "performerName">, fallbackFaceId?: number) {
+  return face?.performerName?.trim()
+    || face?.label?.trim()
+    || (face?.id != null ? `Face #${face.id}` : fallbackFaceId != null && fallbackFaceId > 0 ? `Face #${fallbackFaceId}` : "Face");
 }
 
 function parseVttTime(timeStr: string): number {

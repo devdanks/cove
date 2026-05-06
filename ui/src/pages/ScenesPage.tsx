@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { scenes, tags, performers, galleries } from "../api/client";
+import { aiVisual, scenes, tags, performers, galleries } from "../api/client";
 import type { FindFilter, Scene, SceneCreate, SceneFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
@@ -45,6 +45,13 @@ const IdentifyDialog = lazy(() => import("../components/IdentifyDialog").then((m
 const SceneQueue = lazy(() => import("../components/SceneQueue").then((module) => ({ default: module.SceneQueue })));
 const QuickViewDialog = lazy(() => import("../components/QuickViewDialog").then((module) => ({ default: module.QuickViewDialog })));
 
+const SEARCH_MODE_OPTIONS = [
+  { value: "text", label: "Text", title: "Text search" },
+  { value: "visual", label: "Visual", title: "Visual semantic search" },
+];
+
+const VISUAL_MATCH_SORT_OPTION = { value: "visual_match", label: "Visual Match" };
+
 interface Props {
   onNavigate: (r: any) => void;
 }
@@ -58,12 +65,14 @@ export function ScenesPage({ onNavigate }: Props) {
       displayMode: "grid" as DisplayMode,
     };
   }, []);
-  const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode } = useListUrlState({
+  const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode, searchMode, setSearchMode } = useListUrlState({
     resetKey: "scenes",
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list", "wall", "tagger"] as const,
+    defaultSearchMode: "text",
+    allowedSearchModes: ["text", "visual"],
   });
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
@@ -85,13 +94,47 @@ export function ScenesPage({ onNavigate }: Props) {
   const canDownloadScene = hasPermission("jobs.run") && canWriteScene;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
+  const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
+  const sortOptions = useMemo(
+    () => searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SCENE_SORT_OPTIONS] : SCENE_SORT_OPTIONS,
+    [searchMode],
+  );
+
+  const handleSearchModeChange = useCallback((mode: string) => {
+    setSearchMode(mode);
+
+    if (mode === "visual") {
+      setFilter({ ...filter, sort: "visual_match", direction: "desc", page: 1 });
+      return;
+    }
+
+    if (filter.sort === "visual_match") {
+      setFilter({
+        ...filter,
+        sort: defaultState.filter.sort,
+        direction: defaultState.filter.direction ?? "desc",
+        page: 1,
+      });
+      return;
+    }
+
+    setFilter({ ...filter, page: 1 });
+  }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["scenes", filter, objectFilter],
-    queryFn: () =>
-      hasObjectFilter
+    queryKey: ["scenes", filter, objectFilter, searchMode],
+    queryFn: () => {
+      if (visualSearchActive) {
+        return aiVisual.searchScenes({
+          findFilter: filter,
+          objectFilter: hasObjectFilter ? objectFilter as SceneFilterCriteria : undefined,
+        });
+      }
+
+      return hasObjectFilter
         ? scenes.findFiltered({ findFilter: filter, objectFilter: objectFilter as SceneFilterCriteria })
-        : scenes.find(filter),
+        : scenes.find(filter);
+    },
   });
 
   const items = data?.items ?? [];
@@ -213,7 +256,11 @@ export function ScenesPage({ onNavigate }: Props) {
       onFilterChange={handleFilterChange}
       totalCount={data?.totalCount ?? 0}
       isLoading={isLoading}
-      sortOptions={SCENE_SORT_OPTIONS}
+      searchMode={searchMode}
+      searchModes={SEARCH_MODE_OPTIONS}
+      searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Filter..."}
+      onSearchModeChange={handleSearchModeChange}
+      sortOptions={sortOptions}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall", "tagger"]}

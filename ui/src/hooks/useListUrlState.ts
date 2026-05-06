@@ -6,6 +6,7 @@ interface ListUrlState<TDisplayMode extends string> {
   filter: FindFilter;
   objectFilter: Record<string, unknown>;
   displayMode: TDisplayMode;
+  searchMode: string;
 }
 
 interface UseListUrlStateOptions<TDisplayMode extends string> {
@@ -14,9 +15,12 @@ interface UseListUrlStateOptions<TDisplayMode extends string> {
   defaultObjectFilter?: Record<string, unknown>;
   defaultDisplayMode: TDisplayMode;
   allowedDisplayModes: readonly TDisplayMode[];
+  defaultSearchMode?: string;
+  allowedSearchModes?: readonly string[];
 }
 
-const MANAGED_KEYS = ["q", "page", "perPage", "sort", "direction", "view", "filters", "seed"];
+const MANAGED_KEYS = ["q", "page", "perPage", "sort", "direction", "view", "filters", "seed", "searchMode"];
+const DEFAULT_SEARCH_MODE = "text";
 
 function cloneFilter(filter: FindFilter): FindFilter {
   return { ...filter };
@@ -76,6 +80,9 @@ function readObjectFilter(value: string | null, fallback: Record<string, unknown
 
 function readStateFromUrl<TDisplayMode extends string>(options: UseListUrlStateOptions<TDisplayMode>): ListUrlState<TDisplayMode> {
   const params = new URLSearchParams(window.location.search);
+  const defaultSearchMode = options.defaultSearchMode ?? DEFAULT_SEARCH_MODE;
+  const allowedSearchModes = options.allowedSearchModes ?? [defaultSearchMode];
+  const searchModeParam = params.get("searchMode");
   const filter: FindFilter = {
     q: params.get("q") ?? options.defaultFilter.q,
     page: normalizeInteger(params.get("page"), options.defaultFilter.page),
@@ -94,6 +101,7 @@ function readStateFromUrl<TDisplayMode extends string>(options: UseListUrlStateO
     filter,
     objectFilter: readObjectFilter(params.get("filters"), options.defaultObjectFilter ?? {}),
     displayMode,
+    searchMode: searchModeParam && allowedSearchModes.includes(searchModeParam) ? searchModeParam : defaultSearchMode,
   };
 }
 
@@ -127,6 +135,9 @@ function writeStateToParams<TDisplayMode extends string>(
   if (state.displayMode !== options.defaultDisplayMode) {
     params.set("view", state.displayMode);
   }
+  if (state.searchMode !== (options.defaultSearchMode ?? DEFAULT_SEARCH_MODE)) {
+    params.set("searchMode", state.searchMode);
+  }
   if (Object.keys(state.objectFilter).length > 0) {
     params.set("filters", JSON.stringify(state.objectFilter));
   } else if (options.defaultObjectFilter && Object.keys(options.defaultObjectFilter).length > 0) {
@@ -146,8 +157,9 @@ export function useListUrlState<TDisplayMode extends string>(options: UseListUrl
       filter: cloneFilter(options.defaultFilter),
       objectFilter: cloneObjectFilter(options.defaultObjectFilter),
       displayMode: options.defaultDisplayMode,
+      searchMode: options.defaultSearchMode ?? DEFAULT_SEARCH_MODE,
     });
-  }, [options.defaultDisplayMode, options.defaultFilter, options.defaultObjectFilter]);
+  }, [options.defaultDisplayMode, options.defaultFilter, options.defaultObjectFilter, options.defaultSearchMode]);
 
   useEffect(() => {
     const applyUrlState = () => {
@@ -199,13 +211,19 @@ export function useListUrlState<TDisplayMode extends string>(options: UseListUrl
     setState((current) => ({ ...current, displayMode }));
   }, []);
 
+  const setSearchMode = useCallback((searchMode: string) => {
+    setState((current) => ({ ...current, searchMode }));
+  }, []);
+
   return {
     filter: state.filter,
     objectFilter: state.objectFilter,
     displayMode: state.displayMode,
+    searchMode: state.searchMode,
     setFilter,
     setObjectFilter,
     setDisplayMode,
+    setSearchMode,
     reset,
   };
 }

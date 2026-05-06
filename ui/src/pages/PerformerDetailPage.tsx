@@ -348,15 +348,15 @@ type PerformerFaceMatch = {
 };
 
 function PerformerFaceSimilarityPanel({ performerId, canReadFaces, onNavigate }: { performerId: number; canReadFaces: boolean; onNavigate: (r: any) => void }) {
-  const { data: linkedFacesResponse, isLoading: linkedFacesLoading } = useQuery({
+  const { data: linkedFaces = [], isLoading: linkedFacesLoading } = useQuery({
     queryKey: ["performer", performerId, "linked-faces"],
-    queryFn: () => faces.list({ performerId, merged: false, page: 1, perPage: 6 }),
+    queryFn: () => faces.performerFaces(performerId),
     enabled: canReadFaces,
   });
-
-  const linkedFaces = linkedFacesResponse?.items ?? [];
+  const similaritySourceFaces = linkedFaces.slice(0, 6);
+  const visibleLinkedFaces = linkedFaces.slice(0, 12);
   const similarFaceQueries = useQueries({
-    queries: linkedFaces.map((face) => ({
+    queries: similaritySourceFaces.map((face) => ({
       queryKey: ["performer", performerId, "linked-face", face.id, "similar"],
       queryFn: () => faces.similar(face.id, { k: 12 }),
       enabled: canReadFaces,
@@ -367,7 +367,7 @@ function PerformerFaceSimilarityPanel({ performerId, canReadFaces, onNavigate }:
     const matches = new Map<number, PerformerFaceMatch & { matchingFaceIdSet: Set<number> }>();
 
     for (const query of similarFaceQueries) {
-      const candidates = query.data ?? [];
+      const candidates = query.data?.items ?? [];
       for (const candidate of candidates) {
         if (candidate.performerId == null || candidate.performerId === performerId) {
           continue;
@@ -434,7 +434,7 @@ function PerformerFaceSimilarityPanel({ performerId, canReadFaces, onNavigate }:
       ) : (
         <>
           <div className="mt-4 flex flex-wrap gap-2">
-            {linkedFaces.map((face) => (
+            {visibleLinkedFaces.map((face) => (
               <button
                 key={face.id}
                 type="button"
@@ -444,6 +444,11 @@ function PerformerFaceSimilarityPanel({ performerId, canReadFaces, onNavigate }:
                 {face.label?.trim() || `Face #${face.id}`}
               </button>
             ))}
+            {linkedFaces.length > visibleLinkedFaces.length ? (
+              <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-muted">
+                +{linkedFaces.length - visibleLinkedFaces.length} more
+              </span>
+            ) : null}
           </div>
 
           {similarFacesLoading ? (

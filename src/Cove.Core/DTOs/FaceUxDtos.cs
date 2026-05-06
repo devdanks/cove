@@ -24,7 +24,9 @@ public record FaceTopSuggestionDto(
     string? CoverImageUrl,
     float Confidence,
     int? LocalPerformerId = null,
-    string? ExternalUrl = null);
+    string? ExternalUrl = null,
+    bool LocalPerformerHasImage = false,
+    bool LocalPerformerIsLocalOnly = false);
 
 public record FaceAppearanceDto(
     int AppearanceId,

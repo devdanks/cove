@@ -898,6 +898,8 @@ export interface FaceTopSuggestion {
   confidence: number;
   localPerformerId?: number;
   externalUrl?: string;
+  localPerformerHasImage?: boolean;
+  localPerformerIsLocalOnly?: boolean;
 }
 
 export interface Face {
@@ -919,6 +921,41 @@ export interface Face {
   topSuggestion?: FaceTopSuggestion;
 }
 
+export interface FaceAppearance {
+  appearanceId: number;
+  hostType: "scene" | "image";
+  hostId: number;
+  title: string;
+  thumbnailUrl: string;
+  frameSampleCount: number;
+  retainedSpatialSampleCount: number;
+  segmentCount: number;
+  firstSeenAtSec?: number;
+  lastSeenAtSec?: number;
+  topConfidence?: number;
+}
+
+export interface FaceAppearancesResponse {
+  items: FaceAppearance[];
+  totalScenes: number;
+  totalImages: number;
+}
+
+export interface FaceHostFace {
+  id: number;
+  label?: string;
+  performerId?: number;
+  performerName?: string;
+  coverImageUrl?: string;
+  appearanceCount: number;
+  frameSampleCount: number;
+  sceneCount: number;
+  imageCount: number;
+  firstSeenAtSec?: number;
+  lastSeenAtSec?: number;
+  topConfidence?: number;
+}
+
 export interface FaceCreate {
   label?: string;
   performerId?: number;
@@ -935,6 +972,37 @@ export interface FaceUpdate {
 
 export interface FaceLink {
   performerId?: number;
+  setPerformerImage?: boolean;
+}
+
+export interface FaceBatchLinkTopSuggestionRequest {
+  faceIds: number[];
+  minConfidence?: number;
+}
+
+export interface FaceBatchDeleteRequest {
+  faceIds: number[];
+}
+
+export interface FaceBatchSkipped {
+  faceId: number;
+  reason: string;
+}
+
+export interface FaceBatchFailed {
+  faceId: number;
+  error: string;
+}
+
+export interface FaceBatchOperationResult {
+  succeeded: number[];
+  skipped: FaceBatchSkipped[];
+  failed: FaceBatchFailed[];
+}
+
+export interface FaceCreatePerformer {
+  name: string;
+  setPerformerImage?: boolean;
 }
 
 export interface FaceMerge {
@@ -972,6 +1040,16 @@ export interface FaceSimilar {
   performerId?: number;
   performerName?: string;
   coverImageUrl?: string;
+  ignored: boolean;
+  mergedIntoFaceId?: number;
+  detectionCount: number;
+  sceneCount: number;
+  imageCount: number;
+  primarySourceKey?: string;
+  createdAt: string;
+  updatedAt: string;
+  appearanceCount: number;
+  frameSampleCount: number;
   distance: number;
 }
 
@@ -990,6 +1068,8 @@ export interface FaceSuggestion {
   evidence: FaceSuggestionEvidence[];
   localPerformerId?: number;
   externalUrl?: string;
+  localPerformerHasImage?: boolean;
+  localPerformerIsLocalOnly?: boolean;
 }
 
 export type AiDataKind = "embedding" | "detection" | "segment" | "tagApplication" | "face";
@@ -1343,6 +1423,12 @@ export interface JobInfo {
   startedAt: string;
   completedAt?: string;
   error?: string;
+  unitsTotal?: number;
+  unitsCompleted?: number;
+  unitsSucceeded?: number;
+  unitsFailed?: number;
+  unitsSkipped?: number;
+  summary?: string;
 }
 
 export interface FindFilter {

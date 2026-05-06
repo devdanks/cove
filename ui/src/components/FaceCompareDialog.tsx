@@ -1,9 +1,11 @@
+import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Fingerprint, Link2, XCircle } from "lucide-react";
 import type { Face, FaceSuggestion, FaceSuggestionEvidence, FaceTopSuggestion } from "../api/types";
 import { createRouteLinkProps } from "./cardNavigation";
 import { EditModal } from "./EditModal";
 
 type ComparableSuggestion = FaceSuggestion | FaceTopSuggestion;
+type ConfirmOptions = { setPerformerImage?: boolean };
 
 interface Props {
   open: boolean;
@@ -12,7 +14,7 @@ interface Props {
   disabled?: boolean;
   canReadPerformers: boolean;
   onClose: () => void;
-  onConfirm: (suggestion: ComparableSuggestion) => void;
+  onConfirm: (suggestion: ComparableSuggestion, options?: ConfirmOptions) => void;
   onReject: (suggestion: ComparableSuggestion) => void;
   onNavigate: (route: any) => void;
 }
@@ -28,6 +30,23 @@ export function FaceCompareDialog({
   onReject,
   onNavigate,
 }: Props) {
+  const canSetPerformerImage = useMemo(() => {
+    if (!face || !suggestion) {
+      return false;
+    }
+
+    const localPerformerId = readLocalPerformerId(suggestion);
+    return localPerformerId != null
+      && !!face.coverImageUrl
+      && suggestion.localPerformerHasImage === false
+      && suggestion.localPerformerIsLocalOnly === true;
+  }, [face, suggestion]);
+  const [setPerformerImage, setSetPerformerImage] = useState(false);
+
+  useEffect(() => {
+    setSetPerformerImage(canSetPerformerImage);
+  }, [canSetPerformerImage, face?.id, open, suggestion?.performerId]);
+
   if (!open || !face || !suggestion) {
     return null;
   }
@@ -137,24 +156,37 @@ export function FaceCompareDialog({
           </section>
         ) : null}
 
-        <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
-          <button
-            type="button"
-            onClick={() => onReject(suggestion)}
-            disabled={disabled}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <XCircle className="h-4 w-4" />
-            Reject
-          </button>
-          <button
-            type="button"
-            onClick={() => onConfirm(suggestion)}
-            disabled={disabled}
-            className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {referenceOnly ? "Import performer" : "Confirm link"}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          {canSetPerformerImage ? (
+            <label className="flex items-center gap-2 rounded-lg border border-border bg-card/40 px-3 py-2 text-sm text-secondary">
+              <input
+                type="checkbox"
+                checked={setPerformerImage}
+                onChange={(event) => setSetPerformerImage(event.target.checked)}
+                className="rounded border-border bg-surface accent-accent"
+              />
+              Use face image for this local performer
+            </label>
+          ) : <span />}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => onReject(suggestion)}
+              disabled={disabled}
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <XCircle className="h-4 w-4" />
+              Reject
+            </button>
+            <button
+              type="button"
+              onClick={() => onConfirm(suggestion, { setPerformerImage: canSetPerformerImage && setPerformerImage })}
+              disabled={disabled}
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {referenceOnly ? "Import performer" : "Confirm link"}
+            </button>
+          </div>
         </div>
       </div>
     </EditModal>

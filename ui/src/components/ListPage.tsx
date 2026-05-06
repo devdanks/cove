@@ -32,6 +32,10 @@ interface ListPageProps {
   onNew?: () => void;
   renderOperations?: () => ReactNode;
   filterMode?: string;
+  searchMode?: string;
+  searchModes?: { value: string; label: string; title?: string }[];
+  searchPlaceholder?: string;
+  onSearchModeChange?: (mode: string) => void;
   // Advanced filtering
   criteriaDefinitions?: CriterionDefinition[];
   objectFilter?: Record<string, unknown>;
@@ -42,6 +46,7 @@ interface ListPageProps {
   onWallColumnCountChange?: (count: number) => void;
   showPagingControls?: boolean;
   customFilterSections?: FilterDialogCustomSection[];
+  showClearAllObjectFilters?: boolean;
 }
 
 const PER_PAGE_OPTIONS = [20, 40, 60, 120, 250, 500, 1000];
@@ -192,6 +197,10 @@ export function ListPage({
   onNew,
   renderOperations,
   filterMode,
+  searchMode,
+  searchModes,
+  searchPlaceholder,
+  onSearchModeChange,
   criteriaDefinitions,
   objectFilter,
   onObjectFilterChange,
@@ -200,6 +209,7 @@ export function ListPage({
   onWallColumnCountChange,
   showPagingControls = true,
   customFilterSections,
+  showClearAllObjectFilters = true,
 }: ListPageProps) {
   const [searchText, setSearchText] = useState(filter.q ?? "");
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -351,7 +361,7 @@ export function ListPage({
   // List-page keyboard shortcuts
   const listBindings = useMemo(() => [
     // "/" focuses search
-    { keys: "/", action: () => { document.querySelector<HTMLInputElement>("input[placeholder='Filter...']")?.focus(); } },
+    { keys: "/", action: () => { document.querySelector<HTMLInputElement>("input[data-list-search='true']")?.focus(); } },
     // View switching
     ...(onDisplayModeChange && availableDisplayModes ? [
       ...(availableDisplayModes.includes("grid") ? [{ keys: "v g", action: () => onDisplayModeChange("grid") }] : []),
@@ -404,16 +414,34 @@ export function ListPage({
         </div>
 
         {/* Search */}
-        <form onSubmit={handleSearch} className="relative shrink-0" style={{ width: "13rem", maxWidth: "100%" }}>
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
-          <input
-            type="text"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Filter..."
-            aria-label="Filter by title"
-            className="w-full rounded-lg border border-border bg-card/70 pl-7 pr-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
-          />
+        <form onSubmit={handleSearch} className="flex shrink-0 items-center gap-1" style={{ width: searchModes?.length ? "18rem" : "13rem", maxWidth: "100%" }}>
+          {searchModes && searchModes.length > 0 && onSearchModeChange && (
+            <select
+              value={searchMode ?? searchModes[0]?.value ?? "text"}
+              onChange={(e) => {
+                onSearchModeChange(e.target.value);
+              }}
+              className="min-h-[30px] max-w-[5.75rem] rounded-lg border border-border bg-card/70 px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-accent"
+              aria-label="Search mode"
+              title="Search mode"
+            >
+              {searchModes.map((mode) => (
+                <option key={mode.value} value={mode.value} title={mode.title}>{mode.label}</option>
+              ))}
+            </select>
+          )}
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder={searchPlaceholder ?? "Filter..."}
+              aria-label="Filter list"
+              data-list-search="true"
+              className="w-full rounded-lg border border-border bg-card/70 pl-7 pr-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
+            />
+          </div>
         </form>
 
         {/* Sort */}
@@ -619,26 +647,28 @@ export function ListPage({
               </button>
             );
           })}
-          <button
-            onClick={() => {
-              if (pageKey) {
-                trackInteraction({
-                  hostType: "collection",
-                  kind: "filterClear",
-                  meta: {
-                    pageKey,
-                    source: "filterChip",
-                    clearedAll: true,
-                  },
-                });
-              }
-              onObjectFilterChange({});
-              onFilterChange({ ...filter, page: 1 });
-            }}
-            className="text-xs text-muted hover:text-red-300"
-          >
-            Clear all
-          </button>
+          {showClearAllObjectFilters && (
+            <button
+              onClick={() => {
+                if (pageKey) {
+                  trackInteraction({
+                    hostType: "collection",
+                    kind: "filterClear",
+                    meta: {
+                      pageKey,
+                      source: "filterChip",
+                      clearedAll: true,
+                    },
+                  });
+                }
+                onObjectFilterChange({});
+                onFilterChange({ ...filter, page: 1 });
+              }}
+              className="text-xs text-muted hover:text-red-300"
+            >
+              Clear all
+            </button>
+          )}
         </div>
       )}
 

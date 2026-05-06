@@ -75,6 +75,19 @@ function shouldSuppressResultToast(result: unknown): boolean {
       || ("suppressToast" in result && Boolean((result as QueuedActionResponse).suppressToast)));
 }
 
+function shouldSuppressQueuedAlert(action: ExtensionAction, result: unknown): boolean {
+  if (/^run ai$/i.test(action.label) || action.extensionId === "cove.ai.core") {
+    return true;
+  }
+
+  if (result && typeof result === "object") {
+    const queued = result as QueuedActionResponse;
+    return typeof queued.description === "string" && /^run ai\b/i.test(queued.description);
+  }
+
+  return false;
+}
+
 export function ExtensionEntityActions({ entityType, entityId, pageType, renderMode = "toolbar", onInvoked }: Props) {
   const normalizedEntityType = normalizeEntityType(entityType);
   const normalizedPageType = normalizeEntityType(pageType ?? entityType);
@@ -111,7 +124,7 @@ export function ExtensionEntityActions({ entityType, entityId, pageType, renderM
       setPendingActionId(action.id);
     },
     onSuccess: (result, action) => {
-      if (shouldSuppressResultToast(result)) {
+      if (shouldSuppressResultToast(result) || shouldSuppressQueuedAlert(action, result)) {
         return;
       }
 

@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Repeat, RotateCcw, SkipBack, SkipForward } from "lucide-react";
+import { ExternalLink, Info, ListVideo, Repeat, RotateCcw, SkipBack, SkipForward, SlidersHorizontal } from "lucide-react";
 import { faces, performers, scenes, segmentDisplayProfiles, segmentLibrary, tags } from "../api/client";
 import type { ResolvedSpanDetail, ResolvedSpanInterval, SegmentDerivedQueryDescriptor, SegmentRecord, SegmentSpanOperator } from "../api/types";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -15,6 +15,8 @@ interface Props {
   derivedQueryDescriptor?: SegmentDerivedQueryDescriptor;
   onNavigate: (r: any) => void;
 }
+
+type ResolvedSpanTab = "overview" | "intervals" | "provenance";
 
 export function ResolvedSpanPlayPage({ sceneId, spanKey, profileId, derivedQueryDescriptor, onNavigate }: Props) {
   const { backLabel, goBack } = useBackNavigation({ page: "scene", id: sceneId }, onNavigate);
@@ -77,6 +79,7 @@ function ResolvedSpanPlayerCard({
   const [resumeTime, setResumeTime] = useState(detail.intervals[0]?.startSec ?? detail.span.startSec);
   const [autostart, setAutostart] = useState(false);
   const [autostartToken, setAutostartToken] = useState(0);
+  const [activeTab, setActiveTab] = useState<ResolvedSpanTab>("overview");
 
   const intervals = useMemo(
     () => detail.intervals.length > 0 ? detail.intervals : [{ startSec: detail.span.startSec, endSec: detail.span.endSec }],
@@ -312,6 +315,127 @@ function ResolvedSpanPlayerCard({
     </div>
   );
 
+  const tabs = useMemo(() => [
+    { key: "overview", label: "Overview", icon: <Info className="h-4 w-4" /> },
+    { key: "intervals", label: "Intervals", icon: <ListVideo className="h-4 w-4" />, count: intervals.length },
+    { key: "provenance", label: "Provenance", icon: <SlidersHorizontal className="h-4 w-4" /> },
+  ], [intervals.length]);
+
+  const progressPanel = (
+    <div className="rounded-2xl border border-border bg-surface/50 p-4">
+      <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted">
+        <span>Union progress</span>
+        <span>{formatTime(currentLogicalTime)} / {formatTime(totalLogicalDuration)}</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={Math.max(totalLogicalDuration, 0.001)}
+        step={0.01}
+        value={Math.min(currentLogicalTime, Math.max(totalLogicalDuration, 0.001))}
+        onChange={(event) => seekLogical(Number(event.target.value))}
+        disabled={!currentFile || currentSceneLoading || totalLogicalDuration <= 0}
+        className="w-full accent-accent disabled:cursor-not-allowed disabled:opacity-50"
+        aria-label="Seek within the resolved span"
+      />
+      <div className="mt-3 flex items-center justify-between text-xs text-secondary">
+        <span>Active interval {activeIntervalIndex + 1} of {intervals.length}</span>
+        <span>{clipProgress.toFixed(0)}%</span>
+      </div>
+    </div>
+  );
+
+  const playbackControls = (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={restartSpan}
+        disabled={!currentFile || currentSceneLoading}
+        className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <RotateCcw className="h-4 w-4" />
+        Restart
+      </button>
+      <button
+        type="button"
+        onClick={() => seekLogical(Math.max(0, currentLogicalTime - 5))}
+        disabled={!currentFile || currentSceneLoading}
+        className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <SkipBack className="h-4 w-4" />
+        -5s
+      </button>
+      <button
+        type="button"
+        onClick={() => seekLogical(Math.min(totalLogicalDuration, currentLogicalTime + 5))}
+        disabled={!currentFile || currentSceneLoading}
+        className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <SkipForward className="h-4 w-4" />
+        +5s
+      </button>
+      <button
+        type="button"
+        onClick={() => setLoopSpan((value) => !value)}
+        className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${loopSpan ? "border-accent bg-accent/10 text-accent" : "border-border text-foreground hover:border-accent"}`}
+      >
+        <Repeat className="h-4 w-4" />
+        Loop span
+      </button>
+    </div>
+  );
+
+  const intervalsContent = (
+    <div className="rounded-2xl border border-border bg-surface/50 p-4">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Intervals</div>
+      <div className="space-y-2">
+        {intervals.map((interval, index) => (
+          <button
+            key={`${interval.startSec}-${interval.endSec}`}
+            type="button"
+            onClick={() => seekAbsolute(interval.startSec)}
+            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition-colors ${index === activeIntervalIndex ? "border-accent bg-accent/10 text-foreground" : "border-border bg-card/60 text-secondary hover:border-accent"}`}
+          >
+            <span>Interval {index + 1}</span>
+            <span className="font-mono text-xs">{formatTime(interval.startSec)} - {formatTime(interval.endSec)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const provenanceContent = (
+    <ResolvedSpanProvenanceCard
+      detail={detail}
+      derivedOperator={derivedOperator}
+      derivedQueryDescriptor={derivedQueryDescriptor}
+      profileName={profileQuery.data?.name}
+      rawSegments={rawSegmentsQuery.data ?? []}
+      rawSegmentsLoading={rawSegmentsQuery.isLoading}
+      tagNamesById={tagNamesById}
+      performerNamesById={performerNamesById}
+      faceLabelsById={faceLabelsById}
+      onNavigate={onNavigate}
+    />
+  );
+
+  const overviewContent = (
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-border bg-card/70 p-5">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Resolved Span Playback</div>
+        <p className="mt-2 text-sm text-secondary">{playbackDescription}</p>
+      </section>
+      {progressPanel}
+      {playbackControls}
+    </div>
+  );
+
+  const activeContent = activeTab === "intervals"
+    ? intervalsContent
+    : activeTab === "provenance"
+      ? provenanceContent
+      : overviewContent;
+
   return (
     <MediaDetailLayout
       title={spanTitle}
@@ -330,106 +454,12 @@ function ResolvedSpanPlayerCard({
       mediaAspectRatio="auto"
       mediaFullBleed
       mediaSticky={false}
+      tabs={tabs}
+      activeTab={activeTab}
+      onTabChange={(key) => setActiveTab(key as ResolvedSpanTab)}
     >
       <MediaDetailLayout.Content>
-        <div className="space-y-4">
-          <section className="rounded-2xl border border-border bg-card/70 p-5">
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted">Resolved Span Playback</div>
-            <p className="mt-2 text-sm text-secondary">{playbackDescription}</p>
-          </section>
-
-          <div className="rounded-2xl border border-border bg-surface/50 p-4">
-          <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted">
-            <span>Union progress</span>
-            <span>{formatTime(currentLogicalTime)} / {formatTime(totalLogicalDuration)}</span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={Math.max(totalLogicalDuration, 0.001)}
-            step={0.01}
-            value={Math.min(currentLogicalTime, Math.max(totalLogicalDuration, 0.001))}
-            onChange={(event) => seekLogical(Number(event.target.value))}
-            disabled={!currentFile || currentSceneLoading || totalLogicalDuration <= 0}
-            className="w-full accent-accent disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Seek within the resolved span"
-          />
-          <div className="mt-3 flex items-center justify-between text-xs text-secondary">
-            <span>Active interval {activeIntervalIndex + 1} of {intervals.length}</span>
-            <span>{clipProgress.toFixed(0)}%</span>
-          </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={restartSpan}
-              disabled={!currentFile || currentSceneLoading}
-              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <RotateCcw className="h-4 w-4" />
-              Restart
-            </button>
-            <button
-              type="button"
-              onClick={() => seekLogical(Math.max(0, currentLogicalTime - 5))}
-              disabled={!currentFile || currentSceneLoading}
-              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <SkipBack className="h-4 w-4" />
-              -5s
-            </button>
-            <button
-              type="button"
-              onClick={() => seekLogical(Math.min(totalLogicalDuration, currentLogicalTime + 5))}
-              disabled={!currentFile || currentSceneLoading}
-              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <SkipForward className="h-4 w-4" />
-              +5s
-            </button>
-            <button
-              type="button"
-              onClick={() => setLoopSpan((value) => !value)}
-              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${loopSpan ? "border-accent bg-accent/10 text-accent" : "border-border text-foreground hover:border-accent"}`}
-            >
-              <Repeat className="h-4 w-4" />
-              Loop span
-            </button>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr),minmax(0,0.9fr)]">
-            <div className="rounded-2xl border border-border bg-surface/50 p-4">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Intervals</div>
-              <div className="space-y-2">
-                {intervals.map((interval, index) => (
-                  <button
-                    key={`${interval.startSec}-${interval.endSec}`}
-                    type="button"
-                    onClick={() => seekAbsolute(interval.startSec)}
-                    className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition-colors ${index === activeIntervalIndex ? "border-accent bg-accent/10 text-foreground" : "border-border bg-card/60 text-secondary hover:border-accent"}`}
-                  >
-                    <span>Interval {index + 1}</span>
-                    <span className="font-mono text-xs">{formatTime(interval.startSec)} - {formatTime(interval.endSec)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <ResolvedSpanProvenanceCard
-              detail={detail}
-              derivedOperator={derivedOperator}
-              derivedQueryDescriptor={derivedQueryDescriptor}
-              profileName={profileQuery.data?.name}
-              rawSegments={rawSegmentsQuery.data ?? []}
-              rawSegmentsLoading={rawSegmentsQuery.isLoading}
-              tagNamesById={tagNamesById}
-              performerNamesById={performerNamesById}
-              faceLabelsById={faceLabelsById}
-              onNavigate={onNavigate}
-            />
-          </div>
-        </div>
+        {activeContent}
       </MediaDetailLayout.Content>
     </MediaDetailLayout>
   );

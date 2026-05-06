@@ -25,7 +25,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         if (jsBundles.Count == 1)
         {
             var (extId, path) = jsBundles[0];
-            manifest.JsBundleUrl = $"/api/extensions/assets/{Uri.EscapeDataString(extId)}/{path}";
+            manifest.JsBundleUrl = BuildAssetUrl(extId, path);
         }
         else if (jsBundles.Count > 1)
         {
@@ -36,7 +36,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         if (cssBundles.Count == 1)
         {
             var (extId, path) = cssBundles[0];
-            manifest.CssBundleUrl = $"/api/extensions/assets/{Uri.EscapeDataString(extId)}/{path}";
+            manifest.CssBundleUrl = BuildAssetUrl(extId, path);
         }
         else if (cssBundles.Count > 1)
         {
@@ -63,7 +63,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         for (var i = 0; i < jsBundles.Count; i++)
         {
             var (extId, path) = jsBundles[i];
-            var url = $"/api/extensions/assets/{Uri.EscapeDataString(extId)}/{path}";
+            var url = BuildAssetUrl(extId, path);
             lines.Add($"import * as m{i} from '{url}';");
         }
 
@@ -91,11 +91,26 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         var lines = new List<string>();
         foreach (var (extId, path) in cssBundles)
         {
-            var url = $"/api/extensions/assets/{Uri.EscapeDataString(extId)}/{path}";
+            var url = BuildAssetUrl(extId, path);
             lines.Add($"@import url('{url}');");
         }
 
         return Content(string.Join("\n", lines), "text/css");
+    }
+
+    private string BuildAssetUrl(string extensionId, string path)
+    {
+        var url = $"/api/extensions/assets/{Uri.EscapeDataString(extensionId)}/{path}";
+        var basePath = Path.Combine(extensionManager.Context.DataDirectory, extensionId);
+        var fullPath = Path.GetFullPath(Path.Combine(basePath, path));
+
+        if (!fullPath.StartsWith(Path.GetFullPath(basePath)) || !System.IO.File.Exists(fullPath))
+        {
+            return url;
+        }
+
+        var version = System.IO.File.GetLastWriteTimeUtc(fullPath).Ticks;
+        return $"{url}?v={version}";
     }
 
     /// <summary>Returns a list of all registered extensions with capability and category info.</summary>

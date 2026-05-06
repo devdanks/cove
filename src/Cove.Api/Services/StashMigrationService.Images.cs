@@ -75,8 +75,15 @@ public partial class StashMigrationService
         }
 
         var idMap = new Dictionary<int, int>(imageRows.Count);
+        var candidateParentFolderIds = fileData.Values
+            .Where(file => folderIdMap.ContainsKey(file.FolderId))
+            .Select(file => folderIdMap[file.FolderId])
+            .Distinct()
+            .ToList();
         var existingFileKeys = new HashSet<string>(
             await _db.Set<BaseFileEntity>()
+                .AsNoTracking()
+                .Where(file => candidateParentFolderIds.Contains(file.ParentFolderId))
                 .Select(file => GetImportedBaseFileKey(file.ParentFolderId, file.Basename))
                 .ToListAsync(ct),
             StringComparer.OrdinalIgnoreCase);

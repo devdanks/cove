@@ -49,7 +49,24 @@ public partial class StashMigrationService
         }
 
         var idMap = new Dictionary<int, int>(rows.Count);
+        const int PerformerBatchSize = 250;
+        var pendingBatch = new List<(int StashId, Performer Entity)>(PerformerBatchSize);
         progress.Report(startProgress, "Importing performers...");
+
+        async Task FlushPerformerBatchAsync()
+        {
+            if (pendingBatch.Count == 0)
+                return;
+
+            await _db.SaveChangesAsync(ct);
+            foreach (var (stashId, entity) in pendingBatch)
+                idMap[stashId] = entity.Id;
+
+            pendingBatch.Clear();
+            _db.ChangeTracker.Clear();
+            ReportPhase(progress, startProgress, endProgress, idMap.Count, rows.Count, $"Importing performers ({idMap.Count}/{rows.Count})");
+        }
+
         foreach (var row in rows)
         {
             var performerUrls = urls.GetValueOrDefault(row.Id, [])
@@ -93,55 +110,19 @@ public partial class StashMigrationService
                 Details = row.Details,
                 IgnoreAutoTag = row.IgnoreAutoTag,
                 ImageBlobId = GetBlobId(blobMap, row.ImageBlob),
+                Urls = performerUrls.Select(url => new PerformerUrl { Url = url }).ToList(),
+                Aliases = performerAliases.Select(alias => new PerformerAlias { Alias = alias }).ToList(),
+                PerformerTags = performerTags.Select(tagId => new PerformerTag { TagId = tagId }).ToList(),
+                RemoteIds = performerRemoteIds.Select(remoteId => new PerformerRemoteId { Endpoint = remoteId.Ep, RemoteId = remoteId.Rid }).ToList(),
             };
-            _db.ChangeTracker.Clear();
-            var transaction = string.Equals(_db.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal)
-                ? null
-                : await _db.Database.BeginTransactionAsync(ct);
-            try
-            {
-                _db.Performers.Add(entity);
-                await _db.SaveChangesAsync(ct);
+            _db.Performers.Add(entity);
+            pendingBatch.Add((row.Id, entity));
 
-                await SaveImportedPerformerChildrenAsync(entity.Id, performerUrls, performerAliases, performerTags, performerRemoteIds, ct);
-                if (transaction is not null)
-                    await transaction.CommitAsync(ct);
-            }
-            catch (Exception ex)
-            {
-                if (transaction is not null)
-                {
-                    try
-                    {
-                        await transaction.RollbackAsync(ct);
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                _db.ChangeTracker.Clear();
-                _logger.LogError(ex,
-                    "Failed importing performer {StashPerformerId} '{PerformerName}' with URLs [{Urls}], aliases [{Aliases}], and remote IDs [{RemoteIds}]",
-                    row.Id,
-                    row.Name,
-                    string.Join(", ", performerUrls),
-                    string.Join(", ", performerAliases),
-                    string.Join(", ", performerRemoteIds.Select(id => $"{id.Ep}:{id.Rid}")));
-                throw;
-            }
-            finally
-            {
-                if (transaction is not null)
-                    await transaction.DisposeAsync();
-            }
-
-            idMap[row.Id] = entity.Id;
-            _db.ChangeTracker.Clear();
-
-            if (idMap.Count % 100 == 0 || idMap.Count == rows.Count)
-                ReportPhase(progress, startProgress, endProgress, idMap.Count, rows.Count, $"Importing performers ({idMap.Count}/{rows.Count})");
+            if (pendingBatch.Count >= PerformerBatchSize)
+                await FlushPerformerBatchAsync();
         }
+
+        await FlushPerformerBatchAsync();
         _logger.LogInformation("Imported {Count} performers", idMap.Count);
         return idMap;
     }

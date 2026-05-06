@@ -16,8 +16,11 @@ import {
   VolumeX,
 } from "lucide-react";
 import { scenes } from "../api/client";
-import type { Detection } from "../api/types";
+import type { Detection, Face, Segment } from "../api/types";
 import { createPlaybackTracker, type PlaybackTrackingTarget } from "../utils/interactionTracking";
+
+type FaceOverlayInfo = Pick<Face, "id" | "label" | "performerName" | "performerId">;
+type DetectionOverlay = Detection & { overlayKey?: string };
 
 function generateUuid() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -76,6 +79,8 @@ export function VideoPlayer({
   resumeTime,
   sceneId,
   detections = [],
+  segments = [],
+  faces = [],
   captions,
   onPlay,
   onSeekRegister,
@@ -97,6 +102,8 @@ export function VideoPlayer({
   resumeTime?: number;
   sceneId: number;
   detections?: Detection[];
+  segments?: Segment[];
+  faces?: FaceOverlayInfo[];
   captions?: { id: number; languageCode: string; captionType: string; filename: string }[];
   onPlay: () => void;
   onSeekRegister?: (fn: (time: number) => void) => void;
@@ -250,17 +257,32 @@ export function VideoPlayer({
     };
   }, [sceneId, selectedQuality, streamUrl, updateVideoBox]);
 
-  const activeDetections = useMemo(() => {
-    if (!detections.length) {
+  const faceLabelsById = useMemo(() => {
+    const labels = new Map<number, FaceOverlayInfo>();
+    for (const face of faces) {
+      labels.set(face.id, face);
+    }
+
+    return labels;
+  }, [faces]);
+
+  const activeDetections = useMemo<DetectionOverlay[]>(() => {
+    const faceSegments = segments.filter(isFaceTimelineSegment);
+    if (!detections.length && (!faceOverlayEnabled || !faceSegments.some(hasSegmentFaceKeyframes))) {
       return [];
     }
 
     const toleranceSec = 0.5;
-    const byKey = new Map<string, Detection>();
+    const byKey = new Map<string, DetectionOverlay>();
+    const faceDetections: Detection[] = [];
 
     for (const detection of detections) {
-      const isFaceDetection = (detection.refKind ?? detection.class ?? "").toLowerCase() === "face";
-      if (isFaceDetection && !faceOverlayEnabled) {
+      if (isLinkedFaceDetection(detection)) {
+        faceDetections.push(detection);
+        continue;
+      }
+
+      if (isFaceDetection(detection)) {
         continue;
       }
 
@@ -284,12 +306,77 @@ export function VideoPlayer({
       }
     }
 
+    if (faceOverlayEnabled && faceDetections.length > 0) {
+      const faceGroups = groupFaceDetections(faceDetections);
+      const consumedGroups = new Set<string>();
+
+      for (const segment of faceSegments) {
+        if (!isFaceTimelineSegment(segment) || !isTimeWithinSegment(currentTime, segment, toleranceSec)) {
+          continue;
+        }
+
+        const trackKey = getSegmentTrackKey(segment);
+        let segmentCandidates = trackKey && faceGroups.has(trackKey)
+          ? faceGroups.get(trackKey) ?? []
+          : faceDetections.filter((detection) => detection.refId != null
+              && segment.refId != null
+              && detection.refId === segment.refId
+              && isDetectionWithinSegment(detection, segment, toleranceSec));
+
+        if (segmentCandidates.length === 0) {
+          segmentCandidates = getSegmentFaceKeyframes(segment);
+        }
+
+        if (segmentCandidates.length === 0) {
+          continue;
+        }
+
+        const overlay = interpolateDetection(segmentCandidates, currentTime);
+        const key = getFaceOverlayKey(overlay, trackKey);
+        const candidate = { ...overlay, overlayKey: key };
+        const existing = byKey.get(key);
+        byKey.set(key, existing ? chooseCurrentFaceOverlay(existing, candidate, currentTime) : candidate);
+        if (trackKey) {
+          consumedGroups.add(trackKey);
+        }
+      }
+
+      for (const [groupKey, group] of faceGroups) {
+        if (consumedGroups.has(groupKey) || group.length === 0) {
+          continue;
+        }
+
+        const timed = group.filter((detection) => detection.observedAtSec != null);
+        if (timed.length === 0) {
+          const fallback = group[0];
+          const key = getFaceOverlayKey(fallback, groupKey);
+          const candidate = { ...fallback, overlayKey: key };
+          const existing = byKey.get(key);
+          byKey.set(key, existing ? chooseCurrentFaceOverlay(existing, candidate, currentTime) : candidate);
+          continue;
+        }
+
+        const start = Math.min(...timed.map((detection) => detection.observedAtSec!));
+        const end = Math.max(...timed.map((detection) => detection.observedAtSec!));
+        const singleInstantWindow = timed.length === 1 ? toleranceSec : 0;
+        if (currentTime < start - toleranceSec || currentTime > end + Math.max(toleranceSec, singleInstantWindow)) {
+          continue;
+        }
+
+        const overlay = interpolateDetection(group, currentTime);
+        const key = getFaceOverlayKey(overlay, groupKey);
+        const candidate = { ...overlay, overlayKey: key };
+        const existing = byKey.get(key);
+        byKey.set(key, existing ? chooseCurrentFaceOverlay(existing, candidate, currentTime) : candidate);
+      }
+    }
+
     return Array.from(byKey.values());
-  }, [currentTime, detections, faceOverlayEnabled]);
+  }, [currentTime, detections, faceOverlayEnabled, segments]);
 
   const hasFaceDetections = useMemo(
-    () => detections.some((detection) => (detection.refKind ?? detection.class ?? "").toLowerCase() === "face"),
-    [detections],
+    () => detections.some(isLinkedFaceDetection) || segments.some(hasSegmentFaceKeyframes),
+    [detections, segments],
   );
 
   const effectiveStreamUrl = selectedQuality === "Direct" ? streamUrl : scenes.transcodeUrl(sceneId, selectedQuality);
@@ -765,7 +852,7 @@ export function VideoPlayer({
 
             return (
               <div
-                key={detection.id}
+                key={detection.overlayKey ?? detection.id}
                 className="absolute rounded-md border shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
                 style={{
                   left,
@@ -781,7 +868,7 @@ export function VideoPlayer({
                   className="absolute left-0 top-0 -translate-y-full rounded-sm px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white"
                   style={{ backgroundColor: color }}
                 >
-                  {formatDetectionBadge(detection)}
+                  {formatDetectionBadge(detection, faceLabelsById)}
                 </span>
               </div>
             );
@@ -993,8 +1080,269 @@ function detectionColor(className: string) {
   return `hsl(${hue} 80% 55%)`;
 }
 
-function formatDetectionBadge(detection: Detection) {
+function isFaceDetection(detection: Detection) {
+  return (detection.refKind ?? detection.class ?? "").toLowerCase() === "face";
+}
+
+function isLinkedFaceDetection(detection: Detection) {
+  return isFaceDetection(detection) && detection.refKind?.toLowerCase() === "face" && detection.refId != null;
+}
+
+function getPayloadValue(payload: unknown, key: string): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+
+  return (payload as Record<string, unknown>)[key];
+}
+
+function getPayloadString(payload: unknown, key: string): string | undefined {
+  const value = getPayloadValue(payload, key);
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function getPayloadJsonValue(payload: unknown, key: string): unknown {
+  const value = getPayloadValue(payload, key);
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function readFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function readNumberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(readFiniteNumber)
+    .filter((item): item is number => item != null);
+}
+
+function getSegmentKeyframeItems(segment: Segment): unknown[] {
+  const keyframes = getPayloadJsonValue(segment.payload, "keyframes");
+  return Array.isArray(keyframes) ? keyframes : [];
+}
+
+function hasSegmentFaceKeyframes(segment: Segment) {
+  if (!isFaceTimelineSegment(segment)) {
+    return false;
+  }
+
+  return getSegmentKeyframeItems(segment).length > 0
+    || readNumberArray(getPayloadJsonValue(segment.payload, "bestBbox")).length >= 4;
+}
+
+function getSegmentFaceKeyframes(segment: Segment): Detection[] {
+  const keyframes = getSegmentKeyframeItems(segment);
+  const detections = keyframes
+    .map((keyframe, index) => createSegmentKeyframeDetection(segment, keyframe, index))
+    .filter((detection): detection is Detection => detection != null);
+
+  if (detections.length > 0) {
+    return detections;
+  }
+
+  const bestBbox = readNumberArray(getPayloadJsonValue(segment.payload, "bestBbox"));
+  if (bestBbox.length < 4) {
+    return [];
+  }
+
+  return [createSegmentFaceDetection(
+    segment,
+    0,
+    readFiniteNumber(getPayloadValue(segment.payload, "bestTimeSec")) ?? segment.startSec,
+    bestBbox,
+    readFiniteNumber(getPayloadValue(segment.payload, "bestScore")) ?? segment.confidence ?? 1,
+  )];
+}
+
+function createSegmentKeyframeDetection(segment: Segment, keyframe: unknown, index: number): Detection | null {
+  if (!keyframe || typeof keyframe !== "object" || Array.isArray(keyframe)) {
+    return null;
+  }
+
+  const record = keyframe as Record<string, unknown>;
+  const bbox = readNumberArray(record.bbox);
+  if (bbox.length < 4) {
+    return null;
+  }
+
+  return createSegmentFaceDetection(
+    segment,
+    index,
+    readFiniteNumber(record.t) ?? readFiniteNumber(record.timeSec) ?? readFiniteNumber(record.time) ?? segment.startSec,
+    bbox,
+    readFiniteNumber(record.score) ?? segment.confidence ?? 1,
+  );
+}
+
+function createSegmentFaceDetection(segment: Segment, index: number, observedAtSec: number, bbox: number[], score: number): Detection {
+  const x = bbox[0];
+  const y = bbox[1];
+  const width = bbox[2] > x ? bbox[2] - x : bbox[2];
+  const height = bbox[3] > y ? bbox[3] - y : bbox[3];
+  const trackKey = getSegmentTrackKey(segment) ?? `segment:${segment.id}`;
+
+  return {
+    id: -(segment.id * 1000 + index + 1),
+    hostType: "scene",
+    hostId: segment.hostId,
+    observedAtSec,
+    frameWidth: 1,
+    frameHeight: 1,
+    class: "face",
+    score,
+    x,
+    y,
+    w: Math.max(width, 0),
+    h: Math.max(height, 0),
+    extra: segment.payload,
+    refKind: "face",
+    refId: segment.refId,
+    groupKey: trackKey,
+    sourceKey: segment.sourceKey,
+    sourceRunId: segment.sourceRunId,
+    createdAt: segment.createdAt,
+    updatedAt: segment.updatedAt,
+  };
+}
+
+function isFaceTimelineSegment(segment: Segment) {
+  return (segment.kind ?? "").toLowerCase() === "face"
+    || getPayloadString(segment.payload, "refKind")?.toLowerCase() === "face";
+}
+
+function getSegmentTrackKey(segment: Segment) {
+  return getPayloadString(segment.payload, "trackKey") || undefined;
+}
+
+function isTimeWithinSegment(currentTime: number, segment: Segment, toleranceSec: number) {
+  const start = segment.startSec;
+  const end = Math.max(segment.endSec ?? segment.startSec, segment.startSec + 0.4);
+  return currentTime >= start - toleranceSec && currentTime <= end + toleranceSec;
+}
+
+function isDetectionWithinSegment(detection: Detection, segment: Segment, toleranceSec: number) {
+  if (detection.observedAtSec == null) {
+    return false;
+  }
+
+  const start = segment.startSec;
+  const end = Math.max(segment.endSec ?? segment.startSec, segment.startSec + 0.4);
+  return detection.observedAtSec >= start - toleranceSec && detection.observedAtSec <= end + toleranceSec;
+}
+
+function getFaceDetectionGroupKey(detection: Detection) {
+  return detection.groupKey
+    ?? (detection.refId != null ? `face:${detection.refId}` : `detection:${detection.id}`);
+}
+
+function groupFaceDetections(detections: Detection[]) {
+  const groups = new Map<string, Detection[]>();
+  for (const detection of detections) {
+    const key = getFaceDetectionGroupKey(detection);
+    const group = groups.get(key) ?? [];
+    group.push(detection);
+    groups.set(key, group);
+  }
+
+  return groups;
+}
+
+function getFaceOverlayKey(detection: Detection, trackKey?: string) {
+  if (detection.refId != null) {
+    return `face:${detection.refId}`;
+  }
+
+  return `face-track:${trackKey ?? detection.groupKey ?? detection.id}`;
+}
+
+function chooseCurrentFaceOverlay(existing: DetectionOverlay, candidate: DetectionOverlay, currentTime: number): DetectionOverlay {
+  const existingDelta = Math.abs((existing.observedAtSec ?? currentTime) - currentTime);
+  const candidateDelta = Math.abs((candidate.observedAtSec ?? currentTime) - currentTime);
+  if (candidateDelta < existingDelta - 0.001) {
+    return candidate;
+  }
+
+  if (Math.abs(candidateDelta - existingDelta) <= 0.001 && candidate.score > existing.score) {
+    return candidate;
+  }
+
+  return existing;
+}
+
+function interpolateDetection(detections: Detection[], currentTime: number): Detection {
+  const timed = detections
+    .filter((detection) => detection.observedAtSec != null)
+    .sort((left, right) => (left.observedAtSec ?? 0) - (right.observedAtSec ?? 0));
+
+  if (timed.length === 0) {
+    return detections[0];
+  }
+
+  if (timed.length === 1 || currentTime <= timed[0].observedAtSec!) {
+    return timed[0];
+  }
+
+  const last = timed[timed.length - 1];
+  if (currentTime >= last.observedAtSec!) {
+    return last;
+  }
+
+  for (let index = 1; index < timed.length; index += 1) {
+    const previous = timed[index - 1];
+    const next = timed[index];
+    const previousTime = previous.observedAtSec ?? currentTime;
+    const nextTime = next.observedAtSec ?? previousTime;
+    if (currentTime > nextTime) {
+      continue;
+    }
+
+    const span = Math.max(nextTime - previousTime, 0.001);
+    const ratio = Math.min(1, Math.max(0, (currentTime - previousTime) / span));
+    const lerp = (left: number, right: number) => left + ((right - left) * ratio);
+    return {
+      ...previous,
+      observedAtSec: currentTime,
+      score: Math.max(previous.score, next.score),
+      x: lerp(previous.x, next.x),
+      y: lerp(previous.y, next.y),
+      w: lerp(previous.w, next.w),
+      h: lerp(previous.h, next.h),
+    };
+  }
+
+  return last;
+}
+
+function formatDetectionBadge(detection: Detection, faceLabelsById?: Map<number, FaceOverlayInfo>) {
   const confidence = Math.round(detection.score * 100);
+  const face = detection.refId != null && isFaceDetection(detection)
+    ? faceLabelsById?.get(detection.refId)
+    : undefined;
+  if (face?.performerName?.trim()) {
+    return `${detection.class} ${confidence}% · ${face.performerName.trim()}`;
+  }
+
   const refText = detection.refKind && detection.refId != null
     ? ` · ${detection.refKind} #${detection.refId}`
     : "";

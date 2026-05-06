@@ -74,6 +74,28 @@ public partial class StashMigrationService
 
         progress.Report(startProgress, "Importing folders...");
 
+        const int FolderBatchSize = 1000;
+        var pendingFolders = new List<(int StashId, string NormalizedPath, Folder Entity)>(FolderBatchSize);
+        var createdFoldersByStashId = new Dictionary<int, Folder>();
+        var createdFoldersByPath = new Dictionary<string, Folder>(StringComparer.OrdinalIgnoreCase);
+
+        async Task FlushFolderBatchAsync()
+        {
+            if (pendingFolders.Count == 0)
+                return;
+
+            await _db.SaveChangesAsync(ct);
+            foreach (var (stashId, normalizedPath, entity) in pendingFolders)
+            {
+                folderIdMap[stashId] = entity.Id;
+                existingFoldersByPath[normalizedPath] = entity.Id;
+            }
+
+            pendingFolders.Clear();
+            _db.ChangeTracker.Clear();
+            ReportPhase(progress, startProgress, endProgress, folderIdMap.Count, ordered.Count, $"Importing folders ({folderIdMap.Count}/{ordered.Count})");
+        }
+
         foreach (var stashFolderId in ordered)
         {
             var fd = folderData[stashFolderId];
@@ -84,22 +106,34 @@ public partial class StashMigrationService
                 continue;
             }
 
+            if (createdFoldersByPath.TryGetValue(normalizedPath, out var pendingFolder))
+            {
+                createdFoldersByStashId[stashFolderId] = pendingFolder;
+                pendingFolders.Add((stashFolderId, normalizedPath, pendingFolder));
+                if (pendingFolders.Count >= FolderBatchSize)
+                    await FlushFolderBatchAsync();
+                continue;
+            }
+
             var folder = new Folder
             {
                 Path = normalizedPath,
                 ParentFolderId = fd.ParentId.HasValue && folderIdMap.TryGetValue(fd.ParentId.Value, out var pfId) ? pfId : null,
+                ParentFolder = fd.ParentId.HasValue && !folderIdMap.ContainsKey(fd.ParentId.Value) && createdFoldersByStashId.TryGetValue(fd.ParentId.Value, out var parentFolder) ? parentFolder : null,
                 ModTime = fd.ModTime,
                 CreatedAt = fd.CreatedAt,
                 UpdatedAt = fd.ModTime,
             };
             _db.Folders.Add(folder);
-            await _db.SaveChangesAsync(ct);
-            folderIdMap[stashFolderId] = folder.Id;
-            existingFoldersByPath[normalizedPath] = folder.Id;
+            createdFoldersByStashId[stashFolderId] = folder;
+            createdFoldersByPath[normalizedPath] = folder;
+            pendingFolders.Add((stashFolderId, normalizedPath, folder));
 
-            if (folderIdMap.Count % 100 == 0 || folderIdMap.Count == ordered.Count)
-                ReportPhase(progress, startProgress, endProgress, folderIdMap.Count, ordered.Count, $"Importing folders ({folderIdMap.Count}/{ordered.Count})");
+            if (pendingFolders.Count >= FolderBatchSize)
+                await FlushFolderBatchAsync();
         }
+
+        await FlushFolderBatchAsync();
         _logger.LogInformation("Imported {Count} folders", folderIdMap.Count);
         return folderIdMap;
     }

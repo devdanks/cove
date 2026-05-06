@@ -17,6 +17,7 @@ public class FacesController(
     CoveContext db,
     IEmbeddingService embeddingService,
     IBlobService blobService,
+    FacePerformerPropagationService facePerformerPropagationService,
     IEnumerable<IFaceLifecycleParticipant> faceLifecycleParticipants,
     ILogger<FacesController> logger,
     IEnumerable<IFaceSuggester>? faceSuggesters = null,
@@ -28,8 +29,10 @@ public class FacesController(
     public async Task<ActionResult<PaginatedResponse<FaceDto>>> List(
         [FromQuery] string? q,
         [FromQuery] int? performerId,
+        [FromQuery] bool? linked,
         [FromQuery] bool? ignored,
         [FromQuery] bool? merged,
+        [FromQuery] string? sort,
         [FromQuery] int page = 1,
         [FromQuery] int perPage = 50,
         CancellationToken cancellationToken = default)
@@ -52,6 +55,11 @@ public class FacesController(
         if (performerId.HasValue)
             query = query.Where(face => face.PerformerId == performerId.Value);
 
+        if (linked.HasValue)
+            query = linked.Value
+                ? query.Where(face => face.PerformerId != null)
+                : query.Where(face => face.PerformerId == null);
+
         if (ignored.HasValue)
             query = query.Where(face => face.Ignored == ignored.Value);
 
@@ -61,18 +69,21 @@ public class FacesController(
                 : query.Where(face => face.MergedIntoFaceId == null);
 
         var totalCount = await query.CountAsync(cancellationToken);
-        var items = await query
-            .OrderBy(face => face.MergedIntoFaceId != null)
-            .ThenByDescending(face => face.AppearanceCount)
-            .ThenByDescending(face => face.FrameSampleCount)
-            .ThenBy(face => face.Label)
-            .ThenBy(face => face.Id)
+        var items = await ApplyFaceSort(query, sort)
             .Skip((page - 1) * perPage)
             .Take(perPage)
             .ToListAsync(cancellationToken);
 
         var computedCounts = await LoadComputedCountsAsync(items.Select(face => face.Id).ToArray(), cancellationToken);
         var topSuggestions = await BuildTopSuggestionsAsync(items, cancellationToken);
+        if (IsSuggestionConfidenceSort(sort))
+        {
+            items = items
+                .OrderByDescending(face => topSuggestions.TryGetValue(face.Id, out var suggestion) ? suggestion.Confidence : -1f)
+                .ThenByDescending(face => face.UpdatedAt)
+                .ThenBy(face => face.Id)
+                .ToList();
+        }
 
         return Ok(new PaginatedResponse<FaceDto>(
             items.Select(face => MapToDto(
@@ -103,67 +114,40 @@ public class FacesController(
     }
 
     [HttpGet("{id:int}/appearances")]
-    public async Task<ActionResult<FaceAppearancesResponseDto>> GetAppearances(int id, CancellationToken cancellationToken)
+    public async Task<ActionResult<PaginatedResponse<FaceAppearanceDto>>> GetAppearances(
+        int id,
+        [FromQuery] string? q,
+        [FromQuery] string? sort,
+        [FromQuery] string? direction,
+        [FromQuery] int page = 1,
+        [FromQuery] int perPage = 24,
+        CancellationToken cancellationToken = default)
     {
+        page = Math.Max(page, 1);
+        perPage = Math.Clamp(perPage, 1, 250);
+
         var faceExists = await db.Faces.AsNoTracking().AnyAsync(face => face.Id == id, cancellationToken);
         if (!faceExists)
             return NotFound();
 
-        var appearances = await db.FaceAppearances
-            .AsNoTracking()
-            .Where(appearance => appearance.FaceId == id)
-            .OrderBy(appearance => appearance.HostType)
-            .ThenByDescending(appearance => appearance.LastSeenAtSec ?? appearance.FirstSeenAtSec ?? double.MinValue)
-            .ThenByDescending(appearance => appearance.UpdatedAt)
-            .ToListAsync(cancellationToken);
-
-        if (appearances.Count == 0)
-            return Ok(await BuildFallbackAppearanceResponseAsync(id, cancellationToken));
-
-        Dictionary<int, string?> sceneTitles = [];
-        var sceneIds = appearances
-            .Where(appearance => appearance.HostType == FaceAppearanceHostType.Scene)
-            .Select(appearance => appearance.HostId)
-            .Distinct()
-            .ToArray();
-        if (sceneIds.Length > 0)
+        var items = await LoadFaceAppearanceItemsAsync(id, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(q))
         {
-            sceneTitles = await db.Scenes
-                .AsNoTracking()
-                .Where(scene => sceneIds.Contains(scene.Id))
-                .ToDictionaryAsync(scene => scene.Id, scene => scene.Title, cancellationToken);
+            items = items
+                .Where(item =>
+                    item.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || item.HostType.Contains(q, StringComparison.OrdinalIgnoreCase))
+                .ToList();
         }
 
-        Dictionary<int, string?> imageTitles = [];
-        var imageIds = appearances
-            .Where(appearance => appearance.HostType == FaceAppearanceHostType.Image)
-            .Select(appearance => appearance.HostId)
-            .Distinct()
-            .ToArray();
-        if (imageIds.Length > 0)
-        {
-            imageTitles = await db.Images
-                .AsNoTracking()
-                .Where(image => imageIds.Contains(image.Id))
-                .ToDictionaryAsync(image => image.Id, image => image.Title, cancellationToken);
-        }
-
-        var items = appearances
-            .Select(appearance => new FaceAppearanceDto(
-                appearance.Id,
-                appearance.HostType == FaceAppearanceHostType.Scene ? "scene" : "image",
-                appearance.HostId,
-                ResolveAppearanceTitle(appearance, sceneTitles, imageTitles),
-                ResolveAppearanceThumbnailUrl(appearance.HostType, appearance.HostId),
-                appearance.SampleCount,
-                appearance.RetainedSpatialSampleCount,
-                appearance.SegmentCount,
-                appearance.FirstSeenAtSec,
-                appearance.LastSeenAtSec,
-                appearance.TopConfidence))
+        items = ApplyAppearanceSort(items, sort, direction);
+        var totalCount = items.Count;
+        var pageItems = items
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
             .ToList();
 
-        return Ok(new FaceAppearancesResponseDto(items, sceneIds.Length, imageIds.Length));
+        return Ok(new PaginatedResponse<FaceAppearanceDto>(pageItems, totalCount, page, perPage));
     }
 
     [HttpGet("{id:int}/detections")]
@@ -181,6 +165,89 @@ public class FacesController(
             .ToListAsync(cancellationToken);
 
         return Ok(detections.Select(MapDetectionToDto).ToList());
+    }
+
+    [HttpGet("/api/scenes/{sceneId:int}/faces")]
+    public async Task<ActionResult<IReadOnlyList<FaceHostFaceDto>>> GetSceneFaces(int sceneId, CancellationToken cancellationToken)
+        => Ok(await LoadHostFacesAsync(FaceAppearanceHostType.Scene, sceneId, cancellationToken));
+
+    [HttpGet("/api/images/{imageId:int}/faces")]
+    public async Task<ActionResult<IReadOnlyList<FaceHostFaceDto>>> GetImageFaces(int imageId, CancellationToken cancellationToken)
+        => Ok(await LoadHostFacesAsync(FaceAppearanceHostType.Image, imageId, cancellationToken));
+
+    [HttpGet("/api/performers/{performerId:int}/faces")]
+    public async Task<ActionResult<IReadOnlyList<FaceDto>>> GetPerformerFaces(int performerId, CancellationToken cancellationToken)
+    {
+        var faces = await db.Faces
+            .AsNoTracking()
+            .Include(face => face.Performer)
+            .Where(face => face.PerformerId == performerId && face.MergedIntoFaceId == null)
+            .OrderByDescending(face => face.AppearanceCount)
+            .ThenBy(face => face.Label)
+            .ThenBy(face => face.Id)
+            .ToListAsync(cancellationToken);
+
+        var computedCounts = await LoadComputedCountsAsync(faces.Select(face => face.Id).ToArray(), cancellationToken);
+        return Ok(faces.Select(face => MapToDto(face, computedCounts.GetValueOrDefault(face.Id))).ToList());
+    }
+
+    [HttpGet("review/unlinked")]
+    public async Task<ActionResult<IReadOnlyList<FaceDto>>> GetUnlinkedReviewFaces(
+        [FromQuery] int take = 24,
+        CancellationToken cancellationToken = default)
+    {
+        take = Math.Clamp(take, 1, 100);
+        var faces = await db.Faces
+            .AsNoTracking()
+            .Include(face => face.Performer)
+            .Where(face => face.PerformerId == null && face.MergedIntoFaceId == null && !face.Ignored)
+            .OrderByDescending(face => face.AppearanceCount)
+            .ThenByDescending(face => face.FrameSampleCount)
+            .ThenBy(face => face.Id)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+
+        var computedCounts = await LoadComputedCountsAsync(faces.Select(face => face.Id).ToArray(), cancellationToken);
+        var topSuggestions = await BuildTopSuggestionsAsync(faces, cancellationToken);
+        return Ok(faces.Select(face => MapToDto(
+            face,
+            computedCounts.GetValueOrDefault(face.Id),
+            topSuggestions.GetValueOrDefault(face.Id))).ToList());
+    }
+
+    [HttpGet("review/ai-run")]
+    public async Task<ActionResult<IReadOnlyList<FaceDto>>> GetAiRunReviewFaces(
+        [FromQuery] DateTime? startedAt,
+        [FromQuery] DateTime? completedAt,
+        [FromQuery] int take = 12,
+        CancellationToken cancellationToken = default)
+    {
+        if (!startedAt.HasValue || !completedAt.HasValue)
+            return Ok(Array.Empty<FaceDto>());
+
+        take = Math.Clamp(take, 1, 100);
+        var windowStart = startedAt.Value.ToUniversalTime().AddMinutes(-1);
+        var windowEnd = completedAt.Value.ToUniversalTime().AddMinutes(1);
+        var runs = await db.AiRuns
+            .AsNoTracking()
+            .Where(run => run.SourceKey == "ext:ai.core"
+                && run.Status == AiRunStatus.Completed
+                && run.StartedAt >= windowStart
+                && (run.CompletedAt ?? run.StartedAt) <= windowEnd
+                && (run.TargetType == AiRunTargetType.Scene || run.TargetType == AiRunTargetType.Image))
+            .OrderByDescending(run => run.CompletedAt ?? run.StartedAt)
+            .ToListAsync(cancellationToken);
+
+        var targets = runs
+            .Select(run => new { run.TargetType, run.TargetId })
+            .Distinct()
+            .ToArray();
+        if (targets.Length != 1)
+            return Ok(Array.Empty<FaceDto>());
+
+        var target = targets[0];
+        var hostType = target.TargetType == AiRunTargetType.Scene ? FaceAppearanceHostType.Scene : FaceAppearanceHostType.Image;
+        return Ok(await LoadReviewFacesForHostAsync(hostType, target.TargetId, take, cancellationToken));
     }
 
     [HttpGet("{id:int}/delete-impact")]
@@ -247,6 +314,134 @@ public class FacesController(
         return CreatedAtAction(nameof(GetById), new { id = face.Id }, MapToDto(created));
     }
 
+    [HttpPost("batch/link-top-suggestion")]
+    [RequiresPermission(Permissions.FacesWrite)]
+    public async Task<ActionResult<FaceBatchOperationResultDto>> BatchLinkTopSuggestion([FromBody] FaceBatchLinkTopSuggestionDto dto, CancellationToken cancellationToken)
+    {
+        var succeeded = new List<int>();
+        var skipped = new List<FaceBatchSkippedDto>();
+        var failed = new List<FaceBatchFailedDto>();
+        var minConfidence = NormalizeConfidenceThreshold(dto.MinConfidence ?? 60f);
+        var requestedFaceIds = dto.FaceIds.Distinct().ToArray();
+        var facesById = requestedFaceIds.Length == 0
+            ? new Dictionary<int, Face>()
+            : await db.Faces
+                .Where(face => requestedFaceIds.Contains(face.Id))
+                .ToDictionaryAsync(face => face.Id, cancellationToken);
+        var eligibleFaceIds = facesById.Values
+            .Where(face => !face.PerformerId.HasValue)
+            .Select(face => face.Id)
+            .ToArray();
+        var blockedByFaceId = await LoadBlockedSuggestionIdsAsync(eligibleFaceIds, cancellationToken);
+        var suggestionsByFaceId = await BuildRankedSuggestionsByFaceAsync(
+            eligibleFaceIds,
+            blockedByFaceId,
+            TopSuggestionCandidateCount,
+            cancellationToken,
+            includeReferenceMatches: true);
+
+        foreach (var faceId in requestedFaceIds)
+        {
+            try
+            {
+                if (!facesById.TryGetValue(faceId, out var face))
+                {
+                    skipped.Add(new FaceBatchSkippedDto(faceId, "Face was not found."));
+                    continue;
+                }
+
+                if (face.PerformerId.HasValue)
+                {
+                    skipped.Add(new FaceBatchSkippedDto(faceId, "Face is already linked."));
+                    continue;
+                }
+
+                suggestionsByFaceId.TryGetValue(faceId, out var suggestions);
+                var suggestion = suggestions?
+                    .FirstOrDefault(item => ResolveLocalPerformerId(item).HasValue && NormalizeConfidenceThreshold(item.Confidence) >= minConfidence);
+                var performerId = suggestion is null ? null : ResolveLocalPerformerId(suggestion);
+                if (!performerId.HasValue)
+                {
+                    skipped.Add(new FaceBatchSkippedDto(faceId, "No local top suggestion met the confidence threshold."));
+                    continue;
+                }
+
+                await facePerformerPropagationService.ApplyLinkChangeAsync(faceId, face.PerformerId, performerId, cancellationToken);
+                face.PerformerId = performerId;
+                succeeded.Add(faceId);
+            }
+            catch (Exception ex)
+            {
+                failed.Add(new FaceBatchFailedDto(faceId, ex.Message));
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(new FaceBatchOperationResultDto(succeeded, skipped, failed));
+    }
+
+    [HttpPost("batch/delete")]
+    [RequiresPermission(Permissions.FacesDelete)]
+    public async Task<ActionResult<FaceBatchOperationResultDto>> BatchDelete([FromBody] FaceBatchDeleteDto dto, CancellationToken cancellationToken)
+    {
+        var succeeded = new List<int>();
+        var skipped = new List<FaceBatchSkippedDto>();
+        var failed = new List<FaceBatchFailedDto>();
+
+        foreach (var faceId in dto.FaceIds.Distinct())
+        {
+            try
+            {
+                var deleted = await DeleteFaceAsync(faceId, cancellationToken);
+                if (deleted)
+                    succeeded.Add(faceId);
+                else
+                    skipped.Add(new FaceBatchSkippedDto(faceId, "Face was not found."));
+            }
+            catch (Exception ex)
+            {
+                failed.Add(new FaceBatchFailedDto(faceId, ex.Message));
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(new FaceBatchOperationResultDto(succeeded, skipped, failed));
+    }
+
+    [HttpPost("{id:int}/create-performer")]
+    [RequiresPermission(Permissions.FacesWrite)]
+    [RequiresEntityAccess(EntityKinds.Face, Permissions.FacesWrite)]
+    public async Task<ActionResult<FaceDto>> CreatePerformerFromFace(int id, [FromBody] FaceCreatePerformerDto dto, CancellationToken cancellationToken)
+    {
+        var name = Clean(dto.Name);
+        if (string.IsNullOrWhiteSpace(name))
+            return ValidationProblem("A performer name is required.");
+
+        var face = await db.Faces.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (face is null)
+            return NotFound();
+
+        if (face.PerformerId.HasValue)
+            return ValidationProblem("This face is already linked to a performer.");
+
+        var performer = new Performer { Name = name };
+        await TrySetLocalPerformerImageFromFaceAsync(face, performer, dto.SetPerformerImage, cancellationToken);
+
+        db.Performers.Add(performer);
+        await db.SaveChangesAsync(cancellationToken);
+
+        await facePerformerPropagationService.ApplyLinkChangeAsync(id, face.PerformerId, performer.Id, cancellationToken);
+        face.PerformerId = performer.Id;
+        await db.SaveChangesAsync(cancellationToken);
+
+        var updated = await db.Faces
+            .AsNoTracking()
+            .Include(item => item.Performer)
+            .FirstAsync(item => item.Id == id, cancellationToken);
+
+        return Ok(MapToDto(updated));
+    }
+
     [HttpPut("{id:int}")]
     [RequiresPermission(Permissions.FacesWrite)]
     [RequiresEntityAccess(EntityKinds.Face, Permissions.FacesWrite)]
@@ -264,6 +459,7 @@ public class FacesController(
         }
 
         face.Label = Clean(dto.Label);
+        await facePerformerPropagationService.ApplyLinkChangeAsync(id, face.PerformerId, dto.PerformerId, cancellationToken);
         face.PerformerId = dto.PerformerId;
         face.Ignored = dto.Ignored;
         face.PrimarySourceKey = Clean(dto.PrimarySourceKey);
@@ -283,63 +479,9 @@ public class FacesController(
     [RequiresEntityAccess(EntityKinds.Face, Permissions.FacesDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
     {
-        var face = await db.Faces.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
-        if (face is null)
+        if (!await DeleteFaceAsync(id, cancellationToken))
             return NotFound();
-
-        var mergedFaces = await db.Faces
-            .Where(item => item.MergedIntoFaceId == id)
-            .ToListAsync(cancellationToken);
-        var detections = await db.Detections
-            .Where(detection => detection.RefId == id && detection.RefKind != null && detection.RefKind.ToLower() == "face")
-            .ToListAsync(cancellationToken);
-        var appearances = await db.FaceAppearances
-            .Where(appearance => appearance.FaceId == id)
-            .ToListAsync(cancellationToken);
-        var embeddings = await db.Embeddings
-            .Where(embedding => embedding.HostType == EmbeddingHostType.Face && embedding.HostId == id)
-            .ToListAsync(cancellationToken);
-        var segments = await db.Segments
-            .Where(segment => segment.RefId == id && segment.Kind != null && segment.Kind.ToLower() == "face")
-            .ToListAsync(cancellationToken);
-        var coverBlobId = face.CoverBlobId;
-
-        foreach (var participant in faceLifecycleParticipants)
-        {
-            await participant.OnDeletingAsync(face, cancellationToken);
-        }
-
-        foreach (var mergedFace in mergedFaces)
-        {
-            mergedFace.MergedIntoFaceId = null;
-        }
-
-        if (detections.Count > 0)
-            db.Detections.RemoveRange(detections);
-
-        if (appearances.Count > 0)
-            db.FaceAppearances.RemoveRange(appearances);
-
-        if (embeddings.Count > 0)
-            db.Embeddings.RemoveRange(embeddings);
-
-        if (segments.Count > 0)
-            db.Segments.RemoveRange(segments);
-
-        db.Faces.Remove(face);
         await db.SaveChangesAsync(cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(coverBlobId))
-        {
-            try
-            {
-                await blobService.DeleteBlobAsync(coverBlobId, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to delete face cover blob {BlobId} after deleting face {FaceId}.", coverBlobId, id);
-            }
-        }
 
         return NoContent();
     }
@@ -353,14 +495,20 @@ public class FacesController(
         if (face is null)
             return NotFound();
 
+        Performer? performer = null;
         if (dto.PerformerId.HasValue)
         {
-            var performerExists = await db.Performers.AnyAsync(performer => performer.Id == dto.PerformerId.Value, cancellationToken);
-            if (!performerExists)
+            performer = await db.Performers
+                .Include(item => item.RemoteIds)
+                .FirstOrDefaultAsync(item => item.Id == dto.PerformerId.Value, cancellationToken);
+            if (performer is null)
                 return ValidationProblem($"Performer {dto.PerformerId.Value} was not found.");
         }
 
+        await facePerformerPropagationService.ApplyLinkChangeAsync(id, face.PerformerId, dto.PerformerId, cancellationToken);
         face.PerformerId = dto.PerformerId;
+        if (performer is not null)
+            await TrySetLocalPerformerImageFromFaceAsync(face, performer, dto.SetPerformerImage, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         var linked = await db.Faces
@@ -387,8 +535,10 @@ public class FacesController(
         if (face is null)
             return NotFound();
 
-        var performerExists = await db.Performers.AnyAsync(performer => performer.Id == dto.PerformerId, cancellationToken);
-        if (!performerExists)
+        var performer = await db.Performers
+            .Include(item => item.RemoteIds)
+            .FirstOrDefaultAsync(item => item.Id == dto.PerformerId, cancellationToken);
+        if (performer is null)
             return ValidationProblem($"Performer {dto.PerformerId} was not found.");
 
         var decision = await db.FaceSuggestionDecisions
@@ -410,7 +560,11 @@ public class FacesController(
         }
 
         if (normalizedDecision == FaceSuggestionDecisionValues.Accept)
+        {
+            await facePerformerPropagationService.ApplyLinkChangeAsync(id, face.PerformerId, dto.PerformerId, cancellationToken);
             face.PerformerId = dto.PerformerId;
+            await TrySetLocalPerformerImageFromFaceAsync(face, performer, dto.SetPerformerImage, cancellationToken);
+        }
 
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
@@ -472,13 +626,21 @@ public class FacesController(
     }
 
     [HttpGet("{id:int}/similar")]
-    public async Task<ActionResult<IReadOnlyList<FaceSimilarDto>>> GetSimilar(
+    public async Task<ActionResult<PaginatedResponse<FaceSimilarDto>>> GetSimilar(
         int id,
         [FromQuery] string? kindFamily,
-        [FromQuery] int k = 20,
+        [FromQuery] string? q,
+        [FromQuery] string? sort,
+        [FromQuery] string? direction,
+        [FromQuery] int page = 1,
+        [FromQuery] int perPage = 18,
+        [FromQuery] int k = 80,
         CancellationToken cancellationToken = default)
     {
-        k = Math.Clamp(k, 1, 100);
+        page = Math.Max(page, 1);
+        perPage = Math.Clamp(perPage, 1, 250);
+        k = Math.Clamp(k, 1, 250);
+        var candidateCount = Math.Clamp(Math.Max(k, page * perPage * 4), 1, 250);
 
         var sourceEmbedding = await db.Embeddings
             .AsNoTracking()
@@ -491,11 +653,11 @@ public class FacesController(
             .FirstOrDefaultAsync(cancellationToken);
 
         if (sourceEmbedding is null)
-            return Ok(Array.Empty<FaceSimilarDto>());
+            return Ok(new PaginatedResponse<FaceSimilarDto>(Array.Empty<FaceSimilarDto>(), 0, page, perPage));
 
         var results = await embeddingService.KnnAsync(
             sourceEmbedding.Vector,
-            k + 1,
+            candidateCount + 1,
             new EmbeddingSearchOptions
             {
                 HostType = EmbeddingHostType.Face,
@@ -508,11 +670,11 @@ public class FacesController(
             .Where(result => result.Embedding.HostId != id)
             .Select(result => result.Embedding.HostId)
             .Distinct()
-            .Take(k)
+            .Take(candidateCount)
             .ToArray();
 
         if (faceIds.Length == 0)
-            return Ok(Array.Empty<FaceSimilarDto>());
+            return Ok(new PaginatedResponse<FaceSimilarDto>(Array.Empty<FaceSimilarDto>(), 0, page, perPage));
 
         var faces = await db.Faces
             .AsNoTracking()
@@ -520,28 +682,326 @@ public class FacesController(
             .Where(face => faceIds.Contains(face.Id))
             .ToDictionaryAsync(face => face.Id, cancellationToken);
 
+        var computedCounts = await LoadComputedCountsAsync(faceIds, cancellationToken);
+
         var response = results
             .Where(result => result.Embedding.HostId != id)
             .GroupBy(result => result.Embedding.HostId)
             .Select(group => group.OrderBy(result => result.Distance).First())
             .OrderBy(result => result.Distance)
-            .Take(k)
+            .Take(candidateCount)
             .Where(result => faces.ContainsKey(result.Embedding.HostId))
-            .Select(result =>
+            .Select(result => MapToSimilarDto(
+                faces[result.Embedding.HostId],
+                computedCounts.GetValueOrDefault(result.Embedding.HostId),
+                result.Distance))
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            response = response
+                .Where(face =>
+                    (!string.IsNullOrWhiteSpace(face.Label) && face.Label.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrWhiteSpace(face.PerformerName) && face.PerformerName.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+        }
+
+        response = ApplySimilarSort(response, sort, direction);
+        var totalCount = response.Count;
+        var pageItems = response
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
+            .ToList();
+
+        return Ok(new PaginatedResponse<FaceSimilarDto>(pageItems, totalCount, page, perPage));
+    }
+
+    private async Task<IReadOnlyList<FaceHostFaceDto>> LoadHostFacesAsync(FaceAppearanceHostType hostType, int hostId, CancellationToken cancellationToken)
+    {
+        var appearances = await db.FaceAppearances
+            .AsNoTracking()
+            .Include(appearance => appearance.Face)
+                .ThenInclude(face => face!.Performer)
+            .Where(appearance => appearance.HostType == hostType && appearance.HostId == hostId && appearance.Face != null && appearance.Face.MergedIntoFaceId == null)
+            .OrderByDescending(appearance => appearance.TopConfidence ?? 0)
+            .ThenBy(appearance => appearance.FaceId)
+            .ToListAsync(cancellationToken);
+
+        var computedCounts = await LoadComputedCountsAsync(appearances.Select(appearance => appearance.FaceId).Distinct().ToArray(), cancellationToken);
+        return appearances
+            .GroupBy(appearance => appearance.FaceId)
+            .Select(group =>
             {
-                var face = faces[result.Embedding.HostId];
-                return new FaceSimilarDto(
+                var primaryAppearance = group
+                    .OrderByDescending(appearance => appearance.TopConfidence ?? 0)
+                    .ThenBy(appearance => appearance.Id)
+                    .First();
+                var face = primaryAppearance.Face!;
+                var hasCounts = computedCounts.TryGetValue(face.Id, out var counts);
+                return new FaceHostFaceDto(
                     face.Id,
                     face.Label,
                     face.PerformerId,
                     face.Performer?.Name,
                     face.CoverBlobId is null ? null : EntityImageUrls.Face(face.Id, face.UpdatedAt),
-                    result.Distance);
+                    hasCounts ? counts.AppearanceCount : face.AppearanceCount,
+                    hasCounts ? counts.FrameSampleCount : face.FrameSampleCount,
+                    hasCounts ? counts.SceneCount : face.SceneCount,
+                    hasCounts ? counts.ImageCount : face.ImageCount,
+                    MinOrNull(group.Select(appearance => appearance.FirstSeenAtSec)),
+                    MaxOrNull(group.Select(appearance => appearance.LastSeenAtSec)),
+                    MaxFloatOrNull(group.Select(appearance => appearance.TopConfidence)));
             })
+            .OrderByDescending(face => face.TopConfidence ?? 0)
+            .ThenBy(face => face.Id)
             .ToList();
 
-        return Ok(response);
+        static double? MinOrNull(IEnumerable<double?> values)
+        {
+            var resolved = values.Where(static value => value.HasValue).Select(static value => value!.Value).ToArray();
+            return resolved.Length == 0 ? null : resolved.Min();
+        }
+
+        static double? MaxOrNull(IEnumerable<double?> values)
+        {
+            var resolved = values.Where(static value => value.HasValue).Select(static value => value!.Value).ToArray();
+            return resolved.Length == 0 ? null : resolved.Max();
+        }
+
+        static float? MaxFloatOrNull(IEnumerable<float?> values)
+        {
+            var resolved = values.Where(static value => value.HasValue).Select(static value => value!.Value).ToArray();
+            return resolved.Length == 0 ? null : resolved.Max();
+        }
     }
+
+    private static IOrderedQueryable<Face> ApplyFaceSort(IQueryable<Face> query, string? sort)
+    {
+        var normalized = (sort ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "created_desc" => query.OrderByDescending(face => face.CreatedAt).ThenBy(face => face.Id),
+            "updated_desc" => query.OrderByDescending(face => face.UpdatedAt).ThenBy(face => face.Id),
+            "appearance_desc" => query.OrderBy(face => face.MergedIntoFaceId != null).ThenByDescending(face => face.AppearanceCount).ThenByDescending(face => face.FrameSampleCount).ThenBy(face => face.Label).ThenBy(face => face.Id),
+            "scene_count_desc" => query.OrderByDescending(face => face.SceneCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id),
+            "image_count_desc" => query.OrderByDescending(face => face.ImageCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id),
+            "suggestion_confidence" => query.OrderBy(face => face.PerformerId != null).ThenByDescending(face => face.AppearanceCount).ThenByDescending(face => face.UpdatedAt).ThenBy(face => face.Id),
+            _ => query.OrderBy(face => face.MergedIntoFaceId != null).ThenByDescending(face => face.AppearanceCount).ThenByDescending(face => face.FrameSampleCount).ThenBy(face => face.Label).ThenBy(face => face.Id),
+        };
+    }
+
+    private static bool IsSuggestionConfidenceSort(string? sort)
+        => string.Equals(sort?.Trim(), "suggestion_confidence", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<List<FaceAppearanceDto>> LoadFaceAppearanceItemsAsync(int faceId, CancellationToken cancellationToken)
+    {
+        var appearances = await db.FaceAppearances
+            .AsNoTracking()
+            .Where(appearance => appearance.FaceId == faceId)
+            .OrderBy(appearance => appearance.HostType)
+            .ThenByDescending(appearance => appearance.LastSeenAtSec ?? appearance.FirstSeenAtSec ?? double.MinValue)
+            .ThenByDescending(appearance => appearance.UpdatedAt)
+            .ToListAsync(cancellationToken);
+
+        if (appearances.Count == 0)
+            return await BuildFallbackAppearanceItemsAsync(faceId, cancellationToken);
+
+        Dictionary<int, string?> sceneTitles = [];
+        var sceneIds = appearances
+            .Where(appearance => appearance.HostType == FaceAppearanceHostType.Scene)
+            .Select(appearance => appearance.HostId)
+            .Distinct()
+            .ToArray();
+        if (sceneIds.Length > 0)
+        {
+            sceneTitles = await db.Scenes
+                .AsNoTracking()
+                .Where(scene => sceneIds.Contains(scene.Id))
+                .ToDictionaryAsync(scene => scene.Id, scene => scene.Title, cancellationToken);
+        }
+
+        Dictionary<int, string?> imageTitles = [];
+        var imageIds = appearances
+            .Where(appearance => appearance.HostType == FaceAppearanceHostType.Image)
+            .Select(appearance => appearance.HostId)
+            .Distinct()
+            .ToArray();
+        if (imageIds.Length > 0)
+        {
+            imageTitles = await db.Images
+                .AsNoTracking()
+                .Where(image => imageIds.Contains(image.Id))
+                .ToDictionaryAsync(image => image.Id, image => image.Title, cancellationToken);
+        }
+
+        return appearances
+            .GroupBy(appearance => new { appearance.HostType, appearance.HostId })
+            .Select(group =>
+            {
+                var primaryAppearance = group
+                    .OrderByDescending(appearance => appearance.TopConfidence ?? 0)
+                    .ThenBy(appearance => appearance.Id)
+                    .First();
+                return new FaceAppearanceDto(
+                    primaryAppearance.Id,
+                    primaryAppearance.HostType == FaceAppearanceHostType.Scene ? "scene" : "image",
+                    primaryAppearance.HostId,
+                    ResolveAppearanceTitle(primaryAppearance, sceneTitles, imageTitles),
+                    ResolveAppearanceThumbnailUrl(primaryAppearance.HostType, primaryAppearance.HostId),
+                    group.Sum(appearance => appearance.SampleCount),
+                    group.Sum(appearance => appearance.RetainedSpatialSampleCount),
+                    group.Sum(appearance => appearance.SegmentCount),
+                    MinOrNull(group.Select(appearance => appearance.FirstSeenAtSec)),
+                    MaxOrNull(group.Select(appearance => appearance.LastSeenAtSec)),
+                    MaxFloatOrNull(group.Select(appearance => appearance.TopConfidence)));
+            })
+            .ToList();
+    }
+
+    private static List<FaceAppearanceDto> ApplyAppearanceSort(IEnumerable<FaceAppearanceDto> items, string? sort, string? direction)
+    {
+        var normalized = (sort ?? string.Empty).Trim().ToLowerInvariant();
+        var ascending = ResolveSortDirection(direction, normalized is "title" or "host_type");
+
+        return normalized switch
+        {
+            "title" => OrderBy(items, item => item.Title, ascending).ThenBy(item => item.HostId).ToList(),
+            "host_type" => OrderBy(items, item => item.HostType, ascending).ThenBy(item => item.Title).ToList(),
+            "sample_count" => OrderBy(items, item => item.FrameSampleCount, ascending).ThenBy(item => item.Title).ToList(),
+            "confidence" => OrderBy(items, item => item.TopConfidence ?? float.MinValue, ascending).ThenBy(item => item.Title).ToList(),
+            "first_seen" => OrderBy(items, item => item.FirstSeenAtSec ?? double.MinValue, ascending).ThenBy(item => item.Title).ToList(),
+            _ => OrderBy(items, item => item.LastSeenAtSec ?? item.FirstSeenAtSec ?? double.MinValue, ascending).ThenBy(item => item.Title).ToList(),
+        };
+    }
+
+    private static List<FaceSimilarDto> ApplySimilarSort(IEnumerable<FaceSimilarDto> items, string? sort, string? direction)
+    {
+        var normalized = (sort ?? string.Empty).Trim().ToLowerInvariant();
+        var ascending = ResolveSortDirection(direction, normalized is "distance" or "label");
+
+        return normalized switch
+        {
+            "label" => OrderBy(items, item => item.Label ?? item.PerformerName ?? string.Empty, ascending).ThenBy(item => item.Id).ToList(),
+            "updated_at" => OrderBy(items, item => item.UpdatedAt, ascending).ThenBy(item => item.Id).ToList(),
+            "appearance_count" => OrderBy(items, item => item.AppearanceCount, ascending).ThenBy(item => item.Distance).ToList(),
+            "scene_count" => OrderBy(items, item => item.SceneCount, ascending).ThenBy(item => item.Distance).ToList(),
+            "image_count" => OrderBy(items, item => item.ImageCount, ascending).ThenBy(item => item.Distance).ToList(),
+            _ => OrderBy(items, item => item.Distance, ascending).ThenBy(item => item.Id).ToList(),
+        };
+    }
+
+    private static IOrderedEnumerable<TItem> OrderBy<TItem, TKey>(IEnumerable<TItem> items, Func<TItem, TKey> keySelector, bool ascending)
+        where TKey : IComparable<TKey>
+        => ascending ? items.OrderBy(keySelector) : items.OrderByDescending(keySelector);
+
+    private static bool ResolveSortDirection(string? direction, bool defaultAscending)
+        => string.Equals(direction, "asc", StringComparison.OrdinalIgnoreCase)
+            || (!string.Equals(direction, "desc", StringComparison.OrdinalIgnoreCase) && defaultAscending);
+
+    private async Task<IReadOnlyList<FaceDto>> LoadReviewFacesForHostAsync(FaceAppearanceHostType hostType, int hostId, int take, CancellationToken cancellationToken)
+    {
+        var faceIds = await db.FaceAppearances
+            .AsNoTracking()
+            .Where(appearance => appearance.HostType == hostType && appearance.HostId == hostId)
+            .Select(appearance => appearance.FaceId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+        if (faceIds.Length == 0)
+            return [];
+
+        var candidateTake = Math.Clamp(take * 4, take, 100);
+        var faces = await db.Faces
+            .AsNoTracking()
+            .Include(face => face.Performer)
+            .Where(face => faceIds.Contains(face.Id) && face.PerformerId == null && face.MergedIntoFaceId == null && !face.Ignored)
+            .OrderByDescending(face => face.AppearanceCount)
+            .ThenByDescending(face => face.FrameSampleCount)
+            .ThenBy(face => face.Id)
+            .Take(candidateTake)
+            .ToListAsync(cancellationToken);
+        if (faces.Count == 0)
+            return [];
+
+        var computedCounts = await LoadComputedCountsAsync(faces.Select(face => face.Id).ToArray(), cancellationToken);
+        var topSuggestions = await BuildTopSuggestionsAsync(faces, cancellationToken);
+        return faces
+            .Where(face => topSuggestions.ContainsKey(face.Id))
+            .OrderByDescending(face => topSuggestions[face.Id].Confidence)
+            .ThenByDescending(face => face.AppearanceCount)
+            .Take(take)
+            .Select(face => MapToDto(face, computedCounts.GetValueOrDefault(face.Id), topSuggestions.GetValueOrDefault(face.Id)))
+            .ToList();
+    }
+
+    private async Task<bool> DeleteFaceAsync(int id, CancellationToken cancellationToken)
+    {
+        var face = await db.Faces.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (face is null)
+            return false;
+
+        var mergedFaces = await db.Faces
+            .Where(item => item.MergedIntoFaceId == id)
+            .ToListAsync(cancellationToken);
+        var detections = await db.Detections
+            .Where(detection => detection.RefId == id && detection.RefKind != null && detection.RefKind.ToLower() == "face")
+            .ToListAsync(cancellationToken);
+        var appearances = await db.FaceAppearances
+            .Where(appearance => appearance.FaceId == id)
+            .ToListAsync(cancellationToken);
+        var embeddings = await db.Embeddings
+            .Where(embedding => embedding.HostType == EmbeddingHostType.Face && embedding.HostId == id)
+            .ToListAsync(cancellationToken);
+        var segments = await db.Segments
+            .Where(segment => segment.RefId == id && segment.Kind != null && segment.Kind.ToLower() == "face")
+            .ToListAsync(cancellationToken);
+        var coverBlobId = face.CoverBlobId;
+
+        await facePerformerPropagationService.ApplyLinkChangeAsync(id, face.PerformerId, null, cancellationToken);
+
+        foreach (var participant in faceLifecycleParticipants)
+        {
+            await participant.OnDeletingAsync(face, cancellationToken);
+        }
+
+        foreach (var mergedFace in mergedFaces)
+        {
+            mergedFace.MergedIntoFaceId = null;
+        }
+
+        if (detections.Count > 0)
+            db.Detections.RemoveRange(detections);
+
+        if (appearances.Count > 0)
+            db.FaceAppearances.RemoveRange(appearances);
+
+        if (embeddings.Count > 0)
+            db.Embeddings.RemoveRange(embeddings);
+
+        if (segments.Count > 0)
+            db.Segments.RemoveRange(segments);
+
+        db.Faces.Remove(face);
+
+        if (!string.IsNullOrWhiteSpace(coverBlobId))
+        {
+            try
+            {
+                await blobService.DeleteBlobAsync(coverBlobId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to delete face cover blob {BlobId} after deleting face {FaceId}.", coverBlobId, id);
+            }
+        }
+
+        return true;
+    }
+
+    private static int? ResolveLocalPerformerId(FaceSuggestionDto suggestion)
+        => suggestion.LocalPerformerId ?? (suggestion.PerformerId > 0 ? suggestion.PerformerId : null);
+
+    private static float NormalizeConfidenceThreshold(float confidence)
+        => confidence <= 1f ? confidence * 100f : confidence;
 
     private async Task<FaceTopSuggestionDto?> BuildTopSuggestionAsync(Face face, CancellationToken cancellationToken)
     {
@@ -576,15 +1036,15 @@ public class FacesController(
 
         var blockedByFaceId = await LoadBlockedSuggestionIdsAsync(eligibleFaceIds, cancellationToken);
 
-        // Run per-face ranked-suggestion lookups sequentially: each suggester reuses the
-        // shared scoped DbContext, so concurrent EF queries would trigger
-        // NpgsqlOperationInProgressException. Within a face, the suggester fan-out is
-        // still concurrent inside BuildRankedSuggestionsAsync.
-        var topSuggestions = new Dictionary<int, FaceTopSuggestionDto>(eligibleFaceIds.Length);
-        foreach (var faceId in eligibleFaceIds)
+        var rankedSuggestionsByFaceId = await BuildRankedSuggestionsByFaceAsync(
+            eligibleFaceIds,
+            blockedByFaceId,
+            TopSuggestionCandidateCount,
+            cancellationToken,
+            includeReferenceMatches: true);
+        var topSuggestions = new Dictionary<int, FaceTopSuggestionDto>(rankedSuggestionsByFaceId.Count);
+        foreach (var (faceId, suggestions) in rankedSuggestionsByFaceId)
         {
-            blockedByFaceId.TryGetValue(faceId, out var blockedIds);
-            var suggestions = await BuildRankedSuggestionsAsync(faceId, blockedIds, TopSuggestionCandidateCount, cancellationToken);
             var top = suggestions.FirstOrDefault();
             if (top is not null)
             {
@@ -594,18 +1054,76 @@ public class FacesController(
         return topSuggestions;
     }
 
-    private async Task<IReadOnlyList<FaceSuggestionDto>> BuildRankedSuggestionsAsync(int faceId, int maxResults, CancellationToken cancellationToken)
+    private async Task<Dictionary<int, IReadOnlyList<FaceSuggestionDto>>> BuildRankedSuggestionsByFaceAsync(
+        IReadOnlyCollection<int> faceIds,
+        IReadOnlyDictionary<int, HashSet<int>> blockedByFaceId,
+        int maxResults,
+        CancellationToken cancellationToken,
+        bool includeReferenceMatches = true)
+    {
+        maxResults = Math.Clamp(maxResults, 1, 20);
+        var distinctFaceIds = faceIds.Where(static faceId => faceId > 0).Distinct().ToArray();
+        if (distinctFaceIds.Length == 0)
+        {
+            return [];
+        }
+
+        var activeSuggesters = (faceSuggesters ?? []).Where(suggester => suggester is not EmptyFaceSuggester).ToArray();
+        if (activeSuggesters.Length == 0)
+        {
+            return [];
+        }
+
+        var suggestionOptions = new FaceSuggestionOptions(IncludeReferenceMatches: includeReferenceMatches);
+        var suggestionsByFaceId = new Dictionary<int, List<FaceSuggestionDto>>();
+        foreach (var suggester in activeSuggesters)
+        {
+            var batch = await suggester.SuggestForBatchAsync(distinctFaceIds, maxResults, suggestionOptions, cancellationToken);
+            foreach (var (faceId, suggestions) in batch)
+            {
+                if (!suggestionsByFaceId.TryGetValue(faceId, out var faceSuggestions))
+                {
+                    faceSuggestions = [];
+                    suggestionsByFaceId[faceId] = faceSuggestions;
+                }
+
+                faceSuggestions.AddRange(suggestions);
+            }
+        }
+
+        return suggestionsByFaceId.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<FaceSuggestionDto>)pair.Value
+                .Where(item => !blockedByFaceId.TryGetValue(pair.Key, out var blockedPerformerIds) || !blockedPerformerIds.Contains(item.PerformerId))
+                .GroupBy(item => item.PerformerId)
+                .Select(group => group
+                    .OrderByDescending(item => item.Confidence)
+                    .ThenByDescending(item => item.Evidence.Count)
+                    .ThenBy(item => item.PerformerName)
+                    .First())
+                .OrderByDescending(item => item.Confidence)
+                .ThenBy(item => item.PerformerName)
+                .Take(maxResults)
+                .ToList());
+    }
+
+    private async Task<IReadOnlyList<FaceSuggestionDto>> BuildRankedSuggestionsAsync(
+        int faceId,
+        int maxResults,
+        CancellationToken cancellationToken,
+        bool includeReferenceMatches = true)
     {
         var blockedByFaceId = await LoadBlockedSuggestionIdsAsync(new[] { faceId }, cancellationToken);
         blockedByFaceId.TryGetValue(faceId, out var blockedIds);
-        return await BuildRankedSuggestionsAsync(faceId, blockedIds, maxResults, cancellationToken);
+        return await BuildRankedSuggestionsAsync(faceId, blockedIds, maxResults, cancellationToken, includeReferenceMatches);
     }
 
     private async Task<IReadOnlyList<FaceSuggestionDto>> BuildRankedSuggestionsAsync(
         int faceId,
         IReadOnlySet<int>? blockedPerformerIds,
         int maxResults,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeReferenceMatches = true)
     {
         maxResults = Math.Clamp(maxResults, 1, 20);
 
@@ -615,7 +1133,8 @@ public class FacesController(
             return [];
         }
 
-        var suggestions = await Task.WhenAll(activeSuggesters.Select(suggester => suggester.SuggestForAsync(faceId, maxResults, cancellationToken)));
+        var suggestionOptions = new FaceSuggestionOptions(IncludeReferenceMatches: includeReferenceMatches);
+        var suggestions = await Task.WhenAll(activeSuggesters.Select(suggester => suggester.SuggestForAsync(faceId, maxResults, suggestionOptions, cancellationToken)));
         return suggestions
             .SelectMany(items => items)
             .Where(item => blockedPerformerIds is null || !blockedPerformerIds.Contains(item.PerformerId))
@@ -655,7 +1174,33 @@ public class FacesController(
         suggestion.CoverImageUrl,
         suggestion.Confidence,
         suggestion.LocalPerformerId ?? (suggestion.PerformerId > 0 ? suggestion.PerformerId : null),
-        suggestion.ExternalUrl);
+        suggestion.ExternalUrl,
+        suggestion.LocalPerformerHasImage,
+        suggestion.LocalPerformerIsLocalOnly);
+
+    private async Task TrySetLocalPerformerImageFromFaceAsync(
+        Face face,
+        Performer performer,
+        bool setPerformerImage,
+        CancellationToken cancellationToken)
+    {
+        if (!setPerformerImage
+            || string.IsNullOrWhiteSpace(face.CoverBlobId)
+            || !string.IsNullOrWhiteSpace(performer.ImageBlobId)
+            || performer.RemoteIds.Count > 0)
+        {
+            return;
+        }
+
+        var blob = await blobService.GetBlobAsync(face.CoverBlobId, cancellationToken);
+        if (blob is null)
+        {
+            return;
+        }
+
+        await using var stream = blob.Value.Stream;
+        performer.ImageBlobId = await blobService.StoreBlobAsync(stream, blob.Value.ContentType, cancellationToken);
+    }
 
     private static FaceDto MapToDto(Face face, FaceComputedCounts? computedCounts = null, FaceTopSuggestionDto? topSuggestion = null) => new(
         face.Id,
@@ -674,6 +1219,24 @@ public class FacesController(
         computedCounts?.AppearanceCount ?? face.AppearanceCount,
         computedCounts?.FrameSampleCount ?? face.FrameSampleCount,
         topSuggestion);
+
+    private static FaceSimilarDto MapToSimilarDto(Face face, FaceComputedCounts? computedCounts, float distance) => new(
+        face.Id,
+        face.Label,
+        face.PerformerId,
+        face.Performer?.Name,
+        face.CoverBlobId is null ? null : EntityImageUrls.Face(face.Id, face.UpdatedAt),
+        face.Ignored,
+        face.MergedIntoFaceId,
+        computedCounts?.DetectionCount ?? face.DetectionCount,
+        computedCounts?.SceneCount ?? face.SceneCount,
+        computedCounts?.ImageCount ?? face.ImageCount,
+        face.PrimarySourceKey,
+        face.CreatedAt,
+        face.UpdatedAt,
+        computedCounts?.AppearanceCount ?? face.AppearanceCount,
+        computedCounts?.FrameSampleCount ?? face.FrameSampleCount,
+        distance);
 
     private async Task<Dictionary<int, FaceComputedCounts>> LoadComputedCountsAsync(
         IReadOnlyCollection<int> faceIds,
@@ -762,7 +1325,7 @@ public class FacesController(
         return computedCounts;
     }
 
-    private async Task<FaceAppearancesResponseDto> BuildFallbackAppearanceResponseAsync(int faceId, CancellationToken cancellationToken)
+    private async Task<List<FaceAppearanceDto>> BuildFallbackAppearanceItemsAsync(int faceId, CancellationToken cancellationToken)
     {
         var detections = await db.Detections
             .AsNoTracking()
@@ -831,7 +1394,25 @@ public class FacesController(
             })
             .ToList();
 
-        return new FaceAppearancesResponseDto(items, sceneIds.Length, imageIds.Length);
+        return items;
+    }
+
+    private static double? MinOrNull(IEnumerable<double?> values)
+    {
+        var resolved = values.Where(static value => value.HasValue).Select(static value => value!.Value).ToArray();
+        return resolved.Length == 0 ? null : resolved.Min();
+    }
+
+    private static double? MaxOrNull(IEnumerable<double?> values)
+    {
+        var resolved = values.Where(static value => value.HasValue).Select(static value => value!.Value).ToArray();
+        return resolved.Length == 0 ? null : resolved.Max();
+    }
+
+    private static float? MaxFloatOrNull(IEnumerable<float?> values)
+    {
+        var resolved = values.Where(static value => value.HasValue).Select(static value => value!.Value).ToArray();
+        return resolved.Length == 0 ? null : resolved.Max();
     }
 
     private static string ResolveAppearanceTitle(

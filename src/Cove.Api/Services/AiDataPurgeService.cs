@@ -4,6 +4,7 @@ using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
+using Cove.Data.Services;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -13,7 +14,8 @@ public sealed class AiDataPurgeService(
     CoveContext db,
     IEnumerable<IFaceLifecycleParticipant> faceLifecycleParticipants,
     IBlobService blobService,
-    ILogger<AiDataPurgeService> logger)
+    ILogger<AiDataPurgeService> logger,
+    SegmentSpanResolver? segmentSpanResolver = null)
 {
     private const int PurgeBatchSize = 5_000;
 
@@ -21,6 +23,7 @@ public sealed class AiDataPurgeService(
     private readonly IReadOnlyList<IFaceLifecycleParticipant> _faceLifecycleParticipants = faceLifecycleParticipants.ToList();
     private readonly IBlobService _blobService = blobService;
     private readonly ILogger<AiDataPurgeService> _logger = logger;
+    private readonly SegmentSpanResolver? _segmentSpanResolver = segmentSpanResolver;
 
     public async Task<AiDataSummaryDto> GetSummaryAsync(AiDataSelectorDto selectorDto, CancellationToken cancellationToken = default)
     {
@@ -91,6 +94,11 @@ public sealed class AiDataPurgeService(
             ? await ResolveFaceIdsAsync(selector, runModels, cancellationToken)
             : [];
         IReadOnlyCollection<int>? excludedFaceIds = faceIds.Count > 0 ? faceIds : null;
+        var affectedRunKeys = await CollectAffectedRunKeysAsync(selector, runModels, faceIds, cancellationToken);
+        var affectedSceneIds = dryRun
+            ? []
+            : await CollectAffectedSceneIdsAsync(selector, runModels, faceIds, cancellationToken);
+        affectedRunKeys.UnionWith(await CollectSelectedAiRunKeysAsync(selector, cancellationToken));
 
         if (faceIds.Count > 0)
             MergeRemovedCounts(removed, await PurgeFacesByIdsAsync(faceIds, dryRun, cancellationToken));
@@ -107,7 +115,177 @@ public sealed class AiDataPurgeService(
         if (selector.IncludesKind("tagapplication"))
             MergeRemovedCounts(removed, await PurgeTagApplicationsCoreAsync(selector, dryRun, cancellationToken));
 
+        if (affectedRunKeys.Count > 0)
+            AddRemovedCount(removed, "aiRun", await PurgeUnreferencedAiRunsAsync(affectedRunKeys, dryRun, cancellationToken));
+
+        if (!dryRun && affectedSceneIds.Count > 0 && _segmentSpanResolver is not null)
+        {
+            foreach (var sceneId in affectedSceneIds)
+            {
+                _segmentSpanResolver.EvictScene(sceneId);
+            }
+        }
+
         return new AiDataPurgeResultDto(removed);
+    }
+
+    private async Task<HashSet<int>> CollectAffectedSceneIdsAsync(
+        AiDataSelector selector,
+        IReadOnlyDictionary<string, string?> runModels,
+        IReadOnlyCollection<int> faceIds,
+        CancellationToken cancellationToken)
+    {
+        var sceneIds = new HashSet<int>();
+
+        if (selector.IncludesKind("segment"))
+        {
+            var segmentCandidates = await QuerySceneSegmentCandidatesAsync(selector, runModels, cancellationToken);
+            sceneIds.UnionWith(segmentCandidates.Select(candidate => candidate.HostId));
+        }
+
+        if (faceIds.Count > 0)
+        {
+            var faceIdArray = faceIds.ToArray();
+            var faceSegmentSceneIds = await _db.Segments
+                .AsNoTracking()
+                .Where(segment => segment.HostType == SegmentHostType.Scene
+                    && segment.RefId.HasValue
+                    && segment.Kind != null
+                    && segment.Kind.ToLower() == "face"
+                    && faceIdArray.Contains((int)segment.RefId.Value))
+                .Select(segment => segment.HostId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            sceneIds.UnionWith(faceSegmentSceneIds);
+        }
+
+        return sceneIds;
+    }
+
+    private async Task<List<SceneSegmentCandidate>> QuerySceneSegmentCandidatesAsync(
+        AiDataSelector selector,
+        IReadOnlyDictionary<string, string?> runModels,
+        CancellationToken cancellationToken)
+    {
+        if (TryParseSegmentHostType(selector.HostType, out var hostType) && hostType != SegmentHostType.Scene)
+        {
+            return [];
+        }
+
+        var query = _db.ReadSet<Segment>()
+            .AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Scene);
+
+        if (!string.IsNullOrWhiteSpace(selector.SourceKey))
+            query = query.Where(segment => segment.SourceKey == selector.SourceKey);
+
+        if (!string.IsNullOrWhiteSpace(selector.SourceRunId))
+            query = query.Where(segment => segment.SourceRunId == selector.SourceRunId);
+
+        if (selector.HostId.HasValue)
+            query = query.Where(segment => segment.HostId == selector.HostId.Value);
+
+        var rows = await query
+            .Select(segment => new SceneSegmentCandidate(
+                segment.HostId,
+                segment.SourceRunId,
+                ExtractModelKey(segment.Payload)))
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Where(candidate => MatchesOptional(ResolveArtifactModel(candidate.Model, candidate.SourceRunId, runModels), selector.Model))
+            .ToList();
+    }
+
+    private async Task<HashSet<string>> CollectAffectedRunKeysAsync(
+        AiDataSelector selector,
+        IReadOnlyDictionary<string, string?> runModels,
+        IReadOnlyCollection<int> faceIds,
+        CancellationToken cancellationToken)
+    {
+        var runKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (selector.IncludesKind("embedding"))
+            AddRunKeys(runKeys, (await QueryEmbeddingCandidatesAsync(selector, runModels, cancellationToken)).Select(candidate => candidate.SourceRunId));
+
+        if (selector.IncludesKind("detection"))
+            AddRunKeys(runKeys, (await QueryDetectionCandidatesAsync(selector, runModels, cancellationToken)).Select(candidate => candidate.SourceRunId));
+
+        if (selector.IncludesKind("segment"))
+            AddRunKeys(runKeys, (await QuerySegmentCandidatesAsync(selector, runModels, cancellationToken)).Select(candidate => candidate.SourceRunId));
+
+        if (selector.IncludesKind("tagapplication"))
+            AddRunKeys(runKeys, (await QueryTagApplicationCandidatesAsync(selector, cancellationToken)).Select(candidate => candidate.SourceRunId));
+
+        if (faceIds.Count > 0)
+        {
+            var faceIdSet = faceIds.ToHashSet();
+
+            AddRunKeys(runKeys, await _db.FaceAppearances
+                .AsNoTracking()
+                .Where(appearance => faceIdSet.Contains(appearance.FaceId))
+                .Select(appearance => appearance.SourceRunId)
+                .ToListAsync(cancellationToken));
+
+            AddRunKeys(runKeys, await _db.Embeddings
+                .AsNoTracking()
+                .Where(embedding => embedding.HostType == EmbeddingHostType.Face && faceIdSet.Contains(embedding.HostId))
+                .Select(embedding => embedding.SourceRunId)
+                .ToListAsync(cancellationToken));
+
+            AddRunKeys(runKeys, await _db.Set<Detection>()
+                .AsNoTracking()
+                .Where(detection => detection.RefId.HasValue
+                    && detection.RefKind != null
+                    && detection.RefKind.ToLower() == "face"
+                    && faceIdSet.Contains((int)detection.RefId.Value))
+                .Select(detection => detection.SourceRunId)
+                .ToListAsync(cancellationToken));
+
+            AddRunKeys(runKeys, await _db.Segments
+                .AsNoTracking()
+                .Where(segment => segment.RefId.HasValue
+                    && segment.Kind != null
+                    && segment.Kind.ToLower() == "face"
+                    && faceIdSet.Contains((int)segment.RefId.Value))
+                .Select(segment => segment.SourceRunId)
+                .ToListAsync(cancellationToken));
+        }
+
+        return runKeys;
+    }
+
+    private async Task<HashSet<string>> CollectSelectedAiRunKeysAsync(AiDataSelector selector, CancellationToken cancellationToken)
+    {
+        var runKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!ShouldSelectAiRunsForSource(selector.SourceKey))
+        {
+            return runKeys;
+        }
+
+        var query = _db.ReadSet<AiRun>().AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(selector.SourceKey) && selector.SourceKey.Equals("ext:ai.core", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(run => run.SourceKey == selector.SourceKey);
+
+        if (!string.IsNullOrWhiteSpace(selector.SourceRunId))
+            query = query.Where(run => run.RunKey == selector.SourceRunId);
+
+        if (TryParseAiRunTargetType(selector.HostType, out var targetType))
+            query = query.Where(run => run.TargetType == targetType);
+
+        if (selector.HostId.HasValue)
+            query = query.Where(run => run.TargetId == selector.HostId.Value);
+
+        var rows = await query
+            .Select(run => new { run.RunKey, run.Models })
+            .ToListAsync(cancellationToken);
+
+        AddRunKeys(runKeys, rows
+            .Where(run => MatchesOptional(ExtractAiRunModel(run.Models), selector.Model))
+            .Select(run => run.RunKey));
+
+        return runKeys;
     }
 
     private async Task<List<AiDataSummaryRecord>> GetEmbeddingSummaryRecordsAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken)
@@ -274,10 +452,7 @@ public sealed class AiDataPurgeService(
     {
         var query = _db.ReadSet<Face>().AsNoTracking();
 
-        if (!string.IsNullOrWhiteSpace(selector.SourceKey))
-            query = query.Where(face => face.PrimarySourceKey == selector.SourceKey);
-
-        if (!string.IsNullOrWhiteSpace(selector.SourceRunId) || !string.IsNullOrWhiteSpace(selector.Model) || selector.HasHostFilter)
+        if (!string.IsNullOrWhiteSpace(selector.SourceKey) || !string.IsNullOrWhiteSpace(selector.SourceRunId) || !string.IsNullOrWhiteSpace(selector.Model) || selector.HasHostFilter)
         {
             var faceIds = await ResolveFaceIdsAsync(selector, runModels, cancellationToken);
             if (faceIds.Count == 0)
@@ -354,26 +529,7 @@ public sealed class AiDataPurgeService(
 
     private async Task<Dictionary<string, int>> PurgeTagApplicationsCoreAsync(AiDataSelector selector, bool dryRun, CancellationToken cancellationToken)
     {
-        var query = _db.ReadSet<TagApplication>().AsNoTracking();
-
-        if (!string.IsNullOrWhiteSpace(selector.SourceKey))
-            query = query.Where(application => application.SourceKey == selector.SourceKey);
-
-        if (!string.IsNullOrWhiteSpace(selector.SourceRunId))
-            query = query.Where(application => application.SourceRunId == selector.SourceRunId);
-
-        if (!string.IsNullOrWhiteSpace(selector.Model))
-            query = query.Where(application => application.ModelKey == selector.Model);
-
-        if (TryParseAffinityHostType(selector.HostType, out var hostType))
-            query = query.Where(application => application.HostType == hostType);
-
-        if (selector.HostId.HasValue)
-            query = query.Where(application => application.HostId == selector.HostId.Value);
-
-        var candidates = await query
-            .Select(application => new TagApplicationCandidate(application.Id, application.HostType, application.HostId, application.TagId))
-            .ToListAsync(cancellationToken);
+        var candidates = await QueryTagApplicationCandidatesAsync(selector, cancellationToken);
 
         if (candidates.Count == 0)
         {
@@ -400,6 +556,109 @@ public sealed class AiDataPurgeService(
         {
             ["tagApplication"] = removedCount,
         };
+    }
+
+    private async Task<List<TagApplicationCandidate>> QueryTagApplicationCandidatesAsync(AiDataSelector selector, CancellationToken cancellationToken)
+    {
+        var query = _db.ReadSet<TagApplication>().AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(selector.SourceKey))
+            query = query.Where(application => application.SourceKey == selector.SourceKey);
+
+        if (!string.IsNullOrWhiteSpace(selector.SourceRunId))
+            query = query.Where(application => application.SourceRunId == selector.SourceRunId);
+
+        if (!string.IsNullOrWhiteSpace(selector.Model))
+            query = query.Where(application => application.ModelKey == selector.Model);
+
+        if (TryParseAffinityHostType(selector.HostType, out var hostType))
+            query = query.Where(application => application.HostType == hostType);
+
+        if (selector.HostId.HasValue)
+            query = query.Where(application => application.HostId == selector.HostId.Value);
+
+        return await query
+            .Select(application => new TagApplicationCandidate(application.Id, application.HostType, application.HostId, application.TagId, application.SourceRunId))
+            .ToListAsync(cancellationToken);
+    }
+
+    private async Task<int> PurgeUnreferencedAiRunsAsync(IReadOnlyCollection<string> runKeys, bool dryRun, CancellationToken cancellationToken)
+    {
+        if (runKeys.Count == 0)
+        {
+            return 0;
+        }
+
+        var runKeyArray = runKeys
+            .Where(static runKey => !string.IsNullOrWhiteSpace(runKey))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (runKeyArray.Length == 0)
+        {
+            return 0;
+        }
+
+        var candidateRuns = await _db.AiRuns
+            .Where(run => runKeyArray.Contains(run.RunKey) && run.Status != AiRunStatus.Pending && run.Status != AiRunStatus.Running)
+            .ToListAsync(cancellationToken);
+        if (candidateRuns.Count == 0)
+        {
+            return 0;
+        }
+
+        var referencedRunKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        AddRunKeys(referencedRunKeys, await _db.Embeddings
+            .AsNoTracking()
+            .Where(embedding => embedding.SourceRunId != null && runKeyArray.Contains(embedding.SourceRunId))
+            .Select(embedding => embedding.SourceRunId)
+            .Distinct()
+            .ToListAsync(cancellationToken));
+
+        AddRunKeys(referencedRunKeys, await _db.Set<Detection>()
+            .AsNoTracking()
+            .Where(detection => detection.SourceRunId != null && runKeyArray.Contains(detection.SourceRunId))
+            .Select(detection => detection.SourceRunId)
+            .Distinct()
+            .ToListAsync(cancellationToken));
+
+        AddRunKeys(referencedRunKeys, await _db.Segments
+            .AsNoTracking()
+            .Where(segment => segment.SourceRunId != null && runKeyArray.Contains(segment.SourceRunId))
+            .Select(segment => segment.SourceRunId)
+            .Distinct()
+            .ToListAsync(cancellationToken));
+
+        AddRunKeys(referencedRunKeys, await _db.TagApplications
+            .AsNoTracking()
+            .Where(application => runKeyArray.Contains(application.SourceRunId))
+            .Select(application => application.SourceRunId)
+            .Distinct()
+            .ToListAsync(cancellationToken));
+
+        AddRunKeys(referencedRunKeys, await _db.FaceAppearances
+            .AsNoTracking()
+            .Where(appearance => appearance.SourceRunId != null && runKeyArray.Contains(appearance.SourceRunId))
+            .Select(appearance => appearance.SourceRunId)
+            .Distinct()
+            .ToListAsync(cancellationToken));
+
+        var removableRuns = candidateRuns
+            .Where(run => !referencedRunKeys.Contains(run.RunKey))
+            .ToArray();
+        if (removableRuns.Length == 0)
+        {
+            return 0;
+        }
+
+        if (dryRun)
+        {
+            return removableRuns.Length;
+        }
+
+        _db.AiRuns.RemoveRange(removableRuns);
+        await _db.SaveChangesAsync(cancellationToken);
+        return removableRuns.Length;
     }
 
     private async Task<int> RemoveByIdsInBatchesAsync<TEntity>(DbSet<TEntity> set, IEnumerable<int> ids, CancellationToken cancellationToken)
@@ -446,6 +705,9 @@ public sealed class AiDataPurgeService(
 
         var segmentCandidates = await QuerySegmentCandidatesAsync(selector, runModels, cancellationToken, requireFaceReference: true);
         faceIds.UnionWith(segmentCandidates.Where(candidate => candidate.FaceId.HasValue).Select(candidate => candidate.FaceId!.Value));
+
+        var appearanceCandidates = await QueryFaceAppearanceCandidatesAsync(selector, runModels, cancellationToken);
+        faceIds.UnionWith(appearanceCandidates.Select(candidate => candidate.FaceId));
 
         if (!selector.HasHostFilter)
         {
@@ -720,6 +982,31 @@ public sealed class AiDataPurgeService(
             .ToList();
     }
 
+    private async Task<List<FaceAppearanceCandidate>> QueryFaceAppearanceCandidatesAsync(AiDataSelector selector, IReadOnlyDictionary<string, string?> runModels, CancellationToken cancellationToken)
+    {
+        var query = _db.ReadSet<FaceAppearance>().AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(selector.SourceKey))
+            query = query.Where(appearance => appearance.SourceKey == selector.SourceKey);
+
+        if (!string.IsNullOrWhiteSpace(selector.SourceRunId))
+            query = query.Where(appearance => appearance.SourceRunId == selector.SourceRunId);
+
+        if (TryParseFaceAppearanceHostType(selector.HostType, out var hostType))
+            query = query.Where(appearance => appearance.HostType == hostType);
+
+        if (selector.HostId.HasValue)
+            query = query.Where(appearance => appearance.HostId == selector.HostId.Value);
+
+        var rows = await query
+            .Select(appearance => new FaceAppearanceCandidate(appearance.FaceId, appearance.SourceRunId))
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Where(candidate => MatchesOptional(ResolveArtifactModel(null, candidate.SourceRunId, runModels), selector.Model))
+            .ToList();
+    }
+
     private async Task<IReadOnlyDictionary<string, string?>> LoadAiRunModelLookupAsync(AiDataSelector selector, CancellationToken cancellationToken)
     {
         var query = _db.ReadSet<AiRun>().AsNoTracking();
@@ -869,6 +1156,18 @@ public sealed class AiDataPurgeService(
         }
     }
 
+    private static void AddRunKeys(ISet<string> runKeys, IEnumerable<string?> values)
+    {
+        foreach (var value in values)
+        {
+            var cleaned = Clean(value);
+            if (!string.IsNullOrWhiteSpace(cleaned))
+            {
+                runKeys.Add(cleaned);
+            }
+        }
+    }
+
     private static bool TryParseEmbeddingModality(string? value, out EmbeddingModality modality)
         => Enum.TryParse(value, true, out modality);
 
@@ -881,8 +1180,19 @@ public sealed class AiDataPurgeService(
     private static bool TryParseSegmentHostType(string? value, out SegmentHostType hostType)
         => Enum.TryParse(value, true, out hostType);
 
+    private static bool TryParseFaceAppearanceHostType(string? value, out FaceAppearanceHostType hostType)
+        => Enum.TryParse(value, true, out hostType);
+
+    private static bool TryParseAiRunTargetType(string? value, out AiRunTargetType targetType)
+        => Enum.TryParse(value, true, out targetType);
+
     private static bool TryParseAffinityHostType(string? value, out AffinityHostType hostType)
         => Enum.TryParse(value, true, out hostType);
+
+    private static bool ShouldSelectAiRunsForSource(string? sourceKey)
+        => string.IsNullOrWhiteSpace(sourceKey)
+           || sourceKey.Equals("ext:ai.core", StringComparison.OrdinalIgnoreCase)
+           || sourceKey.StartsWith("ext:ai.", StringComparison.OrdinalIgnoreCase);
 
     private sealed record AiDataSelector(
         string? SourceKey,
@@ -908,7 +1218,11 @@ public sealed class AiDataPurgeService(
 
     private sealed record SegmentCandidate(int Id, int? FaceId, string? SourceRunId, string? Model);
 
-    private sealed record TagApplicationCandidate(int Id, AffinityHostType HostType, int HostId, int TagId);
+    private sealed record SceneSegmentCandidate(int HostId, string? SourceRunId, string? Model);
+
+    private sealed record FaceAppearanceCandidate(int FaceId, string? SourceRunId);
+
+    private sealed record TagApplicationCandidate(int Id, AffinityHostType HostType, int HostId, int TagId, string? SourceRunId);
 
     private readonly record struct TagHostPair(AffinityHostType HostType, int HostId, int TagId);
 }

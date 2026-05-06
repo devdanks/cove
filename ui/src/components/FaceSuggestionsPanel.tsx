@@ -107,7 +107,7 @@ export function FaceSuggestionsPanel({
                     <div className="space-y-2">
                       <div className="text-[11px] uppercase tracking-wide text-muted">Evidence</div>
                       {suggestion.evidence.length === 0 ? (
-                        <p className="text-xs text-secondary">{isReferenceOnly ? "External reference match. Import it to create a local performer link." : "No supporting face evidence was returned."}</p>
+                        <SuggestionEvidenceFallback suggestion={suggestion} isReferenceOnly={isReferenceOnly} />
                       ) : (
                         <div className="flex flex-wrap gap-2">
                           {suggestion.evidence.slice(0, 5).map((evidence) => (
@@ -169,6 +169,39 @@ export function FaceSuggestionsPanel({
       )}
     </div>
   );
+}
+
+function SuggestionEvidenceFallback({ suggestion, isReferenceOnly }: { suggestion: FaceSuggestion; isReferenceOnly: boolean }) {
+  const evidenceLines = splitEvidenceLines(suggestion.why);
+  const hasReferenceSignal = !!suggestion.externalUrl || suggestion.localPerformerId != null || isReferenceOnly;
+
+  if (!hasReferenceSignal && evidenceLines.length === 0) {
+    return <p className="text-xs text-secondary">This suggestion did not include local face thumbnails.</p>;
+  }
+
+  return (
+    <div className="space-y-1 text-xs text-secondary">
+      {hasReferenceSignal ? (
+        <p>{isReferenceOnly ? "External reference match. Import it to create a local performer link." : "Reference match resolved to this local performer."}</p>
+      ) : null}
+      {evidenceLines.map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+      {suggestion.externalUrl ? (
+        <a href={suggestion.externalUrl} target="_blank" rel="noreferrer" className="inline-flex text-accent hover:underline">
+          Open reference record
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function splitEvidenceLines(value: string) {
+  return (value || "")
+    .split(/;\s*/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4);
 }
 
 function formatPercent(value: number) {

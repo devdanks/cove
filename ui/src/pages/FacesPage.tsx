@@ -1,33 +1,72 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { FindFilter, FaceTopSuggestion } from "../api/types";
+import type { FaceBatchOperationResult, FindFilter, FaceTopSuggestion } from "../api/types";
 import { aiFaces, faces } from "../api/client";
 import type { Face } from "../api/types";
-import { Fingerprint, Link2, Merge } from "lucide-react";
+import { Fingerprint, Link2, Merge, Trash2 } from "lucide-react";
 import { ListPage, type DisplayMode } from "../components/ListPage";
+import type { FilterDialogCustomSection } from "../components/FilterDialog";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { formatDate } from "../components/shared";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useAuth } from "../auth/AuthContext";
-import { canReadEntity, canWriteEntity } from "../auth/visibility";
+import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 
 interface Props {
   onNavigate: (r: any) => void;
 }
 
 type TriState = "all" | "yes" | "no";
+type MergeFilter = "all" | "merged";
+type FaceSort = "suggestion_confidence" | "updated_desc" | "created_desc" | "appearance_desc" | "scene_count_desc" | "image_count_desc";
+
+const defaultFaceSort: FaceSort = "suggestion_confidence";
+const FACE_SORT_OPTIONS = [
+  { value: "suggestion_confidence", label: "Suggested match confidence" },
+  { value: "updated_desc", label: "Recently updated" },
+  { value: "created_desc", label: "Recently created" },
+  { value: "appearance_desc", label: "Most appearances" },
+  { value: "scene_count_desc", label: "Most scenes" },
+  { value: "image_count_desc", label: "Most images" },
+];
 
 function readTriState(value: unknown): TriState {
   return value === "yes" || value === "no" ? value : "all";
 }
 
+function readFaceSort(value: unknown): FaceSort {
+  return value === "updated_desc"
+    || value === "created_desc"
+    || value === "appearance_desc"
+    || value === "scene_count_desc"
+    || value === "image_count_desc"
+    || value === "suggestion_confidence"
+    ? value
+    : defaultFaceSort;
+}
+
+function readMergeFilter(value: unknown): MergeFilter {
+  return value === "merged" ? value : "all";
+}
+
 function sanitizeFaceFilters(filter: Record<string, unknown>) {
   const next: Record<string, unknown> = {};
-  const merged = readTriState(filter.merged);
+  const linked = readTriState(filter.linked);
+  const ignored = readTriState(filter.ignored);
+  const merged = readMergeFilter(filter.merged);
+
+  if (linked !== "all") {
+    next.linked = linked;
+  }
+
+  if (ignored !== "all") {
+    next.ignored = ignored;
+  }
 
   if (merged !== "all") {
     next.merged = merged;
@@ -36,14 +75,47 @@ function sanitizeFaceFilters(filter: Record<string, unknown>) {
   return next;
 }
 
+function formatTriState(value: unknown, yesLabel: string, noLabel: string) {
+  const resolved = readTriState(value);
+  return resolved === "yes" ? yesLabel : resolved === "no" ? noLabel : "All";
+}
+
+function formatMergeFilter(value: unknown) {
+  const resolved = readMergeFilter(value);
+  return resolved === "merged" ? "Merged only" : "Primary and merged";
+}
+
+function renderSelectFilter(
+  value: unknown,
+  onChange: (value: unknown) => void,
+  options: { value: string; label: string }[],
+  label: string,
+) {
+  return (
+    <label className="grid gap-1 text-xs text-secondary">
+      <span>{label}</span>
+      <select
+        value={String(value ?? options[0]?.value ?? "")}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-h-[32px] rounded border border-border bg-input px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function FacesPage({ onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canWriteFaces = canWriteEntity("face", hasPermission);
+  const canDeleteFaces = canDeleteEntity("face", hasPermission);
   const defaultState = useMemo(() => ({
-    filter: { page: 1, perPage: 36 } as FindFilter,
-    objectFilter: {},
+    filter: { page: 1, perPage: 36, sort: defaultFaceSort } as FindFilter,
+    objectFilter: { linked: "no" },
     displayMode: "grid" as DisplayMode,
   }), []);
   const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode } = useListUrlState({
@@ -53,15 +125,64 @@ export function FacesPage({ onNavigate }: Props) {
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list"] as const,
   });
-  const merged = readTriState(objectFilter.merged);
+  const linked = readTriState(objectFilter.linked);
+  const ignored = readTriState(objectFilter.ignored);
+  const merged = readMergeFilter(objectFilter.merged);
+  const sort = readFaceSort(filter.sort);
+  const faceFilterSections = useMemo<FilterDialogCustomSection[]>(() => [
+    {
+      id: "linked",
+      label: "Linked state",
+      filterKey: "linked",
+      defaultValue: "all",
+      isActive: (value) => readTriState(value) !== "all",
+      summarize: (value) => formatTriState(value, "Linked", "Unlinked"),
+      renderEditor: (value, onChange) => renderSelectFilter(value, onChange, [
+        { value: "all", label: "Linked and unlinked" },
+        { value: "no", label: "Unlinked" },
+        { value: "yes", label: "Linked" },
+      ], "Linked state"),
+    },
+    {
+      id: "ignored",
+      label: "Ignored state",
+      filterKey: "ignored",
+      defaultValue: "all",
+      isActive: (value) => readTriState(value) !== "all",
+      summarize: (value) => formatTriState(value, "Ignored", "Not ignored"),
+      renderEditor: (value, onChange) => renderSelectFilter(value, onChange, [
+        { value: "all", label: "Ignored and visible" },
+        { value: "no", label: "Not ignored" },
+        { value: "yes", label: "Ignored" },
+      ], "Ignored state"),
+    },
+    {
+      id: "merged",
+      label: "Merge state",
+      filterKey: "merged",
+      defaultValue: "all",
+      isActive: (value) => readMergeFilter(value) !== "all",
+      summarize: formatMergeFilter,
+      renderEditor: (value, onChange) => renderSelectFilter(value, onChange, [
+        { value: "all", label: "Primary and merged" },
+        { value: "merged", label: "Merged only" },
+      ], "Merge state"),
+    },
+  ], []);
   const [comparison, setComparison] = useState<{ face: Face; suggestion: FaceTopSuggestion } | null>(null);
+  const [batchMinConfidence, setBatchMinConfidence] = useState(60);
+  const [batchResult, setBatchResult] = useState<FaceBatchOperationResult | null>(null);
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
 
   const query = useMemo(() => ({
     q: filter.q?.trim() || undefined,
-    merged: merged === "all" ? undefined : merged === "yes",
+    linked: linked === "all" ? undefined : linked === "yes",
+    ignored: ignored === "all" ? undefined : ignored === "yes",
+    merged: merged === "all" ? undefined : merged === "merged",
+    sort,
     page: filter.page ?? 1,
     perPage: filter.perPage ?? 36,
-  }), [filter.page, filter.perPage, filter.q, merged]);
+  }), [filter.page, filter.perPage, filter.q, ignored, linked, merged, sort]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["faces", query],
@@ -71,6 +192,7 @@ export function FacesPage({ onNavigate }: Props) {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
+  const selectedFaceIds = useMemo(() => Array.from(selectedIds).map((value) => Number(value)), [selectedIds]);
 
   const invalidateFace = useCallback((faceId: number) => {
     queryClient.invalidateQueries({ queryKey: ["faces"] });
@@ -79,9 +201,28 @@ export function FacesPage({ onNavigate }: Props) {
   }, [queryClient]);
 
   const linkMutation = useMutation({
-    mutationFn: (data: { faceId: number; performerId: number }) => faces.link(data.faceId, { performerId: data.performerId }),
+    mutationFn: (data: { faceId: number; performerId: number; setPerformerImage?: boolean }) =>
+      faces.link(data.faceId, { performerId: data.performerId, setPerformerImage: data.setPerformerImage }),
     onSuccess: (_, variables) => {
       invalidateFace(variables.faceId);
+    },
+  });
+
+  const batchLinkTopSuggestionMutation = useMutation({
+    mutationFn: () => faces.batchLinkTopSuggestion({ faceIds: selectedFaceIds, minConfidence: batchMinConfidence }),
+    onSuccess: (result) => {
+      setBatchResult(result);
+      selectNone();
+      queryClient.invalidateQueries({ queryKey: ["faces"] });
+    },
+  });
+
+  const batchDeleteMutation = useMutation({
+    mutationFn: () => faces.batchDelete({ faceIds: selectedFaceIds }),
+    onSuccess: (result) => {
+      setBatchResult(result);
+      selectNone();
+      queryClient.invalidateQueries({ queryKey: ["faces"] });
     },
   });
 
@@ -105,21 +246,19 @@ export function FacesPage({ onNavigate }: Props) {
   });
 
   const handleFilterChange = useCallback((next: FindFilter) => {
-    setFilter(next);
+    setFilter({ ...next, sort: readFaceSort(next.sort) });
   }, [setFilter]);
 
-  const updateFaceFilter = useCallback((patch: Record<string, unknown>) => {
-    setObjectFilter(sanitizeFaceFilters({ ...objectFilter, ...patch }));
-    setFilter({ ...filter, page: 1 });
-  }, [filter, objectFilter, setFilter, setObjectFilter]);
+  const handleObjectFilterChange = useCallback((next: Record<string, unknown>) => {
+    setObjectFilter(sanitizeFaceFilters(next));
+  }, [setObjectFilter]);
 
-  const hasExtraFilters = Object.keys(objectFilter).length > 0;
   const compareBusy = linkMutation.isPending || rejectSuggestionMutation.isPending || referenceSuggestionMutation.isPending;
 
-  const handleConfirmSuggestion = useCallback((face: Face, suggestion: FaceTopSuggestion) => {
+  const handleConfirmSuggestion = useCallback((face: Face, suggestion: FaceTopSuggestion, options?: { setPerformerImage?: boolean }) => {
     const localPerformerId = suggestion.localPerformerId ?? (suggestion.performerId > 0 ? suggestion.performerId : undefined);
     if (localPerformerId != null) {
-      linkMutation.mutate({ faceId: face.id, performerId: localPerformerId });
+      linkMutation.mutate({ faceId: face.id, performerId: localPerformerId, setPerformerImage: options?.setPerformerImage });
       setComparison(null);
       return;
     }
@@ -149,42 +288,61 @@ export function FacesPage({ onNavigate }: Props) {
         onFilterChange={handleFilterChange}
         totalCount={data?.totalCount ?? 0}
         isLoading={isLoading}
+        sortOptions={FACE_SORT_OPTIONS}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
+        showClearAllObjectFilters={false}
         availableDisplayModes={["grid", "list"]}
+        criteriaDefinitions={[]}
+        objectFilter={objectFilter}
+        onObjectFilterChange={handleObjectFilterChange}
+        customFilterSections={faceFilterSections}
         selectedIds={selectedIds}
         onSelectAll={selectAll}
         onSelectNone={selectNone}
-        metadataByline={<span className="hidden text-xs text-muted lg:inline">Browse unlinked clusters with the strongest suggestion visible directly on each card.</span>}
-        renderOperations={() => (
+        selectionActions={(
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={merged}
-              onChange={(event) => updateFaceFilter({ merged: event.target.value })}
-              className="min-h-[30px] rounded-lg border border-border bg-card/70 px-3 py-1.5 text-xs text-foreground focus:border-accent focus:outline-none"
-              aria-label="Filter faces by merge state"
-            >
-              <option value="all">Merged + primary</option>
-              <option value="no">Primary only</option>
-              <option value="yes">Merged only</option>
-            </select>
-            {hasExtraFilters ? (
+            {canWriteFaces ? (
+              <label className="flex items-center gap-1.5 text-xs text-secondary">
+                Min
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={batchMinConfidence}
+                  onChange={(event) => setBatchMinConfidence(Math.max(0, Math.min(100, Number(event.target.value) || 0)))}
+                  className="h-7 w-16 rounded border border-border bg-input px-2 text-xs text-foreground outline-none focus:border-accent"
+                />
+              </label>
+            ) : null}
+            {canWriteFaces ? (
               <button
                 type="button"
-                onClick={() => {
-                  setObjectFilter({});
-                  setFilter({ ...filter, page: 1 });
-                }}
-                className="rounded-lg border border-border px-3 py-1 text-xs text-secondary hover:border-accent hover:text-foreground"
+                onClick={() => batchLinkTopSuggestionMutation.mutate()}
+                disabled={selectedFaceIds.length === 0 || batchLinkTopSuggestionMutation.isPending || batchDeleteMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1 text-xs text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Clear
+                <Link2 className="h-3.5 w-3.5" />
+                {batchLinkTopSuggestionMutation.isPending ? "Linking..." : "Link suggested"}
+              </button>
+            ) : null}
+            {canDeleteFaces ? (
+              <button
+                type="button"
+                onClick={() => setConfirmBatchDelete(true)}
+                disabled={selectedFaceIds.length === 0 || batchLinkTopSuggestionMutation.isPending || batchDeleteMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 px-3 py-1 text-xs text-red-200 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {batchDeleteMutation.isPending ? "Deleting..." : "Delete"}
               </button>
             ) : null}
           </div>
         )}
+        metadataByline={<span className="hidden text-xs text-muted lg:inline">Review face clusters with suggestions, links, and sample counts.</span>}
       >
         {displayMode === "grid" ? (
-          <EntityCardGrid minCardWidth="18rem" gapClassName="gap-4">
+          <EntityCardGrid gapClassName="gap-4">
             {items.map((face) => (
               <FaceCard
                 key={face.id}
@@ -219,6 +377,25 @@ export function FacesPage({ onNavigate }: Props) {
         ) : null}
       </ListPage>
 
+      {batchResult ? (
+        <div className="mx-1 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/80 px-4 py-3 text-sm text-secondary">
+          <span>{describeBatchResult(batchResult)}</span>
+          <button type="button" onClick={() => setBatchResult(null)} className="text-xs text-accent hover:underline">Dismiss</button>
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmBatchDelete}
+        title="Delete selected faces?"
+        message={`Delete ${selectedFaceIds.length} selected face${selectedFaceIds.length === 1 ? "" : "s"} and their AI artifacts. This cannot be undone.`}
+        confirmLabel="Delete faces"
+        onCancel={() => setConfirmBatchDelete(false)}
+        onConfirm={() => {
+          setConfirmBatchDelete(false);
+          batchDeleteMutation.mutate();
+        }}
+      />
+
       <FaceCompareDialog
         open={comparison != null}
         face={comparison?.face ?? null}
@@ -226,9 +403,9 @@ export function FacesPage({ onNavigate }: Props) {
         disabled={compareBusy}
         canReadPerformers={canReadPerformers}
         onClose={() => setComparison(null)}
-        onConfirm={(suggestion) => {
+        onConfirm={(suggestion, options) => {
           if (comparison) {
-            handleConfirmSuggestion(comparison.face, suggestion as FaceTopSuggestion);
+            handleConfirmSuggestion(comparison.face, suggestion as FaceTopSuggestion, options);
           }
         }}
         onReject={(suggestion) => {
@@ -240,6 +417,17 @@ export function FacesPage({ onNavigate }: Props) {
       />
     </>
   );
+}
+
+function describeBatchResult(result: FaceBatchOperationResult) {
+  const parts = [
+    `${result.succeeded.length} succeeded`,
+    result.skipped.length > 0 ? `${result.skipped.length} skipped` : null,
+    result.failed.length > 0 ? `${result.failed.length} failed` : null,
+  ].filter(Boolean);
+
+  const firstIssue = result.failed[0]?.error ?? result.skipped[0]?.reason;
+  return firstIssue ? `${parts.join(", ")}. ${firstIssue}` : `${parts.join(", ")}.`;
 }
 
 function FaceCard({
