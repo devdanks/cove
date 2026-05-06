@@ -13,7 +13,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.GalleriesRead)]
-public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, ITagProvenanceService? tagProvenanceService = null) : ControllerBase
+public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -96,7 +96,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         {
             Title = dto.Title, Code = dto.Code, Date = ParseDate(dto.Date),
             Details = dto.Details, Photographer = dto.Photographer,
-            Rating = dto.Rating, Organized = dto.Organized, StudioId = dto.StudioId
+            Organized = dto.Organized, StudioId = dto.StudioId
         };
         if (dto.Urls?.Count > 0) gallery.Urls = dto.Urls.Select(u => new GalleryUrl { Url = u }).ToList();
         if (dto.TagIds?.Count > 0) gallery.GalleryTags = dto.TagIds.Select(id => new GalleryTag { TagId = id }).ToList();
@@ -104,6 +104,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         if (dto.SceneIds?.Count > 0) gallery.SceneGalleries = dto.SceneIds.Select(id => new SceneGallery { SceneId = id }).ToList();
 
         gallery = await galleryRepo.AddAsync(gallery, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Gallery, gallery.Id, dto.Rating, cancellationToken: ct);
         if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
         {
             await tagProvenanceService.SyncTagSetAsync(AffinityHostType.Gallery, gallery.Id, [], dto.TagIds, cancellationToken: ct);
@@ -127,7 +129,6 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         if (dto.Date != null) gallery.Date = ParseDate(dto.Date);
         if (dto.Details != null) gallery.Details = dto.Details;
         if (dto.Photographer != null) gallery.Photographer = dto.Photographer;
-        if (dto.Rating.HasValue) gallery.Rating = dto.Rating;
         if (dto.Organized.HasValue) gallery.Organized = dto.Organized.Value;
         if (dto.StudioId.HasValue) gallery.StudioId = dto.StudioId;
 
@@ -164,6 +165,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         }
 
         await galleryRepo.UpdateAsync(gallery, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Gallery, id, dto.Rating, cancellationToken: ct);
         var updated = await galleryRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(await MapToDtoWithProvenanceAsync(updated!, ct));
     }
@@ -197,7 +200,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
 
     private static GalleryDto MapToDto(Gallery g, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
         g.Id, g.Title, g.Code, g.Date?.ToString("yyyy-MM-dd"), g.Details, g.Photographer,
-        g.Rating, g.Organized, g.StudioId, g.Studio?.Name,
+        g.Organized, g.StudioId, g.Studio?.Name,
         g.Urls.Select(u => u.Url).ToList(),
         g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => new TagDto(gt.Tag!.Id, gt.Tag.Name, gt.Tag.Description, gt.Tag.Favorite, gt.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, gt.Tag!.Id))).ToList(),
         g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => new PerformerSummaryDto(gp.Performer!.Id, gp.Performer.Name, gp.Performer.Disambiguation, gp.Performer.Gender?.ToString(), gp.Performer.Birthdate?.ToString("yyyy-MM-dd"), gp.Performer.Favorite, gp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(gp.Performer.Id, gp.Performer.UpdatedAt) : null)).ToList(),
@@ -343,7 +346,6 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
 
         foreach (var gallery in galleries)
         {
-            if (dto.Rating.HasValue) gallery.Rating = dto.Rating;
             if (dto.Organized.HasValue) gallery.Organized = dto.Organized.Value;
             if (dto.StudioId.HasValue) gallery.StudioId = dto.StudioId;
 
@@ -365,6 +367,11 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         }
 
         await db.SaveChangesAsync(ct);
+        if (dto.Rating.HasValue)
+        {
+            foreach (var gallery in galleries)
+                await engagementService.SetRatingAsync(AffinityHostType.Gallery, gallery.Id, dto.Rating, cancellationToken: ct);
+        }
         return Ok(new { updated = galleries.Count });
     }
 }

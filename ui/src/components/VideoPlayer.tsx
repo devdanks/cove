@@ -478,6 +478,12 @@ export function VideoPlayer({
     flushInterval(state, "keepalive");
   }, [flushInterval]);
 
+  const startTrackedInterval = useCallback((time: number) => {
+    intervalStart.current = time;
+    lastSeenTime.current = time;
+    lastKeepaliveSentAt.current = Date.now();
+  }, []);
+
   useEffect(() => {
     if (!clip) {
       return;
@@ -506,7 +512,7 @@ export function VideoPlayer({
         lastSeenTime.current = roundPlaybackTime(clipStart);
         if (intervalStart.current !== null) {
           flushInterval("active");
-          intervalStart.current = clipStart;
+          startTrackedInterval(clipStart);
         }
         return;
       }
@@ -530,7 +536,7 @@ export function VideoPlayer({
     return () => {
       video.removeEventListener("timeupdate", handleClipBoundary);
     };
-  }, [clip, clipEnd, clipStart, flushInterval, onEndedProp]);
+  }, [clip, clipEnd, clipStart, flushInterval, onEndedProp, startTrackedInterval]);
 
   useEffect(() => {
     if (!playbackTrackingTarget) {
@@ -772,8 +778,7 @@ export function VideoPlayer({
           setPlaying(true);
           pendingAutostartRef.current = false;
           const currentPos = roundPlaybackTime(videoRef.current?.currentTime ?? currentTime);
-          intervalStart.current = currentPos;
-          lastSeenTime.current = currentPos;
+          startTrackedInterval(currentPos);
           if (!playTriggered.current) { playTriggered.current = true; onPlay?.(); }
         }}
         onPause={() => {
@@ -791,8 +796,7 @@ export function VideoPlayer({
           const video = videoRef.current;
           if (video && !video.paused) {
             const time = roundPlaybackTime(video.currentTime);
-            intervalStart.current = time;
-            lastSeenTime.current = time;
+            startTrackedInterval(time);
           }
         }}
         onTimeUpdate={() => {

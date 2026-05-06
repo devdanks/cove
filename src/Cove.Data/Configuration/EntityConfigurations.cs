@@ -10,7 +10,6 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
     {
         builder.ToTable("scenes");
         builder.HasKey(s => s.Id);
-        builder.Property(s => s.Rating).HasAnnotation("Range", new[] { 1, 100 });
         builder.Property(s => s.CustomFields).HasColumnType("jsonb");
 
         builder.HasOne(s => s.Studio)
@@ -28,7 +27,6 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
         builder.HasIndex(s => s.Title);
         builder.HasIndex(s => s.StudioId);
         builder.HasIndex(s => s.Date);
-        builder.HasIndex(s => s.Rating);
         builder.HasIndex(s => s.CreatedAt);
         builder.HasIndex(s => s.UpdatedAt);
         builder.HasIndex(s => s.Organized);
@@ -151,7 +149,6 @@ public class PerformerConfiguration : IEntityTypeConfiguration<Performer>
 
         builder.HasIndex(p => p.Name);
         builder.HasIndex(p => p.Favorite);
-        builder.HasIndex(p => p.Rating);
         builder.HasIndex(p => p.SceneCount);
         builder.HasIndex(p => p.ImageCount);
         builder.HasIndex(p => p.GalleryCount);
@@ -260,7 +257,6 @@ public class StudioConfiguration : IEntityTypeConfiguration<Studio>
 
         builder.HasIndex(s => s.Name);
         builder.HasIndex(s => s.ParentId);
-        builder.HasIndex(s => s.Rating);
         builder.HasIndex(s => s.Favorite);
         builder.HasIndex(s => s.Organized);
         builder.HasIndex(s => s.SceneCount);
@@ -317,7 +313,6 @@ public class GalleryConfiguration : IEntityTypeConfiguration<Gallery>
         builder.HasIndex(g => g.Title);
         builder.HasIndex(g => g.StudioId);
         builder.HasIndex(g => g.Date);
-        builder.HasIndex(g => g.Rating);
         builder.HasIndex(g => g.Organized);
         builder.HasIndex(g => g.CreatedAt);
         builder.HasIndex(g => g.UpdatedAt);
@@ -371,7 +366,6 @@ public class ImageConfiguration : IEntityTypeConfiguration<Image>
 
         builder.HasIndex(i => i.Title);
         builder.HasIndex(i => i.StudioId);
-        builder.HasIndex(i => i.Rating);
         builder.HasIndex(i => i.Organized);
         builder.HasIndex(i => i.CreatedAt);
         builder.HasIndex(i => i.UpdatedAt);

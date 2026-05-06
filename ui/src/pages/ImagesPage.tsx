@@ -372,8 +372,8 @@ export function ImagesPage({ onNavigate }: Props) {
 function ImageCard({ image, engagement, onPreview, onDetails, onNavigate, selected, onSelect, selecting, onQuickView }: { image: Image; engagement?: EntityEngagement; onPreview: () => void; onDetails: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onQuickView?: () => void }) {
   const thumbnailUrl = images.thumbnailUrl(image.id);
   const displayTitle = getImageDisplayTitle(image);
-  const rating = engagement?.rating ?? image.rating;
-  const likeCount = engagement?.likeCount ?? image.likeCounter;
+  const rating = engagement?.rating;
+  const likeCount = engagement?.likeCount ?? 0;
 
   return (
     <div

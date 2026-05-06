@@ -115,7 +115,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     setRating: setPerformerRating,
   } = useEntityEngagement("performer", id, {
     fallbackFavorite: performer?.favorite,
-    fallbackRating: performer?.rating,
+    fallbackRating: undefined,
   });
 
   const autoTagMut = useMutation({

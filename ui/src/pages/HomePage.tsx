@@ -357,7 +357,7 @@ function SceneRecommendationCard({ scene, engagement, onNavigate }: { scene: Sce
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
   const screenshotUrl = scenes.screenshotUrl(scene.id);
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: scene.id }, () => onNavigate({ page: "scene", id: scene.id }));
-  const rating = engagement?.rating ?? scene.rating;
+  const rating = engagement?.rating;
 
   return (
     <a
@@ -397,7 +397,7 @@ function SceneRecommendationCard({ scene, engagement, onNavigate }: { scene: Sce
 
 function PerformerRecommendationCard({ performer, engagement, onNavigate }: { performer: Performer; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, () => onNavigate({ page: "performer", id: performer.id }));
-  const rating = engagement?.rating ?? performer.rating;
+  const rating = engagement?.rating;
 
   return (
     <a
@@ -430,7 +430,7 @@ function PerformerRecommendationCard({ performer, engagement, onNavigate }: { pe
 
 function StudioRecommendationCard({ studio, engagement, onNavigate }: { studio: Studio; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "studio", id: studio.id }, () => onNavigate({ page: "studio", id: studio.id }));
-  const rating = engagement?.rating ?? studio.rating;
+  const rating = engagement?.rating;
 
   return (
     <a
@@ -490,7 +490,7 @@ function TagRecommendationCard({ tag, onNavigate }: { tag: Tag; onNavigate: (r: 
 
 function GalleryRecommendationCard({ gallery, engagement, onNavigate }: { gallery: Gallery; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, () => onNavigate({ page: "gallery", id: gallery.id }));
-  const rating = engagement?.rating ?? gallery.rating;
+  const rating = engagement?.rating;
 
   return (
     <a
@@ -521,7 +521,7 @@ function GalleryRecommendationCard({ gallery, engagement, onNavigate }: { galler
 
 function GroupRecommendationCard({ group, engagement, onNavigate }: { group: Group; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
-  const rating = engagement?.rating ?? group.rating;
+  const rating = engagement?.rating;
 
   return (
     <a

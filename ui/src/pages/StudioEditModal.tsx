@@ -19,7 +19,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
 
   const [name, setName] = useState(studio.name);
   const [details, setDetails] = useState(studio.details ?? "");
-  const [rating, setRating] = useState<number | undefined>(studio.rating ?? undefined);
+  const [rating, setRating] = useState<number | undefined>(undefined);
   const [ignoreAutoTag, setIgnoreAutoTag] = useState(studio.ignoreAutoTag);
   const [urls, setUrls] = useState(studio.urls.length > 0 ? studio.urls : [""]);
   const [aliases, setAliases] = useState(studio.aliases.length > 0 ? studio.aliases : [""]);
@@ -45,7 +45,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
   useEffect(() => {
     setName(studio.name);
     setDetails(studio.details ?? "");
-    setRating(studio.rating ?? undefined);
+    setRating(undefined);
     setIgnoreAutoTag(studio.ignoreAutoTag);
     setUrls(studio.urls.length > 0 ? studio.urls : [""]);
     setAliases(studio.aliases.length > 0 ? studio.aliases : [""]);

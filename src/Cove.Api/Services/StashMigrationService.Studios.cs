@@ -98,7 +98,6 @@ public partial class StashMigrationService
                 ParentId = row.ParentId.HasValue && idMap.TryGetValue(row.ParentId.Value, out var pId) ? pId : null,
                 Parent = row.ParentId.HasValue && !idMap.ContainsKey(row.ParentId.Value) && createdStudiosByStashId.TryGetValue(row.ParentId.Value, out var parentStudio) ? parentStudio : null,
                 Details = row.Details,
-                Rating = row.Rating,
                 Favorite = row.Favorite,
                 IgnoreAutoTag = row.IgnoreAutoTag,
                 Organized = false,
@@ -116,6 +115,11 @@ public partial class StashMigrationService
         }
 
         await FlushStudioBatchAsync();
+        await AddImportedOverallRatingsAsync(
+            rows.Select(row => new ImportedRatingSeed(row.Id, row.Rating)),
+            idMap,
+            RatingHostType.Studio,
+            ct);
         _logger.LogInformation("Imported {Count} studios in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
     }

@@ -1,13 +1,14 @@
 import { useMemo, useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { aiVisual, scenes, tags, performers, galleries } from "../api/client";
-import type { FindFilter, Scene, SceneCreate, SceneFilterCriteria } from "../api/types";
+import type { EntityEngagement, FindFilter, Scene, SceneCreate, SceneFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { RatingField } from "../components/Rating";
 import { SceneTagger } from "../components/SceneTagger";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from "../components/shared";
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
@@ -138,6 +139,7 @@ export function ScenesPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const { engagementById } = useEntityEngagementBatch("scene", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
@@ -364,6 +366,7 @@ export function ScenesPage({ onNavigate }: Props) {
             <SceneCard
               key={scene.id}
               scene={scene}
+              engagement={engagementById.get(scene.id)}
               onClick={() => selecting ? toggle(scene.id) : navigateToScene(scene.id)}
               onNavigate={onNavigate}
               selected={selectedIds.has(scene.id)}
@@ -375,7 +378,7 @@ export function ScenesPage({ onNavigate }: Props) {
         </EntityCardGrid>
       )}
       {displayMode === "list" && (
-        <SceneListTable scenes={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <SceneListTable scenes={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}
       {displayMode === "wall" && (
         <div className="flex gap-1 px-2">
@@ -677,7 +680,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
 
 /* ── Scene List Table ── */
 
-function SceneListTable({ scenes, onNavigate, selectedIds, onToggle }: { scenes: Scene[]; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
+function SceneListTable({ scenes, engagementById, onNavigate, selectedIds, onToggle }: { scenes: Scene[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
   return (
     <div className="overflow-x-auto px-2">
       <table className="w-full text-xs text-foreground">
@@ -722,11 +725,11 @@ function SceneListTable({ scenes, onNavigate, selectedIds, onToggle }: { scenes:
                   )}
                 </td>
                 <td className="py-1.5 px-2 text-muted">{scene.date || ""}</td>
-                <td className="py-1.5 px-2"><RatingBadge rating={scene.rating} /></td>
+                <td className="py-1.5 px-2"><RatingBadge rating={engagementById.get(scene.id)?.rating} /></td>
                 <td className="py-1.5 px-2 text-muted">{file ? formatDuration(file.duration) : ""}</td>
                 <td className="py-1.5 px-2 text-muted">{file ? formatFileSize(file.size) : ""}</td>
                 <td className="py-1.5 px-2 text-muted">{file ? getResolutionLabel(file.width, file.height) : ""}</td>
-                <td className="py-1.5 px-2 text-right text-muted">{scene.playCount || ""}</td>
+                <td className="py-1.5 px-2 text-right text-muted">{engagementById.get(scene.id)?.playCount || ""}</td>
               </tr>
             );
           })}

@@ -123,12 +123,13 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     favoritePending: sceneFavoritePending,
   } = useEntityEngagement("scene", id, {
     enabled: !!scene && canReadScene,
-    fallbackFavorite: (scene?.likeCounter ?? 0) > 0,
-    fallbackRating: scene?.rating,
+    fallbackFavorite: false,
+    fallbackRating: undefined,
   });
-  const scenePlayCount = sceneEngagement?.playCount ?? scene?.playCount ?? 0;
-  const sceneResumeTime = sceneEngagement?.resumeTime ?? scene?.resumeTime;
-  const sceneLikeCount = sceneEngagement?.likeCount ?? scene?.likeCounter ?? 0;
+  const scenePlayCount = sceneEngagement?.playCount ?? 0;
+  const scenePlayDuration = sceneEngagement?.playDuration ?? 0;
+  const sceneResumeTime = sceneEngagement?.resumeTime;
+  const sceneLikeCount = sceneEngagement?.likeCount ?? 0;
   const sceneDerivedLikeCount = sceneEngagement?.derivedLikeCount ?? 0;
   const scenePageVisitCount = sceneEngagement?.pageVisitCount ?? 0;
   const effectiveResumeTime = initialSeekTo ?? sceneResumeTime;
@@ -521,6 +522,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     <HistoryTab
       scene={scene}
       playCount={scenePlayCount}
+      playDuration={scenePlayDuration}
       favorite={sceneFavorite}
       favoritePending={sceneFavoritePending}
       setFavorite={setSceneFavorite}
@@ -663,7 +665,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         activeTab={activeTab}
         onTabChange={(key) => setActiveTab(key as TabKey)}
         engagement={{
-          primaryContent: <InteractiveRating value={sceneRating ?? scene.rating} onChange={(value) => setSceneRating(value)} readOnly={!canEngageScene} />,
+          primaryContent: <InteractiveRating value={sceneRating} onChange={(value) => setSceneRating(value)} readOnly={!canEngageScene} />,
           additionalMetrics: [
             {
               label: "Plays",
@@ -1042,6 +1044,7 @@ export function FileInfoTab({ files }: { files: Scene["files"] }) {
 function HistoryTab({
   scene,
   playCount,
+  playDuration,
   favorite,
   favoritePending,
   setFavorite,
@@ -1050,6 +1053,7 @@ function HistoryTab({
 }: {
   scene: Scene;
   playCount: number;
+  playDuration: number;
   favorite: boolean;
   favoritePending: boolean;
   setFavorite: (isFavorite: boolean) => void;
@@ -1092,6 +1096,7 @@ function HistoryTab({
     }
   };
   const timelineEvents = history?.events ?? [];
+  const totalNonDistinctWatchedSec = (history as { totalNonDistinctWatchedSec?: number } | undefined)?.totalNonDistinctWatchedSec;
 
   return (
     <div className="space-y-6 text-sm">
@@ -1106,7 +1111,7 @@ function HistoryTab({
         </div>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <div><span className="text-muted">Play Count:</span> <span className="text-foreground">{playCount}</span></div>
-          <div><span className="text-muted">Duration:</span> <span className="text-foreground">{formatDuration(scene.playDuration)}</span></div>
+          <div><span className="text-muted">Duration:</span> <span className="text-foreground">{formatDuration(playDuration)}</span></div>
         </div>
         {history?.playHistory && history.playHistory.length > 0 && (
           <div className="max-h-40 overflow-y-auto space-y-0.5 border-t border-border pt-2">
@@ -1170,6 +1175,9 @@ function HistoryTab({
         </div>
         {history?.allTimeWatchedIntervals && history.allTimeWatchedIntervals.length > 0 ? (
           <>
+            {totalNonDistinctWatchedSec != null && (
+              <div className="mb-2 text-xs text-secondary">Total watched: {formatDuration(totalNonDistinctWatchedSec)}</div>
+            )}
             {history.totalDistinctWatchedSec != null && (
               <div className="mb-2 text-xs text-secondary">Total distinct: {formatDuration(history.totalDistinctWatchedSec)}</div>
             )}
@@ -2072,7 +2080,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   const [details, setDetails] = useState(scene.details || "");
   const [director, setDirector] = useState(scene.director || "");
   const [date, setDate] = useState(scene.date || "");
-  const [rating, setRating] = useState<number | undefined>(scene.rating ?? undefined);
+  const [rating, setRating] = useState<number | undefined>(undefined);
   const [urls, setUrls] = useState(scene.urls.length > 0 ? scene.urls : [""]);
   const [studioId, setStudioId] = useState<number | undefined>(scene.studioId ?? undefined);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(scene.tags.map((t) => t.id));
@@ -2093,7 +2101,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
 
   useEffect(() => {
     setTitle(scene.title || ""); setCode(scene.code || ""); setDetails(scene.details || "");
-    setDirector(scene.director || ""); setDate(scene.date || ""); setRating(scene.rating ?? undefined);
+    setDirector(scene.director || ""); setDate(scene.date || ""); setRating(undefined);
     setUrls(scene.urls.length > 0 ? scene.urls : [""]); setStudioId(scene.studioId ?? undefined);
     setSelectedTagIds(scene.tags.map((t) => t.id)); setSelectedPerformerIds(scene.performers.map((p) => p.id));
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));

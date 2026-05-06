@@ -8,6 +8,7 @@ public sealed record UserEngagementSnapshot(
     bool IsFavorite,
     int? Rating,
     double ResumeTime,
+    // Sum of per-session distinct watched deltas. This is not the raw all-interval total.
     double PlayDuration,
     int PlayCount,
     DateTime? LastPlayedAt,

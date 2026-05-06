@@ -129,10 +129,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 existing.Value = Math.Clamp(value.Value, 0, 100);
             }
         }
-
-        if (IsOverallAspect(normalizedAspect))
-            await MirrorLegacyRatingAsync(hostType, hostId, value, cancellationToken);
-
         await db.SaveChangesAsync(cancellationToken);
         return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
     }
@@ -213,8 +209,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         }
 
         db.Set<ScenePlayHistory>().Add(new ScenePlayHistory { SceneId = sceneId, PlayedAt = now });
-        scene.PlayCount = affinity?.ViewCount ?? (scene.PlayCount + 1);
-        scene.LastPlayedAt = affinity?.LastConsumedAt ?? now;
         await db.SaveChangesAsync(cancellationToken);
 
         return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
@@ -253,9 +247,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             .FirstOrDefaultAsync(cancellationToken);
         if (lastPlayHistory != null)
             db.Set<ScenePlayHistory>().Remove(lastPlayHistory);
-
-        scene.PlayCount = affinity?.ViewCount ?? 0;
-        scene.LastPlayedAt = affinity?.LastConsumedAt;
         await db.SaveChangesAsync(cancellationToken);
 
         return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
@@ -286,11 +277,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             .Where(h => h.SceneId == sceneId)
             .ToListAsync(cancellationToken);
         db.Set<ScenePlayHistory>().RemoveRange(allPlayHistory);
-
-        scene.PlayCount = 0;
-        scene.PlayDuration = 0;
-        scene.ResumeTime = 0;
-        scene.LastPlayedAt = null;
         await db.SaveChangesAsync(cancellationToken);
 
         return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
@@ -333,8 +319,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 At = now,
             });
         }
-
-        await MirrorLegacyLikeAsync(hostType, hostId, affinity?.LikeCount, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
@@ -357,8 +341,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             if (lastInteraction != null)
                 db.Interactions.Remove(lastInteraction);
         }
-
-        await MirrorLegacyLikeAsync(hostType, hostId, affinity?.LikeCount ?? 0, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
@@ -379,8 +361,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 .ToListAsync(cancellationToken);
             db.Interactions.RemoveRange(interactions);
         }
-
-        await MirrorLegacyLikeAsync(hostType, hostId, 0, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
@@ -525,9 +505,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                     var scene = await db.Scenes.FirstOrDefaultAsync(sc => sc.Id == dto.HostId, cancellationToken);
                     if (scene != null)
                     {
-                        scene.ResumeTime = dto.CurrentPositionSec;
-                        scene.PlayDuration = affinity.TotalConsumedSec;
-                        scene.LastPlayedAt = now;
                     }
                 }
 
@@ -613,9 +590,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 .ToListAsync(cancellationToken);
             db.PlaybackSessions.RemoveRange(playbackSessions);
         }
-
-        scene.ResumeTime = 0d;
-        scene.PlayDuration = 0d;
         await db.SaveChangesAsync(cancellationToken);
 
         return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
@@ -657,10 +631,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 existing.Value = Math.Clamp(value.Value, 0, 100);
             }
         }
-
-        if (IsOverallAspect(normalizedAspect))
-            scene.Rating = value.HasValue ? Math.Clamp(value.Value, 0, 100) : null;
-
         await db.SaveChangesAsync(cancellationToken);
 
         return await BuildSceneSnapshotAsync(sceneId, scene, null, cancellationToken);
@@ -805,23 +775,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         AffinityHostType.Group => InteractionHostType.Group,
         _ => throw new ArgumentOutOfRangeException(nameof(hostType), hostType, null),
     };
-
-    private async Task MirrorLegacyLikeAsync(AffinityHostType hostType, int hostId, int? value, CancellationToken cancellationToken)
-    {
-        var likeCount = Math.Max(0, value ?? 0);
-        switch (hostType)
-        {
-            case AffinityHostType.Scene:
-                var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
-                if (scene != null) scene.LikeCounter = likeCount;
-                break;
-            case AffinityHostType.Image:
-                var image = await db.Images.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
-                if (image != null) image.LikeCounter = likeCount;
-                break;
-        }
-    }
-
     private async Task<UserEngagementSnapshot> BuildSceneSnapshotAsync(int sceneId, Scene scene, UserEntityAffinity? affinity, CancellationToken cancellationToken)
     {
         var userId = principalAccessor.Current?.UserId;
@@ -834,7 +787,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         }
 
         affinity ??= await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken, createIfMissing: false);
-        return ToSnapshot(affinity, rating, scene);
+        return ToSnapshot(affinity, rating);
     }
 
     private async Task<bool> EntityExistsAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken)
@@ -886,34 +839,6 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 break;
         }
     }
-
-    private async Task MirrorLegacyRatingAsync(AffinityHostType hostType, int hostId, int? value, CancellationToken cancellationToken)
-    {
-        switch (hostType)
-        {
-            case AffinityHostType.Image:
-                var image = await db.Images.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
-                if (image != null) image.Rating = value;
-                break;
-            case AffinityHostType.Performer:
-                var performer = await db.Performers.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
-                if (performer != null) performer.Rating = value;
-                break;
-            case AffinityHostType.Studio:
-                var studio = await db.Studios.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
-                if (studio != null) studio.Rating = value;
-                break;
-            case AffinityHostType.Gallery:
-                var gallery = await db.Galleries.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
-                if (gallery != null) gallery.Rating = value;
-                break;
-            case AffinityHostType.Group:
-                var group = await db.Groups.FirstOrDefaultAsync(item => item.Id == hostId, cancellationToken);
-                if (group != null) group.Rating = value;
-                break;
-        }
-    }
-
     private static RatingHostType ToRatingHostType(AffinityHostType hostType) => hostType switch
     {
         AffinityHostType.Scene => RatingHostType.Scene,
@@ -973,14 +898,14 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     private static JsonDocument? CloneJsonDocument(JsonElement? element)
         => element.HasValue ? JsonDocument.Parse(element.Value.GetRawText()) : null;
 
-    private static UserEngagementSnapshot ToSnapshot(UserEntityAffinity? affinity, Rating? rating, Scene? scene = null) => new(
+    private static UserEngagementSnapshot ToSnapshot(UserEntityAffinity? affinity, Rating? rating) => new(
         affinity?.IsFavorite ?? false,
-        rating?.Value ?? scene?.Rating,
-        affinity?.LastPositionSec ?? scene?.ResumeTime ?? 0d,
-        affinity?.TotalConsumedSec ?? scene?.PlayDuration ?? 0d,
-        affinity?.ViewCount ?? scene?.PlayCount ?? 0,
-        affinity?.LastConsumedAt ?? scene?.LastPlayedAt,
-        affinity?.LikeCount ?? scene?.LikeCounter ?? 0,
+        rating?.Value,
+        affinity?.LastPositionSec ?? 0d,
+        affinity?.TotalConsumedSec ?? 0d,
+        affinity?.ViewCount ?? 0,
+        affinity?.LastConsumedAt,
+        affinity?.LikeCount ?? 0,
         affinity?.DerivedLikeCount ?? 0,
         affinity?.PageVisitCount ?? 0,
         affinity?.CompleteCount ?? 0);

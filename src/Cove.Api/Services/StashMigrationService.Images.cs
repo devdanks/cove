@@ -116,9 +116,7 @@ public partial class StashMigrationService
                     Code = row.Code,
                     Details = row.Details,
                     Photographer = row.Photographer,
-                    Rating = row.Rating,
                     Organized = row.Organized,
-                    LikeCounter = row.LikeCounter,
                     StudioId = row.StudioId.HasValue && studioIdMap.TryGetValue(row.StudioId.Value, out var sid) ? sid : null,
                     Date = ParseDate(row.Date),
                     CreatedAt = ParseDateTime(row.CreatedAt),
@@ -185,6 +183,17 @@ public partial class StashMigrationService
                 skippedDuplicateFiles,
                 stopwatch.Elapsed.TotalMilliseconds);
         }
+
+        await AddImportedOverallRatingsAsync(
+            imageRows.Select(row => new ImportedRatingSeed(row.StashId, row.Rating)),
+            idMap,
+            RatingHostType.Image,
+            ct);
+        await AddImportedAffinitiesAsync(
+            imageRows.Select(row => new ImportedAffinitySeed(row.StashId, LikeCount: row.LikeCounter)),
+            idMap,
+            AffinityHostType.Image,
+            ct);
 
         if (skippedDuplicateFiles > 0)
             _logger.LogWarning("Skipped {Count} duplicate image files because a file with the same folder/basename was already imported", skippedDuplicateFiles);

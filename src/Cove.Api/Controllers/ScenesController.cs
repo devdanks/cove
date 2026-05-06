@@ -88,7 +88,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var scene = new Scene
         {
             Title = dto.Title, Code = dto.Code, Details = dto.Details, Director = dto.Director,
-            Date = ParseDate(dto.Date), Rating = dto.Rating, Organized = dto.Organized, StudioId = dto.StudioId,
+            Date = ParseDate(dto.Date), Organized = dto.Organized, StudioId = dto.StudioId,
             Captions = dto.Captions, InteractiveSpeed = dto.InteractiveSpeed
         };
         if (dto.Urls?.Count > 0)
@@ -137,7 +137,6 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         if (dto.Details != null) scene.Details = dto.Details;
         if (dto.Director != null) scene.Director = dto.Director;
         if (dto.Date != null) scene.Date = ParseDate(dto.Date);
-        if (dto.Rating.HasValue) scene.Rating = dto.Rating;
         if (dto.Organized.HasValue) scene.Organized = dto.Organized.Value;
         if (dto.StudioId.HasValue) scene.StudioId = dto.StudioId;
         if (dto.Captions != null) scene.Captions = dto.Captions;
@@ -319,13 +318,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     private SceneDto MapToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
-        preferUserSnapshot ? engagement?.Rating : engagement?.Rating ?? s.Rating,
         s.Organized, s.StudioId, s.Studio?.Name,
-        preferUserSnapshot ? engagement?.ResumeTime ?? 0d : engagement?.ResumeTime ?? s.ResumeTime,
-        preferUserSnapshot ? engagement?.PlayDuration ?? 0d : engagement?.PlayDuration ?? s.PlayDuration,
-        preferUserSnapshot ? engagement?.PlayCount ?? 0 : engagement?.PlayCount ?? s.PlayCount,
-        preferUserSnapshot ? engagement?.LastPlayedAt?.ToString("o") : engagement?.LastPlayedAt?.ToString("o") ?? s.LastPlayedAt?.ToString("o"),
-        preferUserSnapshot ? engagement?.LikeCount ?? 0 : engagement?.LikeCount ?? s.LikeCounter,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
@@ -355,13 +348,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     private SceneDto MapListToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
-        preferUserSnapshot ? engagement?.Rating : engagement?.Rating ?? s.Rating,
         s.Organized, s.StudioId, s.Studio?.Name,
-        preferUserSnapshot ? engagement?.ResumeTime ?? 0d : engagement?.ResumeTime ?? s.ResumeTime,
-        preferUserSnapshot ? engagement?.PlayDuration ?? 0d : engagement?.PlayDuration ?? s.PlayDuration,
-        preferUserSnapshot ? engagement?.PlayCount ?? 0 : engagement?.PlayCount ?? s.PlayCount,
-        preferUserSnapshot ? engagement?.LastPlayedAt?.ToString("o") : engagement?.LastPlayedAt?.ToString("o") ?? s.LastPlayedAt?.ToString("o"),
-        preferUserSnapshot ? engagement?.LikeCount ?? 0 : engagement?.LikeCount ?? s.LikeCounter,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
@@ -571,7 +558,6 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         {
             var previousTagIds = dto.TagIds != null ? scene.SceneTags.Select(sceneTag => sceneTag.TagId).ToArray() : [];
 
-            if (dto.Rating.HasValue) scene.Rating = dto.Rating;
             if (dto.Organized.HasValue) scene.Organized = dto.Organized.Value;
             if (dto.StudioId.HasValue) scene.StudioId = dto.StudioId;
             if (dto.Date != null) scene.Date = ParseDate(dto.Date);
@@ -647,6 +633,11 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         }
 
         await db.SaveChangesAsync(ct);
+        if (dto.Rating.HasValue)
+        {
+            foreach (var scene in scenes)
+                await engagementService.SetSceneRatingAsync(scene.Id, dto.Rating, cancellationToken: ct);
+        }
         return Ok(new { updated = scenes.Count });
     }
 
@@ -718,10 +709,6 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             // Merge performers
             foreach (var sp in source.ScenePerformers.Where(sp => !existingPerfIds.Contains(sp.PerformerId)))
                 target.ScenePerformers.Add(new ScenePerformer { PerformerId = sp.PerformerId, SceneId = target.Id });
-            // Accumulate play counts & o-counters
-            target.PlayCount += source.PlayCount;
-            target.LikeCounter += source.LikeCounter;
-            target.PlayDuration += source.PlayDuration;
             // Delete source
             if (tagProvenanceService != null)
                 await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Scene, source.Id, ct);
@@ -730,7 +717,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
         await db.SaveChangesAsync(ct);
         var result = await sceneRepo.GetByIdWithRelationsAsync(target.Id, ct);
-        return Ok(MapToDto(result!));
+        var engagement = (await engagementService.GetSceneSnapshotsAsync([target.Id], ct)).GetValueOrDefault(target.Id);
+        return Ok(await MapToDtoWithProvenanceAsync(result!, engagement, HasUserScopedEngagement, ct));
     }
 
     // ===== Generate Screenshot =====

@@ -6,7 +6,6 @@ public class Group : BaseEntity
     public string? Aliases { get; set; }
     public int? Duration { get; set; } // seconds
     public DateOnly? Date { get; set; }
-    public int? Rating { get; set; } // 1-100
     public int? StudioId { get; set; }
     public string? Director { get; set; }
     public string? Synopsis { get; set; }

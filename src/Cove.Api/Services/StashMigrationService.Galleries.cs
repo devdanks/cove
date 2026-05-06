@@ -107,7 +107,9 @@ public partial class StashMigrationService
 
         var count = 0;
         var galleryFileIdMap = new Dictionary<int, int>();
+        var galleryIdMap = new Dictionary<int, int>();
         var pendingGalleryFiles = new List<(int StashFileId, GalleryFile FileEntity)>();
+        var pendingGalleries = new List<(int StashId, Gallery Entity)>();
         const int GalleryBatchSize = 500;
         progress.Report(startProgress, "Importing galleries...");
         _logger.LogDebug(
@@ -131,7 +133,6 @@ public partial class StashMigrationService
                 Date = ParseDate(row.Date),
                 Details = row.Details,
                 Photographer = row.Photographer,
-                Rating = row.Rating,
                 Organized = row.Organized,
                 FolderId = row.FolderId.HasValue && folderIdMap.TryGetValue(row.FolderId.Value, out var fid) ? fid : null,
                 StudioId = row.StudioId.HasValue && studioIdMap.TryGetValue(row.StudioId.Value, out var sid) ? sid : null,
@@ -169,12 +170,16 @@ public partial class StashMigrationService
             }
 
             _db.Galleries.Add(gallery);
+            pendingGalleries.Add((stashId, gallery));
             count++;
             if (count % GalleryBatchSize == 0)
             {
                 await _db.SaveChangesAsync(ct);
+                foreach (var (galleryStashId, galleryEntity) in pendingGalleries)
+                    galleryIdMap[galleryStashId] = galleryEntity.Id;
                 foreach (var (stashFileId, fileEntity) in pendingGalleryFiles)
                     galleryFileIdMap[stashFileId] = fileEntity.Id;
+                pendingGalleries.Clear();
                 pendingGalleryFiles.Clear();
                 _db.ChangeTracker.Clear();
                 ReportPhase(progress, startProgress, endProgress, count, total, $"Importing galleries ({count}/{total})");
@@ -188,10 +193,17 @@ public partial class StashMigrationService
             }
         }
         await _db.SaveChangesAsync(ct);
+        foreach (var (galleryStashId, galleryEntity) in pendingGalleries)
+            galleryIdMap[galleryStashId] = galleryEntity.Id;
         foreach (var (stashFileId, fileEntity) in pendingGalleryFiles)
             galleryFileIdMap[stashFileId] = fileEntity.Id;
         _db.ChangeTracker.Clear();
         ReportPhase(progress, startProgress, endProgress, count, total, $"Importing galleries ({count}/{total})");
+        await AddImportedOverallRatingsAsync(
+            galleryRows.Select(row => new ImportedRatingSeed(row.StashId, row.Rating)),
+            galleryIdMap,
+            RatingHostType.Gallery,
+            ct);
         _logger.LogInformation("Imported {Count} galleries in {Elapsed}", count, stopwatch.Elapsed);
         return (count, galleryFileIdMap);
     }

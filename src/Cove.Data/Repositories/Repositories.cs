@@ -101,36 +101,69 @@ public class PerformerRepository : IPerformerRepository
             : sortQuery.OrderBy(item => item.LastFavoriteAt == null ? 1 : 0).ThenBy(item => item.LastFavoriteAt).ThenBy(item => item.Performer.Id).Select(item => item.Performer);
     }
 
-    private static IQueryable<Performer> ApplyLastPlayedAtSort(IQueryable<Performer> query, bool desc)
+    private IQueryable<Performer> ApplyLastPlayedAtSort(IQueryable<Performer> query, bool desc)
     {
+        var userId = EngagementQueryHelpers.CurrentUserId(_db);
+        if (userId is not int selectedUserId)
+            return desc ? query.OrderByDescending(performer => performer.Id) : query.OrderBy(performer => performer.Id);
+
         var sortQuery = query.Select(performer => new
         {
             Performer = performer,
-            HasLastPlayedAt = performer.ScenePerformers.Any(scenePerformer => scenePerformer.Scene != null && scenePerformer.Scene.LastPlayedAt != null),
             LastPlayedAt = performer.ScenePerformers
-                .Select(scenePerformer => scenePerformer.Scene!.LastPlayedAt)
+                .Select(scenePerformer => _db.UserEntityAffinities
+                    .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Scene && affinity.HostId == scenePerformer.SceneId)
+                    .Select(affinity => affinity.LastConsumedAt)
+                    .FirstOrDefault())
                 .Max(),
         });
 
         return desc
-            ? sortQuery.OrderBy(item => item.HasLastPlayedAt ? 0 : 1).ThenByDescending(item => item.LastPlayedAt).ThenByDescending(item => item.Performer.Id).Select(item => item.Performer)
-            : sortQuery.OrderBy(item => item.HasLastPlayedAt ? 0 : 1).ThenBy(item => item.LastPlayedAt).ThenBy(item => item.Performer.Id).Select(item => item.Performer);
+            ? sortQuery.OrderBy(item => item.LastPlayedAt == null ? 1 : 0).ThenByDescending(item => item.LastPlayedAt).ThenByDescending(item => item.Performer.Id).Select(item => item.Performer)
+            : sortQuery.OrderBy(item => item.LastPlayedAt == null ? 1 : 0).ThenBy(item => item.LastPlayedAt).ThenBy(item => item.Performer.Id).Select(item => item.Performer);
     }
 
-    private static IQueryable<Performer> ApplyPlayCountSort(IQueryable<Performer> query, bool desc)
+    private IQueryable<Performer> ApplyPlayCountSort(IQueryable<Performer> query, bool desc)
+        => ApplySceneAffinityIntSumSort(query, nameof(UserEntityAffinity.ViewCount), desc);
+
+    private IQueryable<Performer> ApplySceneAffinityIntSumCriterion(IQueryable<Performer> query, IntCriterion? criterion, string propertyName)
     {
+        if (criterion == null)
+            return query;
+
+        var userId = EngagementQueryHelpers.CurrentUserId(_db);
+        if (userId is not int selectedUserId)
+            return FilterHelpers.ApplyInt(query, criterion, _ => 0);
+
+        return FilterHelpers.ApplyInt(query, criterion, performer => performer.ScenePerformers
+            .Select(scenePerformer => _db.UserEntityAffinities
+                .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Scene && affinity.HostId == scenePerformer.SceneId)
+                .Select(affinity => EF.Property<int>(affinity, propertyName))
+                .FirstOrDefault())
+            .Sum());
+    }
+
+    private IQueryable<Performer> ApplySceneAffinityIntSumSort(IQueryable<Performer> query, string propertyName, bool desc)
+    {
+        var userId = EngagementQueryHelpers.CurrentUserId(_db);
+        if (userId is not int selectedUserId)
+            return desc ? query.OrderByDescending(performer => performer.Id) : query.OrderBy(performer => performer.Id);
+
         var sortQuery = query.Select(performer => new
         {
             Performer = performer,
-            HasPlayCount = performer.ScenePerformers.Any(scenePerformer => scenePerformer.Scene != null && scenePerformer.Scene.PlayCount > 0),
-            PlayCount = performer.ScenePerformers.Select(scenePerformer => (int?)scenePerformer.Scene!.PlayCount).Sum() ?? 0,
+            Value = performer.ScenePerformers
+                .Select(scenePerformer => _db.UserEntityAffinities
+                    .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Scene && affinity.HostId == scenePerformer.SceneId)
+                    .Select(affinity => EF.Property<int>(affinity, propertyName))
+                    .FirstOrDefault())
+                .Sum(),
         });
 
         return desc
-            ? sortQuery.OrderBy(item => item.HasPlayCount ? 0 : 1).ThenByDescending(item => item.PlayCount).ThenByDescending(item => item.Performer.Id).Select(item => item.Performer)
-            : sortQuery.OrderBy(item => item.HasPlayCount ? 0 : 1).ThenBy(item => item.PlayCount).ThenBy(item => item.Performer.Id).Select(item => item.Performer);
+            ? sortQuery.OrderBy(item => item.Value <= 0 ? 1 : 0).ThenByDescending(item => item.Value).ThenByDescending(item => item.Performer.Id).Select(item => item.Performer)
+            : sortQuery.OrderBy(item => item.Value <= 0 ? 0 : 1).ThenBy(item => item.Value).ThenBy(item => item.Performer.Id).Select(item => item.Performer);
     }
-
     private static IQueryable<Performer> ApplyMeasurementsSort(IQueryable<Performer> query, bool desc)
     {
         var measuredQuery = query.Select(performer => new
@@ -257,6 +290,7 @@ public class PerformerRepository : IPerformerRepository
             ct);
 
         var query = (readScopePlan ?? new ReadScopeRootPlan<Performer>(false, null)).Apply(_db.Performers.AsQueryable());
+        var currentUserId = EngagementQueryHelpers.CurrentUserId(_db);
 
         if (filter != null)
         {
@@ -265,7 +299,7 @@ public class PerformerRepository : IPerformerRepository
             if (filter.Favorite.HasValue)
                 query = query.Where(p => p.Favorite == filter.Favorite.Value);
             if (filter.Rating.HasValue)
-                query = query.Where(p => p.Rating >= filter.Rating.Value);
+                query = EngagementQueryHelpers.ApplyRatingMinimum(_db, query, currentUserId, RatingHostType.Performer, filter.Rating.Value);
             if (filter.TagIds?.Count > 0)
                 query = query.Where(p => p.PerformerTags.Any(pt => filter.TagIds.Contains(pt.TagId)));
             if (filter.StudioId.HasValue)
@@ -273,7 +307,7 @@ public class PerformerRepository : IPerformerRepository
 
             // Advanced criteria
             query = FilterHelpers.ApplyString(query, filter.NameCriterion, p => p.Name);
-            query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, p => p.Rating ?? 0);
+            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, currentUserId, RatingHostType.Performer, filter.RatingCriterion);
             query = FilterHelpers.ApplyInt(query, filter.HeightCriterion, p => p.HeightCm ?? 0);
             query = FilterHelpers.ApplyInt(query, filter.WeightCriterion, p => p.Weight ?? 0);
 
@@ -454,8 +488,8 @@ public class PerformerRepository : IPerformerRepository
 
             // Count criteria
             query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, p => p.TagCount);
-            query = FilterHelpers.ApplyInt(query, filter.PlayCountCriterion, p => p.ScenePerformers.Sum(sp => sp.Scene!.PlayCount));
-            query = FilterHelpers.ApplyInt(query, filter.LikeCounterCriterion, p => p.ScenePerformers.Sum(sp => sp.Scene!.LikeCounter));
+            query = ApplySceneAffinityIntSumCriterion(query, filter.PlayCountCriterion, nameof(UserEntityAffinity.ViewCount));
+            query = ApplySceneAffinityIntSumCriterion(query, filter.LikeCounterCriterion, nameof(UserEntityAffinity.LikeCount));
 
             // Groups criterion
             if (filter.GroupsCriterion != null)
@@ -511,9 +545,7 @@ public class PerformerRepository : IPerformerRepository
         query = sort switch
         {
             "name" => desc ? query.OrderByDescending(p => p.Name) : query.OrderBy(p => p.Name),
-            "rating" => desc
-                ? query.OrderBy(p => p.Rating == null || p.Rating <= 0 ? 1 : 0).ThenByDescending(p => p.Rating)
-                : query.OrderBy(p => p.Rating == null || p.Rating <= 0 ? 0 : 1).ThenBy(p => p.Rating),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Performer, desc),
             "created_at" => desc ? query.OrderByDescending(p => p.CreatedAt) : query.OrderBy(p => p.CreatedAt),
             "birthdate" => desc ? query.OrderByDescending(p => p.Birthdate) : query.OrderBy(p => p.Birthdate),
             "scene_count" => desc ? query.OrderByDescending(p => p.SceneCount) : query.OrderBy(p => p.SceneCount),
@@ -524,9 +556,7 @@ public class PerformerRepository : IPerformerRepository
             "weight" => desc ? query.OrderByDescending(p => p.Weight) : query.OrderBy(p => p.Weight),
             "measurements" => ApplyMeasurementsSort(query, desc),
             "tag_count" => desc ? query.OrderByDescending(p => p.TagCount) : query.OrderBy(p => p.TagCount),
-            "like_counter" => desc
-                ? query.OrderByDescending(p => p.ScenePerformers.Sum(sp => sp.Scene!.LikeCounter))
-                : query.OrderBy(p => p.ScenePerformers.Sum(sp => sp.Scene!.LikeCounter)),
+            "like_counter" => ApplySceneAffinityIntSumSort(query, nameof(UserEntityAffinity.LikeCount), desc),
             "play_count" => ApplyPlayCountSort(query, desc),
             "last_like_at" => ApplyLastFavoriteSort(query, desc),
             "last_played_at" => ApplyLastPlayedAtSort(query, desc),
@@ -1090,18 +1120,8 @@ public class StudioRepository : IStudioRepository
     private readonly CoveContext _db;
     public StudioRepository(CoveContext db) => _db = db;
 
-    private static IQueryable<Studio> ApplyStudioRatingSort(IQueryable<Studio> query, bool desc)
-    {
-        var sortQuery = query.Select(studio => new
-        {
-            Studio = studio,
-            studio.Rating,
-        });
-
-        return desc
-            ? sortQuery.OrderBy(item => item.Rating == null || item.Rating <= 0 ? 1 : 0).ThenByDescending(item => item.Rating).Select(item => item.Studio)
-            : sortQuery.OrderBy(item => item.Rating == null || item.Rating <= 0 ? 0 : 1).ThenBy(item => item.Rating).Select(item => item.Studio);
-    }
+    private IQueryable<Studio> ApplyStudioRatingSort(IQueryable<Studio> query, bool desc)
+        => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Studio, desc);
 
     public async Task<Studio?> GetByIdAsync(int id, CancellationToken ct = default) => await _db.Studios.FindAsync([id], ct);
 
@@ -1149,7 +1169,7 @@ public class StudioRepository : IStudioRepository
             if (filter.TagIds?.Count > 0) query = query.Where(s => s.StudioTags.Any(st => filter.TagIds.Contains(st.TagId)));
 
             // Advanced criteria
-            query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, s => s.Rating ?? 0);
+            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Studio, filter.RatingCriterion);
             query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, s => s.SceneCount);
             query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, s => s.GalleryCount);
             query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, s => s.ImageCount);
@@ -1345,7 +1365,7 @@ public class GalleryRepository : IGalleryRepository
             if (filter.PerformerIds?.Count > 0) query = query.Where(g => g.PerformerIds.Any(id => filter.PerformerIds.Contains(id)));
 
             // Advanced criteria
-            query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, g => g.Rating ?? 0);
+            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Gallery, filter.RatingCriterion);
             query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, g => g.ImageCount);
 
             if (filter.OrganizedCriterion != null)
@@ -1519,18 +1539,8 @@ public class GalleryRepository : IGalleryRepository
             .Select(item => item.Gallery);
     }
 
-    private static IQueryable<Gallery> ApplyGalleryRatingSort(IQueryable<Gallery> query, bool desc)
-    {
-        var sortQuery = query.Select(gallery => new
-        {
-            Gallery = gallery,
-            gallery.Rating,
-        });
-
-        return desc
-            ? sortQuery.OrderBy(item => item.Rating == null || item.Rating <= 0 ? 1 : 0).ThenByDescending(item => item.Rating).Select(item => item.Gallery)
-            : sortQuery.OrderBy(item => item.Rating == null || item.Rating <= 0 ? 0 : 1).ThenBy(item => item.Rating).Select(item => item.Gallery);
-    }
+    private IQueryable<Gallery> ApplyGalleryRatingSort(IQueryable<Gallery> query, bool desc)
+        => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Gallery, desc);
 
     private static IQueryable<Gallery> ApplyGalleryPathCriterion(IQueryable<Gallery> query, StringCriterion? criterion)
     {
@@ -1814,7 +1824,7 @@ public class ImageRepository : IImageRepository
         return (sorted, totalCount);
     }
 
-    private static IQueryable<Image> ApplyImageFilters(IQueryable<Image> query, ImageFilter? filter, IReadOnlyList<int[]>? hierarchicalTagGroups = null)
+    private IQueryable<Image> ApplyImageFilters(IQueryable<Image> query, ImageFilter? filter, IReadOnlyList<int[]>? hierarchicalTagGroups = null)
     {
         if (filter == null) return query;
 
@@ -1829,9 +1839,9 @@ public class ImageRepository : IImageRepository
 
         // Advanced criteria
         if (filter.RatingCriterion != null)
-            query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, i => i.Rating ?? 0);
+            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Image, filter.RatingCriterion);
         if (filter.LikeCounterCriterion != null)
-            query = FilterHelpers.ApplyInt(query, filter.LikeCounterCriterion, i => i.LikeCounter);
+            query = EngagementQueryHelpers.ApplyAffinityIntCriterion(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Image, nameof(UserEntityAffinity.LikeCount), filter.LikeCounterCriterion);
         if (filter.OrganizedCriterion != null)
             query = query.Where(i => i.Organized == filter.OrganizedCriterion.Value);
         if (filter.ResolutionCriterion != null)
@@ -1910,7 +1920,7 @@ public class ImageRepository : IImageRepository
         return query;
     }
 
-    private static IQueryable<Image> ApplySorting(IQueryable<Image> query, string sort, bool desc, int? seed = null)
+    private IQueryable<Image> ApplySorting(IQueryable<Image> query, string sort, bool desc, int? seed = null)
     {
         if (sort == "random")
             return SeededRandomOrdering.OrderBy(query, seed, image => image.Id, desc);
@@ -1918,14 +1928,12 @@ public class ImageRepository : IImageRepository
         return ApplySortingSwitch(query, sort, desc);
     }
 
-    private static IQueryable<Image> ApplySortingSwitch(IQueryable<Image> query, string sort, bool desc) => sort switch
+    private IQueryable<Image> ApplySortingSwitch(IQueryable<Image> query, string sort, bool desc) => sort switch
     {
         "title" => ApplyDisplayTitleSort(query, desc),
         "date" => desc ? query.OrderByDescending(i => i.Date ?? DateOnly.MinValue) : query.OrderBy(i => i.Date ?? DateOnly.MinValue),
-        "rating" => desc
-            ? query.OrderBy(i => i.Rating == null || i.Rating <= 0 ? 1 : 0).ThenByDescending(i => i.Rating)
-            : query.OrderBy(i => i.Rating == null || i.Rating <= 0 ? 0 : 1).ThenBy(i => i.Rating),
-        "like_counter" => desc ? query.OrderByDescending(i => i.LikeCounter) : query.OrderBy(i => i.LikeCounter),
+        "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Image, desc),
+        "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Image, nameof(UserEntityAffinity.LikeCount), desc),
         "random" => query.OrderBy(i => i.Id),
         "file_mod_time" => ApplyFileModTimeSort(query, desc),
         "file_size" => desc ? query.OrderByDescending(i => i.MaxFileSize) : query.OrderBy(i => i.MaxFileSize),
@@ -2235,7 +2243,7 @@ public class GroupRepository : IGroupRepository
                 query = query.Where(g => g.GroupTags.Any(gt => filter.TagIds.Contains(gt.TagId)));
 
             // Advanced criteria
-            query = FilterHelpers.ApplyInt(query, filter.RatingCriterion, g => g.Rating ?? 0);
+            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Gallery, filter.RatingCriterion);
             query = FilterHelpers.ApplyInt(query, filter.DurationCriterion, g => g.Duration ?? 0);
 
             // Multi-ID criteria
@@ -2296,9 +2304,7 @@ public class GroupRepository : IGroupRepository
         {
             "name" => desc ? query.OrderByDescending(g => g.Name) : query.OrderBy(g => g.Name),
             "date" => desc ? query.OrderByDescending(g => g.Date ?? DateOnly.MinValue) : query.OrderBy(g => g.Date ?? DateOnly.MinValue),
-            "rating" => desc
-                ? query.OrderBy(item => item.Rating == null || item.Rating <= 0 ? 1 : 0).ThenByDescending(item => item.Rating)
-                : query.OrderBy(item => item.Rating == null || item.Rating <= 0 ? 0 : 1).ThenBy(item => item.Rating),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Group, desc),
             "created_at" => desc ? query.OrderByDescending(g => g.CreatedAt) : query.OrderBy(g => g.CreatedAt),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, g => g.Id, desc),
             _ => desc ? query.OrderByDescending(g => g.UpdatedAt) : query.OrderBy(g => g.UpdatedAt),

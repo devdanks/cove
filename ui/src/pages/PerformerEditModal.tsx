@@ -53,7 +53,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
   const [measurements, setMeasurements] = useState(performer.measurements || "");
   const [tattoos, setTattoos] = useState(performer.tattoos || "");
   const [piercings, setPiercings] = useState(performer.piercings || "");
-  const [rating, setRating] = useState<number | undefined>(performer.rating ?? undefined);
+  const [rating, setRating] = useState<number | undefined>(undefined);
   const [details, setDetails] = useState(performer.details || "");
   const [deathDate, setDeathDate] = useState(performer.deathDate || "");
   const [fakeTits, setFakeTits] = useState(performer.fakeTits || "");
@@ -93,7 +93,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
     setMeasurements(performer.measurements || "");
     setTattoos(performer.tattoos || "");
     setPiercings(performer.piercings || "");
-    setRating(performer.rating ?? undefined);
+    setRating(undefined);
     setDetails(performer.details || "");
     setDeathDate(performer.deathDate || "");
     setFakeTits(performer.fakeTits || "");

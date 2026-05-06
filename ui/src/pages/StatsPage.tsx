@@ -195,36 +195,36 @@ export function StatsPage({ onNavigate }: StatsPageProps) {
       )}
 
       {/* Recently Played */}
-      {recentlyPlayed && recentlyPlayed.items.filter(s => s.playCount > 0).length > 0 && (
+      {recentlyPlayed && recentlyPlayed.items.length > 0 && (
         <Carousel
           title="Recently Played"
           onSeeAll={() => onNavigate?.({ page: "scenes" })}
         >
-          {recentlyPlayed.items.filter(s => s.playCount > 0).map((scene) => (
+          {recentlyPlayed.items.map((scene) => (
             <SceneCard key={scene.id} scene={scene} onNavigate={onNavigate} />
           ))}
         </Carousel>
       )}
 
       {/* Most Played */}
-      {mostPlayed && mostPlayed.items.filter(s => s.playCount > 0).length > 0 && (
+      {mostPlayed && mostPlayed.items.length > 0 && (
         <Carousel
           title="Most Played"
           onSeeAll={() => onNavigate?.({ page: "scenes" })}
         >
-          {mostPlayed.items.filter(s => s.playCount > 0).map((scene) => (
+          {mostPlayed.items.map((scene) => (
             <SceneCard key={scene.id} scene={scene} onNavigate={onNavigate} />
           ))}
         </Carousel>
       )}
 
       {/* Top Rated */}
-      {topRated && topRated.items.filter(s => s.rating != null && s.rating > 0).length > 0 && (
+      {topRated && topRated.items.length > 0 && (
         <Carousel
           title="Top Rated"
           onSeeAll={() => onNavigate?.({ page: "scenes" })}
         >
-          {topRated.items.filter(s => s.rating != null && s.rating > 0).map((scene) => (
+          {topRated.items.map((scene) => (
             <SceneCard key={scene.id} scene={scene} onNavigate={onNavigate} />
           ))}
         </Carousel>

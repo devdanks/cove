@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups } from "../api/client";
-import type { FindFilter, Group, GroupCreate, GroupFilterCriteria } from "../api/types";
+import type { EntityEngagement, FindFilter, Group, GroupCreate, GroupFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { formatDate } from "../components/shared";
 import { Layers, Film, Trash2, Loader2, Edit, Tag as TagIcon, FolderTree, FolderUp } from "lucide-react";
 import { PopoverButton, ScenesPopoverContent } from "../components/EntityCards";
@@ -66,6 +67,7 @@ export function GroupsPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const { engagementById } = useEntityEngagementBatch("group", items.map((item) => item.id));
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
 
@@ -136,6 +138,7 @@ export function GroupsPage({ onNavigate }: Props) {
             <GroupCard
               key={g.id}
               group={g}
+              engagement={engagementById.get(g.id)}
               onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "group", id: g.id })}
               onNavigate={onNavigate}
               selected={selectedIds.has(g.id)}
@@ -145,7 +148,7 @@ export function GroupsPage({ onNavigate }: Props) {
           ))}
         </EntityCardGrid>
       ) : (
-        <GroupListTable groups={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <GroupListTable groups={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}
       {items.length === 0 && (
         <div className="text-center text-secondary py-16">
@@ -167,7 +170,7 @@ export function GroupsPage({ onNavigate }: Props) {
   );
 }
 
-function GroupCard({ group, onClick, onNavigate, selected, onSelect, selecting }: { group: Group; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+function GroupCard({ group, engagement, onClick, onNavigate, selected, onSelect, selecting }: { group: Group; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const { slots } = useRouteRegistry();
   const hasExtensionFooter = slots.some((slot) => slot.slot === "group-card-footer");
   return (
@@ -181,7 +184,7 @@ function GroupCard({ group, onClick, onNavigate, selected, onSelect, selecting }
         ) : (
           <Layers className="w-10 h-10 text-muted opacity-30" />
         )}
-        <RatingBanner rating={group.rating} />
+        <RatingBanner rating={engagement?.rating} />
         {/* Studio overlay */}
         {group.studioName && (
           <div className="absolute top-1 right-1 text-xs bg-black/70 px-1.5 py-0.5 rounded text-white truncate max-w-[80%]">
@@ -234,7 +237,7 @@ function GroupCard({ group, onClick, onNavigate, selected, onSelect, selecting }
   );
 }
 
-function GroupListTable({ groups: items, onNavigate, selectedIds, onToggle, selecting }: { groups: Group[]; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
+function GroupListTable({ groups: items, engagementById, onNavigate, selectedIds, onToggle, selecting }: { groups: Group[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
   return (
     <table className="w-full text-sm">
       <thead>
@@ -261,7 +264,7 @@ function GroupListTable({ groups: items, onNavigate, selectedIds, onToggle, sele
             <td className="py-2 px-3 text-secondary">{g.director ?? ""}</td>
             <td className="py-2 px-3 text-secondary">{g.date ? formatDate(g.date) : ""}</td>
             <td className="py-2 px-3 text-secondary text-right">{g.sceneCount}</td>
-            <td className="py-2 px-3 text-secondary text-right">{g.rating ?? ""}</td>
+            <td className="py-2 px-3 text-secondary text-right">{engagementById.get(g.id)?.rating ?? ""}</td>
           </tr>
         ))}
       </tbody>
@@ -269,7 +272,7 @@ function GroupListTable({ groups: items, onNavigate, selectedIds, onToggle, sele
   );
 }
 
-/* ── Group Create Modal ── */
+/* â”€â”€ Group Create Modal â”€â”€ */
 function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: number) => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({

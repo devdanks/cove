@@ -166,16 +166,10 @@ public partial class StashMigrationService
                 Title = row.Title,
                 Details = row.Details,
                 Date = ParseDate(row.Date),
-                Rating = row.Rating,
                 StudioId = row.StudioId.HasValue && studioIdMap.TryGetValue(row.StudioId.Value, out var sId) ? sId : null,
                 Organized = row.Organized,
                 Code = row.Code,
                 Director = row.Director,
-                ResumeTime = row.ResumeTime,
-                PlayDuration = row.PlayDuration,
-                LikeCounter = oHistory.Count,
-                PlayCount = viewHistory.Count,
-                LastPlayedAt = importedLastPlayedAt ?? (viewHistory.Count > 0 ? viewHistory.Max() : null),
                 CreatedAt = ParseDateTime(row.CreatedAt),
                 UpdatedAt = ParseDateTime(row.UpdatedAt),
                 Urls = sceneUrls.GetValueOrDefault(row.Id, []).Select(u => new SceneUrl { Url = u }).ToList(),
@@ -254,6 +248,28 @@ public partial class StashMigrationService
             _db.ChangeTracker.Clear();
             ReportPhase(progress, startProgress, endProgress, count, sceneRows.Count, $"Importing scenes ({count}/{sceneRows.Count})");
         }
+        await AddImportedOverallRatingsAsync(
+            sceneRows.Select(row => new ImportedRatingSeed(row.Id, row.Rating)),
+            idMap,
+            RatingHostType.Scene,
+            ct);
+
+        var sceneAffinitySeeds = new List<ImportedAffinitySeed>(sceneRows.Count);
+        foreach (var row in sceneRows)
+        {
+            var likeHistory = sceneODates.GetValueOrDefault(row.Id, []);
+            var viewHistory = sceneViewDates.GetValueOrDefault(row.Id, []);
+            var lastConsumedAt = ParseDateTimeOrNull(row.LastPlayedAt) ?? (viewHistory.Count > 0 ? viewHistory.Max() : null);
+            sceneAffinitySeeds.Add(new ImportedAffinitySeed(
+                row.Id,
+                LikeCount: likeHistory.Count,
+                ViewCount: viewHistory.Count,
+                LastPositionSec: row.ResumeTime > 0 ? row.ResumeTime : null,
+                TotalConsumedSec: row.PlayDuration,
+                LastConsumedAt: lastConsumedAt));
+        }
+        await AddImportedAffinitiesAsync(sceneAffinitySeeds, idMap, AffinityHostType.Scene, ct);
+
         _logger.LogInformation("Imported {Count} scenes in {Elapsed}", count, stopwatch.Elapsed);
 
         var generatedMap = new Dictionary<int, SceneGeneratedData>();

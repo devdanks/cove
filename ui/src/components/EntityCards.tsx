@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { scenes, images, performers, galleries, studios, groups, entityImages } from "../api/client";
-import type { Gallery, Group, Image, Performer, Scene, Studio } from "../api/types";
+import type { EntityEngagement, Gallery, Group, Image, Performer, Scene, Studio } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
 import { Building2, FolderOpen, Layers, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp } from "lucide-react";
@@ -155,7 +155,7 @@ export function ScenesPopoverContent({ filter }: { filter: Record<string, string
     queryKey: ["scenes-popover", filter],
     queryFn: () => scenes.find({ perPage: 10, sort: "date", direction: "desc" }, filter),
   });
-  if (isLoading) return <p className="text-[11px] text-muted px-1">Loading…</p>;
+  if (isLoading) return <p className="text-[11px] text-muted px-1">LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</p>;
   const items = data?.items ?? [];
   if (items.length === 0) return <p className="text-[11px] text-muted px-1">No scenes</p>;
   return (
@@ -180,7 +180,7 @@ export function ImagesPopoverContent({ filter }: { filter: Record<string, string
     queryKey: ["images-popover", filter],
     queryFn: () => images.find({ perPage: 10, sort: "created_at", direction: "desc" }, filter),
   });
-  if (isLoading) return <p className="text-[11px] text-muted px-1">Loading…</p>;
+  if (isLoading) return <p className="text-[11px] text-muted px-1">LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</p>;
   const items = data?.items ?? [];
   if (items.length === 0) return <p className="text-[11px] text-muted px-1">No images</p>;
   return (
@@ -204,7 +204,7 @@ export function PerformersPopoverContent({ filter }: { filter: Record<string, st
     queryKey: ["performers-popover", filter],
     queryFn: () => performers.find({ perPage: 10, sort: "name", direction: "asc" }, filter),
   });
-  if (isLoading) return <p className="text-[11px] text-muted px-1">Loading…</p>;
+  if (isLoading) return <p className="text-[11px] text-muted px-1">LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</p>;
   const items = data?.items ?? [];
   if (items.length === 0) return <p className="text-[11px] text-muted px-1">No performers</p>;
   return <PerformerPreviewGrid performers={items} />;
@@ -217,7 +217,7 @@ export function GalleriesPopoverContent({ filter }: { filter: Record<string, str
     queryKey: ["galleries-popover", filter],
     queryFn: () => galleries.find({ perPage: 10, sort: "title", direction: "asc" }, filter),
   });
-  if (isLoading) return <p className="text-[11px] text-muted px-1">Loading…</p>;
+  if (isLoading) return <p className="text-[11px] text-muted px-1">LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</p>;
   const items = data?.items ?? [];
   if (items.length === 0) return <p className="text-[11px] text-muted px-1">No galleries</p>;
   return <GalleryPreviewList galleries={items} />;
@@ -230,7 +230,7 @@ export function StudiosPopoverContent({ filter }: { filter: Record<string, strin
     queryKey: ["studios-popover", filter],
     queryFn: () => studios.find({ perPage: 10, sort: "name", direction: "asc" }, filter),
   });
-  if (isLoading) return <p className="text-[11px] text-muted px-1">Loading…</p>;
+  if (isLoading) return <p className="text-[11px] text-muted px-1">LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</p>;
   const items = data?.items ?? [];
   if (items.length === 0) return <p className="text-[11px] text-muted px-1">No studios</p>;
   return (
@@ -263,7 +263,7 @@ export function GroupsPopoverContent({ filter }: { filter: Record<string, string
     queryKey: ["groups-popover", filter],
     queryFn: () => groups.find({ perPage: 10, sort: "name", direction: "asc" }, filter),
   });
-  if (isLoading) return <p className="text-[11px] text-muted px-1">Loading…</p>;
+  if (isLoading) return <p className="text-[11px] text-muted px-1">LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</p>;
   const items = data?.items ?? [];
   if (items.length === 0) return <p className="text-[11px] text-muted px-1">No groups</p>;
   return (
@@ -283,10 +283,11 @@ export function GroupsPopoverContent({ filter }: { filter: Record<string, string
 
 // ===== SceneCardPopovers =====
 
-export function SceneCardPopovers({ scene, onNavigate }: { scene: Scene; onNavigate?: (r: any) => void }) {
+export function SceneCardPopovers({ scene, engagement, onNavigate }: { scene: Scene; engagement?: EntityEngagement; onNavigate?: (r: any) => void }) {
+  const likeCount = engagement?.likeCount ?? 0;
   const hasPopovers =
     scene.tags.length > 0 || scene.performers.length > 0 || scene.groups.length > 0 ||
-    scene.galleries.length > 0 || scene.likeCounter > 0 || scene.organized;
+    scene.galleries.length > 0 || likeCount > 0 || scene.organized;
   return (
     <>
       <hr className="border-border/50 my-0" />
@@ -312,8 +313,8 @@ export function SceneCardPopovers({ scene, onNavigate }: { scene: Scene; onNavig
             </div>
           </PopoverButton>
         )}
-        {scene.likeCounter > 0 && (
-          <LikeCounter count={scene.likeCounter} />
+        {likeCount > 0 && (
+          <LikeCounter count={likeCount} />
         )}
         {scene.groups.length > 0 && (
           <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={scene.groups.length} title="Groups" preferBelow>
@@ -424,7 +425,7 @@ function PerformerBadge({
 
 // ===== SceneCard (redesigned - cleaner, performer badges, 2-line title) =====
 
-export function SceneCard({ scene, onClick, selected, onSelect, onNavigate, selecting, onQuickView }: { scene: Scene; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onNavigate?: (r: any) => void; onQuickView?: () => void }) {
+export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNavigate, selecting, onQuickView }: { scene: Scene; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onNavigate?: (r: any) => void; onQuickView?: () => void }) {
   const file = scene.files[0];
   const duration = file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
@@ -432,7 +433,7 @@ export function SceneCard({ scene, onClick, selected, onSelect, onNavigate, sele
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
   const previewUrl = scenes.previewUrl(scene.id);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const progressPercent = duration > 0 && scene.resumeTime ? Math.min(100, (scene.resumeTime / duration) * 100) : 0;
+  const progressPercent = duration > 0 && engagement?.resumeTime ? Math.min(100, (engagement.resumeTime / duration) * 100) : 0;
   const cardTitle = scene.title || file?.basename || "Untitled";
 
   useEffect(() => {
@@ -496,7 +497,7 @@ export function SceneCard({ scene, onClick, selected, onSelect, onNavigate, sele
         {progressPercent > 0 && (
           <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/40 z-[6]"><div className="h-full bg-accent" style={{ width: `${progressPercent}%` }} /></div>
         )}
-        <RatingBanner rating={scene.rating} />
+        <RatingBanner rating={engagement?.rating} />
       </div>
       <div className="card-body px-2.5 pt-2 pb-2 border-t border-border/50 flex-1 flex flex-col gap-1.5 min-h-0">
         <div>
@@ -520,7 +521,7 @@ export function SceneCard({ scene, onClick, selected, onSelect, onNavigate, sele
         )}
         {scene.details && <p className="text-xs text-secondary line-clamp-2 leading-snug">{scene.details}</p>}
       </div>
-      <SceneCardPopovers scene={scene} onNavigate={onNavigate} />
+      <SceneCardPopovers scene={scene} engagement={engagement} onNavigate={onNavigate} />
     </div>
   );
 }
@@ -561,7 +562,7 @@ export function SceneTile({ scene, onClick }: SceneTileProps) {
         />
         {duration > 0 && <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[11px] text-white">{formatDuration(duration)}</span>}
         {resLabel && <span className="absolute top-1.5 right-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent">{resLabel}</span>}
-        <RatingBanner rating={scene.rating} />
+        <RatingBanner rating={undefined} />
       </div>
       <div className="pt-2">
         <p className="card-title font-medium text-foreground line-clamp-2 group-hover:text-accent">{scene.title || "Untitled"}</p>
@@ -582,13 +583,13 @@ interface PerformerTileProps {
   selecting?: boolean;
 }
 
-export function PerformerTile({ performer, onClick, onNavigate, selected, onSelect, selecting }: PerformerTileProps) {
+export function PerformerTile({ performer, engagement, onClick, onNavigate, selected, onSelect, selecting }: PerformerTileProps & { engagement?: EntityEngagement }) {
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "performer", id: performer.id }} onClick={onClick} label={`Open performer ${performer.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <div className="aspect-[2/3] overflow-hidden bg-gradient-to-b from-card to-surface relative">
         <img src={entityImages.performerImageUrl(performer.id)} alt={performer.name} className="h-full w-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-        <RatingBanner rating={performer.rating} />
+        <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
         {performer.favorite && (
           <div className="absolute top-1.5 right-1.5 z-[5]">
@@ -651,7 +652,7 @@ interface StudioTileProps {
   selecting?: boolean;
 }
 
-export function StudioTile({ studio, onClick, onNavigate, selected, onSelect, selecting }: StudioTileProps) {
+export function StudioTile({ studio, engagement, onClick, onNavigate, selected, onSelect, selecting }: StudioTileProps & { engagement?: EntityEngagement }) {
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "studio", id: studio.id }} onClick={onClick} label={`Open studio ${studio.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
@@ -663,7 +664,7 @@ export function StudioTile({ studio, onClick, onNavigate, selected, onSelect, se
             <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>
           </div>
         )}
-        <RatingBanner rating={studio.rating} />
+        <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
         {studio.favorite && (
           <div className="absolute top-1.5 right-1.5 z-[5]">
@@ -718,15 +719,16 @@ interface ImageTileProps {
   selecting?: boolean;
 }
 
-export function ImageTile({ image, onClick, onNavigate, onQuickView, selected, onSelect, selecting }: ImageTileProps) {
-  const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || image.likeCounter > 0 || image.organized;
+export function ImageTile({ image, engagement, onClick, onNavigate, onQuickView, selected, onSelect, selecting }: ImageTileProps & { engagement?: EntityEngagement }) {
+  const likeCount = engagement?.likeCount ?? 0;
+  const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || likeCount > 0 || image.organized;
   const displayTitle = getImageDisplayTitle(image);
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left shadow-md shadow-black/20 flex flex-col h-full transition-colors ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "image", id: image.id }} onClick={onClick} label={`Open image ${displayTitle}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <div className="aspect-square overflow-hidden bg-surface relative">
         <img src={images.thumbnailUrl(image.id)} alt={displayTitle} className="h-full w-full object-cover" loading="lazy" />
-        <RatingBanner rating={image.rating} />
+        <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
         {image.studioName && (
           <div className="absolute top-1 right-1 text-[10px] bg-black/70 px-1 py-0.5 rounded text-white truncate max-w-[80%]">{image.studioName}</div>
@@ -773,8 +775,8 @@ export function ImageTile({ image, onClick, onNavigate, onQuickView, selected, o
                 <GalleriesPopoverContent filter={{ imageId: image.id }} />
               </PopoverButton>
             )}
-            {image.likeCounter > 0 && (
-              <LikeCounter count={image.likeCounter} />
+            {likeCount > 0 && (
+              <LikeCounter count={likeCount} />
             )}
             {image.organized && (
               <span className="p-1 text-muted" title="Organized"><Box className="w-3.5 h-3.5" /></span>
@@ -796,7 +798,7 @@ interface GalleryTileProps {
   selecting?: boolean;
 }
 
-export function GalleryTile({ gallery, onClick, selected, onSelect, selecting }: GalleryTileProps) {
+export function GalleryTile({ gallery, engagement, onClick, selected, onSelect, selecting }: GalleryTileProps & { engagement?: EntityEngagement }) {
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "gallery", id: gallery.id }} onClick={onClick} label={`Open gallery ${gallery.title || "Untitled"}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
@@ -806,7 +808,7 @@ export function GalleryTile({ gallery, onClick, selected, onSelect, selecting }:
         ) : (
           <FolderOpen className="h-10 w-10 text-muted" />
         )}
-        <RatingBanner rating={gallery.rating} />
+        <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
       </div>
       <div className="card-body border-t border-border/50 p-2.5 flex-1 flex flex-col gap-1">
@@ -827,13 +829,13 @@ interface GroupTileProps {
   selecting?: boolean;
 }
 
-export function GroupTile({ group, onClick, selected, onSelect, selecting }: GroupTileProps) {
+export function GroupTile({ group, engagement, onClick, selected, onSelect, selecting }: GroupTileProps & { engagement?: EntityEngagement }) {
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "group", id: group.id }} onClick={onClick} label={`Open group ${group.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card relative">
         <Layers className="h-10 w-10 text-muted" />
-        <RatingBanner rating={group.rating} />
+        <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
       </div>
       <div className="card-body border-t border-border/50 p-2.5 flex-1 flex flex-col gap-1">

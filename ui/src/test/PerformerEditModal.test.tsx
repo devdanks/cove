@@ -86,7 +86,6 @@ describe("PerformerEditModal", () => {
       groupCount: 0,
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-02T00:00:00Z",
-      rating: 80,
     };
 
     const { container } = renderModal(performer);
@@ -118,7 +117,6 @@ describe("PerformerEditModal", () => {
       groupCount: 0,
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-02T00:00:00Z",
-      rating: undefined,
     };
 
     mocks.tagsFind.mockImplementation(async ({ q }: { q?: string }) => ({

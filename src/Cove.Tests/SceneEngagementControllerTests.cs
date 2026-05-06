@@ -66,11 +66,13 @@ public class SceneEngagementControllerTests
         var userOneResult = await scenesController.GetById(sceneId, CancellationToken.None);
         var userOneOk = Assert.IsType<OkObjectResult>(userOneResult.Result);
         var userOneScene = Assert.IsType<SceneDto>(userOneOk.Value);
-        Assert.Equal(88, userOneScene.Rating);
-        Assert.Equal(120.0, userOneScene.ResumeTime);
-        Assert.Equal(52.0, userOneScene.PlayDuration, precision: 5);  // 5.5 + 46.5
-        Assert.Equal(2, userOneScene.PlayCount);
-        Assert.Equal(1, userOneScene.LikeCounter);
+        var userOneSnapshot = await new UserEngagementService(context, principalAccessor).GetSnapshotAsync(AffinityHostType.Scene, sceneId, CancellationToken.None);
+        Assert.NotNull(userOneSnapshot);
+        Assert.Equal(88, userOneSnapshot.Rating);
+        Assert.Equal(120.0, userOneSnapshot.ResumeTime);
+        Assert.Equal(52.0, userOneSnapshot.PlayDuration, precision: 5);  // 5.5 + 46.5
+        Assert.Equal(2, userOneSnapshot.PlayCount);
+        Assert.Equal(1, userOneSnapshot.LikeCount);
 
         var historyResult = await scenesController.GetHistory(sceneId, CancellationToken.None);
         var historyOk = Assert.IsType<OkObjectResult>(historyResult.Result);
@@ -97,11 +99,13 @@ public class SceneEngagementControllerTests
         var userTwoResult = await scenesController.GetById(sceneId, CancellationToken.None);
         var userTwoOk = Assert.IsType<OkObjectResult>(userTwoResult.Result);
         var userTwoScene = Assert.IsType<SceneDto>(userTwoOk.Value);
-        Assert.Null(userTwoScene.Rating);
-        Assert.Equal(0d, userTwoScene.ResumeTime);
-        Assert.Equal(0d, userTwoScene.PlayDuration);
-        Assert.Equal(0, userTwoScene.PlayCount);
-        Assert.Equal(0, userTwoScene.LikeCounter);
+        var userTwoSnapshot = await new UserEngagementService(context, principalAccessor).GetSnapshotAsync(AffinityHostType.Scene, sceneId, CancellationToken.None);
+        Assert.NotNull(userTwoSnapshot);
+        Assert.Null(userTwoSnapshot.Rating);
+        Assert.Equal(0d, userTwoSnapshot.ResumeTime);
+        Assert.Equal(0d, userTwoSnapshot.PlayDuration);
+        Assert.Equal(0, userTwoSnapshot.PlayCount);
+        Assert.Equal(0, userTwoSnapshot.LikeCount);
 
         var userTwoRatingsResult = await scenesController.GetRatings(sceneId, CancellationToken.None);
         var userTwoRatingsOk = Assert.IsType<OkObjectResult>(userTwoRatingsResult.Result);

@@ -81,7 +81,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
     favoritePending: galleryFavoritePending,
   } = useEntityEngagement("gallery", id, {
     enabled: !!gallery,
-    fallbackRating: gallery?.rating,
+    fallbackRating: undefined,
   });
   const visibleGalleryTabs = filterItemsByPermission(galleryTabs, {
     images: "images.read",

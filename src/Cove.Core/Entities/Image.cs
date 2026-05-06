@@ -6,9 +6,7 @@ public class Image : BaseEntity
     public string? Code { get; set; }
     public string? Details { get; set; }
     public string? Photographer { get; set; }
-    public int? Rating { get; set; } // 1-100
     public bool Organized { get; set; }
-    public int LikeCounter { get; set; }
     public int? StudioId { get; set; }
     public DateOnly? Date { get; set; }
 

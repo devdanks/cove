@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { studios, entityImages } from "../api/client";
-import type { FindFilter, Studio, StudioCreate, StudioFilterCriteria } from "../api/types";
+import type { EntityEngagement, FindFilter, Studio, StudioCreate, StudioFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { Building2, Film, Image, LayoutGrid, Trash2, Loader2, Edit, Merge, Heart, Check, Users, Layers, Tag as TagIcon } from "lucide-react";
 import { STUDIO_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, STUDIO_BULK_FIELDS } from "../components/BulkEditDialog";
@@ -76,6 +77,7 @@ export function StudiosPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const { engagementById } = useEntityEngagementBatch("studio", items.map((item) => item.id));
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
 
@@ -173,6 +175,7 @@ export function StudiosPage({ onNavigate }: Props) {
             <StudioCard
               key={s.id}
               studio={s}
+              engagement={engagementById.get(s.id)}
               onClick={() => selecting ? toggle(s.id) : onNavigate({ page: "studio", id: s.id })}
               onNavigate={onNavigate}
               selected={selectedIds.has(s.id)}
@@ -182,7 +185,7 @@ export function StudiosPage({ onNavigate }: Props) {
           ))}
         </EntityCardGrid>
       ) : (
-        <StudioListTable studios={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <StudioListTable studios={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}
       {items.length === 0 && (
         <div className="text-center text-secondary py-16">
@@ -212,7 +215,7 @@ export function StudiosPage({ onNavigate }: Props) {
   );
 }
 
-function StudioCard({ studio, onClick, onNavigate, selected, onSelect, selecting }: { studio: Studio; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+function StudioCard({ studio, engagement, onClick, onNavigate, selected, onSelect, selecting }: { studio: Studio; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const { slots } = useRouteRegistry();
   const queryClient = useQueryClient();
   const hasExtensionFooter = slots.some((slot) => slot.slot === "studio-card-footer");
@@ -244,7 +247,7 @@ function StudioCard({ studio, onClick, onNavigate, selected, onSelect, selecting
         ) : (
           <Building2 className="w-10 h-10 opacity-30" />
         )}
-        <RatingBanner rating={studio.rating} />
+        <RatingBanner rating={engagement?.rating} />
       </div>
       <div className="card-body border-t border-border/50 p-2 text-center">
         <h3 className="font-medium text-sm truncate text-foreground">{studio.name}</h3>
@@ -310,7 +313,7 @@ function StudioCard({ studio, onClick, onNavigate, selected, onSelect, selecting
   );
 }
 
-function StudioListTable({ studios: items, onNavigate, selectedIds, onToggle, selecting }: { studios: Studio[]; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
+function StudioListTable({ studios: items, engagementById, onNavigate, selectedIds, onToggle, selecting }: { studios: Studio[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
   return (
     <table className="w-full text-sm">
       <thead>
@@ -333,7 +336,7 @@ function StudioListTable({ studios: items, onNavigate, selectedIds, onToggle, se
             <td className="py-2 px-3 text-foreground">{s.name}</td>
             <td className="py-2 px-3 text-secondary">{s.parentName ?? ""}</td>
             <td className="py-2 px-3 text-secondary text-right">{s.sceneCount}</td>
-            <td className="py-2 px-3 text-secondary text-right">{s.rating ?? ""}</td>
+            <td className="py-2 px-3 text-secondary text-right">{engagementById.get(s.id)?.rating ?? ""}</td>
           </tr>
         ))}
       </tbody>

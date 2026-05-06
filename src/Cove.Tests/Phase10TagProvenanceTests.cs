@@ -95,6 +95,7 @@ public sealed class Phase10TagProvenanceTests
         var controller = new GalleriesController(
             new GalleryRepository(context),
             context,
+            new NoOpUserEngagementService(),
             new TagProvenanceService(context));
 
         var result = await controller.GetById(gallery.Id, CancellationToken.None);

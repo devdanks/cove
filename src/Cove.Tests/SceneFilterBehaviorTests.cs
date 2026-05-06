@@ -1,4 +1,5 @@
 using Cove.Api.Controllers;
+using Cove.Core.Auth;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
@@ -353,10 +354,15 @@ public class SceneFilterBehaviorTests
     public async Task LastPlayedAtSort_Descending_PutsPlayedScenesBeforeUnplayedScenes()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            new Scene { Title = "never-played" },
-            new Scene { Title = "older-play" , LastPlayedAt = new DateTime(2024, 1, 10, 8, 0, 0, DateTimeKind.Utc) },
-            new Scene { Title = "recent-play", LastPlayedAt = new DateTime(2024, 1, 12, 8, 0, 0, DateTimeKind.Utc) });
+        var neverPlayed = new Scene { Title = "never-played" };
+        var olderPlay = new Scene { Title = "older-play" };
+        var recentPlay = new Scene { Title = "recent-play" };
+        context.Scenes.AddRange(neverPlayed, olderPlay, recentPlay);
+        await context.SaveChangesAsync();
+
+        context.UserEntityAffinities.AddRange(
+            new UserEntityAffinity { UserId = 1, HostType = AffinityHostType.Scene, HostId = olderPlay.Id, LastConsumedAt = new DateTime(2024, 1, 10, 8, 0, 0, DateTimeKind.Utc) },
+            new UserEntityAffinity { UserId = 1, HostType = AffinityHostType.Scene, HostId = recentPlay.Id, LastConsumedAt = new DateTime(2024, 1, 12, 8, 0, 0, DateTimeKind.Utc) });
         await context.SaveChangesAsync();
 
         var repository = new SceneRepository(context);
@@ -450,10 +456,20 @@ public class SceneFilterBehaviorTests
             .UseInMemoryDatabase($"scene-filter-behavior-{Guid.NewGuid():N}")
             .Options;
 
-        return new TestCoveContext(options);
+        var principalAccessor = new CurrentPrincipalAccessor();
+        principalAccessor.Set(new CovePrincipal
+        {
+            UserId = 1,
+            Username = "test-user",
+            Kind = PrincipalKind.User,
+            Permissions = new HashSet<string> { "*" },
+            Roles = new HashSet<string>(),
+        });
+
+        return new TestCoveContext(options, principalAccessor);
     }
 
-    private sealed class TestCoveContext(DbContextOptions<CoveContext> options) : CoveContext(options)
+    private sealed class TestCoveContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor principalAccessor) : CoveContext(options, principalAccessor)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

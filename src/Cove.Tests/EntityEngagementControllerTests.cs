@@ -48,7 +48,7 @@ public class EntityEngagementControllerTests
         var ratingsDto = Assert.IsType<EntityRatingsDto>(ratingsOk.Value);
         Assert.Equal(91, ratingsDto.Ratings["overall"]);
         Assert.Equal(40, ratingsDto.Ratings["audio"]);
-        Assert.Equal(91, await context.Performers.Where(performer => performer.Id == performerId).Select(performer => performer.Rating).SingleAsync());
+        Assert.Equal(91, await context.Ratings.Where(rating => rating.UserId == 7 && rating.HostType == RatingHostType.Performer && rating.HostId == performerId && rating.Aspect == "overall").Select(rating => rating.Value).SingleAsync());
 
         context.ChangeTracker.Clear();
         principalAccessor.Set(CreatePrincipal(9));

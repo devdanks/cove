@@ -7,14 +7,8 @@ public class Scene : BaseEntity
     public string? Details { get; set; }
     public string? Director { get; set; }
     public DateOnly? Date { get; set; }
-    public int? Rating { get; set; } // 1-100
     public bool Organized { get; set; }
     public int? StudioId { get; set; }
-    public double ResumeTime { get; set; }
-    public double PlayDuration { get; set; }
-    public int PlayCount { get; set; }
-    public DateTime? LastPlayedAt { get; set; }
-    public int LikeCounter { get; set; }
     public string? Captions { get; set; }
     public int? InteractiveSpeed { get; set; }
     public string? ImageBlobId { get; set; }

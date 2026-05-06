@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.PerformersRead)]
-public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers) : ControllerBase
+public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -74,7 +74,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             PenisLength = dto.PenisLength, Circumcised = ParseEnum<CircumcisedEnum>(dto.Circumcised),
             CareerStart = ParseDate(dto.CareerStart), CareerEnd = ParseDate(dto.CareerEnd),
             Tattoos = dto.Tattoos, Piercings = dto.Piercings,
-            Favorite = dto.Favorite, Rating = dto.Rating, Details = dto.Details,
+            Favorite = dto.Favorite, Details = dto.Details,
             IgnoreAutoTag = dto.IgnoreAutoTag
         };
         if (dto.Urls?.Count > 0) performer.Urls = dto.Urls.Select(u => new PerformerUrl { Url = u }).ToList();
@@ -82,6 +82,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.TagIds?.Count > 0) performer.PerformerTags = dto.TagIds.Select(id => new PerformerTag { TagId = id }).ToList();
 
         performer = await performerRepo.AddAsync(performer, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Performer, performer.Id, dto.Rating, cancellationToken: ct);
         if (dto.Urls?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Performer, performer.Id, IdentifierSchemes.Url, dto.Urls, null, ct);
         if (dto.Aliases?.Count > 0)
@@ -118,7 +120,6 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.Tattoos != null) p.Tattoos = dto.Tattoos;
         if (dto.Piercings != null) p.Piercings = dto.Piercings;
         if (dto.Favorite.HasValue) p.Favorite = dto.Favorite.Value;
-        if (dto.Rating.HasValue) p.Rating = dto.Rating;
         if (dto.Details != null) p.Details = dto.Details;
         if (dto.IgnoreAutoTag.HasValue) p.IgnoreAutoTag = dto.IgnoreAutoTag.Value;
 
@@ -140,6 +141,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.CustomFields != null) p.CustomFields = dto.CustomFields;
 
         await performerRepo.UpdateAsync(p, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Performer, id, dto.Rating, cancellationToken: ct);
         if (dto.Urls != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Performer, id, IdentifierSchemes.Url, dto.Urls, null, ct);
         if (dto.Aliases != null)
@@ -367,7 +370,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         p.Ethnicity, p.Country, p.EyeColor, p.HairColor, p.HeightCm, p.Weight,
         p.Measurements, p.FakeTits, p.PenisLength, p.Circumcised?.ToString(),
         p.CareerStart?.ToString("yyyy-MM-dd"), p.CareerEnd?.ToString("yyyy-MM-dd"),
-        p.Tattoos, p.Piercings, p.Favorite, p.Rating, p.Details, p.IgnoreAutoTag,
+        p.Tattoos, p.Piercings, p.Favorite, p.Details, p.IgnoreAutoTag,
         p.Urls.Select(u => u.Url).ToList(),
         p.Aliases.Select(a => a.Alias).ToList(),
         p.PerformerTags.Where(pt => pt.Tag != null).Select(pt => new TagDto(pt.Tag!.Id, pt.Tag.Name, pt.Tag.Description, pt.Tag.Favorite, pt.Tag.IgnoreAutoTag, [])).ToList(),
@@ -429,7 +432,6 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
 
         foreach (var p in performers)
         {
-            if (dto.Rating.HasValue) p.Rating = dto.Rating;
             if (dto.Favorite.HasValue) p.Favorite = dto.Favorite.Value;
 
             if (dto.TagIds != null && dto.TagMode == BulkUpdateMode.Set)
@@ -450,6 +452,11 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         }
 
         await db.SaveChangesAsync(ct);
+        if (dto.Rating.HasValue)
+        {
+            foreach (var performer in performers)
+                await engagementService.SetRatingAsync(AffinityHostType.Performer, performer.Id, dto.Rating, cancellationToken: ct);
+        }
         return Ok(new { updated = performers.Count });
     }
 

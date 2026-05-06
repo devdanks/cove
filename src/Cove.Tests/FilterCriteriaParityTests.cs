@@ -478,7 +478,7 @@ public class FilterCriteriaParityTests
     public void SceneDto_HasCaptionsAndInteractiveSpeed()
     {
         var dto = new SceneDto(1, "Title", "Code", "Details", "Director", "2024-01-01",
-            85, false, null, null, 0, 0, 0, null, 0, "English", 50,
+            false, null, null, "English", 50,
             [], [], [], [], [], [], [], null, "2024-01-01", "2024-01-01");
         Assert.Equal("English", dto.Captions);
         Assert.Equal(50, dto.InteractiveSpeed);

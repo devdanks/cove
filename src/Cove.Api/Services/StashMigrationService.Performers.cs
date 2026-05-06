@@ -120,7 +120,6 @@ public partial class StashMigrationService
                 Tattoos = row.Tattoos,
                 Piercings = row.Piercings,
                 Favorite = row.Favorite,
-                Rating = row.Rating,
                 Details = row.Details,
                 IgnoreAutoTag = row.IgnoreAutoTag,
                 ImageBlobId = GetBlobId(blobMap, row.ImageBlob),
@@ -137,6 +136,12 @@ public partial class StashMigrationService
         }
 
         await FlushPerformerBatchAsync();
+        await AddImportedOverallRatingsAsync(
+            rows.Select(row => new ImportedRatingSeed(row.Id, row.Rating)),
+            idMap,
+            RatingHostType.Performer,
+            ct);
+
         _logger.LogInformation("Imported {Count} performers in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
     }

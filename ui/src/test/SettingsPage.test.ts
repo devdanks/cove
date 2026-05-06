@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeTaskSelectablePaths, resolveVisibleSettingsTab } from "../pages/SettingsPage";
+import { isLimitedPrimarySettingsTabVisible } from "../pages/settings/tabVisibility";
 
 describe("mergeTaskSelectablePaths", () => {
   it("defaults to all selectable paths when there is no stored selection", () => {
@@ -45,5 +46,17 @@ describe("resolveVisibleSettingsTab", () => {
         { key: "about" },
       ])
     ).toBe("about");
+  });
+});
+
+describe("isLimitedPrimarySettingsTabVisible", () => {
+  it("keeps User Settings visible for limited users", () => {
+    expect(isLimitedPrimarySettingsTabVisible("user-settings", false)).toBe(true);
+    expect(isLimitedPrimarySettingsTabVisible("library", false)).toBe(false);
+  });
+
+  it("keeps display profiles gated by marker access", () => {
+    expect(isLimitedPrimarySettingsTabVisible("display-profiles", false)).toBe(false);
+    expect(isLimitedPrimarySettingsTabVisible("display-profiles", true)).toBe(true);
   });
 });

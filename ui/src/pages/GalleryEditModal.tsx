@@ -23,7 +23,7 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
     date: gallery.date ?? "",
     details: gallery.details ?? "",
     photographer: gallery.photographer ?? "",
-    rating: gallery.rating,
+    rating: undefined as number | undefined,
     organized: gallery.organized,
     studioId: gallery.studioId,
     urls: gallery.urls.length > 0 ? gallery.urls : [""],

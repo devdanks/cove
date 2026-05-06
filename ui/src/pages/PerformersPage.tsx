@@ -226,7 +226,7 @@ function PerformerCard({ performer, engagement, onClick, onNavigate, selected, o
   } = useEntityEngagement("performer", performer.id, {
     enabled: false,
     fallbackFavorite: engagement?.isFavorite ?? performer.favorite,
-    fallbackRating: engagement?.rating ?? performer.rating,
+    fallbackRating: engagement?.rating,
   });
 
   return (
@@ -373,7 +373,7 @@ function PerformerListTable({ performers: items, engagementById, onNavigate, sel
             : null;
           const engagement = engagementById.get(p.id);
           const favorite = engagement?.isFavorite ?? p.favorite;
-          const rating = engagement?.rating ?? p.rating;
+          const rating = engagement?.rating;
           return (
             <tr 
               key={p.id} 

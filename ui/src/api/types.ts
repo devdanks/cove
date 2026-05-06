@@ -7,15 +7,9 @@ export interface Scene {
   details?: string;
   director?: string;
   date?: string;
-  rating?: number;
   organized: boolean;
   studioId?: number;
   studioName?: string;
-  resumeTime: number;
-  playDuration: number;
-  playCount: number;
-  lastPlayedAt?: string;
-  likeCounter: number;
   urls: string[];
   tags: Tag[];
   performers: PerformerSummary[];
@@ -75,7 +69,6 @@ export interface Performer {
   tattoos?: string;
   piercings?: string;
   favorite: boolean;
-  rating?: number;
   details?: string;
   ignoreAutoTag: boolean;
   urls: string[];
@@ -270,7 +263,6 @@ export interface Studio {
   imagePath?: string;
   parentId?: number;
   parentName?: string;
-  rating?: number;
   favorite: boolean;
   details?: string;
   ignoreAutoTag: boolean;
@@ -318,7 +310,6 @@ export interface Gallery {
   date?: string;
   details?: string;
   photographer?: string;
-  rating?: number;
   organized: boolean;
   coverPath?: string;
   coverImageId?: number;
@@ -398,9 +389,7 @@ export interface Image {
   code?: string;
   details?: string;
   photographer?: string;
-  rating?: number;
   organized: boolean;
-  likeCounter: number;
   studioId?: number;
   studioName?: string;
   date?: string;
@@ -467,7 +456,6 @@ export interface Group {
   aliases?: string;
   duration?: number;
   date?: string;
-  rating?: number;
   studioId?: number;
   studioName?: string;
   director?: string;
@@ -1841,7 +1829,6 @@ export interface SceneFilterCriteria {
   title?: string;
   code?: string;
   path?: string;
-  rating?: number;
   organized?: boolean;
   studioId?: number;
   groupId?: number;
@@ -2004,7 +1991,6 @@ export interface StudioFilterCriteria {
 
 export interface GalleryFilterCriteria {
   title?: string;
-  rating?: number;
   organized?: boolean;
   studioId?: number;
   tagIds?: number[];
@@ -2039,7 +2025,6 @@ export interface GalleryFilterCriteria {
 
 export interface ImageFilterCriteria {
   title?: string;
-  rating?: number;
   organized?: boolean;
   studioId?: number;
   galleryId?: number;
@@ -2076,7 +2061,6 @@ export interface ImageFilterCriteria {
 
 export interface GroupFilterCriteria {
   name?: string;
-  rating?: number;
   studioId?: number;
   nameCriterion?: StringCriterion;
   ratingCriterion?: IntCriterion;
@@ -2111,7 +2095,6 @@ export interface SceneGroupInput {
 
 export interface BulkSceneUpdate {
   ids: number[];
-  rating?: number;
   organized?: boolean;
   studioId?: number | null;
   date?: string;
@@ -2127,7 +2110,6 @@ export interface BulkSceneUpdate {
 
 export interface BulkPerformerUpdate {
   ids: number[];
-  rating?: number;
   favorite?: boolean;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;
@@ -2146,7 +2128,6 @@ export interface BulkTagUpdate {
 
 export interface BulkStudioUpdate {
   ids: number[];
-  rating?: number;
   favorite?: boolean;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;
@@ -2154,7 +2135,6 @@ export interface BulkStudioUpdate {
 
 export interface BulkGalleryUpdate {
   ids: number[];
-  rating?: number;
   organized?: boolean;
   studioId?: number | null;
   tagIds?: number[];
@@ -2165,7 +2145,6 @@ export interface BulkGalleryUpdate {
 
 export interface BulkImageUpdate {
   ids: number[];
-  rating?: number;
   organized?: boolean;
   studioId?: number | null;
   tagIds?: number[];
@@ -2178,7 +2157,6 @@ export interface BulkImageUpdate {
 
 export interface BulkGroupUpdate {
   ids: number[];
-  rating?: number;
   studioId?: number | null;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;

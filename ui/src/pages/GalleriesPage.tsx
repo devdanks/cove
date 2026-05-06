@@ -215,7 +215,7 @@ export function GalleriesPage({ onNavigate }: Props) {
           ))}
         </EntityCardGrid>
       ) : displayMode === "list" ? (
-        <GalleryListTable galleries={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <GalleryListTable galleries={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       ) : (
         <div className="flex gap-2 px-2">
           {wallColumns.map((column, columnIndex) => (
@@ -256,7 +256,7 @@ export function GalleriesPage({ onNavigate }: Props) {
 }
 
 function GalleryWallCard({ gallery, engagement, onClick, selected, onSelect, selecting }: { gallery: Gallery; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  const rating = engagement?.rating ?? gallery.rating;
+  const rating = engagement?.rating;
   return (
     <WallMediaCard
       onClick={onClick}
@@ -278,7 +278,7 @@ function GalleryWallCard({ gallery, engagement, onClick, selected, onSelect, sel
 }
 
 function GalleryCard({ gallery, engagement, onClick, onNavigate, selected, onSelect, selecting }: { gallery: Gallery; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  const rating = engagement?.rating ?? gallery.rating;
+  const rating = engagement?.rating;
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, onClick);
   const cardContent = (
     <>
@@ -370,7 +370,7 @@ function GalleryCardPopovers({ gallery, onNavigate }: { gallery: Gallery; onNavi
   );
 }
 
-function GalleryListTable({ galleries: items, onNavigate, selectedIds, onToggle, selecting }: { galleries: Gallery[]; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
+function GalleryListTable({ galleries: items, engagementById, onNavigate, selectedIds, onToggle, selecting }: { galleries: Gallery[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
   return (
     <table className="w-full text-sm">
       <thead>
@@ -391,7 +391,7 @@ function GalleryListTable({ galleries: items, onNavigate, selectedIds, onToggle,
             <td className="py-2 px-3 text-secondary">{g.studioName ?? ""}</td>
             <td className="py-2 px-3 text-secondary">{g.date ?? ""}</td>
             <td className="py-2 px-3 text-secondary text-right">{g.imageCount}</td>
-            <td className="py-2 px-3 text-secondary text-right">{g.rating ?? ""}</td>
+            <td className="py-2 px-3 text-secondary text-right">{engagementById.get(g.id)?.rating ?? ""}</td>
           </tr>
         ))}
       </tbody>

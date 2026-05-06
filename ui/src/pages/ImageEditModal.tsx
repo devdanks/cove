@@ -78,7 +78,7 @@ function toFormState(image?: Image): ImageFormState {
     details: image.details || "",
     photographer: image.photographer || "",
     date: image.date || "",
-    rating: image.rating ?? undefined,
+    rating: undefined,
     organized: image.organized,
     urls: image.urls.length > 0 ? image.urls : [""],
     studioId: image.studioId ?? undefined,

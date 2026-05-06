@@ -131,7 +131,7 @@ describe("SceneCard navigation", () => {
   });
 
   it("renders a likes counter instead of the legacy O badge", () => {
-    render(<SceneCard scene={baseScene as any} onClick={vi.fn()} />);
+    render(<SceneCard scene={baseScene as any} engagement={{ hostId: 42, isFavorite: false, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 1, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
 
     expect(screen.getByTitle("Likes: 1")).toBeInTheDocument();
     expect(screen.queryByText(/^O$/)).not.toBeInTheDocument();

@@ -1,6 +1,7 @@
 using System.Reflection;
 using Cove.Api.Services;
 using Cove.Core.Entities;
+using Cove.Core.Entities.Auth;
 using Cove.Core.Interfaces;
 using Cove.Data;
 using Microsoft.Data.Sqlite;
@@ -100,8 +101,7 @@ INSERT INTO performers_tags (performer_id, tag_id) VALUES (1, 7);
 
                 await using var stash = new SqliteConnection("Data Source=:memory:");
                 await stash.OpenAsync();
-                var legacyLikeCounterColumn = "o" + "_counter";
-                await ExecuteSqlAsync(stash, $@"
+                await ExecuteSqlAsync(stash, @"
 CREATE TABLE performers (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -284,8 +284,11 @@ VALUES (10, 120, 'H264', 'mp4', 'AAC', 1920, 1080, 30, 2000000, 0, NULL);
 
         var scene = await context.Scenes.Include(s => s.Files).SingleAsync();
         var file = Assert.Single(scene.Files);
-
-        Assert.Equal(new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc), scene.LastPlayedAt);
+        var affinity = await context.UserEntityAffinities.SingleAsync(item => item.HostType == AffinityHostType.Scene && item.HostId == scene.Id);
+        Assert.Equal(new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc), affinity.LastConsumedAt);
+        Assert.Equal(1, affinity.ViewCount);
+        Assert.Equal(15, affinity.LastPositionSec);
+        Assert.Equal(45, affinity.TotalConsumedSec);
         Assert.Equal(new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), scene.CreatedAt);
         Assert.Equal(new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc), scene.UpdatedAt);
         Assert.Equal(new DateTime(2024, 1, 5, 0, 0, 0, DateTimeKind.Utc), file.CreatedAt);
@@ -550,7 +553,8 @@ INSERT INTO studio_stash_ids (studio_id, endpoint, stash_id) VALUES
 
                 await using var stash = new SqliteConnection("Data Source=:memory:");
                 await stash.OpenAsync();
-                await ExecuteSqlAsync(stash, @"
+                var legacyLikeCounterColumn = "o" + "_counter";
+                await ExecuteSqlAsync(stash, $@"
 CREATE TABLE folders (
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL,
@@ -1137,7 +1141,17 @@ VALUES (51, 41, 'scene', 3, 'tag', 'body', NULL, 7, 8.0, 11.0, '{""confidence"":
             .UseInMemoryDatabase($"stash-metadata-{Guid.NewGuid():N}")
             .Options;
 
-        return new TestCoveContext(options);
+        var context = new TestCoveContext(options);
+        context.Users.Add(new User
+        {
+            Username = "owner",
+            PasswordHash = "test",
+            PasswordAlgo = "test",
+            IsSystem = true,
+            IsActive = true,
+        });
+        context.SaveChanges();
+        return context;
     }
 
     private sealed class TestCoveContext(DbContextOptions<CoveContext> options) : CoveContext(options)

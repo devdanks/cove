@@ -63,7 +63,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     setRating: setImageRating,
   } = useEntityEngagement("image", id, {
     enabled: !!image && canEngageImage,
-    fallbackRating: image?.rating,
+    fallbackRating: undefined,
   });
   const { data: imageFaces = [] } = useQuery({
     queryKey: ["image", id, "faces"],
@@ -84,7 +84,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       queryClient.invalidateQueries({ queryKey: ["engagement", "image", id] });
     },
   });
-  const imageLikeCount = imageEngagement?.likeCount ?? image?.likeCounter ?? 0;
+  const imageLikeCount = imageEngagement?.likeCount ?? 0;
   const imageDerivedLikeCount = imageEngagement?.derivedLikeCount ?? 0;
   const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
   const displayTitle = image ? getImageDisplayTitle(image) : `Image ${id}`;

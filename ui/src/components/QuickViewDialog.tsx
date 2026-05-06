@@ -4,6 +4,7 @@ import { formatDuration, formatFileSize, formatDate, getResolutionLabel, TagBadg
 import { X, Play, ExternalLink, Star, User, Tag, Building2, Calendar, Film, Clock, HardDrive, Monitor } from "lucide-react";
 import { RatingBadge } from "./Rating";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
 
 interface SceneQuickViewProps {
   type: "scene";
@@ -27,6 +28,7 @@ export function QuickViewDialog(props: QuickViewProps) {
 }
 
 function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "type">) {
+  const { engagement } = useEntityEngagement("scene", id);
   const { data: scene, isLoading } = useQuery({
     queryKey: ["scene", id],
     queryFn: () => scenes.get(id),
@@ -84,10 +86,10 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
       {/* Details */}
       <div className="p-5 space-y-4 max-h-[50vh] overflow-y-auto">
         {/* Rating */}
-        {scene.rating != null && (
+        {engagement?.rating != null && (
           <div className="flex items-center gap-2">
             <Star className="w-4 h-4 text-yellow-400" />
-            <RatingBadge rating={scene.rating} />
+            <RatingBadge rating={engagement.rating} />
           </div>
         )}
 
@@ -174,6 +176,7 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
 }
 
 function ImageQuickView({ id, onClose, onNavigate }: Omit<ImageQuickViewProps, "type">) {
+  const { engagement } = useEntityEngagement("image", id);
   const { data: image, isLoading } = useQuery({
     queryKey: ["image", id],
     queryFn: () => images.get(id),
@@ -222,10 +225,10 @@ function ImageQuickView({ id, onClose, onNavigate }: Omit<ImageQuickViewProps, "
       {/* Details */}
       <div className="p-5 space-y-4 max-h-[40vh] overflow-y-auto">
         {/* Rating */}
-        {image.rating != null && (
+        {engagement?.rating != null && (
           <div className="flex items-center gap-2">
             <Star className="w-4 h-4 text-yellow-400" />
-            <RatingBadge rating={image.rating} />
+            <RatingBadge rating={engagement.rating} />
           </div>
         )}
 

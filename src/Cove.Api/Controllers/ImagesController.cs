@@ -77,7 +77,6 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             Code = dto.Code,
             Details = dto.Details,
             Photographer = dto.Photographer,
-            Rating = dto.Rating,
             Organized = dto.Organized,
             StudioId = dto.StudioId,
             Date = ParseDate(dto.Date)
@@ -93,6 +92,8 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             image.ImageGalleries = dto.GalleryIds.Select(gid => new ImageGallery { GalleryId = gid }).ToList();
 
         image = await imageRepo.AddAsync(image, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Image, image.Id, dto.Rating, cancellationToken: ct);
         if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
         {
             await tagProvenanceService.SyncTagSetAsync(AffinityHostType.Image, image.Id, [], dto.TagIds, cancellationToken: ct);
@@ -115,7 +116,6 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         if (dto.Code != null) image.Code = dto.Code;
         if (dto.Details != null) image.Details = dto.Details;
         if (dto.Photographer != null) image.Photographer = dto.Photographer;
-        if (dto.Rating.HasValue) image.Rating = dto.Rating;
         if (dto.Organized.HasValue) image.Organized = dto.Organized.Value;
         if (dto.StudioId.HasValue) image.StudioId = dto.StudioId;
         if (dto.Date != null) image.Date = ParseDate(dto.Date);
@@ -153,6 +153,8 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         }
 
         await imageRepo.UpdateAsync(image, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Image, id, dto.Rating, cancellationToken: ct);
         var updated = await imageRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(await MapToDtoWithProvenanceAsync(updated!, ct));
     }
@@ -187,9 +189,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
 
     private ImageDto MapToDto(Image i, int? galleryCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
-        preferUserSnapshot ? engagement?.Rating : engagement?.Rating ?? i.Rating,
         i.Organized,
-        preferUserSnapshot ? engagement?.LikeCount ?? 0 : engagement?.LikeCount ?? i.LikeCounter,
         i.StudioId, i.Studio?.Name,
         i.Date?.ToString("yyyy-MM-dd"),
         i.Urls.Select(u => u.Url).ToList(),
@@ -222,9 +222,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
 
     private ImageDto MapListToDto(Image i, int galleryCount, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
-        preferUserSnapshot ? engagement?.Rating : engagement?.Rating ?? i.Rating,
         i.Organized,
-        preferUserSnapshot ? engagement?.LikeCount ?? 0 : engagement?.LikeCount ?? i.LikeCounter,
         i.StudioId, i.Studio?.Name,
         i.Date?.ToString("yyyy-MM-dd"),
         i.Urls.Select(u => u.Url).ToList(),
@@ -296,7 +294,6 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         {
             var previousTagIds = dto.TagIds != null ? image.ImageTags.Select(imageTag => imageTag.TagId).ToArray() : [];
 
-            if (dto.Rating.HasValue) image.Rating = dto.Rating;
             if (dto.Organized.HasValue) image.Organized = dto.Organized.Value;
             if (dto.StudioId.HasValue) image.StudioId = dto.StudioId;
 
@@ -360,6 +357,11 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         }
 
         await db.SaveChangesAsync(ct);
+        if (dto.Rating.HasValue)
+        {
+            foreach (var image in images)
+                await engagementService.SetRatingAsync(AffinityHostType.Image, image.Id, dto.Rating, cancellationToken: ct);
+        }
         return Ok(new { updated = images.Count });
     }
 

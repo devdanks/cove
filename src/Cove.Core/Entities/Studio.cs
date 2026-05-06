@@ -4,7 +4,6 @@ public class Studio : BaseEntity
 {
     public string Name { get; set; } = string.Empty;
     public int? ParentId { get; set; }
-    public int? Rating { get; set; } // 1-100
     public bool Favorite { get; set; }
     public string? Details { get; set; }
     public bool IgnoreAutoTag { get; set; }

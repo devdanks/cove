@@ -21,7 +21,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   const [details, setDetails] = useState(scene.details || "");
   const [director, setDirector] = useState(scene.director || "");
   const [date, setDate] = useState(scene.date || "");
-  const [rating, setRating] = useState<number | undefined>(scene.rating ?? undefined);
+  const [rating, setRating] = useState<number | undefined>(undefined);
   const [urls, setUrls] = useState<string[]>(scene.urls.length > 0 ? scene.urls : [""]);
   const addUrl = () => setUrls([...urls, ""]);
   const removeUrl = (i: number) => setUrls(urls.filter((_, idx) => idx !== i));
@@ -71,7 +71,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     setDetails(scene.details || "");
     setDirector(scene.director || "");
     setDate(scene.date || "");
-    setRating(scene.rating ?? undefined);
+    setRating(undefined);
     setUrls(scene.urls.length > 0 ? scene.urls : [""]);
     setStudioId(scene.studioId ?? undefined);
     setSelectedTagIds(scene.tags.map((t) => t.id));

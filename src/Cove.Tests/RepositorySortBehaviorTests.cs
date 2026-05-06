@@ -1,3 +1,4 @@
+using Cove.Core.Auth;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
@@ -124,21 +125,18 @@ public class RepositorySortBehaviorTests
         var highestRated = new Studio
         {
             Name = "Highest Rated",
-            Rating = 95,
             UpdatedAt = new DateTime(2024, 1, 12, 0, 0, 0, DateTimeKind.Utc),
         };
 
         var countsLeader = new Studio
         {
             Name = "Counts Leader",
-            Rating = 40,
             UpdatedAt = new DateTime(2024, 1, 10, 0, 0, 0, DateTimeKind.Utc),
         };
 
         var unrated = new Studio
         {
             Name = "Unrated",
-            Rating = null,
             UpdatedAt = new DateTime(2024, 1, 8, 0, 0, 0, DateTimeKind.Utc),
         };
 
@@ -156,6 +154,10 @@ public class RepositorySortBehaviorTests
         unrated.Images.Add(new Image { Title = "i4" });
 
         context.Studios.AddRange(highestRated, countsLeader, unrated);
+        await context.SaveChangesAsync();
+
+        AddRating(context, RatingHostType.Studio, highestRated.Id, 95);
+        AddRating(context, RatingHostType.Studio, countsLeader.Id, 40);
         await context.SaveChangesAsync();
 
         var repository = new StudioRepository(context);
@@ -183,14 +185,12 @@ public class RepositorySortBehaviorTests
         var ratedFolderGallery = new Gallery
         {
             Title = "folder-gallery",
-            Rating = 80,
             Folder = new Folder { Path = @"C:\library\matched-folder", ModTime = new DateTime(2024, 1, 12, 0, 0, 0, DateTimeKind.Utc) },
         };
 
         var unratedFileGallery = new Gallery
         {
             Title = "file-gallery",
-            Rating = null,
         };
         unratedFileGallery.Files.Add(new GalleryFile
         {
@@ -201,6 +201,9 @@ public class RepositorySortBehaviorTests
         });
 
         context.Galleries.AddRange(ratedFolderGallery, unratedFileGallery);
+        await context.SaveChangesAsync();
+
+        AddRating(context, RatingHostType.Gallery, ratedFolderGallery.Id, 80);
         await context.SaveChangesAsync();
 
         var repository = new GalleryRepository(context);
@@ -234,21 +237,22 @@ public class RepositorySortBehaviorTests
         {
             Name = "Newest",
             Date = new DateOnly(2024, 1, 12),
-            Rating = 90,
         };
         var older = new Group
         {
             Name = "Older",
             Date = new DateOnly(2024, 1, 10),
-            Rating = 50,
         };
         var undated = new Group
         {
             Name = "Undated",
-            Rating = null,
         };
 
         context.Groups.AddRange(newest, older, undated);
+        await context.SaveChangesAsync();
+
+        AddRating(context, RatingHostType.Group, newest.Id, 90);
+        AddRating(context, RatingHostType.Group, older.Id, 50);
         await context.SaveChangesAsync();
 
         newest.CreatedAt = new DateTime(2024, 1, 12, 0, 0, 0, DateTimeKind.Utc);
@@ -319,9 +323,6 @@ public class RepositorySortBehaviorTests
         var leaderScene = new Scene
         {
             Title = "leader-scene",
-            PlayCount = 12,
-            LikeCounter = 8,
-            LastPlayedAt = new DateTime(2024, 1, 15, 12, 0, 0, DateTimeKind.Utc),
         };
         leaderScene.ScenePerformers.Add(new ScenePerformer { Scene = leaderScene, Performer = leader });
         leaderScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 16, 12, 0, 0, DateTimeKind.Utc) });
@@ -329,9 +330,6 @@ public class RepositorySortBehaviorTests
         var middleScene = new Scene
         {
             Title = "middle-scene",
-            PlayCount = 4,
-            LikeCounter = 2,
-            LastPlayedAt = new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc),
         };
         middleScene.ScenePerformers.Add(new ScenePerformer { Scene = middleScene, Performer = middle });
         middleScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 11, 12, 0, 0, DateTimeKind.Utc) });
@@ -339,15 +337,20 @@ public class RepositorySortBehaviorTests
         var compactScene = new Scene
         {
             Title = "compact-scene",
-            PlayCount = 1,
-            LikeCounter = 1,
-            LastPlayedAt = new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc),
         };
         compactScene.ScenePerformers.Add(new ScenePerformer { Scene = compactScene, Performer = compact });
         compactScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 6, 12, 0, 0, DateTimeKind.Utc) });
 
         context.Performers.AddRange(leader, middle, compact, quiet);
         context.Scenes.AddRange(leaderScene, middleScene, compactScene);
+        await context.SaveChangesAsync();
+
+        AddSceneAffinity(context, leaderScene.Id, viewCount: 12, likeCount: 8, lastConsumedAt: new DateTime(2024, 1, 15, 12, 0, 0, DateTimeKind.Utc));
+        AddSceneAffinity(context, middleScene.Id, viewCount: 4, likeCount: 2, lastConsumedAt: new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc));
+        AddSceneAffinity(context, compactScene.Id, viewCount: 1, likeCount: 1, lastConsumedAt: new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc));
+        AddLikeInteraction(context, leaderScene.Id, new DateTime(2024, 1, 16, 12, 0, 0, DateTimeKind.Utc));
+        AddLikeInteraction(context, middleScene.Id, new DateTime(2024, 1, 11, 12, 0, 0, DateTimeKind.Utc));
+        AddLikeInteraction(context, compactScene.Id, new DateTime(2024, 1, 6, 12, 0, 0, DateTimeKind.Utc));
         await context.SaveChangesAsync();
 
         var repository = new PerformerRepository(context);
@@ -377,41 +380,61 @@ public class RepositorySortBehaviorTests
         await using var context = CreateContext();
 
         context.Performers.AddRange(
-            new Performer { Name = "Performer Low", Rating = 20 },
-            new Performer { Name = "Performer High", Rating = 80 },
-            new Performer { Name = "Performer Zero", Rating = 0 },
-            new Performer { Name = "Performer Unrated", Rating = null });
+            new Performer { Name = "Performer Low" },
+            new Performer { Name = "Performer High" },
+            new Performer { Name = "Performer Zero" },
+            new Performer { Name = "Performer Unrated" });
 
         context.Images.AddRange(
-            new Image { Title = "Image Low", Rating = 20 },
-            new Image { Title = "Image High", Rating = 80 },
-            new Image { Title = "Image Zero", Rating = 0 },
-            new Image { Title = "Image Unrated", Rating = null });
+            new Image { Title = "Image Low" },
+            new Image { Title = "Image High" },
+            new Image { Title = "Image Zero" },
+            new Image { Title = "Image Unrated" });
 
         context.Groups.AddRange(
-            new Group { Name = "Group Low", Rating = 20 },
-            new Group { Name = "Group High", Rating = 80 },
-            new Group { Name = "Group Zero", Rating = 0 },
-            new Group { Name = "Group Unrated", Rating = null });
+            new Group { Name = "Group Low" },
+            new Group { Name = "Group High" },
+            new Group { Name = "Group Zero" },
+            new Group { Name = "Group Unrated" });
 
         context.Studios.AddRange(
-            new Studio { Name = "Studio Low", Rating = 20 },
-            new Studio { Name = "Studio High", Rating = 80 },
-            new Studio { Name = "Studio Zero", Rating = 0 },
-            new Studio { Name = "Studio Unrated", Rating = null });
+            new Studio { Name = "Studio Low" },
+            new Studio { Name = "Studio High" },
+            new Studio { Name = "Studio Zero" },
+            new Studio { Name = "Studio Unrated" });
 
         context.Galleries.AddRange(
-            new Gallery { Title = "Gallery Low", Rating = 20 },
-            new Gallery { Title = "Gallery High", Rating = 80 },
-            new Gallery { Title = "Gallery Zero", Rating = 0 },
-            new Gallery { Title = "Gallery Unrated", Rating = null });
+            new Gallery { Title = "Gallery Low" },
+            new Gallery { Title = "Gallery High" },
+            new Gallery { Title = "Gallery Zero" },
+            new Gallery { Title = "Gallery Unrated" });
 
         context.Scenes.AddRange(
-            new Scene { Title = "Scene Low", Rating = 20 },
-            new Scene { Title = "Scene High", Rating = 80 },
-            new Scene { Title = "Scene Zero", Rating = 0 },
-            new Scene { Title = "Scene Unrated", Rating = null });
+            new Scene { Title = "Scene Low" },
+            new Scene { Title = "Scene High" },
+            new Scene { Title = "Scene Zero" },
+            new Scene { Title = "Scene Unrated" });
 
+        await context.SaveChangesAsync();
+
+        AddRating(context, RatingHostType.Performer, context.Performers.Single(entity => entity.Name == "Performer Low").Id, 20);
+        AddRating(context, RatingHostType.Performer, context.Performers.Single(entity => entity.Name == "Performer High").Id, 80);
+        AddRating(context, RatingHostType.Performer, context.Performers.Single(entity => entity.Name == "Performer Zero").Id, 0);
+        AddRating(context, RatingHostType.Image, context.Images.Single(entity => entity.Title == "Image Low").Id, 20);
+        AddRating(context, RatingHostType.Image, context.Images.Single(entity => entity.Title == "Image High").Id, 80);
+        AddRating(context, RatingHostType.Image, context.Images.Single(entity => entity.Title == "Image Zero").Id, 0);
+        AddRating(context, RatingHostType.Group, context.Groups.Single(entity => entity.Name == "Group Low").Id, 20);
+        AddRating(context, RatingHostType.Group, context.Groups.Single(entity => entity.Name == "Group High").Id, 80);
+        AddRating(context, RatingHostType.Group, context.Groups.Single(entity => entity.Name == "Group Zero").Id, 0);
+        AddRating(context, RatingHostType.Studio, context.Studios.Single(entity => entity.Name == "Studio Low").Id, 20);
+        AddRating(context, RatingHostType.Studio, context.Studios.Single(entity => entity.Name == "Studio High").Id, 80);
+        AddRating(context, RatingHostType.Studio, context.Studios.Single(entity => entity.Name == "Studio Zero").Id, 0);
+        AddRating(context, RatingHostType.Gallery, context.Galleries.Single(entity => entity.Title == "Gallery Low").Id, 20);
+        AddRating(context, RatingHostType.Gallery, context.Galleries.Single(entity => entity.Title == "Gallery High").Id, 80);
+        AddRating(context, RatingHostType.Gallery, context.Galleries.Single(entity => entity.Title == "Gallery Zero").Id, 0);
+        AddRating(context, RatingHostType.Scene, context.Scenes.Single(entity => entity.Title == "Scene Low").Id, 20);
+        AddRating(context, RatingHostType.Scene, context.Scenes.Single(entity => entity.Title == "Scene High").Id, 80);
+        AddRating(context, RatingHostType.Scene, context.Scenes.Single(entity => entity.Title == "Scene Zero").Id, 0);
         await context.SaveChangesAsync();
 
         var performerRepository = new PerformerRepository(context);
@@ -659,16 +682,44 @@ public class RepositorySortBehaviorTests
         return scene;
     }
 
+    private const int TestUserId = 1;
+
+    private static void AddRating(CoveContext context, RatingHostType hostType, int hostId, int? value)
+    {
+        if (value.HasValue)
+            context.Ratings.Add(new Rating { UserId = TestUserId, HostType = hostType, HostId = hostId, Value = value.Value });
+    }
+
+    private static void AddSceneAffinity(CoveContext context, int sceneId, int viewCount = 0, int likeCount = 0, DateTime? lastConsumedAt = null)
+    {
+        context.UserEntityAffinities.Add(new UserEntityAffinity { UserId = TestUserId, HostType = AffinityHostType.Scene, HostId = sceneId, ViewCount = viewCount, LikeCount = likeCount, LastConsumedAt = lastConsumedAt });
+    }
+
+    private static void AddLikeInteraction(CoveContext context, int sceneId, DateTime at)
+    {
+        context.Interactions.Add(new Interaction { UserId = TestUserId, HostType = InteractionHostType.Scene, HostId = sceneId, Kind = InteractionKind.LikeCount, At = at });
+    }
+
     private static CoveContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<CoveContext>()
             .UseInMemoryDatabase($"repository-sort-behavior-{Guid.NewGuid():N}")
             .Options;
 
-        return new TestCoveContext(options);
+        var principalAccessor = new CurrentPrincipalAccessor();
+        principalAccessor.Set(new CovePrincipal
+        {
+            UserId = TestUserId,
+            Username = "test-user",
+            Kind = PrincipalKind.User,
+            Permissions = new HashSet<string> { "*" },
+            Roles = new HashSet<string>(),
+        });
+
+        return new TestCoveContext(options, principalAccessor);
     }
 
-    private sealed class TestCoveContext(DbContextOptions<CoveContext> options) : CoveContext(options)
+    private sealed class TestCoveContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor principalAccessor) : CoveContext(options, principalAccessor)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

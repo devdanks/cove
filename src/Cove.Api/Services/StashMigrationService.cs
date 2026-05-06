@@ -35,6 +35,8 @@ public partial class StashMigrationService
     private readonly ILogger<StashMigrationService> _logger;
 
     private sealed record SceneGeneratedData(string? Oshash, string? Md5, string? CoverBlobId);
+    private sealed record ImportedRatingSeed(int StashId, int? Value);
+    private sealed record ImportedAffinitySeed(int StashId, int LikeCount = 0, int ViewCount = 0, double? LastPositionSec = null, double TotalConsumedSec = 0, DateTime? LastConsumedAt = null);
     private sealed record StashConfigData(
         List<(string Path, bool ExcludeImage, bool ExcludeVideo)> Paths,
         string? GeneratedPath,
@@ -96,6 +98,97 @@ public partial class StashMigrationService
         _logger = logger;
     }
 
+    private async Task<int?> GetImportEngagementUserIdAsync(CancellationToken ct)
+        => await _db.Users.AsNoTracking()
+            .Where(user => user.IsSystem && user.IsActive && !user.IsLocked)
+            .OrderBy(user => user.Id)
+            .Select(user => (int?)user.Id)
+            .FirstOrDefaultAsync(ct);
+
+    private async Task AddImportedOverallRatingsAsync(
+        IEnumerable<ImportedRatingSeed> seeds,
+        IReadOnlyDictionary<int, int> idMap,
+        RatingHostType hostType,
+        CancellationToken ct)
+    {
+        var userId = await GetImportEngagementUserIdAsync(ct);
+        if (userId is null)
+            return;
+
+        var pending = 0;
+        foreach (var seed in seeds)
+        {
+            if (!seed.Value.HasValue || !idMap.TryGetValue(seed.StashId, out var hostId))
+                continue;
+
+            _db.Ratings.Add(new Rating
+            {
+                UserId = userId.Value,
+                HostType = hostType,
+                HostId = hostId,
+                Aspect = "overall",
+                Value = seed.Value.Value,
+            });
+
+            pending++;
+            if (pending % 500 == 0)
+            {
+                await _db.SaveChangesAsync(ct);
+                _db.ChangeTracker.Clear();
+            }
+        }
+
+        if (pending % 500 != 0)
+        {
+            await _db.SaveChangesAsync(ct);
+            _db.ChangeTracker.Clear();
+        }
+    }
+
+    private async Task AddImportedAffinitiesAsync(
+        IEnumerable<ImportedAffinitySeed> seeds,
+        IReadOnlyDictionary<int, int> idMap,
+        AffinityHostType hostType,
+        CancellationToken ct)
+    {
+        var userId = await GetImportEngagementUserIdAsync(ct);
+        if (userId is null)
+            return;
+
+        var pending = 0;
+        foreach (var seed in seeds)
+        {
+            if (!idMap.TryGetValue(seed.StashId, out var hostId))
+                continue;
+            if (seed.LikeCount <= 0 && seed.ViewCount <= 0 && seed.TotalConsumedSec <= 0 && seed.LastPositionSec is null && seed.LastConsumedAt is null)
+                continue;
+
+            _db.UserEntityAffinities.Add(new UserEntityAffinity
+            {
+                UserId = userId.Value,
+                HostType = hostType,
+                HostId = hostId,
+                LikeCount = Math.Max(0, seed.LikeCount),
+                ViewCount = Math.Max(0, seed.ViewCount),
+                TotalConsumedSec = Math.Max(0, seed.TotalConsumedSec),
+                LastPositionSec = seed.LastPositionSec,
+                LastConsumedAt = seed.LastConsumedAt,
+            });
+
+            pending++;
+            if (pending % 500 == 0)
+            {
+                await _db.SaveChangesAsync(ct);
+                _db.ChangeTracker.Clear();
+            }
+        }
+
+        if (pending % 500 != 0)
+        {
+            await _db.SaveChangesAsync(ct);
+            _db.ChangeTracker.Clear();
+        }
+    }
     public async Task<StashPreviewResult> PreviewAsync(string stashDbPath, CancellationToken ct = default)
     {
         if (!File.Exists(stashDbPath))

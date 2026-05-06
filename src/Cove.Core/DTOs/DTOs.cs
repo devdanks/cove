@@ -17,9 +17,8 @@ public class FilteredQueryRequest<TFilter> where TFilter : class, new()
 // ===== SCENE DTOs =====
 public record SceneDto(
     int Id, string? Title, string? Code, string? Details, string? Director,
-    string? Date, int? Rating, bool Organized, int? StudioId, string? StudioName,
-    double ResumeTime, double PlayDuration, int PlayCount, string? LastPlayedAt,
-    int LikeCounter, string? Captions, int? InteractiveSpeed,
+    string? Date, bool Organized, int? StudioId, string? StudioName,
+    string? Captions, int? InteractiveSpeed,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     List<VideoFileDto> Files,
     List<GroupSummaryDto> Groups, List<GallerySummaryDto> Galleries,
@@ -49,7 +48,7 @@ public record PerformerDto(
     string? EyeColor, string? HairColor, int? HeightCm, int? Weight,
     string? Measurements, string? FakeTits, double? PenisLength, string? Circumcised,
     string? CareerStart, string? CareerEnd, string? Tattoos, string? Piercings,
-    bool Favorite, int? Rating, string? Details, bool IgnoreAutoTag,
+    bool Favorite, string? Details, bool IgnoreAutoTag,
     List<string> Urls, List<string> Aliases, List<TagDto> Tags,
     List<PerformerRemoteIdDto> RemoteIds,
     int SceneCount, int ImageCount, int GalleryCount, int GroupCount,
@@ -183,7 +182,7 @@ public record TagUpdateDto(
     int? SegmentLaneOverride = null);
 
 // ===== STUDIO DTOs =====
-public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, int? Rating, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
+public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
     List<string> Urls, List<string> Aliases, List<TagDto> Tags, List<StudioRemoteIdDto> RemoteIds,
     int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount,
     string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
@@ -198,7 +197,7 @@ public record StudioUpdateDto(string? Name, int? ParentId, int? Rating, bool? Fa
 
 // ===== GALLERY DTOs =====
 public record GalleryDto(int Id, string? Title, string? Code, string? Date, string? Details, string? Photographer,
-    int? Rating, bool Organized, int? StudioId, string? StudioName,
+    bool Organized, int? StudioId, string? StudioName,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     int ImageCount, int SceneCount, List<int> SceneIds, string? FolderPath, List<GalleryFileInfoDto> Files,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
@@ -214,7 +213,7 @@ public record GalleryUpdateDto(string? Title, string? Code, string? Date, string
 
 // ===== IMAGE DTOs =====
 public record ImageDto(int Id, string? Title, string? Code, string? Details, string? Photographer,
-    int? Rating, bool Organized, int LikeCounter, int? StudioId, string? StudioName, string? Date,
+    bool Organized, int? StudioId, string? StudioName, string? Date,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     int GalleryCount, List<int> GalleryIds, List<GallerySummaryDto> Galleries, List<ImageFileDto> Files, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
 
@@ -230,7 +229,7 @@ public record ImageUpdateDto(string? Title, string? Code, string? Details, strin
 
 // ===== GROUP DTOs =====
 public record GroupDto(int Id, string Name, string? Aliases, int? Duration, string? Date,
-    int? Rating, int? StudioId, string? StudioName, string? Director, string? Synopsis,
+    int? StudioId, string? StudioName, string? Director, string? Synopsis,
     List<string> Urls, List<TagDto> Tags, int SceneCount, bool IsCompilation, int SubGroupCount, int ContainingGroupCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     string? FrontImagePath, string? BackImagePath);

@@ -39,7 +39,6 @@ public partial class StashMigrationService
                 Aliases = row.Aliases,
                 Duration = row.Duration,
                 Date = ParseDate(row.Date),
-                Rating = row.Rating,
                 StudioId = row.StudioId.HasValue && studioIdMap.TryGetValue(row.StudioId.Value, out var sId) ? sId : null,
                 Director = row.Director,
                 Synopsis = row.Description,
@@ -77,6 +76,12 @@ public partial class StashMigrationService
             _db.ChangeTracker.Clear();
             ReportPhase(progress, startProgress, endProgress, idMap.Count, rows.Count, $"Importing groups ({idMap.Count}/{rows.Count})");
         }
+        await AddImportedOverallRatingsAsync(
+            rows.Select(row => new ImportedRatingSeed(row.Id, row.Rating)),
+            idMap,
+            RatingHostType.Group,
+            ct);
+
         _logger.LogInformation("Imported {Count} groups in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
     }

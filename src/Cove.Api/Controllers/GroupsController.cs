@@ -13,7 +13,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.GroupsRead)]
-public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) : ControllerBase
+public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, IUserEngagementService engagementService) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -64,13 +64,15 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
         var group = new Group
         {
             Name = dto.Name, Aliases = dto.Aliases, Duration = dto.Duration,
-            Date = ParseDate(dto.Date), Rating = dto.Rating, StudioId = dto.StudioId,
+            Date = ParseDate(dto.Date), StudioId = dto.StudioId,
             Director = dto.Director, Synopsis = dto.Synopsis
         };
         if (dto.Urls?.Count > 0) group.Urls = dto.Urls.Select(u => new GroupUrl { Url = u }).ToList();
         if (dto.TagIds?.Count > 0) group.GroupTags = dto.TagIds.Select(id => new GroupTag { TagId = id }).ToList();
 
         group = await groupRepo.AddAsync(group, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Group, group.Id, dto.Rating, cancellationToken: ct);
         var result = await groupRepo.GetByIdWithRelationsAsync(group.Id, ct);
         return CreatedAtAction(nameof(GetById), new { id = group.Id }, MapToDto(result!));
     }
@@ -87,7 +89,6 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
         if (dto.Aliases != null) group.Aliases = dto.Aliases;
         if (dto.Duration.HasValue) group.Duration = dto.Duration;
         if (dto.Date != null) group.Date = ParseDate(dto.Date);
-        if (dto.Rating.HasValue) group.Rating = dto.Rating;
         if (dto.StudioId.HasValue) group.StudioId = dto.StudioId;
         if (dto.Director != null) group.Director = dto.Director;
         if (dto.Synopsis != null) group.Synopsis = dto.Synopsis;
@@ -105,6 +106,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
         if (dto.CustomFields != null) group.CustomFields = dto.CustomFields;
 
         await groupRepo.UpdateAsync(group, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Group, id, dto.Rating, cancellationToken: ct);
         var updated = await groupRepo.GetByIdWithRelationsAsync(id, ct);
         return Ok(MapToDto(updated!));
     }
@@ -134,7 +137,6 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
 
         foreach (var g in groups)
         {
-            if (dto.Rating.HasValue) g.Rating = dto.Rating;
             if (dto.StudioId.HasValue) g.StudioId = dto.StudioId;
 
             if (dto.TagIds != null && dto.TagMode == BulkUpdateMode.Set)
@@ -155,6 +157,11 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
         }
 
         await db.SaveChangesAsync(ct);
+        if (dto.Rating.HasValue)
+        {
+            foreach (var group in groups)
+                await engagementService.SetRatingAsync(AffinityHostType.Group, group.Id, dto.Rating, cancellationToken: ct);
+        }
         return Ok(new { updated = groups.Count });
     }
 
@@ -249,7 +256,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db) :
 
     private static GroupDto MapToDto(Group g) => new(
         g.Id, g.Name, g.Aliases, g.Duration, g.Date?.ToString("yyyy-MM-dd"),
-        g.Rating, g.StudioId, g.Studio?.Name, g.Director, g.Synopsis,
+        g.StudioId, g.Studio?.Name, g.Director, g.Synopsis,
         g.Urls.Select(u => u.Url).ToList(),
         g.GroupTags.Where(gt => gt.Tag != null).Select(gt => new TagDto(gt.Tag!.Id, gt.Tag.Name, gt.Tag.Description, gt.Tag.Favorite, gt.Tag.IgnoreAutoTag, [])).ToList(),
         g.GroupItems.Select(item => item.SceneId).Distinct().Count(),

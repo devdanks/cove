@@ -24,7 +24,6 @@ public class Performer : BaseEntity
     public string? Tattoos { get; set; }
     public string? Piercings { get; set; }
     public bool Favorite { get; set; }
-    public int? Rating { get; set; } // 1-100
     public string? Details { get; set; }
     public bool IgnoreAutoTag { get; set; }
 

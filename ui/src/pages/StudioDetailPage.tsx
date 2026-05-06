@@ -114,7 +114,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
     setRating: setStudioRating,
   } = useEntityEngagement("studio", id, {
     fallbackFavorite: studio?.favorite,
-    fallbackRating: studio?.rating,
+    fallbackRating: undefined,
   });
 
   useEffect(() => {

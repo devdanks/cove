@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.StudiosRead)]
-public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers) : ControllerBase
+public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -65,7 +65,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     {
         var studio = new Studio
         {
-            Name = dto.Name, ParentId = dto.ParentId, Rating = dto.Rating,
+            Name = dto.Name, ParentId = dto.ParentId,
             Favorite = dto.Favorite, Details = dto.Details,
             IgnoreAutoTag = dto.IgnoreAutoTag, Organized = dto.Organized
         };
@@ -74,6 +74,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (dto.TagIds?.Count > 0) studio.StudioTags = dto.TagIds.Select(id => new StudioTag { TagId = id }).ToList();
 
         studio = await studioRepo.AddAsync(studio, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Studio, studio.Id, dto.Rating, cancellationToken: ct);
         if (dto.Urls?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Studio, studio.Id, IdentifierSchemes.Url, dto.Urls, null, ct);
         if (dto.Aliases?.Count > 0)
@@ -92,7 +94,6 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
         if (dto.Name != null) studio.Name = dto.Name;
         if (dto.ParentId.HasValue) studio.ParentId = dto.ParentId;
-        if (dto.Rating.HasValue) studio.Rating = dto.Rating;
         if (dto.Favorite.HasValue) studio.Favorite = dto.Favorite.Value;
         if (dto.Details != null) studio.Details = dto.Details;
         if (dto.IgnoreAutoTag.HasValue) studio.IgnoreAutoTag = dto.IgnoreAutoTag.Value;
@@ -116,6 +117,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (dto.CustomFields != null) studio.CustomFields = dto.CustomFields;
 
         await studioRepo.UpdateAsync(studio, ct);
+        if (dto.Rating.HasValue)
+            await engagementService.SetRatingAsync(AffinityHostType.Studio, id, dto.Rating, cancellationToken: ct);
         if (dto.Urls != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Studio, id, IdentifierSchemes.Url, dto.Urls, null, ct);
         if (dto.Aliases != null)
@@ -149,7 +152,6 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
         foreach (var s in studios)
         {
-            if (dto.Rating.HasValue) s.Rating = dto.Rating;
             if (dto.Favorite.HasValue) s.Favorite = dto.Favorite.Value;
 
             if (dto.TagIds != null && dto.TagMode == BulkUpdateMode.Set)
@@ -170,13 +172,18 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         }
 
         await db.SaveChangesAsync(ct);
+        if (dto.Rating.HasValue)
+        {
+            foreach (var studio in studios)
+                await engagementService.SetRatingAsync(AffinityHostType.Studio, studio.Id, dto.Rating, cancellationToken: ct);
+        }
         return Ok(new { updated = studios.Count });
     }
 
     // ===== Merge =====
 
     private static StudioDto MapToDto(Studio s, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null, int? performerCount = null, int? childStudioCount = null) => new(
-        s.Id, s.Name, s.ParentId, s.Parent?.Name, s.Rating, s.Favorite, s.Details, s.IgnoreAutoTag, s.Organized,
+        s.Id, s.Name, s.ParentId, s.Parent?.Name, s.Favorite, s.Details, s.IgnoreAutoTag, s.Organized,
         s.Urls.Select(u => u.Url).ToList(),
         s.Aliases.Select(a => a.Alias).ToList(),
         s.StudioTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),

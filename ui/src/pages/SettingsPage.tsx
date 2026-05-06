@@ -27,6 +27,7 @@ import {
   KeyRound,
   FileText,
   Layers,
+  UserCog,
   X,
 } from "lucide-react";
 import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi } from "../api/client";
@@ -64,11 +65,12 @@ import {
 } from "../utils/batchDownloads";
 import { useAuth } from "../auth/AuthContext";
 import { UsersTab, RolesTab, AuditTab, ContentRulesTab, ApiTokensTab, ShareLinksTab } from "./settings/AdminSections";
+import { isLimitedPrimarySettingsTabVisible } from "./settings/tabVisibility";
 import { defaultRatingSystemOptions, normalizeRatingOptions } from "../components/Rating";
 import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 
-type SettingsTab = "tasks" | "library" | "interface" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
+type SettingsTab = "tasks" | "library" | "interface" | "user-settings" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
 type ResolvedTrackingPreferences = {
   enabled: boolean;
@@ -103,6 +105,7 @@ const primaryTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[
   { key: "tasks", label: "Tasks", icon: PlayCircle },
   { key: "library", label: "Library", icon: FolderOpen },
   { key: "interface", label: "Interface", icon: Monitor },
+  { key: "user-settings", label: "User Settings", icon: UserCog },
   { key: "display-profiles", label: "Display Profiles", icon: Layers },
   { key: "ai-data", label: "AI Data", icon: Database },
   { key: "metadata-providers", label: "Metadata Providers", icon: SearchCode },
@@ -125,12 +128,11 @@ const authTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] =
 
 const tabs = [...primaryTabs, ...authTabs];
 const authTabKeys = new Set(authTabs.map((tab) => tab.key));
-const limitedPrimaryTabKeys = new Set<SettingsTab>(["interface", "changelog", "about"]);
-
 const tabDescriptions: Record<SettingsTab, string> = {
   tasks: "Scan, generate, and maintenance operations.",
   library: "Content locations, generated assets, and scan rules.",
   interface: "Language, custom title, navigation, and rating presentation.",
+  "user-settings": "Preferences that follow the current user or shared profile.",
   "display-profiles": "Manage resolved-span display profiles and the rules attached to each profile.",
   "ai-data": "Inspect and safely purge AI-produced embeddings, detections, segments, tag provenance, and face-owned data.",
   security: "Authentication and session settings for the local instance.",
@@ -628,7 +630,7 @@ export function SettingsPage() {
   const visiblePrimaryTabs = useMemo(
     () => (canWriteSystemSettings
       ? primaryTabs
-      : primaryTabs.filter((tab) => limitedPrimaryTabKeys.has(tab.key) || (tab.key === "display-profiles" && canReadMarkers))),
+      : primaryTabs.filter((tab) => isLimitedPrimarySettingsTabVisible(tab.key, canReadMarkers))),
     [canReadMarkers, canWriteSystemSettings],
   );
 
@@ -691,7 +693,7 @@ export function SettingsPage() {
           <p className="mt-1 text-sm text-secondary">
             {canWriteSystemSettings
               ? "System configuration, auth administration, and runtime controls."
-              : "Personal appearance, release notes, and account-level tools."}
+              : "Personal appearance, User Settings, release notes, and account-level tools."}
           </p>
         </div>
         <nav className="space-y-1">
@@ -1282,6 +1284,8 @@ export function SettingsPage() {
             <LocalInterfacePanel serverRatingOptions={draftState?.ui.ratingSystemOptions} />
           )
         )}
+
+        {resolvedActiveTab === "user-settings" && <UserSettingsPanel />}
 
         {resolvedActiveTab === "display-profiles" && canReadMarkers && (
           <DisplayProfilesSettingsPanel canWrite={canWriteMarkers} />
@@ -2249,61 +2253,95 @@ function LocalInterfacePanel({
         </div>
       </SectionCard>
 
-      {accountBackedPreferences ? (
-        <SectionCard
-          title={sharedProfilePreferences ? "Shared Interaction Tracking" : "Personal Interaction Tracking"}
-          description={sharedProfilePreferences
-            ? "These preferences are stored in Cove's shared built-in profile and control activity recording for the current profile."
-            : "These preferences follow your signed-in account and control activity recording for your own profile."}
-        >
-          <div className="space-y-4">
-            <CheckboxLabel
-              label="Enable interaction tracking"
-              checked={trackingPreferences.enabled ?? defaultTrackingPreferences.enabled}
-              onChange={(checked) => updateTrackingPreferences({ enabled: checked })}
-            />
-            <div className="grid gap-4 md:grid-cols-2">
-              <NumberField
-                label="Minimum scene view seconds"
-                value={trackingPreferences.minViewSeconds ?? defaultTrackingPreferences.minViewSeconds}
-                min={0}
-                onChange={(value) => updateTrackingPreferences({ minViewSeconds: value ?? defaultTrackingPreferences.minViewSeconds })}
-              />
-              <NumberField
-                label="Scene completion ratio"
-                value={trackingPreferences.viewCompletionRatio ?? defaultTrackingPreferences.viewCompletionRatio}
-                min={0.01}
-                max={1}
-                onChange={(value) => updateTrackingPreferences({ viewCompletionRatio: value ?? defaultTrackingPreferences.viewCompletionRatio })}
-              />
-              <NumberField
-                label="Minimum image view seconds"
-                value={trackingPreferences.minImageDetailViewSeconds ?? defaultTrackingPreferences.minImageDetailViewSeconds}
-                min={0}
-                onChange={(value) => updateTrackingPreferences({ minImageDetailViewSeconds: value ?? defaultTrackingPreferences.minImageDetailViewSeconds })}
-              />
-              <NumberField
-                label="Minimum derived like seconds"
-                value={trackingPreferences.minDerivedLikeSessionSeconds ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds}
-                min={0}
-                onChange={(value) => updateTrackingPreferences({ minDerivedLikeSessionSeconds: value ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds })}
-              />
-              <NumberField
-                label="Session idle timeout seconds"
-                value={trackingPreferences.sessionIdleTimeoutSec ?? defaultTrackingPreferences.sessionIdleTimeoutSec}
-                min={10}
-                onChange={(value) => updateTrackingPreferences({ sessionIdleTimeoutSec: value ?? defaultTrackingPreferences.sessionIdleTimeoutSec })}
-              />
-            </div>
-          </div>
-        </SectionCard>
-      ) : null}
-
       <ThemeSelector />
     </>
   );
 }
 
+function UserSettingsPanel() {
+  const { authEnabled, user } = useAuth();
+  const accountBackedPreferences = supportsServerBackedUiPreferences(user);
+  const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
+  const [trackingPreferences, setTrackingPreferences] = useState<ResolvedTrackingPreferences>(() => resolveTrackingPreferences(user?.uiPreferences?.tracking));
+
+  useEffect(() => {
+    setTrackingPreferences(resolveTrackingPreferences(user?.uiPreferences?.tracking));
+  }, [user]);
+
+  const updateTrackingPreferences = (patch: Partial<ResolvedTrackingPreferences>) => {
+    const nextTracking = {
+      ...defaultTrackingPreferences,
+      ...trackingPreferences,
+      ...patch,
+    };
+    setTrackingPreferences(nextTracking);
+    updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      tracking: nextTracking,
+    }));
+  };
+
+  if (!accountBackedPreferences) {
+    return (
+      <SectionCard
+        title="User Settings"
+        description="Sign in or use the shared built-in profile to store engagement preferences outside this browser."
+      >
+        <p className="text-sm text-secondary">No account-backed user settings are available in the current session.</p>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <SectionCard
+      title={sharedProfilePreferences ? "Shared Engagement" : "Personal Engagement"}
+      description={sharedProfilePreferences
+        ? "These preferences are stored in Cove's shared built-in profile and control activity recording for the current profile."
+        : "These preferences follow your signed-in account and control activity recording for your own profile."}
+    >
+      <div className="space-y-4">
+        <CheckboxLabel
+          label="Enable engagement history"
+          checked={trackingPreferences.enabled ?? defaultTrackingPreferences.enabled}
+          onChange={(checked) => updateTrackingPreferences({ enabled: checked })}
+        />
+        <div className="grid gap-4 md:grid-cols-2">
+          <NumberField
+            label="Minimum scene view seconds"
+            value={trackingPreferences.minViewSeconds ?? defaultTrackingPreferences.minViewSeconds}
+            min={0}
+            onChange={(value) => updateTrackingPreferences({ minViewSeconds: value ?? defaultTrackingPreferences.minViewSeconds })}
+          />
+          <NumberField
+            label="Scene completion ratio"
+            value={trackingPreferences.viewCompletionRatio ?? defaultTrackingPreferences.viewCompletionRatio}
+            min={0.01}
+            max={1}
+            onChange={(value) => updateTrackingPreferences({ viewCompletionRatio: value ?? defaultTrackingPreferences.viewCompletionRatio })}
+          />
+          <NumberField
+            label="Minimum image view seconds"
+            value={trackingPreferences.minImageDetailViewSeconds ?? defaultTrackingPreferences.minImageDetailViewSeconds}
+            min={0}
+            onChange={(value) => updateTrackingPreferences({ minImageDetailViewSeconds: value ?? defaultTrackingPreferences.minImageDetailViewSeconds })}
+          />
+          <NumberField
+            label="Minimum session length for derived likes"
+            value={trackingPreferences.minDerivedLikeSessionSeconds ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds}
+            min={0}
+            onChange={(value) => updateTrackingPreferences({ minDerivedLikeSessionSeconds: value ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds })}
+          />
+          <NumberField
+            label="Session idle timeout seconds"
+            value={trackingPreferences.sessionIdleTimeoutSec ?? defaultTrackingPreferences.sessionIdleTimeoutSec}
+            min={10}
+            onChange={(value) => updateTrackingPreferences({ sessionIdleTimeoutSec: value ?? defaultTrackingPreferences.sessionIdleTimeoutSec })}
+          />
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
 function LogsPanel() {
   const [logLevel, setLogLevel] = useState("");
   const { data: logEntries, isLoading, refetch } = useQuery({
@@ -5022,3 +5060,5 @@ function ExtBadge({ label }: { label: string }) {
     </span>
   );
 }
+
+

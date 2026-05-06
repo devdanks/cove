@@ -23,7 +23,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const [director, setDirector] = useState(group.director ?? "");
   const [date, setDate] = useState(group.date ?? "");
   const [duration, setDuration] = useState<number | undefined>(group.duration ?? undefined);
-  const [rating, setRating] = useState<number | undefined>(group.rating ?? undefined);
+  const [rating, setRating] = useState<number | undefined>(undefined);
   const [studioId, setStudioId] = useState<number | undefined>(group.studioId ?? undefined);
   const [synopsis, setSynopsis] = useState(group.synopsis ?? "");
   const [urls, setUrls] = useState(group.urls.length > 0 ? group.urls : [""]);
@@ -45,7 +45,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
     setDirector(group.director ?? "");
     setDate(group.date ?? "");
     setDuration(group.duration ?? undefined);
-    setRating(group.rating ?? undefined);
+    setRating(undefined);
     setStudioId(group.studioId ?? undefined);
     setSynopsis(group.synopsis ?? "");
     setUrls(group.urls.length > 0 ? group.urls : [""]);
