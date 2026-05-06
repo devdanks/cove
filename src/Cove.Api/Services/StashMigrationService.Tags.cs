@@ -8,6 +8,7 @@ public partial class StashMigrationService
 {
     private async Task<Dictionary<int, int>> ImportTagsAsync(SqliteConnection conn, Dictionary<string, string> blobMap, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var rows = new List<(int Id, string Name, string? SortName, string? Description, bool Favorite, bool IgnoreAutoTag, string? ImageBlob)>();
         await using (var cmd = conn.CreateCommand())
         {
@@ -38,8 +39,36 @@ public partial class StashMigrationService
         var ordered = TopologicalSort(rows.Select(r => r.Id).ToList(), id => tagParents.GetValueOrDefault(id, []));
 
         var idMap = new Dictionary<int, int>();
-        var pendingTags = new List<(int StashId, Tag Entity)>(ordered.Count);
+        const int TagBatchSize = 1000;
+        const int TagParentBatchSize = 5000;
+        var pendingTags = new List<(int StashId, Tag Entity)>(TagBatchSize);
         progress.Report(startProgress, "Importing tags...");
+        _logger.LogDebug(
+            "[StashTiming] phase=tags checkpoint=loaded rows={Rows} aliases={AliasOwners} parentLinks={ParentLinks} elapsedMs={ElapsedMilliseconds:F0}",
+            rows.Count,
+            aliases.Count,
+            tagParents.Sum(static item => item.Value.Count),
+            stopwatch.Elapsed.TotalMilliseconds);
+
+        async Task FlushTagBatchAsync()
+        {
+            if (pendingTags.Count == 0)
+                return;
+
+            await _db.SaveChangesAsync(ct);
+            foreach (var (stashId, entity) in pendingTags)
+                idMap[stashId] = entity.Id;
+
+            pendingTags.Clear();
+            _db.ChangeTracker.Clear();
+            ReportPhase(progress, startProgress, endProgress, idMap.Count, ordered.Count, $"Importing tags ({idMap.Count}/{ordered.Count})");
+            _logger.LogDebug(
+                "[StashTiming] phase=tags checkpoint=batch imported={Imported} total={Total} elapsedMs={ElapsedMilliseconds:F0}",
+                idMap.Count,
+                ordered.Count,
+                stopwatch.Elapsed.TotalMilliseconds);
+        }
+
         foreach (var stashId in ordered)
         {
             var row = byId[stashId];
@@ -56,32 +85,46 @@ public partial class StashMigrationService
             _db.Tags.Add(entity);
             pendingTags.Add((stashId, entity));
 
-            if (pendingTags.Count % 100 == 0 || pendingTags.Count == ordered.Count)
-                ReportPhase(progress, startProgress, endProgress, pendingTags.Count, ordered.Count, $"Importing tags ({pendingTags.Count}/{ordered.Count})");
+            if (pendingTags.Count >= TagBatchSize)
+                await FlushTagBatchAsync();
         }
 
-        if (pendingTags.Count > 0)
-        {
-            await _db.SaveChangesAsync(ct);
-            foreach (var (stashId, entity) in pendingTags)
-                idMap[stashId] = entity.Id;
-        }
+        await FlushTagBatchAsync();
 
         if (tagParents.Count > 0)
         {
+            var pendingParents = new List<TagParent>(TagParentBatchSize);
+
+            async Task FlushTagParentsAsync()
+            {
+                if (pendingParents.Count == 0)
+                    return;
+
+                _db.Set<TagParent>().AddRange(pendingParents);
+                await _db.SaveChangesAsync(ct);
+                pendingParents.Clear();
+                _db.ChangeTracker.Clear();
+            }
+
             foreach (var (childStashId, parentStashIds) in tagParents)
             {
                 if (!idMap.TryGetValue(childStashId, out var childCoveId)) continue;
                 foreach (var parentStashId in parentStashIds)
                 {
                     if (!idMap.TryGetValue(parentStashId, out var parentCoveId)) continue;
-                    _db.Set<TagParent>().Add(new TagParent { ParentId = parentCoveId, ChildId = childCoveId });
+                    pendingParents.Add(new TagParent { ParentId = parentCoveId, ChildId = childCoveId });
+                    if (pendingParents.Count >= TagParentBatchSize)
+                        await FlushTagParentsAsync();
                 }
             }
-            await _db.SaveChangesAsync(ct);
+            await FlushTagParentsAsync();
+            _logger.LogDebug(
+                "[StashTiming] phase=tags checkpoint=parents parentLinks={ParentLinks} elapsedMs={ElapsedMilliseconds:F0}",
+                tagParents.Sum(static item => item.Value.Count),
+                stopwatch.Elapsed.TotalMilliseconds);
         }
 
-        _logger.LogInformation("Imported {Count} tags", idMap.Count);
+        _logger.LogInformation("Imported {Count} tags in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
     }
 }

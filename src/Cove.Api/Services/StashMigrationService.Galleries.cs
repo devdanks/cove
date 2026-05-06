@@ -24,6 +24,7 @@ public partial class StashMigrationService
             return (0, new Dictionary<int, int>());
         }
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var total = await CountAsync(conn, "galleries", ct);
         _logger.LogInformation("Importing {Total} galleries...", total);
 
@@ -107,7 +108,18 @@ public partial class StashMigrationService
         var count = 0;
         var galleryFileIdMap = new Dictionary<int, int>();
         var pendingGalleryFiles = new List<(int StashFileId, GalleryFile FileEntity)>();
+        const int GalleryBatchSize = 500;
         progress.Report(startProgress, "Importing galleries...");
+        _logger.LogDebug(
+            "[StashTiming] phase=galleries checkpoint=loaded rows={Rows} files={Files} tagOwners={TagOwners} performerOwners={PerformerOwners} urlOwners={UrlOwners} imageOwners={ImageOwners} chapterOwners={ChapterOwners} elapsedMs={ElapsedMilliseconds:F0}",
+            galleryRows.Count,
+            fileData.Count,
+            galleryTagMap.Count,
+            galleryPerformerMap.Count,
+            galleryUrls.Count,
+            galleryImages.Count,
+            galleryChapters.Count,
+            stopwatch.Elapsed.TotalMilliseconds);
         foreach (var row in galleryRows)
         {
             var stashId = row.StashId;
@@ -158,7 +170,7 @@ public partial class StashMigrationService
 
             _db.Galleries.Add(gallery);
             count++;
-            if (count % 100 == 0)
+            if (count % GalleryBatchSize == 0)
             {
                 await _db.SaveChangesAsync(ct);
                 foreach (var (stashFileId, fileEntity) in pendingGalleryFiles)
@@ -167,6 +179,12 @@ public partial class StashMigrationService
                 _db.ChangeTracker.Clear();
                 ReportPhase(progress, startProgress, endProgress, count, total, $"Importing galleries ({count}/{total})");
                 _logger.LogInformation("Imported {Count}/{Total} galleries...", count, total);
+                _logger.LogDebug(
+                    "[StashTiming] phase=galleries checkpoint=batch imported={Imported} total={Total} galleryFiles={GalleryFiles} elapsedMs={ElapsedMilliseconds:F0}",
+                    count,
+                    total,
+                    galleryFileIdMap.Count,
+                    stopwatch.Elapsed.TotalMilliseconds);
             }
         }
         await _db.SaveChangesAsync(ct);
@@ -174,7 +192,7 @@ public partial class StashMigrationService
             galleryFileIdMap[stashFileId] = fileEntity.Id;
         _db.ChangeTracker.Clear();
         ReportPhase(progress, startProgress, endProgress, count, total, $"Importing galleries ({count}/{total})");
-        _logger.LogInformation("Imported {Count} galleries", count);
+        _logger.LogInformation("Imported {Count} galleries in {Elapsed}", count, stopwatch.Elapsed);
         return (count, galleryFileIdMap);
     }
 }

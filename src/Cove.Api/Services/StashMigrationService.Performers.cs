@@ -8,6 +8,7 @@ public partial class StashMigrationService
 {
     private async Task<Dictionary<int, int>> ImportPerformersAsync(SqliteConnection conn, Dictionary<string, string> blobMap, Dictionary<int, int> tagIdMap, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var rows = new List<(int Id, string Name, string? Disambiguation, string? Gender, string? Birthdate,
             string? Ethnicity, string? Country, string? EyeColor, string? HairColor, int? Height, int? Weight,
             string? Measurements, string? FakeTits, double? PenisLength, string? Circumcised,
@@ -49,9 +50,17 @@ public partial class StashMigrationService
         }
 
         var idMap = new Dictionary<int, int>(rows.Count);
-        const int PerformerBatchSize = 250;
+        const int PerformerBatchSize = 500;
         var pendingBatch = new List<(int StashId, Performer Entity)>(PerformerBatchSize);
         progress.Report(startProgress, "Importing performers...");
+        _logger.LogDebug(
+            "[StashTiming] phase=performers checkpoint=loaded rows={Rows} urlOwners={UrlOwners} aliasOwners={AliasOwners} tagOwners={TagOwners} remoteIdOwners={RemoteIdOwners} elapsedMs={ElapsedMilliseconds:F0}",
+            rows.Count,
+            urls.Count,
+            aliases.Count,
+            performerTagMap.Count,
+            performerStashIds.Count,
+            stopwatch.Elapsed.TotalMilliseconds);
 
         async Task FlushPerformerBatchAsync()
         {
@@ -65,6 +74,11 @@ public partial class StashMigrationService
             pendingBatch.Clear();
             _db.ChangeTracker.Clear();
             ReportPhase(progress, startProgress, endProgress, idMap.Count, rows.Count, $"Importing performers ({idMap.Count}/{rows.Count})");
+            _logger.LogDebug(
+                "[StashTiming] phase=performers checkpoint=batch imported={Imported} total={Total} elapsedMs={ElapsedMilliseconds:F0}",
+                idMap.Count,
+                rows.Count,
+                stopwatch.Elapsed.TotalMilliseconds);
         }
 
         foreach (var row in rows)
@@ -123,7 +137,7 @@ public partial class StashMigrationService
         }
 
         await FlushPerformerBatchAsync();
-        _logger.LogInformation("Imported {Count} performers", idMap.Count);
+        _logger.LogInformation("Imported {Count} performers in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
     }
 

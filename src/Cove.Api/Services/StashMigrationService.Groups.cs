@@ -8,6 +8,7 @@ public partial class StashMigrationService
 {
     private async Task<Dictionary<int, int>> ImportGroupsAsync(SqliteConnection conn, Dictionary<int, int> studioIdMap, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var rows = new List<(int Id, string Name, string? Aliases, int? Duration, string? Date,
             int? Rating, int? StudioId, string? Director, string? Description)>();
         await using (var cmd = conn.CreateCommand())
@@ -22,9 +23,14 @@ public partial class StashMigrationService
         var urls = await ReadUrlsAsync(conn, "group_urls", "group_id", ct);
 
         var idMap = new Dictionary<int, int>(rows.Count);
-        var batchEntities = new List<(int StashId, Cove.Core.Entities.Group Entity)>(100);
-        const int GroupBatchSize = 100;
+        const int GroupBatchSize = 500;
+        var batchEntities = new List<(int StashId, Cove.Core.Entities.Group Entity)>(GroupBatchSize);
         progress.Report(startProgress, "Importing groups...");
+        _logger.LogDebug(
+            "[StashTiming] phase=groups checkpoint=loaded rows={Rows} urlOwners={UrlOwners} elapsedMs={ElapsedMilliseconds:F0}",
+            rows.Count,
+            urls.Count,
+            stopwatch.Elapsed.TotalMilliseconds);
         foreach (var row in rows)
         {
             var entity = new Cove.Core.Entities.Group
@@ -52,6 +58,11 @@ public partial class StashMigrationService
                 batchEntities.Clear();
                 _db.ChangeTracker.Clear();
                 ReportPhase(progress, startProgress, endProgress, idMap.Count, rows.Count, $"Importing groups ({idMap.Count}/{rows.Count})");
+                _logger.LogDebug(
+                    "[StashTiming] phase=groups checkpoint=batch imported={Imported} total={Total} elapsedMs={ElapsedMilliseconds:F0}",
+                    idMap.Count,
+                    rows.Count,
+                    stopwatch.Elapsed.TotalMilliseconds);
             }
         }
 
@@ -66,7 +77,7 @@ public partial class StashMigrationService
             _db.ChangeTracker.Clear();
             ReportPhase(progress, startProgress, endProgress, idMap.Count, rows.Count, $"Importing groups ({idMap.Count}/{rows.Count})");
         }
-        _logger.LogInformation("Imported {Count} groups", idMap.Count);
+        _logger.LogInformation("Imported {Count} groups in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
     }
 }

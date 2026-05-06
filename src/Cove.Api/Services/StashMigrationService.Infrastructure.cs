@@ -11,43 +11,96 @@ namespace Cove.Api.Services;
 
 public partial class StashMigrationService
 {
-    private async Task<Dictionary<string, string>> ImportBlobsAsync(SqliteConnection conn, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
+    private async Task<Dictionary<string, string>> ImportBlobsAsync(SqliteConnection conn, string? blobFilesPath, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var total = await CountAsync(conn, "blobs", ct);
         var processed = 0;
+        var inlineCount = 0;
+        var fileCount = 0;
+        var missingCount = 0;
+        var failedCount = 0;
+        var blobStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var normalizedBlobFilesPath = string.IsNullOrWhiteSpace(blobFilesPath) ? null : blobFilesPath.Trim();
+        var hasBlobFilesPath = !string.IsNullOrWhiteSpace(normalizedBlobFilesPath) && Directory.Exists(normalizedBlobFilesPath);
+
+        if (!string.IsNullOrWhiteSpace(normalizedBlobFilesPath) && !hasBlobFilesPath)
+        {
+            _logger.LogWarning("Configured Stash blob files path does not exist: {Path}", normalizedBlobFilesPath);
+        }
+
+        _logger.LogInformation("Importing {Total} blobs from {Source}", total, hasBlobFilesPath ? normalizedBlobFilesPath : "inline SQLite");
+        _logger.LogDebug("[StashTiming] phase=blobs checkpoint=ready totalRows={Total} blobFilesPath={BlobFilesPath}", total, normalizedBlobFilesPath ?? "");
         progress.Report(startProgress, "Importing blobs...");
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT checksum, blob FROM blobs WHERE blob IS NOT NULL";
+        cmd.CommandText = "SELECT checksum, blob FROM blobs";
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
             processed++;
-            if (r.IsDBNull(1)) continue;
             var checksum = r.GetString(0);
             try
             {
-                var bytes = (byte[])r.GetValue(1);
-                using var ms = new MemoryStream(bytes);
-                var contentType = DetectImageContentType(ms);
-                ms.Position = 0;
-                var blobId = await _blobService.StoreBlobAsync(ms, contentType, ct);
-                map[checksum] = blobId;
+                if (!r.IsDBNull(1))
+                {
+                    var bytes = (byte[])r.GetValue(1);
+                    using var ms = new MemoryStream(bytes, writable: false);
+                    var contentType = DetectImageContentType(ms);
+                    ms.Position = 0;
+                    var blobId = await _blobService.StoreBlobAsync(ms, contentType, ct);
+                    map[checksum] = blobId;
+                    inlineCount++;
+                }
+                else if (hasBlobFilesPath && TryResolveStashBlobFilePath(normalizedBlobFilesPath!, checksum, out var sourcePath))
+                {
+                    await using var fs = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 1024 * 128, useAsync: true);
+                    var contentType = DetectImageContentType(fs);
+                    fs.Position = 0;
+                    var blobId = await _blobService.StoreBlobAsync(fs, contentType, ct);
+                    map[checksum] = blobId;
+                    fileCount++;
+                }
+                else
+                {
+                    missingCount++;
+                    _logger.LogDebug("Stash blob {Checksum} had no inline data and no matching blob file", checksum);
+                }
             }
             catch (Exception ex)
             {
+                failedCount++;
                 _logger.LogWarning("Blob {Checksum} import failed: {Err}", checksum, ex.Message);
             }
 
             if (processed % 100 == 0 || processed == total)
+            {
                 ReportPhase(progress, startProgress, endProgress, processed, total, $"Importing blobs ({processed}/{total})");
+                _logger.LogDebug(
+                    "[StashTiming] phase=blobs checkpoint=batch processed={Processed} total={Total} imported={Imported} inline={Inline} files={Files} missing={Missing} failed={Failed} elapsedMs={ElapsedMilliseconds:F0}",
+                    processed,
+                    total,
+                    map.Count,
+                    inlineCount,
+                    fileCount,
+                    missingCount,
+                    failedCount,
+                    blobStopwatch.Elapsed.TotalMilliseconds);
+            }
         }
-        _logger.LogInformation("Imported {Count} blobs", map.Count);
+        _logger.LogInformation(
+            "Imported {Count} blobs in {Elapsed}: inline {Inline}, files {Files}, missing {Missing}, failed {Failed}",
+            map.Count,
+            blobStopwatch.Elapsed,
+            inlineCount,
+            fileCount,
+            missingCount,
+            failedCount);
         return map;
     }
 
     private async Task<Dictionary<int, int>> ImportFoldersAsync(SqliteConnection conn, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var folderData = new Dictionary<int, (string Path, int? ParentId, DateTime ModTime, DateTime CreatedAt)>();
         await using (var cmd = conn.CreateCommand())
         {
@@ -67,12 +120,19 @@ public partial class StashMigrationService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         var existingFoldersByPath = _db.Folders
+            .AsNoTracking()
             .Where(f => allPaths.Contains(f.Path))
             .AsEnumerable()
             .GroupBy(f => NormalizeImportedPath(f.Path), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.OrderBy(f => f.Id).First().Id, StringComparer.OrdinalIgnoreCase);
 
         progress.Report(startProgress, "Importing folders...");
+        _logger.LogDebug(
+            "[StashTiming] phase=folders checkpoint=loaded rows={Rows} pathCandidates={PathCandidates} existing={Existing} elapsedMs={ElapsedMilliseconds:F0}",
+            folderData.Count,
+            allPaths.Count,
+            existingFoldersByPath.Count,
+            stopwatch.Elapsed.TotalMilliseconds);
 
         const int FolderBatchSize = 1000;
         var pendingFolders = new List<(int StashId, string NormalizedPath, Folder Entity)>(FolderBatchSize);
@@ -94,6 +154,11 @@ public partial class StashMigrationService
             pendingFolders.Clear();
             _db.ChangeTracker.Clear();
             ReportPhase(progress, startProgress, endProgress, folderIdMap.Count, ordered.Count, $"Importing folders ({folderIdMap.Count}/{ordered.Count})");
+            _logger.LogDebug(
+                "[StashTiming] phase=folders checkpoint=batch imported={Imported} total={Total} elapsedMs={ElapsedMilliseconds:F0}",
+                folderIdMap.Count,
+                ordered.Count,
+                stopwatch.Elapsed.TotalMilliseconds);
         }
 
         foreach (var stashFolderId in ordered)
@@ -134,7 +199,7 @@ public partial class StashMigrationService
         }
 
         await FlushFolderBatchAsync();
-        _logger.LogInformation("Imported {Count} folders", folderIdMap.Count);
+        _logger.LogInformation("Imported {Count} folders in {Elapsed}", folderIdMap.Count, stopwatch.Elapsed);
         return folderIdMap;
     }
 
@@ -346,16 +411,11 @@ WHERE files.zip_file_id IS NOT NULL";
         _logger.LogInformation("Updated Cove generated path to {Path} before Stash import", normalizedPath);
     }
 
-    private async Task CopyGeneratedContentAsync(string stashDbPath, Dictionary<int, SceneGeneratedData> sceneGeneratedMap, StashImportOptions options, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
+    private async Task CopyGeneratedContentAsync(StashConfigData stashConfig, Dictionary<int, SceneGeneratedData> sceneGeneratedMap, StashImportOptions options, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
         try
         {
             progress.Report(startProgress, "Copying generated scene assets...");
-            var configDir = Path.GetDirectoryName(stashDbPath)!;
-            var configPath = Path.Combine(configDir, "config.yml");
-            var stashConfig = File.Exists(configPath)
-                ? ParseStashConfig(configPath)
-                : new StashConfigData([], null, "OSHASH");
             var stashGeneratedPath = stashConfig.GeneratedPath;
             if (string.IsNullOrWhiteSpace(stashGeneratedPath) || !Directory.Exists(stashGeneratedPath))
             {
@@ -630,6 +690,7 @@ WHERE files.zip_file_id IS NOT NULL";
         var paths = new List<(string Path, bool ExcludeImage, bool ExcludeVideo)>();
         string? generatedPath = null;
         string? videoFileNamingAlgorithm = null;
+        string? blobFilesPath = null;
         bool? calculateMd5 = null;
 
         try
@@ -653,6 +714,13 @@ WHERE files.zip_file_id IS NOT NULL";
                 if (algoMatch.Success)
                 {
                     videoFileNamingAlgorithm = algoMatch.Groups[1].Value.Trim().Trim('"', '\'');
+                    continue;
+                }
+
+                var blobFilesMatch = Regex.Match(rawLine, @"^(blob_files|blob_files_path|blobs_path|blobFilesPath):\s*(.+)$", RegexOptions.IgnoreCase);
+                if (blobFilesMatch.Success)
+                {
+                    blobFilesPath = blobFilesMatch.Groups[2].Value.Trim().Trim('"', '\'');
                     continue;
                 }
 
@@ -725,6 +793,73 @@ WHERE files.zip_file_id IS NOT NULL";
         return new StashConfigData(
             paths,
             generatedPath,
-            videoFileNamingAlgorithm ?? (calculateMd5 == true ? "MD5" : "OSHASH"));
+            videoFileNamingAlgorithm ?? (calculateMd5 == true ? "MD5" : "OSHASH"),
+            blobFilesPath);
+    }
+
+    private static bool TryResolveStashBlobFilePath(string blobFilesPath, string checksum, out string sourcePath)
+    {
+        foreach (var candidate in EnumerateStashBlobPathCandidates(blobFilesPath, checksum))
+        {
+            if (File.Exists(candidate))
+            {
+                sourcePath = candidate;
+                return true;
+            }
+        }
+
+        var bucket = checksum.Length >= 2 ? checksum[..2] : checksum;
+        var bucketPath = Path.Combine(blobFilesPath, bucket);
+        if (Directory.Exists(bucketPath))
+        {
+            var match = Directory.EnumerateFiles(bucketPath, $"{checksum}.*", SearchOption.TopDirectoryOnly).FirstOrDefault();
+            if (match is not null)
+            {
+                sourcePath = match;
+                return true;
+            }
+        }
+
+        if (checksum.Length >= 4)
+        {
+            var nestedBucketPath = Path.Combine(blobFilesPath, checksum[..2], checksum[2..4]);
+            if (Directory.Exists(nestedBucketPath))
+            {
+                var match = Directory.EnumerateFiles(nestedBucketPath, $"{checksum}.*", SearchOption.TopDirectoryOnly).FirstOrDefault();
+                if (match is not null)
+                {
+                    sourcePath = match;
+                    return true;
+                }
+            }
+        }
+
+        if (Directory.Exists(blobFilesPath))
+        {
+            var match = Directory.EnumerateFiles(blobFilesPath, $"{checksum}.*", SearchOption.TopDirectoryOnly).FirstOrDefault();
+            if (match is not null)
+            {
+                sourcePath = match;
+                return true;
+            }
+        }
+
+        sourcePath = string.Empty;
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateStashBlobPathCandidates(string blobFilesPath, string checksum)
+    {
+        yield return Path.Combine(blobFilesPath, checksum);
+
+        if (checksum.Length >= 2)
+        {
+            yield return Path.Combine(blobFilesPath, checksum[..2], checksum);
+        }
+
+        if (checksum.Length >= 4)
+        {
+            yield return Path.Combine(blobFilesPath, checksum[..2], checksum[2..4], checksum);
+        }
     }
 }

@@ -11,12 +11,9 @@ const { mockImages, mockFaces, mockSetFavorite, mockSetRating, mockGoBack } = vi
     incrementO: vi.fn(),
     thumbnailUrl: vi.fn(() => "/thumb.jpg"),
     imageUrl: vi.fn(() => "/image.jpg"),
-    detections: {
-      list: vi.fn(),
-    },
   },
   mockFaces: {
-    get: vi.fn(),
+    imageFaces: vi.fn(),
   },
   mockSetFavorite: vi.fn(),
   mockSetRating: vi.fn(),
@@ -126,17 +123,20 @@ describe("ImageDetailPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the shared layout with detections and related tabs", async () => {
+  it("renders the shared layout with faces and related tabs", async () => {
     mockImages.get.mockResolvedValue(buildImage());
-    mockImages.detections.list.mockResolvedValue([
-      { id: 1, refId: 33, refKind: "face" },
-    ]);
-    mockFaces.get.mockResolvedValue({
+    mockFaces.imageFaces.mockResolvedValue([
+      {
       id: 33,
-      label: "Beach Face",
-      performerName: undefined,
-      coverImageUrl: undefined,
-    });
+        label: "Beach Face",
+        performerName: undefined,
+        coverImageUrl: undefined,
+        appearanceCount: 1,
+        frameSampleCount: 1,
+        sceneCount: 1,
+        imageCount: 1,
+      },
+    ]);
 
     renderPage();
 
@@ -144,8 +144,9 @@ describe("ImageDetailPage", () => {
     expect(screen.getByTestId("media-detail-layout-media")).toBeInTheDocument();
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
-    fireEvent.click(within(tabs).getByRole("tab", { name: /detections/i }));
-    expect(await screen.findByText("Beach Face")).toBeInTheDocument();
+    fireEvent.click(within(tabs).getByRole("tab", { name: /faces/i }));
+    await waitFor(() => expect(mockFaces.imageFaces).toHaveBeenCalledWith(12));
+    await waitFor(() => expect(screen.getByText("Beach Face")).toBeInTheDocument());
 
     fireEvent.click(within(tabs).getByRole("tab", { name: /related/i }));
     expect(await screen.findByText("Alex")).toBeInTheDocument();
@@ -154,7 +155,7 @@ describe("ImageDetailPage", () => {
 
   it("supports keyboard shortcuts for related tab, lightbox, and favorites count", async () => {
     mockImages.get.mockResolvedValue(buildImage());
-    mockImages.detections.list.mockResolvedValue([]);
+    mockFaces.imageFaces.mockResolvedValue([]);
     mockImages.incrementO.mockResolvedValue(undefined);
 
     renderPage();

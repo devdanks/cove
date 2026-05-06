@@ -21,6 +21,7 @@ public partial class StashMigrationService
         double endProgress,
         CancellationToken ct)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var sceneRows = new List<(int Id, string? Title, string? Details, string? Date, int? Rating,
             int? StudioId, bool Organized, string? Code, string? Director,
             double ResumeTime, double PlayDuration, string CreatedAt, string UpdatedAt, string? CoverBlob, string? LastPlayedAt)>();
@@ -132,10 +133,20 @@ public partial class StashMigrationService
 
         var count = 0;
         var idMap = new Dictionary<int, int>();
-        const int SceneBatchSize = 50;
+        const int SceneBatchSize = 250;
         var pendingBatch = new List<(int StashId, Scene Entity)>(SceneBatchSize);
         _logger.LogInformation("Importing {Total} scenes...", sceneRows.Count);
         progress.Report(startProgress, "Importing scenes...");
+        _logger.LogDebug(
+            "[StashTiming] phase=scenes checkpoint=loaded rows={Rows} files={Files} videos={Videos} fingerprints={FingerprintOwners} tagOwners={TagOwners} performerOwners={PerformerOwners} groupOwners={GroupOwners} elapsedMs={ElapsedMilliseconds:F0}",
+            sceneRows.Count,
+            fileData.Count,
+            videoData.Count,
+            fingerprints.Count,
+            sceneTagMap.Count,
+            scenePerformerMap.Count,
+            sceneGroupMap.Count,
+            stopwatch.Elapsed.TotalMilliseconds);
 
         void FlushSceneBatch()
         {
@@ -228,6 +239,11 @@ public partial class StashMigrationService
                 _db.ChangeTracker.Clear();
                 ReportPhase(progress, startProgress, endProgress, count, sceneRows.Count, $"Importing scenes ({count}/{sceneRows.Count})");
                 _logger.LogInformation("Imported {Count}/{Total} scenes...", count, sceneRows.Count);
+                _logger.LogDebug(
+                    "[StashTiming] phase=scenes checkpoint=batch imported={Imported} total={Total} elapsedMs={ElapsedMilliseconds:F0}",
+                    count,
+                    sceneRows.Count,
+                    stopwatch.Elapsed.TotalMilliseconds);
             }
         }
 
@@ -238,7 +254,7 @@ public partial class StashMigrationService
             _db.ChangeTracker.Clear();
             ReportPhase(progress, startProgress, endProgress, count, sceneRows.Count, $"Importing scenes ({count}/{sceneRows.Count})");
         }
-        _logger.LogInformation("Imported {Count} scenes", count);
+        _logger.LogInformation("Imported {Count} scenes in {Elapsed}", count, stopwatch.Elapsed);
 
         var generatedMap = new Dictionary<int, SceneGeneratedData>();
         foreach (var row in sceneRows)

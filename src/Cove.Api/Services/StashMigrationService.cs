@@ -6,6 +6,7 @@ using Cove.Core.Interfaces;
 using Cove.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -305,8 +306,9 @@ public partial class StashMigrationService
 
         await using var conn = new SqliteConnection(OpenReadOnly(stashDbPath));
         await conn.OpenAsync(ct);
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        _logger.LogInformation("Starting Stash migration from {Path}", stashDbPath);
+        var sw = Stopwatch.StartNew();
+        var dbSizeBytes = new FileInfo(stashDbPath).Length;
+        _logger.LogInformation("Starting Stash migration from {Path} ({Size:N0} bytes)", stashDbPath, dbSizeBytes);
 
         await ApplyCoveGeneratedPathOverrideAsync(options.CoveGeneratedPath, ct);
 
@@ -316,62 +318,100 @@ public partial class StashMigrationService
             ? ParseStashConfig(configPath)
             : new StashConfigData([], null, "OSHASH", null);
 
-        _logger.LogInformation("[Stash] Phase: blobs (blob_files_path={BlobFilesPath})", stashConfig.BlobFilesPath ?? "(inline SQLite)");
-        var blobMap = await ImportBlobsAsync(conn, stashConfig.BlobFilesPath, progress, BlobsStart, BlobsEnd, ct);
-        _logger.LogInformation("[Stash] Phase: folders (elapsed {Elapsed})", sw.Elapsed);
-        var folderIdMap = await ImportFoldersAsync(conn, progress, FoldersStart, FoldersEnd, ct);
+        var blobMap = await RunMigrationPhaseAsync(
+            "blobs",
+            sw,
+            () => ImportBlobsAsync(conn, stashConfig.BlobFilesPath, progress, BlobsStart, BlobsEnd, ct));
+
+        var folderIdMap = await RunBulkInsertPhaseAsync(
+            "folders",
+            sw,
+            () => ImportFoldersAsync(conn, progress, FoldersStart, FoldersEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: studios (elapsed {Elapsed})", sw.Elapsed);
-        var studioIdMap = await ImportStudiosAsync(conn, blobMap, progress, StudiosStart, StudiosEnd, ct);
+        var studioIdMap = await RunBulkInsertPhaseAsync(
+            "studios",
+            sw,
+            () => ImportStudiosAsync(conn, blobMap, progress, StudiosStart, StudiosEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: tags (elapsed {Elapsed})", sw.Elapsed);
-        var tagIdMap = await ImportTagsAsync(conn, blobMap, progress, TagsStart, TagsEnd, ct);
+        var tagIdMap = await RunBulkInsertPhaseAsync(
+            "tags",
+            sw,
+            () => ImportTagsAsync(conn, blobMap, progress, TagsStart, TagsEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: performers (elapsed {Elapsed})", sw.Elapsed);
-        var performerIdMap = await ImportPerformersAsync(conn, blobMap, tagIdMap, progress, PerformersStart, PerformersEnd, ct);
+        var performerIdMap = await RunBulkInsertPhaseAsync(
+            "performers",
+            sw,
+            () => ImportPerformersAsync(conn, blobMap, tagIdMap, progress, PerformersStart, PerformersEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: groups (elapsed {Elapsed})", sw.Elapsed);
-        var groupIdMap = await ImportGroupsAsync(conn, studioIdMap, progress, GroupsStart, GroupsEnd, ct);
+        var groupIdMap = await RunBulkInsertPhaseAsync(
+            "groups",
+            sw,
+            () => ImportGroupsAsync(conn, studioIdMap, progress, GroupsStart, GroupsEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: scenes (elapsed {Elapsed})", sw.Elapsed);
-        var (sceneCount, sceneIdMap, sceneGeneratedMap) = await ImportScenesAsync(conn, blobMap, folderIdMap, studioIdMap, tagIdMap, performerIdMap, groupIdMap, progress, ScenesStart, ScenesEnd, ct);
+        var (sceneCount, sceneIdMap, sceneGeneratedMap) = await RunBulkInsertPhaseAsync(
+            "scenes",
+            sw,
+            () => ImportScenesAsync(conn, blobMap, folderIdMap, studioIdMap, tagIdMap, performerIdMap, groupIdMap, progress, ScenesStart, ScenesEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: scene markers (elapsed {Elapsed})", sw.Elapsed);
-        await ImportSceneMarkerSegmentsAsync(conn, sceneIdMap, tagIdMap, progress, SceneMarkersStart, SceneMarkersEnd, ct);
+        await RunBulkInsertPhaseAsync(
+            "scene markers",
+            sw,
+            () => ImportSceneMarkerSegmentsAsync(conn, sceneIdMap, tagIdMap, progress, SceneMarkersStart, SceneMarkersEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: images (elapsed {Elapsed})", sw.Elapsed);
-        var imageIdMap = await ImportImagesAsync(conn, folderIdMap, studioIdMap, tagIdMap, performerIdMap, progress, ImagesStart, ImagesEnd, ct);
+        var imageIdMap = await RunBulkInsertPhaseAsync(
+            "images",
+            sw,
+            () => ImportImagesAsync(conn, folderIdMap, studioIdMap, tagIdMap, performerIdMap, progress, ImagesStart, ImagesEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: galleries (elapsed {Elapsed})", sw.Elapsed);
-        var (galleryCount, galleryFileIdMap) = await ImportGalleriesAsync(conn, folderIdMap, studioIdMap, tagIdMap, performerIdMap, imageIdMap, progress, GalleriesStart, GalleriesEnd, ct);
+        var (galleryCount, galleryFileIdMap) = await RunBulkInsertPhaseAsync(
+            "galleries",
+            sw,
+            () => ImportGalleriesAsync(conn, folderIdMap, studioIdMap, tagIdMap, performerIdMap, imageIdMap, progress, GalleriesStart, GalleriesEnd, ct));
         _db.ChangeTracker.Clear();
 
-        _logger.LogInformation("[Stash] Phase: reconcile zip links (elapsed {Elapsed})", sw.Elapsed);
-        await ReconcileImportedZipLinksAsync(conn, folderIdMap, imageIdMap, galleryFileIdMap, ct);
+        await RunMigrationPhaseAsync(
+            "reconcile zip links",
+            sw,
+            () => ReconcileImportedZipLinksAsync(conn, folderIdMap, imageIdMap, galleryFileIdMap, ct));
         _db.ChangeTracker.Clear();
 
         IReadOnlyDictionary<string, int> tagNameToCoveIdMap = string.IsNullOrWhiteSpace(options.AiDataSource)
             ? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-            : await BuildStashTagNameToCoveIdMapAsync(conn, tagIdMap, ct);
+            : await RunMigrationPhaseAsync(
+                "build AI tag name map",
+                sw,
+                () => BuildStashTagNameToCoveIdMapAsync(conn, tagIdMap, ct));
 
-        await ImportAiTagDataAsync(options.AiDataSource, sceneIdMap, imageIdMap, tagIdMap, tagNameToCoveIdMap, progress, AiDataStart, AiDataEnd, ct);
+        await RunBulkInsertPhaseAsync(
+            "AI tag data",
+            sw,
+            () => ImportAiTagDataAsync(options.AiDataSource, sceneIdMap, imageIdMap, tagIdMap, tagNameToCoveIdMap, progress, AiDataStart, AiDataEnd, ct));
         _db.ChangeTracker.Clear();
 
-        progress.Report(LibraryPathsStart, "Importing library paths...");
-        await ImportLibraryPathsAsync(stashDbPath, ct);
-        progress.Report(LibraryPathsEnd, "Library paths imported");
+        await RunMigrationPhaseAsync(
+            "library paths",
+            sw,
+            async () =>
+            {
+                progress.Report(LibraryPathsStart, "Importing library paths...");
+                await ImportLibraryPathsAsync(stashDbPath, ct);
+                progress.Report(LibraryPathsEnd, "Library paths imported");
+            });
 
         if (options.MigrateGeneratedContent)
         {
-            await CopyGeneratedContentAsync(stashConfig, sceneGeneratedMap, options, progress, GeneratedAssetsStart, GeneratedAssetsEnd, ct);
+            await RunMigrationPhaseAsync(
+                "generated content",
+                sw,
+                () => CopyGeneratedContentAsync(stashConfig, sceneGeneratedMap, options, progress, GeneratedAssetsStart, GeneratedAssetsEnd, ct));
         }
         else
         {
@@ -383,5 +423,69 @@ public partial class StashMigrationService
             sw.Elapsed, sceneCount, performerIdMap.Count, tagIdMap.Count, studioIdMap.Count, groupIdMap.Count, imageIdMap.Count, galleryCount);
 
         return new StashImportResult(sceneCount, performerIdMap.Count, tagIdMap.Count, studioIdMap.Count, groupIdMap.Count, imageIdMap.Count, galleryCount);
+    }
+
+    private async Task<T> RunBulkInsertPhaseAsync<T>(string phaseName, Stopwatch totalStopwatch, Func<Task<T>> action)
+    {
+        var previousAutoDetectChanges = _db.ChangeTracker.AutoDetectChangesEnabled;
+        _db.ChangeTracker.AutoDetectChangesEnabled = false;
+        try
+        {
+            _logger.LogDebug("[StashTiming] phase={Phase} autoDetectChanges=false", phaseName);
+            return await RunMigrationPhaseAsync(phaseName, totalStopwatch, action);
+        }
+        finally
+        {
+            _db.ChangeTracker.AutoDetectChangesEnabled = previousAutoDetectChanges;
+        }
+    }
+
+    private async Task<T> RunMigrationPhaseAsync<T>(string phaseName, Stopwatch totalStopwatch, Func<Task<T>> action)
+    {
+        var phaseStopwatch = Stopwatch.StartNew();
+        var phaseStart = totalStopwatch.Elapsed;
+        _logger.LogInformation("[Stash] Starting {Phase} at +{Elapsed}", phaseName, phaseStart);
+        _logger.LogDebug("[StashTiming] phase={Phase} event=start totalMs={TotalMilliseconds:F0}", phaseName, phaseStart.TotalMilliseconds);
+
+        try
+        {
+            var result = await action();
+            phaseStopwatch.Stop();
+            _logger.LogInformation("[Stash] Finished {Phase} in {PhaseElapsed} (total {TotalElapsed})", phaseName, phaseStopwatch.Elapsed, totalStopwatch.Elapsed);
+            _logger.LogDebug(
+                "[StashTiming] phase={Phase} event=finish phaseMs={PhaseMilliseconds:F0} totalMs={TotalMilliseconds:F0}",
+                phaseName,
+                phaseStopwatch.Elapsed.TotalMilliseconds,
+                totalStopwatch.Elapsed.TotalMilliseconds);
+            return result;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            phaseStopwatch.Stop();
+            _logger.LogError(
+                ex,
+                "[Stash] Failed {Phase} after {PhaseElapsed} (total {TotalElapsed})",
+                phaseName,
+                phaseStopwatch.Elapsed,
+                totalStopwatch.Elapsed);
+            _logger.LogDebug(
+                "[StashTiming] phase={Phase} event=fail phaseMs={PhaseMilliseconds:F0} totalMs={TotalMilliseconds:F0}",
+                phaseName,
+                phaseStopwatch.Elapsed.TotalMilliseconds,
+                totalStopwatch.Elapsed.TotalMilliseconds);
+            throw;
+        }
+    }
+
+    private async Task RunMigrationPhaseAsync(string phaseName, Stopwatch totalStopwatch, Func<Task> action)
+    {
+        await RunMigrationPhaseAsync(
+            phaseName,
+            totalStopwatch,
+            async () =>
+            {
+                await action();
+                return true;
+            });
     }
 }

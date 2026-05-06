@@ -130,7 +130,7 @@ describe("SegmentDetailPage", () => {
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
 
-    fireEvent.click(within(tabs).getByRole("tab", { name: /related/i }));
+    fireEvent.click(within(tabs).getByRole("tab", { name: /context/i }));
     expect(await screen.findByText("Previous Segments")).toBeInTheDocument();
     expect(screen.getAllByText("Cold Open").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Action Beat").length).toBeGreaterThan(0);

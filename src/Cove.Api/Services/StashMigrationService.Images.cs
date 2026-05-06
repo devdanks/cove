@@ -21,6 +21,7 @@ public partial class StashMigrationService
         if (!await TableExistsAsync(conn, "images", ct))
             return new Dictionary<int, int>();
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var total = await CountAsync(conn, "images", ct);
         _logger.LogInformation("Importing {Total} images...", total);
 
@@ -90,6 +91,15 @@ public partial class StashMigrationService
         var skippedDuplicateFiles = 0;
         const int BatchSize = 500;
         progress.Report(startProgress, "Importing images...");
+        _logger.LogDebug(
+            "[StashTiming] phase=images checkpoint=loaded rows={Rows} files={Files} imageFiles={ImageFiles} tagOwners={TagOwners} performerOwners={PerformerOwners} urlOwners={UrlOwners} elapsedMs={ElapsedMilliseconds:F0}",
+            imageRows.Count,
+            fileData.Count,
+            imageFileData.Count,
+            imageTagMap.Count,
+            imagePerformerMap.Count,
+            imageUrls.Count,
+            stopwatch.Elapsed.TotalMilliseconds);
 
         for (int i = 0; i < imageRows.Count; i += BatchSize)
         {
@@ -167,12 +177,18 @@ public partial class StashMigrationService
             ReportPhase(progress, startProgress, endProgress, idMap.Count, imageRows.Count, $"Importing images ({idMap.Count}/{imageRows.Count})");
 
             _logger.LogInformation("Imported {Count}/{Total} images...", Math.Min(i + BatchSize, imageRows.Count), imageRows.Count);
+            _logger.LogDebug(
+                "[StashTiming] phase=images checkpoint=batch imported={Imported} total={Total} skippedDuplicateFiles={SkippedDuplicateFiles} elapsedMs={ElapsedMilliseconds:F0}",
+                idMap.Count,
+                imageRows.Count,
+                skippedDuplicateFiles,
+                stopwatch.Elapsed.TotalMilliseconds);
         }
 
         if (skippedDuplicateFiles > 0)
             _logger.LogWarning("Skipped {Count} duplicate image files because a file with the same folder/basename was already imported", skippedDuplicateFiles);
 
-        _logger.LogInformation("Imported {Count} images", idMap.Count);
+        _logger.LogInformation("Imported {Count} images in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
     }
 }

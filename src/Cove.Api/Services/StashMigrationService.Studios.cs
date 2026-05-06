@@ -8,6 +8,7 @@ public partial class StashMigrationService
 {
     private async Task<Dictionary<int, int>> ImportStudiosAsync(SqliteConnection conn, Dictionary<string, string> blobMap, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var rows = new List<(int Id, string Name, int? ParentId, string? Details, int? Rating, bool Favorite, bool IgnoreAutoTag, string? ImageBlob)>();
         await using (var cmd = conn.CreateCommand())
         {
@@ -40,7 +41,50 @@ public partial class StashMigrationService
 
         _logger.LogInformation("Importing {Total} studios...", rows.Count);
         var idMap = new Dictionary<int, int>();
+        var createdStudiosByStashId = new Dictionary<int, Studio>();
+        const int StudioBatchSize = 500;
+        var pendingStudios = new List<(int StashId, Studio Entity)>(StudioBatchSize);
         progress.Report(startProgress, "Importing studios...");
+        _logger.LogDebug(
+            "[StashTiming] phase=studios checkpoint=loaded rows={Rows} urlOwners={UrlOwners} aliasOwners={AliasOwners} remoteIdOwners={RemoteIdOwners} elapsedMs={ElapsedMilliseconds:F0}",
+            rows.Count,
+            urls.Count,
+            aliases.Count,
+            studioStashIds.Count,
+            stopwatch.Elapsed.TotalMilliseconds);
+
+        async Task FlushStudioBatchAsync()
+        {
+            if (pendingStudios.Count == 0)
+                return;
+
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed importing studio batch with Stash IDs [{StashStudioIds}]",
+                    string.Join(", ", pendingStudios.Select(static item => item.StashId)));
+                throw;
+            }
+
+            foreach (var (stashId, entity) in pendingStudios)
+                idMap[stashId] = entity.Id;
+
+            pendingStudios.Clear();
+            _db.ChangeTracker.Clear();
+
+            ReportPhase(progress, startProgress, endProgress, idMap.Count, ordered.Count, $"Importing studios ({idMap.Count}/{ordered.Count})");
+            _logger.LogDebug(
+                "[StashTiming] phase=studios checkpoint=batch imported={Imported} total={Total} elapsedMs={ElapsedMilliseconds:F0}",
+                idMap.Count,
+                ordered.Count,
+                stopwatch.Elapsed.TotalMilliseconds);
+        }
+
         foreach (var stashId in ordered)
         {
             var row = byId[stashId];
@@ -52,6 +96,7 @@ public partial class StashMigrationService
             {
                 Name = row.Name,
                 ParentId = row.ParentId.HasValue && idMap.TryGetValue(row.ParentId.Value, out var pId) ? pId : null,
+                Parent = row.ParentId.HasValue && !idMap.ContainsKey(row.ParentId.Value) && createdStudiosByStashId.TryGetValue(row.ParentId.Value, out var parentStudio) ? parentStudio : null,
                 Details = row.Details,
                 Rating = row.Rating,
                 Favorite = row.Favorite,
@@ -62,32 +107,16 @@ public partial class StashMigrationService
                 Aliases = aliases.GetValueOrDefault(stashId, []).Select(a => new StudioAlias { Alias = a }).ToList(),
                 RemoteIds = remoteIds,
             };
-            _db.ChangeTracker.Clear();
             _db.Studios.Add(entity);
-            try
-            {
-                await _db.SaveChangesAsync(ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "Failed importing studio {StashStudioId} '{StudioName}' with remote IDs [{RemoteIds}]",
-                    stashId,
-                    row.Name,
-                    string.Join(", ", remoteIds.Select(id => $"{id.Endpoint}:{id.RemoteId}")));
-                throw;
-            }
-            var coveStudioId = entity.Id;
-            idMap[stashId] = coveStudioId;
-            _db.ChangeTracker.Clear();
+            createdStudiosByStashId[stashId] = entity;
+            pendingStudios.Add((stashId, entity));
 
-            if (idMap.Count % 25 == 0 || idMap.Count == ordered.Count)
-            {
-                ReportPhase(progress, startProgress, endProgress, idMap.Count, ordered.Count, $"Importing studios ({idMap.Count}/{ordered.Count})");
-                _logger.LogInformation("Imported {Count}/{Total} studios...", idMap.Count, ordered.Count);
-            }
+            if (pendingStudios.Count >= StudioBatchSize)
+                await FlushStudioBatchAsync();
         }
-        _logger.LogInformation("Imported {Count} studios", idMap.Count);
+
+        await FlushStudioBatchAsync();
+        _logger.LogInformation("Imported {Count} studios in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
     }
 }
