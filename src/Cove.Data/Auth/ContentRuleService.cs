@@ -8,7 +8,7 @@ public sealed class ContentRuleService : IContentRuleService
 {
     private static readonly HashSet<string> ValidEntityKinds = new(StringComparer.OrdinalIgnoreCase)
     {
-        "scene", "performer", "tag", "studio", "gallery", "image", "group", "marker", "file",
+        "scene", "performer", "tag", "studio", "gallery", "image", "group", "segment", "marker", "file",
     };
 
     private static readonly HashSet<string> ValidEffects = new(StringComparer.OrdinalIgnoreCase) { "allow", "deny" };
@@ -51,7 +51,7 @@ public sealed class ContentRuleService : IContentRuleService
         var entity = new RoleContentRule
         {
             RoleId = req.RoleId,
-            EntityKind = req.EntityKind.ToLowerInvariant(),
+            EntityKind = NormalizeEntityKind(req.EntityKind),
             Effect = req.Effect.ToLowerInvariant(),
             ScopeKind = req.ScopeKind.ToLowerInvariant(),
             ScopeValue = string.IsNullOrWhiteSpace(req.ScopeValue) ? "{}" : req.ScopeValue,
@@ -144,7 +144,7 @@ public sealed class ContentRuleService : IContentRuleService
 
         if (!string.IsNullOrEmpty(entityKind))
         {
-            var normalizedEntityKind = entityKind.ToLowerInvariant();
+            var normalizedEntityKind = NormalizeEntityKind(entityKind);
             query = query.Where(overrideItem => overrideItem.EntityKind == normalizedEntityKind);
         }
 
@@ -153,7 +153,7 @@ public sealed class ContentRuleService : IContentRuleService
             overrideItem.Id,
             overrideItem.RoleId,
             overrideItem.Role?.Name ?? string.Empty,
-            overrideItem.EntityKind,
+            ToClientEntityKind(overrideItem.EntityKind),
             overrideItem.EntityId,
             overrideItem.Effect,
             overrideItem.AppliesTo,
@@ -175,7 +175,7 @@ public sealed class ContentRuleService : IContentRuleService
         var entity = new RoleEntityOverride
         {
             RoleId = req.RoleId,
-            EntityKind = req.EntityKind.ToLowerInvariant(),
+            EntityKind = NormalizeEntityKind(req.EntityKind),
             EntityId = req.EntityId,
             Effect = req.Effect.ToLowerInvariant(),
             AppliesTo = req.AppliesTo.ToLowerInvariant(),
@@ -198,7 +198,7 @@ public sealed class ContentRuleService : IContentRuleService
             entity.Id,
             entity.RoleId,
             role.Name,
-            entity.EntityKind,
+            ToClientEntityKind(entity.EntityKind),
             entity.EntityId,
             entity.Effect,
             entity.AppliesTo,
@@ -239,11 +239,20 @@ public sealed class ContentRuleService : IContentRuleService
         rule.Id,
         rule.RoleId,
         rule.Role?.Name ?? string.Empty,
-        rule.EntityKind,
+        ToClientEntityKind(rule.EntityKind),
         rule.Effect,
         rule.ScopeKind,
         rule.ScopeValue,
         rule.AppliesTo,
         rule.CreatedAt,
         rule.UpdatedAt);
+
+    private static string NormalizeEntityKind(string entityKind)
+    {
+        var normalized = entityKind.ToLowerInvariant();
+        return normalized == "segment" ? "marker" : normalized;
+    }
+
+    private static string ToClientEntityKind(string entityKind) =>
+        entityKind.Equals("marker", StringComparison.OrdinalIgnoreCase) ? "segment" : entityKind;
 }

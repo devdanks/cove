@@ -13,6 +13,10 @@ public interface ITagProvenanceService
         string? sourceRunId = null,
         string? modelKey = null,
         float? confidence = null,
+        string? contextType = null,
+        int? contextId = null,
+        double? totalDurationSec = null,
+        double? hostDurationSec = null,
         CancellationToken cancellationToken = default);
 
     Task RecordAsync(
@@ -23,6 +27,10 @@ public interface ITagProvenanceService
         string? sourceRunId = null,
         string? modelKey = null,
         float? confidence = null,
+        string? contextType = null,
+        int? contextId = null,
+        double? totalDurationSec = null,
+        double? hostDurationSec = null,
         CancellationToken cancellationToken = default);
 
     Task SyncTagSetAsync(

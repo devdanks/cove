@@ -23,7 +23,9 @@ public class SystemController(
     ScraperService scraperService, MetadataServerService metadataServerService,
     CoveConfiguration coveConfiguration,
     CoveContext db,
-    ICurrentPrincipalAccessor principalAccessor) : ControllerBase
+    ICurrentPrincipalAccessor principalAccessor,
+    IAuditService auditService,
+    IHostApplicationLifetime applicationLifetime) : ControllerBase
 {
     [HttpGet("status")]
     [Microsoft.AspNetCore.Authorization.AllowAnonymous]
@@ -50,6 +52,28 @@ public class SystemController(
             PendingMigrations: pending.Length > 0 ? pending : null,
             AuthEnabled: coveConfiguration.Auth?.Enabled ?? false
         ));
+    }
+
+    [HttpPost("shutdown")]
+    [RequiresPermission(Permissions.SystemShutdown)]
+    public async Task<IActionResult> Shutdown(CancellationToken ct)
+    {
+        await auditService.LogAsync(
+            AuditActions.SystemShutdown,
+            AuditOutcomes.Success,
+            principalAccessor.Current,
+            targetKind: "system",
+            targetId: "application",
+            detail: null,
+            ct: ct);
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(250);
+            applicationLifetime.StopApplication();
+        }, CancellationToken.None);
+
+        return Ok(new { message = "Shutdown requested." });
     }
 
     [HttpGet("stats")]

@@ -45,6 +45,8 @@ public static class AuditActions
     public const string UserUpdate = "user.update";
     public const string UserDelete = "user.delete";
     public const string UserDisable = "user.disable";
+    public const string UserInviteCreate = "user.invite.create";
+    public const string UserInviteRedeem = "user.invite.redeem";
     public const string UserUnlock = "user.unlock";
     public const string PasswordChange = "password.change";
     public const string RoleCreate = "role.create";
@@ -53,5 +55,9 @@ public static class AuditActions
     public const string RoleGrant = "role.grant";
     public const string RoleRevoke = "role.revoke";
     public const string SettingsChange = "settings.change";
+    public const string AuthFailsafeEnabled = "auth.failsafe-enabled";
+    public const string AuthSetupTokenCreate = "auth.setup-token.create";
+    public const string SystemShutdown = "system.shutdown";
+    public const string AuthSetupTokenRedeem = "auth.setup-token.redeem";
     public const string AiDataPurge = "ai_data.purge";
 }

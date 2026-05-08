@@ -10,7 +10,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/images/{imageId:int}/detections")]
-[RequiresPermission(Permissions.MarkersRead)]
+[RequiresPermission(Permissions.SegmentsRead)]
 public class ImageDetectionsController(CoveContext db) : ControllerBase
 {
     [HttpGet]
@@ -39,8 +39,8 @@ public class ImageDetectionsController(CoveContext db) : ControllerBase
     }
 
     [HttpPost]
-    [RequiresPermission(Permissions.MarkersWrite)]
-    [RequiresEntityAccess(EntityKinds.Image, Permissions.MarkersWrite, RouteValueName = "imageId")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    [RequiresEntityAccess(EntityKinds.Image, Permissions.SegmentsWrite, RouteValueName = "imageId")]
     public async Task<ActionResult<DetectionDto>> Create(int imageId, [FromBody] DetectionCreateDto dto, CancellationToken ct)
     {
         if (!await ImageExistsAsync(imageId, ct)) return NotFound();
@@ -77,8 +77,8 @@ public class ImageDetectionsController(CoveContext db) : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    [RequiresPermission(Permissions.MarkersWrite)]
-    [RequiresEntityAccess(EntityKinds.Image, Permissions.MarkersWrite, RouteValueName = "imageId")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    [RequiresEntityAccess(EntityKinds.Image, Permissions.SegmentsWrite, RouteValueName = "imageId")]
     public async Task<ActionResult<DetectionDto>> Update(int imageId, int id, [FromBody] DetectionUpdateDto dto, CancellationToken ct)
     {
         if (dto.FrameWidth <= 0 || dto.FrameHeight <= 0)
@@ -111,8 +111,8 @@ public class ImageDetectionsController(CoveContext db) : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [RequiresPermission(Permissions.MarkersDelete)]
-    [RequiresEntityAccess(EntityKinds.Image, Permissions.MarkersDelete, RouteValueName = "imageId")]
+    [RequiresPermission(Permissions.SegmentsDelete)]
+    [RequiresEntityAccess(EntityKinds.Image, Permissions.SegmentsDelete, RouteValueName = "imageId")]
     public async Task<IActionResult> Delete(int imageId, int id, CancellationToken ct)
     {
         var detection = await db.Detections

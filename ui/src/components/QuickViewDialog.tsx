@@ -153,7 +153,7 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
             </div>
             <div className="flex flex-wrap gap-1">
               {scene.tags.map((t: any) => (
-                <TagBadge key={t.id} name={t.name} onClick={() => { onClose(); onNavigate({ page: "tag", id: t.id }); }} />
+                <TagBadge key={t.id} name={t.name} tag={t} onClick={() => { onClose(); onNavigate({ page: "tag", id: t.id }); }} />
               ))}
             </div>
           </div>
@@ -279,7 +279,7 @@ function ImageQuickView({ id, onClose, onNavigate }: Omit<ImageQuickViewProps, "
             </div>
             <div className="flex flex-wrap gap-1">
               {image.tags.map((t: any) => (
-                <TagBadge key={t.id} name={t.name} onClick={() => { onClose(); onNavigate({ page: "tag", id: t.id }); }} />
+                <TagBadge key={t.id} name={t.name} tag={t} onClick={() => { onClose(); onNavigate({ page: "tag", id: t.id }); }} />
               ))}
             </div>
           </div>

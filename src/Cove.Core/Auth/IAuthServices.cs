@@ -2,15 +2,24 @@ namespace Cove.Core.Auth;
 
 public interface IUserService
 {
+    Task<bool> OwnerExistsAsync(CancellationToken ct = default);
     Task<UserDto?> FindByUsernameAsync(string username, CancellationToken ct = default);
     Task<UserDto?> GetAsync(int id, CancellationToken ct = default);
     Task<IReadOnlyList<UserDto>> ListAsync(CancellationToken ct = default);
     Task<UserDto> CreateAsync(CreateUserRequest req, CovePrincipal? actor, CancellationToken ct = default);
+    Task<UserDto> BootstrapOwnerAsync(string username, string password, CovePrincipal? actor, CancellationToken ct = default);
     Task<UserDto> UpdateAsync(int id, UpdateUserRequest req, CovePrincipal? actor, CancellationToken ct = default);
     Task DeleteAsync(int id, CovePrincipal? actor, CancellationToken ct = default);
     Task ChangePasswordAsync(int userId, string newPassword, CovePrincipal? actor, CancellationToken ct = default);
     Task<bool> VerifyPasswordAsync(int userId, string password, CancellationToken ct = default);
     Task SetRolesAsync(int userId, IEnumerable<string> roleNames, CovePrincipal? actor, CancellationToken ct = default);
+    Task<InviteTokenDto> CreateInviteAsync(int userId, string baseUrl, CovePrincipal? actor, CancellationToken ct = default);
+    Task<InviteTokenDto> CreatePendingInviteAsync(CreateInviteRequest req, string baseUrl, CovePrincipal? actor, CancellationToken ct = default);
+    Task<InviteTokenInfoDto?> GetInviteInfoAsync(string token, CancellationToken ct = default);
+    Task<UserDto> RedeemInviteAsync(string token, string password, string? username, CovePrincipal? actor, CancellationToken ct = default);
+    Task<SetupTokenDto> CreateSetupTokenAsync(CovePrincipal? actor, CancellationToken ct = default);
+    Task<bool> HasSetupTokenAsync(CancellationToken ct = default);
+    Task<UserDto> RedeemSetupTokenAsync(string token, string password, string? username, CovePrincipal? actor, CancellationToken ct = default);
     Task<UserUiPreferencesDto?> UpdateUiPreferencesAsync(int userId, UserUiPreferencesDto preferences, CovePrincipal? actor, CancellationToken ct = default);
     Task RecordLoginSuccessAsync(int userId, string? ip, CancellationToken ct = default);
     Task RecordLoginFailureAsync(int userId, CancellationToken ct = default);
@@ -54,6 +63,7 @@ public sealed record UserDto(
     bool IsLocked,
     bool IsSystem,
     bool MustChangePassword,
+    bool HasPassword,
     DateTime? LastLoginAt,
     string? LastLoginIp,
     DateTime CreatedAt,
@@ -86,11 +96,17 @@ public sealed record UserUiPreferencesDto(
 
 public sealed record CreateUserRequest(
     string Username,
-    string Password,
+    string? Password,
     string? DisplayName = null,
     string? Email = null,
     IReadOnlyList<string>? Roles = null,
     bool MustChangePassword = false);
+
+public sealed record CreateInviteRequest(
+    string? Username = null,
+    string? DisplayName = null,
+    string? Email = null,
+    IReadOnlyList<string>? Roles = null);
 
 public sealed record UpdateUserRequest(
     string? DisplayName = null,
@@ -123,6 +139,28 @@ public sealed record TokenPair(
     DateTime AccessExpires,
     DateTime RefreshExpires,
     UserDto User);
+
+public sealed record InviteTokenDto(
+    string Token,
+    string Url,
+    DateTime ExpiresAt);
+
+public sealed record InviteTokenInfoDto(
+    bool Valid,
+    bool UsernameRequired,
+    string? Username,
+    DateTime ExpiresAt);
+
+public sealed record SetupTokenDto(
+    string Token,
+    DateTime ExpiresAt);
+
+public sealed class InviteTokenException : Exception
+{
+    public InviteTokenException(string message) : base(message)
+    {
+    }
+}
 
 public sealed record ApiTokenIssued(
     Guid Id,

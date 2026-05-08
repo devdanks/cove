@@ -20,6 +20,7 @@ export interface Scene {
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  contextTagApplications?: TagApplication[];
 }
 
 export interface SceneRemoteId {
@@ -176,6 +177,12 @@ export interface Tag {
   showAsSegment?: boolean | null;
   segmentColorOverride?: string | null;
   segmentLaneOverride?: number | null;
+  color?: string | null;
+  tagGroupId?: number | null;
+  tagGroupName?: string | null;
+  tagGroupColor?: string | null;
+  minOccurrenceSec?: number | null;
+  minOccurrencePercent?: number | null;
   aliases: string[];
   sceneCount?: number;
   segmentCount?: number;
@@ -193,6 +200,60 @@ export interface TagProvenance {
   modelKey?: string;
   confidence?: number;
   appliedAt: string;
+  contextType?: string;
+  contextId?: number;
+  totalDurationSec?: number;
+  hostDurationSec?: number;
+}
+
+export interface TagGroup {
+  id: number;
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  sortOrder: number;
+  tagCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TagGroupCreate {
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  sortOrder?: number | null;
+}
+
+export interface TagGroupUpdate extends Partial<TagGroupCreate> {}
+
+export interface TagApplication {
+  id: number;
+  hostType: string;
+  hostId: number;
+  contextType?: string | null;
+  contextId?: number | null;
+  tag: Tag;
+  sourceKey: string;
+  sourceRunId?: string | null;
+  modelKey?: string | null;
+  confidence?: number | null;
+  totalDurationSec?: number | null;
+  hostDurationSec?: number | null;
+  appliedAt: string;
+}
+
+export interface TagApplicationCreate {
+  hostType: string;
+  hostId: number;
+  tagId: number;
+  sourceKey?: string;
+  contextType?: string | null;
+  contextId?: number | null;
+  sourceRunId?: string | null;
+  modelKey?: string | null;
+  confidence?: number | null;
+  totalDurationSec?: number | null;
+  hostDurationSec?: number | null;
 }
 
 export interface TagDetail extends Tag {
@@ -246,6 +307,10 @@ export interface TagCreate {
   description?: string;
   favorite?: boolean;
   ignoreAutoTag?: boolean;
+  color?: string | null;
+  tagGroupId?: number | null;
+  minOccurrenceSec?: number | null;
+  minOccurrencePercent?: number | null;
   showAsSegment?: boolean | null;
   segmentColorOverride?: string | null;
   segmentLaneOverride?: number | null;
@@ -1323,7 +1388,8 @@ export interface UiConfig {
 export interface SecurityConfig {
   enabled: boolean;
   username?: string;
-  maxSessionAgeMinutes: number;
+  allowAnonymousShareLinks: boolean;
+  knownProxies: string[];
   newPassword?: string;
 }
 
@@ -1817,6 +1883,21 @@ export interface TimestampCriterion {
   modifier: CriterionModifier;
 }
 
+export interface TagDurationClause {
+  tagId?: number;
+  value?: number;
+  value2?: number;
+  modifier: CriterionModifier;
+  unit?: "seconds" | "percent";
+  contextMode?: "any" | "host" | "context";
+  contextType?: string;
+}
+
+export interface TagDurationCriterion extends TagDurationClause {
+  clauses?: TagDurationClause[];
+  _names?: Record<string, string>;
+}
+
 export type FingerprintAlgorithm = "md5" | "oshash" | "phash";
 
 export interface FingerprintCriterion {
@@ -1841,6 +1922,7 @@ export interface SceneFilterCriteria {
   playCountCriterion?: IntCriterion;
   performerCountCriterion?: IntCriterion;
   tagsCriterion?: MultiIdCriterion;
+  tagDurationCriterion?: TagDurationCriterion;
   performersCriterion?: MultiIdCriterion;
   studiosCriterion?: MultiIdCriterion;
   groupsCriterion?: MultiIdCriterion;
@@ -1940,6 +2022,7 @@ export interface TagFilterCriteria {
   performerCountIncludesChildren?: boolean;
   parentsCriterion?: MultiIdCriterion;
   childrenCriterion?: MultiIdCriterion;
+  tagGroupsCriterion?: MultiIdCriterion;
   isMissingCriterion?: BoolCriterion;
   createdAtCriterion?: TimestampCriterion;
   updatedAtCriterion?: TimestampCriterion;
@@ -2316,6 +2399,7 @@ export interface ExtensionAction {
   handlerName?: string;
   order: number;
   pages?: string[];
+  requiredPermission?: string;
 }
 
 export interface ExtensionInfo {

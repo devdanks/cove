@@ -1394,9 +1394,9 @@ public class SegmentCoreControllerTests
         Roles = new HashSet<string>(),
         Permissions = new HashSet<string>
         {
-            Permissions.MarkersRead,
-            Permissions.MarkersWrite,
-            Permissions.MarkersDelete,
+            Permissions.SegmentsRead,
+            Permissions.SegmentsWrite,
+            Permissions.SegmentsDelete,
         },
     };
 

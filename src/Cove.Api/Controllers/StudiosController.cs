@@ -182,11 +182,11 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
     // ===== Merge =====
 
-    private static StudioDto MapToDto(Studio s, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null, int? performerCount = null, int? childStudioCount = null) => new(
+    private StudioDto MapToDto(Studio s, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null, int? performerCount = null, int? childStudioCount = null) => new(
         s.Id, s.Name, s.ParentId, s.Parent?.Name, s.Favorite, s.Details, s.IgnoreAutoTag, s.Organized,
         s.Urls.Select(u => u.Url).ToList(),
         s.Aliases.Select(a => a.Alias).ToList(),
-        s.StudioTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
+        s.StudioTags.Where(st => st.Tag != null).Select(st => TagDtoMapping.MapTagDto(st.Tag!)).ToList(),
         s.RemoteIds.Select(sid => new StudioRemoteIdDto(sid.Endpoint, sid.RemoteId)).ToList(),
         sceneCount ?? s.SceneCount,
         imageCount ?? s.ImageCount,
@@ -194,12 +194,12 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         groupCount ?? s.GroupCount,
         performerCount ?? s.PerformerCount,
         childStudioCount ?? s.ChildStudioCount,
-        s.ImageBlobId != null ? EntityImageUrls.Studio(s.Id, s.UpdatedAt) : null,
+        s.ImageBlobId != null ? EntityImageUrls.Studio(ControllerContext.HttpContext, s.Id, s.UpdatedAt) : null,
         s.CustomFields,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
 
-    private static List<StudioDto> MapListToDtos(IReadOnlyList<Studio> items)
+    private List<StudioDto> MapListToDtos(IReadOnlyList<Studio> items)
     {
         return items.Count == 0 ? [] : items.Select(studio => MapToDto(studio)).ToList();
     }

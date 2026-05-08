@@ -14,8 +14,7 @@ namespace Cove.Data.Auth;
 
 public sealed class TokenService : ITokenService
 {
-    public const int AccessMinutes = 15;
-    public const int RefreshDays = 14;
+    public const int DefaultRefreshDays = 30;
     public const string JwtIssuer = "Cove";
     public const string JwtAudience = "Cove";
 
@@ -46,7 +45,7 @@ public sealed class TokenService : ITokenService
 
         var (jwt, jwtExpires) = IssueJwt(user.Id, user.Username, roleNames);
         var (refreshPlain, refreshHash) = NewOpaqueToken();
-        var refreshExpires = DateTime.UtcNow.AddDays(RefreshDays);
+    var refreshExpires = DateTime.UtcNow.AddDays(GetRefreshTokenDays());
 
         var entity = new RefreshToken
         {
@@ -89,7 +88,7 @@ public sealed class TokenService : ITokenService
         existing.LastUsedAt = DateTime.UtcNow;
 
         var (newPlain, newHash) = NewOpaqueToken();
-        var refreshExpires = DateTime.UtcNow.AddDays(RefreshDays);
+    var refreshExpires = DateTime.UtcNow.AddDays(GetRefreshTokenDays());
         var rotated = new RefreshToken
         {
             Id = Guid.NewGuid(),
@@ -186,7 +185,7 @@ public sealed class TokenService : ITokenService
             {
                 ValidateIssuer = true, ValidIssuer = JwtIssuer,
                 ValidateAudience = true, ValidAudience = JwtAudience,
-                ValidateLifetime = true,
+                ValidateLifetime = false,
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
                 ClockSkew = TimeSpan.FromSeconds(30),
@@ -367,7 +366,7 @@ public sealed class TokenService : ITokenService
     public async Task<IReadOnlyList<ApiTokenDto>> ListApiTokensAsync(int userId, CancellationToken ct = default)
     {
         var rows = await _db.ApiTokens.AsNoTracking()
-            .Where(t => t.UserId == userId)
+            .Where(t => t.UserId == userId && t.RevokedAt == null)
             .OrderByDescending(t => t.CreatedAt)
             .ToListAsync(ct);
         return rows.Select(t =>
@@ -393,10 +392,12 @@ public sealed class TokenService : ITokenService
         };
         foreach (var r in roleNames)
             claims.Add(new Claim(ClaimTypes.Role, r));
-        var expires = DateTime.UtcNow.AddMinutes(AccessMinutes);
-        var token = new JwtSecurityToken(JwtIssuer, JwtAudience, claims, expires: expires, signingCredentials: creds);
+        var expires = DateTime.UtcNow.AddYears(20);
+        var token = new JwtSecurityToken(JwtIssuer, JwtAudience, claims, signingCredentials: creds);
         return (new JwtSecurityTokenHandler().WriteToken(token), expires);
     }
+
+    private int GetRefreshTokenDays() => Math.Clamp(_config.Auth.RefreshTokenDays, 1, 3650);
 
     private async Task<UserDto> BuildUserDto(User user, CancellationToken ct)
     {
@@ -406,6 +407,7 @@ public sealed class TokenService : ITokenService
             .ToListAsync(ct);
         return new UserDto(user.Id, user.Username, user.DisplayName, user.Email,
             user.IsActive, user.IsLocked, user.IsSystem, user.MustChangePassword,
+            !string.IsNullOrWhiteSpace(user.PasswordHash),
             user.LastLoginAt, user.LastLoginIp, user.CreatedAt, roleNames,
             UserService.ParseUiPreferences(user.UiPreferencesJson));
     }

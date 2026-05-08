@@ -34,6 +34,14 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateUserRequest req, CancellationToken ct) =>
         Ok(await _users.CreateAsync(req, _principalAccessor.Current, ct));
 
+    [HttpPost("invite")]
+    [RequiresPermission(Permissions.UsersInvite)]
+    public async Task<IActionResult> CreateInvite([FromBody] CreateInviteRequest req, CancellationToken ct)
+    {
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        return Ok(await _users.CreatePendingInviteAsync(req, baseUrl, _principalAccessor.Current, ct));
+    }
+
     [HttpPut("{id:int}")]
     [RequiresPermission(Permissions.UsersWrite)]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateUserRequest req, CancellationToken ct) =>
@@ -65,6 +73,14 @@ public class UsersController : ControllerBase
     {
         await _users.ChangePasswordAsync(id, req.NewPassword, _principalAccessor.Current, ct);
         return Ok(new { message = "Password updated." });
+    }
+
+    [HttpPost("{id:int}/invite")]
+    [RequiresPermission(Permissions.UsersInvite)]
+    public async Task<IActionResult> Invite(int id, CancellationToken ct)
+    {
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        return Ok(await _users.CreateInviteAsync(id, baseUrl, _principalAccessor.Current, ct));
     }
 
     [HttpPost("{id:int}/unlock")]

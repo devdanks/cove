@@ -13,7 +13,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[RequiresPermission(Permissions.MarkersRead)]
+[RequiresPermission(Permissions.SegmentsRead)]
 public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IServiceScopeFactory scopeFactory) : ControllerBase
 {
     [HttpGet]

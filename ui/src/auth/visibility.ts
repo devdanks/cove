@@ -4,7 +4,7 @@ export type NavVisibilityUser = {
   readGrantedEntityKinds?: string[];
 };
 
-export type EntityResource = "scene" | "image" | "performer" | "gallery" | "studio" | "tag" | "group" | "marker" | "face";
+export type EntityResource = "scene" | "image" | "performer" | "gallery" | "studio" | "tag" | "group" | "segment" | "face";
 export type NavPage = "scenes" | "segments" | "images" | "faces" | "galleries" | "performers" | "studios" | "tags" | "groups";
 
 const READ_PERMISSIONS: Record<EntityResource, string> = {
@@ -16,7 +16,7 @@ const READ_PERMISSIONS: Record<EntityResource, string> = {
   studio: "studios.read",
   tag: "tags.read",
   group: "groups.read",
-  marker: "markers.read",
+  segment: "segments.read",
 };
 
 const WRITE_PERMISSIONS: Record<EntityResource, string> = {
@@ -28,7 +28,7 @@ const WRITE_PERMISSIONS: Record<EntityResource, string> = {
   studio: "studios.write",
   tag: "tags.write",
   group: "groups.write",
-  marker: "markers.write",
+  segment: "segments.write",
 };
 
 const DELETE_PERMISSIONS: Record<EntityResource, string> = {
@@ -40,12 +40,12 @@ const DELETE_PERMISSIONS: Record<EntityResource, string> = {
   studio: "studios.delete",
   tag: "tags.delete",
   group: "groups.delete",
-  marker: "markers.delete",
+  segment: "segments.delete",
 };
 
 const NAV_PAGE_RESOURCE: Record<NavPage, EntityResource> = {
   scenes: "scene",
-  segments: "marker",
+  segments: "segment",
   images: "image",
   faces: "face",
   galleries: "gallery",

@@ -27,12 +27,12 @@ public sealed class CurrentPrincipalMiddleware
         IAuditService audit,
         ILogger<CurrentPrincipalMiddleware> logger)
     {
-        var ip = context.Connection.RemoteIpAddress?.ToString();
+        var ip = AuthDisabledRequestGuard.GetEffectiveRemoteAddress(context, config.Auth)?.ToString();
         var ua = context.Request.Headers.UserAgent.ToString();
 
         if (!config.Auth.Enabled)
         {
-            if (AuthDisabledRequestGuard.IsTrustedLocalAddress(context.Connection.RemoteIpAddress))
+            if (AuthDisabledRequestGuard.IsTrustedLocalRequest(context, config.Auth))
             {
                 accessor.Set(await authBypassPrincipalProvider.GetAsync(ip, ua, context.RequestAborted));
                 await _next(context);

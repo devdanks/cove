@@ -1,15 +1,15 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, scenes, segmentDisplayProfiles, tags, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata } from "../api/client";
+import { faces, scenes, segmentDisplayProfiles, tags, tagApplications, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay } from "../components/shared";
 import { 
   Pencil, Plus, Trash2, Search, Eye, EyeOff, Heart, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
   Gauge, Clapperboard, Monitor, FolderOpen, Layers,
-  RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download,
+  RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download, X,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import type { Detection, Face, ResolvedSpan, Scene, SceneUpdate, Segment } from "../api/types";
+import type { Detection, Face, ResolvedSpan, Scene, SceneUpdate, Segment, TagApplication } from "../api/types";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { InteractiveRating } from "../components/Rating";
@@ -30,6 +30,7 @@ import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { trackInteraction } from "../utils/interactionTracking";
 import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector, type SelectableTag } from "../components/TagSelector";
 
 const SceneEditModal = lazy(() => import("./SceneEditModal").then((module) => ({ default: module.SceneEditModal })));
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
@@ -96,8 +97,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const canReadGroups = canReadEntity("group", hasPermission);
   const canReadGalleries = canReadEntity("gallery", hasPermission);
   const canReadFaces = canReadEntity("face", hasPermission);
-  const canReadMarkers = canReadEntity("marker", hasPermission);
-  const canWriteMarkers = hasPermission("markers.write");
+  const canReadSegments = canReadEntity("segment", hasPermission);
+  const canWriteSegments = hasPermission("segments.write");
   const canReadFiles = hasPermission("files.read");
   const canRunJobs = hasPermission("jobs.run");
   const canLibraryScan = hasPermission("library.scan");
@@ -244,25 +245,25 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const { data: segments = [], isLoading: segmentsLoading } = useQuery({
     queryKey: ["scene", id, "segments"],
     queryFn: () => scenes.segments.list(id),
-    enabled: canReadMarkers,
+    enabled: canReadSegments,
   });
 
   const { data: displayProfiles = [] } = useQuery({
     queryKey: ["segment-display-profiles"],
     queryFn: () => segmentDisplayProfiles.list(),
-    enabled: canReadMarkers,
+    enabled: canReadSegments,
   });
 
   const { data: resolvedSpansResponse, isLoading: resolvedSpansLoading } = useQuery({
     queryKey: ["scene", id, "resolved-spans", selectedProfileId],
     queryFn: () => scenes.segments.spans(id, selectedProfileId),
-    enabled: canReadMarkers,
+    enabled: canReadSegments,
   });
 
   const { data: detections = [], isLoading: detectionsLoading } = useQuery({
     queryKey: ["scene", id, "detections"],
     queryFn: () => scenes.detections.list(id),
-    enabled: canReadMarkers,
+    enabled: canReadSegments,
   });
 
   const sceneFaceIds = useMemo(() => {
@@ -280,7 +281,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     queries: sceneFaceIds.map((faceId) => ({
       queryKey: ["face", faceId],
       queryFn: () => faces.get(faceId),
-      enabled: canReadFaces && canReadMarkers,
+      enabled: canReadFaces && canReadSegments,
     })),
   });
 
@@ -321,7 +322,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   ], {
     groups: "groups.read",
     galleries: "galleries.read",
-    segments: "markers.read",
+    segments: "segments.read",
     "file-info": "files.read",
     edit: "scenes.write",
   }, hasPermission);
@@ -336,13 +337,13 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     { key: ",", description: "Toggle theater mode", handler: () => setTheaterMode(!theaterMode) },
     { key: "a", description: "Open details tab", handler: () => setActiveTab("details") },
     { key: "e", description: "Open edit tab", handler: () => canWriteScene && setActiveTab("edit") },
-    { key: "s", description: "Open segments tab", handler: () => canReadMarkers && setActiveTab("segments") },
+    { key: "s", description: "Open segments tab", handler: () => canReadSegments && setActiveTab("segments") },
     { key: "i", description: "Open file info tab", handler: () => canReadFiles && setActiveTab("file-info") },
     { key: "h", description: "Open history tab", handler: () => setActiveTab("history") },
     { key: "o", description: "Toggle favorite", handler: () => scene && canEngageScene && setSceneFavorite(!sceneFavorite) },
     { key: "[", description: "Open previous scene", handler: () => hasPrev && prevId != null && onNavigate({ page: "scene", id: prevId }) },
     { key: "]", description: "Open next scene", handler: () => hasNext && nextId != null && onNavigate({ page: "scene", id: nextId }) },
-  ], [canEngageScene, canReadFiles, canReadMarkers, canWriteScene, hasNext, hasPrev, nextId, onNavigate, prevId, scene, sceneFavorite, theaterMode, setSceneFavorite]);
+  ], [canEngageScene, canReadFiles, canReadSegments, canWriteScene, hasNext, hasPrev, nextId, onNavigate, prevId, scene, sceneFavorite, theaterMode, setSceneFavorite]);
 
   if (isLoading) {
     return (
@@ -508,7 +509,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         sceneId={scene.id}
         segments={segments}
         loading={segmentsLoading}
-        canEdit={canWriteMarkers}
+        canEdit={canWriteSegments}
         onSeek={(time) => seekRef.current?.(time)}
       />
     </div>
@@ -713,6 +714,68 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   );
 }
 
+function buildSceneEditPerformerContextTagIds(scene: Scene): Record<number, number[]> {
+  const result: Record<number, number[]> = {};
+  for (const application of scene.contextTagApplications ?? []) {
+    if (application.contextType !== "performer" || application.contextId == null) {
+      continue;
+    }
+
+    result[application.contextId] = [...(result[application.contextId] ?? []), application.tag.id];
+  }
+
+  return result;
+}
+
+async function syncSceneEditPerformerContextTags(sceneId: number, existingApplications: TagApplication[], desiredByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) {
+  const selectedPerformers = new Set(selectedPerformerIds);
+  const desiredKeys = new Set<string>();
+
+  for (const [performerIdText, tagIds] of Object.entries(desiredByPerformer)) {
+    const performerId = Number(performerIdText);
+    if (!selectedPerformers.has(performerId)) {
+      continue;
+    }
+
+    for (const tagId of tagIds) {
+      desiredKeys.add(`${performerId}:${tagId}`);
+    }
+  }
+
+  const existingContextApplications = existingApplications.filter((application) => application.contextType === "performer" && application.contextId != null);
+
+  for (const application of existingContextApplications) {
+    const key = `${application.contextId}:${application.tag.id}`;
+    if (!desiredKeys.has(key)) {
+      await tagApplications.delete(application.id);
+    }
+  }
+
+  const existingKeys = new Set(existingContextApplications.map((application) => `${application.contextId}:${application.tag.id}`));
+  for (const [performerIdText, tagIds] of Object.entries(desiredByPerformer)) {
+    const performerId = Number(performerIdText);
+    if (!selectedPerformers.has(performerId)) {
+      continue;
+    }
+
+    for (const tagId of tagIds) {
+      const key = `${performerId}:${tagId}`;
+      if (existingKeys.has(key)) {
+        continue;
+      }
+
+      await tagApplications.create({
+        hostType: "scene",
+        hostId: sceneId,
+        contextType: "performer",
+        contextId: performerId,
+        tagId,
+        sourceKey: "user",
+      });
+    }
+  }
+}
+
 // Details Tab Content
 export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scene; onNavigate: (r: any) => void; sceneFaces?: Array<{ face: Face; detectionCount: number }> }) {
   return (
@@ -757,6 +820,7 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
               <TagBadge 
                 key={tag.id} 
                 name={tag.name} 
+                tag={tag}
                 provenance={tag.provenance}
                 onClick={() => onNavigate({ page: "tag", id: tag.id })} 
               />
@@ -776,6 +840,7 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
                 performer={performer}
                 sceneDate={scene.date}
                 fullWidth={scene.performers.length > 1}
+                contextTags={(scene.contextTagApplications ?? []).filter((application) => application.contextType === "performer" && application.contextId === performer.id)}
                 onClick={() => onNavigate({ page: "performer", id: performer.id })}
               />
             ))}
@@ -932,7 +997,19 @@ function GalleriesTab({ scene, onNavigate }: { scene: Scene; onNavigate: (r: any
   );
 }
 
-function PerformerCard({ performer, sceneDate, fullWidth = false, onClick }: { performer: any; sceneDate?: string; fullWidth?: boolean; onClick: () => void }) {
+function PerformerCard({
+  performer,
+  sceneDate,
+  fullWidth = false,
+  contextTags = [],
+  onClick,
+}: {
+  performer: any;
+  sceneDate?: string;
+  fullWidth?: boolean;
+  contextTags?: TagApplication[];
+  onClick: () => void;
+}) {
   const imageUrl = performer.imagePath;
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, onClick);
   // Calculate age at scene date
@@ -947,35 +1024,62 @@ function PerformerCard({ performer, sceneDate, fullWidth = false, onClick }: { p
   })();
 
   return (
-    <a
-      {...linkProps}
-      className={`bg-card border border-border rounded overflow-hidden hover:border-accent/60 transition-colors text-left ${fullWidth ? "w-full" : ""}`}
-      style={fullWidth ? undefined : { width: "200px" }}
-    >
-      <div className="aspect-[2/3] bg-surface flex items-center justify-center relative">
-        {imageUrl ? (
-          <img src={imageUrl} alt={performer.name} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-card to-surface">
-            <svg viewBox="0 0 100 150" className="w-2/3 h-2/3 opacity-30">
-              <ellipse cx="50" cy="35" rx="25" ry="30" fill="currentColor" className="text-muted"/>
-              <ellipse cx="50" cy="120" rx="40" ry="45" fill="currentColor" className="text-muted"/>
-            </svg>
-          </div>
-        )}
-      </div>
-      <div className="p-2 text-center">
-        <div className="text-sm text-foreground font-medium truncate">{performer.name}</div>
-        <div className="text-xs text-muted flex items-center justify-center gap-1 mt-0.5">
-          {ageAtScene && <span>{ageAtScene} yrs old</span>}
-          {ageAtScene && performer.sceneCount !== undefined && <span>·</span>}
-          {performer.sceneCount !== undefined && (
-            <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" /> {performer.sceneCount}</span>
+    <div className={`bg-card border border-border rounded overflow-hidden transition-colors text-left ${fullWidth ? "w-full" : ""}`} style={fullWidth ? undefined : { width: "200px" }}>
+      <a {...linkProps} className={`block hover:bg-surface/40 ${fullWidth ? "w-full" : ""}`}>
+        <div className="aspect-[2/3] bg-surface flex items-center justify-center relative">
+          {imageUrl ? (
+            <img src={imageUrl} alt={performer.name} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-card to-surface">
+              <svg viewBox="0 0 100 150" className="w-2/3 h-2/3 opacity-30">
+                <ellipse cx="50" cy="35" rx="25" ry="30" fill="currentColor" className="text-muted"/>
+                <ellipse cx="50" cy="120" rx="40" ry="45" fill="currentColor" className="text-muted"/>
+              </svg>
+            </div>
           )}
         </div>
-      </div>
-    </a>
+        <div className="p-2 text-center">
+          <div className="text-sm text-foreground font-medium truncate">{performer.name}</div>
+          <div className="text-xs text-muted flex items-center justify-center gap-1 mt-0.5">
+            {ageAtScene && <span>{ageAtScene} yrs old</span>}
+            {ageAtScene && performer.sceneCount !== undefined && <span>·</span>}
+            {performer.sceneCount !== undefined && (
+              <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" /> {performer.sceneCount}</span>
+            )}
+          </div>
+        </div>
+      </a>
+      {contextTags.length > 0 ? (
+        <div className="border-t border-border/60 p-2">
+          <PerformerContextTagList contextTags={contextTags} />
+        </div>
+      ) : null}
+    </div>
   );
+}
+
+function PerformerContextTagList({ contextTags }: { contextTags: TagApplication[] }) {
+  return contextTags.length > 0 ? (
+    <div className="flex flex-wrap gap-1.5">
+      {contextTags.map((application) => (
+        <TagBadge key={application.id} name={application.tag.name} tag={application.tag} provenance={[toTagProvenance(application)]} />
+      ))}
+    </div>
+  ) : null;
+}
+
+function toTagProvenance(application: TagApplication) {
+  return {
+    sourceKey: application.sourceKey,
+    sourceRunId: application.sourceRunId ?? undefined,
+    modelKey: application.modelKey ?? undefined,
+    confidence: application.confidence ?? undefined,
+    appliedAt: application.appliedAt,
+    contextType: application.contextType ?? undefined,
+    contextId: application.contextId ?? undefined,
+    totalDurationSec: application.totalDurationSec ?? undefined,
+    hostDurationSec: application.hostDurationSec ?? undefined,
+  };
 }
 
 // File Info Tab — show every underlying scene file rather than only the first one.
@@ -2089,6 +2193,8 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   const [selectedGroups, setSelectedGroups] = useState<{ groupId: number; sceneIndex: number }[]>(
     scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex }))
   );
+  const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildSceneEditPerformerContextTagIds(scene));
+  const [contextTagSearchByPerformer, setContextTagSearchByPerformer] = useState<Record<number, string>>({});
   const [tagSearch, setTagSearch] = useState("");
   const [perfSearch, setPerfSearch] = useState("");
   const [gallerySearch, setGallerySearch] = useState("");
@@ -2106,11 +2212,17 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     setSelectedTagIds(scene.tags.map((t) => t.id)); setSelectedPerformerIds(scene.performers.map((p) => p.id));
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
+    setContextTagIdsByPerformer(buildSceneEditPerformerContextTagIds(scene));
+    setContextTagSearchByPerformer({});
   }, [scene]);
 
   const mutation = useMutation({
-    mutationFn: (data: SceneUpdate) => scenes.update(scene.id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["scene", scene.id] }); queryClient.invalidateQueries({ queryKey: ["scenes"] }); onSaved(); },
+    mutationFn: async (data: SceneUpdate) => {
+      const updated = await scenes.update(scene.id, data);
+      await syncSceneEditPerformerContextTags(scene.id, scene.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
+      return updated;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["scene", scene.id] }); queryClient.invalidateQueries({ queryKey: ["tagapplications"] }); queryClient.invalidateQueries({ queryKey: ["scenes"] }); onSaved(); },
   });
 
   const handleSave = () => {
@@ -2120,7 +2232,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
       urls: urlList, tagIds: selectedTagIds, performerIds: selectedPerformerIds, galleryIds: selectedGalleryIds, groups: selectedGroups });
   };
 
-  const filteredTags = allTags?.items.filter((t) => !selectedTagIds.includes(t.id) && t.name.toLowerCase().includes(tagSearch.toLowerCase())) ?? [];
+  const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, selectedTagIds);
   const filteredPerformers = allPerformers?.items.filter((p) => !selectedPerformerIds.includes(p.id) && p.name.toLowerCase().includes(perfSearch.toLowerCase())) ?? [];
   const filteredGalleries = allGalleries?.items.filter((g) => !selectedGalleryIds.includes(g.id) && (g.title || "").toLowerCase().includes(gallerySearch.toLowerCase())) ?? [];
   const selectedGroupIds = selectedGroups.map((g) => g.groupId);
@@ -2134,6 +2246,12 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   const selectedGalleries = selectedGalleryIds
     .map((id) => allGalleries?.items.find((gallery) => gallery.id === id) ?? scene.galleries.find((gallery) => gallery.id === id))
     .filter((gallery): gallery is NonNullable<typeof gallery> => Boolean(gallery));
+  const knownContextTags = (scene.contextTagApplications ?? []).map((application) => application.tag);
+  const knownTags = [...(allTags?.items ?? []), ...scene.tags, ...knownContextTags];
+  const tagById = new Map(knownTags.map((tag) => [tag.id, tag]));
+  const setPerformerContextTagIds = (performerId: number, tagIds: number[]) => {
+    setContextTagIdsByPerformer((current) => ({ ...current, [performerId]: Array.from(new Set(tagIds)) }));
+  };
 
   const inputCls = "w-full bg-input border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent";
 
@@ -2157,11 +2275,9 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
       {/* Tags */}
       <div className="space-y-1">
         <span className="text-xs text-secondary">Tags</span>
-        <div className="flex flex-wrap gap-1 mb-1">
-          {selectedTags.map((t) => <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-accent/20 text-accent">{t.name}<button onClick={() => setSelectedTagIds(selectedTagIds.filter((id) => id !== t.id))} className="hover:text-white">×</button></span>)}
-        </div>
+        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds(selectedTagIds.filter((id) => id !== tag.id))} className="mb-1 flex flex-wrap gap-1" />
         <input value={tagSearch} onChange={(e) => setTagSearch(e.target.value)} placeholder="Search tags…" className={inputCls} />
-        {tagSearch && filteredTags.length > 0 && <div className="max-h-24 overflow-y-auto bg-surface rounded border border-border">{filteredTags.slice(0, 10).map((t) => <button key={t.id} onClick={() => { setSelectedTagIds([...selectedTagIds, t.id]); setTagSearch(""); }} className="block w-full text-left px-3 py-1 text-sm text-foreground hover:bg-card">{t.name}</button>)}</div>}
+        {tagSearch && filteredTags.length > 0 && <GroupedTagOptionList tags={filteredTags} maxItems={20} onSelect={(tag) => { setSelectedTagIds([...selectedTagIds, tag.id]); setTagSearch(""); }} />}
       </div>
 
       {/* Performers */}
@@ -2173,6 +2289,52 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
         <input value={perfSearch} onChange={(e) => setPerfSearch(e.target.value)} placeholder="Search performers…" className={inputCls} />
         {perfSearch && filteredPerformers.length > 0 && <div className="max-h-24 overflow-y-auto bg-surface rounded border border-border">{filteredPerformers.slice(0, 10).map((p) => <button key={p.id} onClick={() => { setSelectedPerformerIds([...selectedPerformerIds, p.id]); setPerfSearch(""); }} className="block w-full text-left px-3 py-1 text-sm text-foreground hover:bg-card">{p.name}{p.disambiguation ? ` (${p.disambiguation})` : ""}</button>)}</div>}
       </div>
+
+      {selectedPerformers.length > 0 ? (
+        <div className="space-y-2 rounded-lg border border-border bg-surface/40 p-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-secondary">Performer Occurrence Tags</div>
+          {selectedPerformers.map((performer) => {
+            const tagIds = contextTagIdsByPerformer[performer.id] ?? [];
+            const search = contextTagSearchByPerformer[performer.id] ?? "";
+            const selectedContextTags = tagIds.map((tagId) => tagById.get(tagId)).filter(Boolean) as SelectableTag[];
+            const availableTags = filterTagsForSelector(allTags?.items ?? [], search, tagIds);
+
+            return (
+              <div key={performer.id} className="rounded-lg border border-border bg-card/70 p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="min-w-0 text-sm font-medium text-foreground">{performer.name}</div>
+                  <div className="text-xs text-muted">{tagIds.length} tag{tagIds.length === 1 ? "" : "s"}</div>
+                </div>
+                <SelectedTagChips
+                  tags={selectedContextTags}
+                  emptyText="No occurrence tags"
+                  onRemove={(tag) => setPerformerContextTagIds(performer.id, tagIds.filter((tagId) => tagId !== tag.id))}
+                  className="mb-2 flex flex-wrap gap-1.5"
+                />
+                <input
+                  value={search}
+                  onChange={(event) => setContextTagSearchByPerformer((current) => ({ ...current, [performer.id]: event.target.value }))}
+                  placeholder="Search tags for this occurrence..."
+                  className={inputCls}
+                />
+                {search.trim() && availableTags.length > 0 ? (
+                  <div className="mt-1">
+                    <GroupedTagOptionList
+                      tags={availableTags}
+                      selectedIds={tagIds}
+                      maxItems={20}
+                      onSelect={(tag) => {
+                        setPerformerContextTagIds(performer.id, [...tagIds, tag.id]);
+                        setContextTagSearchByPerformer((current) => ({ ...current, [performer.id]: "" }));
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       {/* Galleries */}
       <div className="space-y-1">

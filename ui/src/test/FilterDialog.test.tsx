@@ -1,6 +1,14 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { FilterDialog, PERFORMER_CRITERIA, SCENE_CRITERIA, TAG_CRITERIA } from "../components/FilterDialog";
+
+function renderWithQueryClient(ui: ReactElement, setup?: (client: QueryClient) => void) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  setup?.(client);
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 describe("FilterDialog", () => {
   it("resyncs its local edit state when the active filter changes outside the dialog", () => {
@@ -189,6 +197,126 @@ describe("FilterDialog", () => {
       careerLengthCriterion: expect.objectContaining({
         modifier: "EQUALS",
         value: 3,
+      }),
+    }));
+  });
+
+  it("does not apply a tag duration filter until a threshold is entered", () => {
+    const onApply = vi.fn();
+
+    renderWithQueryClient(
+      <FilterDialog
+        open
+        onClose={vi.fn()}
+        criteria={SCENE_CRITERIA}
+        activeFilter={{}}
+        onApply={onApply}
+      />,
+      (client) => {
+        client.setQueryData(["tags", "all"], [{ id: 1, name: "Action", tagGroupName: "Acts" }]);
+      }
+    );
+
+    fireEvent.click(screen.getByText("Tag Duration"));
+    fireEvent.change(screen.getByPlaceholderText("Search tags"), { target: { value: "Action" } });
+    fireEvent.click(screen.getByRole("button", { name: "Action" }));
+
+    expect(screen.queryByRole("button", { name: "Remove Tag Duration filter chip" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onApply).toHaveBeenCalledWith({});
+  });
+
+  it("uses time and percent controls for tag duration filters without context mode choices", () => {
+    const onApply = vi.fn();
+
+    renderWithQueryClient(
+      <FilterDialog
+        open
+        onClose={vi.fn()}
+        criteria={SCENE_CRITERIA}
+        activeFilter={{}}
+        onApply={onApply}
+      />,
+      (client) => {
+        client.setQueryData(["tags", "all"], [{ id: 1, name: "Action", tagGroupName: "Acts" }]);
+      }
+    );
+
+    fireEvent.click(screen.getByText("Tag Duration"));
+    expect(screen.queryByRole("option", { name: "Any" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Search tags"), { target: { value: "Action" } });
+    fireEvent.click(screen.getByRole("button", { name: "Action" }));
+    fireEvent.change(screen.getByLabelText("Tag duration time"), { target: { value: "1:30" } });
+    fireEvent.blur(screen.getByLabelText("Tag duration time"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onApply).toHaveBeenLastCalledWith(expect.objectContaining({
+      tagDurationCriterion: expect.objectContaining({
+        clauses: [expect.objectContaining({
+          tagId: 1,
+          unit: "seconds",
+          value: 90,
+        })],
+      }),
+    }));
+
+    fireEvent.change(screen.getByLabelText("Tag duration unit"), { target: { value: "percent" } });
+    fireEvent.change(screen.getByLabelText("Tag duration percent"), { target: { value: "25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onApply).toHaveBeenLastCalledWith(expect.objectContaining({
+      tagDurationCriterion: expect.objectContaining({
+        clauses: [expect.objectContaining({
+          tagId: 1,
+          unit: "percent",
+          value: 25,
+        })],
+      }),
+    }));
+  });
+
+  it("allows multiple tag duration clauses in one filter", () => {
+    const onApply = vi.fn();
+
+    renderWithQueryClient(
+      <FilterDialog
+        open
+        onClose={vi.fn()}
+        criteria={SCENE_CRITERIA}
+        activeFilter={{}}
+        onApply={onApply}
+      />,
+      (client) => {
+        client.setQueryData(["tags", "all"], [
+          { id: 1, name: "Action", tagGroupName: "Acts" },
+          { id: 2, name: "Mood", tagGroupName: "Qualities" },
+        ]);
+      }
+    );
+
+    fireEvent.click(screen.getByText("Tag Duration"));
+    fireEvent.change(screen.getByPlaceholderText("Search tags"), { target: { value: "Action" } });
+    fireEvent.click(screen.getByRole("button", { name: "Action" }));
+    fireEvent.change(screen.getByLabelText("Tag duration time"), { target: { value: "0:30" } });
+    fireEvent.blur(screen.getByLabelText("Tag duration time"));
+    fireEvent.click(screen.getByRole("button", { name: "Add tag duration" }));
+
+    const searchInputs = screen.getAllByPlaceholderText("Search tags");
+    fireEvent.change(searchInputs[1], { target: { value: "Mood" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mood" }));
+    fireEvent.change(screen.getAllByLabelText("Tag duration unit")[1], { target: { value: "percent" } });
+    fireEvent.change(screen.getByLabelText("Tag duration percent"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
+      tagDurationCriterion: expect.objectContaining({
+        clauses: [
+          expect.objectContaining({ tagId: 1, unit: "seconds", value: 30 }),
+          expect.objectContaining({ tagId: 2, unit: "percent", value: 10 }),
+        ],
       }),
     }));
   });

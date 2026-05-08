@@ -40,27 +40,14 @@ internal static class MultiIdCriterionQueryHelper
 
         var entityParam = idsSelector.Parameters[0];
         var entityIds = idsSelector.Body;
-        var selectedIds = Expression.Constant(criterion.Value.ToArray());
+        var selectedIds = criterion.Value.Where(id => id > 0).Distinct().ToArray();
+        if (selectedIds.Length == 0)
+        {
+            return query;
+        }
 
-        var entityIdParam = Expression.Parameter(typeof(int), "entityId");
-        var anySelectedInEntity = Expression.Call(
-            typeof(Enumerable),
-            nameof(Enumerable.Any),
-            [typeof(int)],
-            entityIds,
-            Expression.Lambda<Func<int, bool>>(
-                Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), [typeof(int)], selectedIds, entityIdParam),
-                entityIdParam));
-
-        var selectedIdParam = Expression.Parameter(typeof(int), "selectedId");
-        var allSelectedInEntity = Expression.Call(
-            typeof(Enumerable),
-            nameof(Enumerable.All),
-            [typeof(int)],
-            selectedIds,
-            Expression.Lambda<Func<int, bool>>(
-                Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), [typeof(int)], entityIds, selectedIdParam),
-                selectedIdParam));
+        var anySelectedInEntity = BuildAnyEntityIdEquals(entityIds, selectedIds);
+        var allSelectedInEntity = BuildAllEntityIdsPresent(entityIds, selectedIds);
 
         Expression body = criterion.Modifier switch
         {
@@ -138,19 +125,55 @@ internal static class MultiIdCriterionQueryHelper
     {
         var entityParam = idsSelector.Parameters[0];
         var entityIds = idsSelector.Body;
-        var excludedConst = Expression.Constant(excludedIds.ToArray());
-        var excludedIdParam = Expression.Parameter(typeof(int), "excludedId");
-
-        var anyExcludedInEntity = Expression.Call(
-            typeof(Enumerable),
-            nameof(Enumerable.Any),
-            [typeof(int)],
-            entityIds,
-            Expression.Lambda<Func<int, bool>>(
-                Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), [typeof(int)], excludedConst, excludedIdParam),
-                excludedIdParam));
+        var anyExcludedInEntity = BuildAnyEntityIdEquals(entityIds, excludedIds.Where(id => id > 0).Distinct().ToArray());
 
         var body = Expression.Not(anyExcludedInEntity);
         return query.Where(Expression.Lambda<Func<TEntity, bool>>(body, entityParam));
+    }
+
+    private static Expression BuildAnyEntityIdEquals(Expression entityIds, IReadOnlyCollection<int> selectedIds)
+    {
+        Expression? anySelectedInEntity = null;
+        foreach (var selectedId in selectedIds)
+        {
+            var entityIdParam = Expression.Parameter(typeof(int), "entityId");
+            var entityHasId = Expression.Call(
+                typeof(Enumerable),
+                nameof(Enumerable.Any),
+                [typeof(int)],
+                entityIds,
+                Expression.Lambda<Func<int, bool>>(
+                    Expression.Equal(entityIdParam, Expression.Constant(selectedId)),
+                    entityIdParam));
+
+            anySelectedInEntity = anySelectedInEntity == null
+                ? entityHasId
+                : Expression.OrElse(anySelectedInEntity, entityHasId);
+        }
+
+        return anySelectedInEntity ?? Expression.Constant(false);
+    }
+
+    private static Expression BuildAllEntityIdsPresent(Expression entityIds, IReadOnlyCollection<int> selectedIds)
+    {
+        Expression? allSelectedInEntity = null;
+        foreach (var selectedId in selectedIds)
+        {
+            var entityIdParam = Expression.Parameter(typeof(int), "entityId");
+            var entityHasId = Expression.Call(
+                typeof(Enumerable),
+                nameof(Enumerable.Any),
+                [typeof(int)],
+                entityIds,
+                Expression.Lambda<Func<int, bool>>(
+                    Expression.Equal(entityIdParam, Expression.Constant(selectedId)),
+                    entityIdParam));
+
+            allSelectedInEntity = allSelectedInEntity == null
+                ? entityHasId
+                : Expression.AndAlso(allSelectedInEntity, entityHasId);
+        }
+
+        return allSelectedInEntity ?? Expression.Constant(true);
     }
 }

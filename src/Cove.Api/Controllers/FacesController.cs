@@ -743,7 +743,7 @@ public class FacesController(
                     face.Label,
                     face.PerformerId,
                     face.Performer?.Name,
-                    face.CoverBlobId is null ? null : EntityImageUrls.Face(face.Id, face.UpdatedAt),
+                    face.CoverBlobId is null ? null : EntityImageUrls.Face(ControllerContext.HttpContext, face.Id, face.UpdatedAt),
                     hasCounts ? counts.AppearanceCount : face.AppearanceCount,
                     hasCounts ? counts.FrameSampleCount : face.FrameSampleCount,
                     hasCounts ? counts.SceneCount : face.SceneCount,
@@ -1202,12 +1202,12 @@ public class FacesController(
         performer.ImageBlobId = await blobService.StoreBlobAsync(stream, blob.Value.ContentType, cancellationToken);
     }
 
-    private static FaceDto MapToDto(Face face, FaceComputedCounts? computedCounts = null, FaceTopSuggestionDto? topSuggestion = null) => new(
+    private FaceDto MapToDto(Face face, FaceComputedCounts? computedCounts = null, FaceTopSuggestionDto? topSuggestion = null) => new(
         face.Id,
         face.Label,
         face.PerformerId,
         face.Performer?.Name,
-        face.CoverBlobId is null ? null : EntityImageUrls.Face(face.Id, face.UpdatedAt),
+        face.CoverBlobId is null ? null : EntityImageUrls.Face(ControllerContext.HttpContext, face.Id, face.UpdatedAt),
         face.Ignored,
         face.MergedIntoFaceId,
         computedCounts?.DetectionCount ?? face.DetectionCount,
@@ -1220,12 +1220,12 @@ public class FacesController(
         computedCounts?.FrameSampleCount ?? face.FrameSampleCount,
         topSuggestion);
 
-    private static FaceSimilarDto MapToSimilarDto(Face face, FaceComputedCounts? computedCounts, float distance) => new(
+    private FaceSimilarDto MapToSimilarDto(Face face, FaceComputedCounts? computedCounts, float distance) => new(
         face.Id,
         face.Label,
         face.PerformerId,
         face.Performer?.Name,
-        face.CoverBlobId is null ? null : EntityImageUrls.Face(face.Id, face.UpdatedAt),
+        face.CoverBlobId is null ? null : EntityImageUrls.Face(ControllerContext.HttpContext, face.Id, face.UpdatedAt),
         face.Ignored,
         face.MergedIntoFaceId,
         computedCounts?.DetectionCount ?? face.DetectionCount,

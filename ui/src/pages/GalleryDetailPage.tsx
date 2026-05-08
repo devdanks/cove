@@ -341,7 +341,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
             {canReadTags && gallery.tags.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {gallery.tags.map((tag) => (
-                  <TagBadge key={tag.id} name={tag.name} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                  <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
                 ))}
               </div>
             ) : null}

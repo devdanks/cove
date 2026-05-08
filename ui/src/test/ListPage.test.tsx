@@ -68,6 +68,44 @@ describe("ListPage active filter chips", () => {
     expect(screen.getByRole("button", { name: /tags:/i })).toHaveTextContent("with sub-tags");
   });
 
+  it("formats tag duration chips with tag names and time values", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+    queryClient.setQueryData(["tags", "all"], [
+      { id: 1, name: "Tag One" },
+    ]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouteRegistryProvider>
+          <ListPage
+            title="Scenes"
+            filter={{ page: 1, perPage: 40 }}
+            onFilterChange={vi.fn()}
+            totalCount={0}
+            isLoading={false}
+            criteriaDefinitions={SCENE_CRITERIA}
+            objectFilter={{
+              tagDurationCriterion: { clauses: [{ tagId: 1, value: 90, modifier: "GREATER_THAN", unit: "seconds" }] },
+            }}
+            onObjectFilterChange={vi.fn()}
+          >
+            <div>content</div>
+          </ListPage>
+        </RouteRegistryProvider>
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByRole("button", { name: /tag duration:/i })).toHaveTextContent("Tag Duration:");
+    expect(screen.getByRole("button", { name: /tag duration:/i })).toHaveTextContent("Tag One");
+    expect(screen.getByRole("button", { name: /tag duration:/i })).toHaveTextContent("> 1:30");
+  });
+
   it("sorts sort options alphabetically in the toolbar", () => {
     const queryClient = new QueryClient({
       defaultOptions: {

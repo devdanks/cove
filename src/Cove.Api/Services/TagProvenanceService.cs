@@ -21,6 +21,10 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
         string? sourceRunId = null,
         string? modelKey = null,
         float? confidence = null,
+        string? contextType = null,
+        int? contextId = null,
+        double? totalDurationSec = null,
+        double? hostDurationSec = null,
         CancellationToken cancellationToken = default)
     {
         if (tagId <= 0)
@@ -28,7 +32,7 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
             return Task.CompletedTask;
         }
 
-        return EnsureApplicationAsync(hostType, hostId, tagId, null, sourceKey, sourceRunId, modelKey, confidence, cancellationToken);
+        return EnsureApplicationAsync(hostType, hostId, tagId, null, sourceKey, sourceRunId, modelKey, confidence, contextType, contextId, totalDurationSec, hostDurationSec, cancellationToken);
     }
 
     public Task RecordAsync(
@@ -39,16 +43,20 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
         string? sourceRunId = null,
         string? modelKey = null,
         float? confidence = null,
+        string? contextType = null,
+        int? contextId = null,
+        double? totalDurationSec = null,
+        double? hostDurationSec = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(tag);
 
         if (tag.Id > 0)
         {
-            return EnsureApplicationAsync(hostType, hostId, tag.Id, null, sourceKey, sourceRunId, modelKey, confidence, cancellationToken);
+            return EnsureApplicationAsync(hostType, hostId, tag.Id, null, sourceKey, sourceRunId, modelKey, confidence, contextType, contextId, totalDurationSec, hostDurationSec, cancellationToken);
         }
 
-        return EnsureApplicationAsync(hostType, hostId, null, tag, sourceKey, sourceRunId, modelKey, confidence, cancellationToken);
+        return EnsureApplicationAsync(hostType, hostId, null, tag, sourceKey, sourceRunId, modelKey, confidence, contextType, contextId, totalDurationSec, hostDurationSec, cancellationToken);
     }
 
     public async Task SyncTagSetAsync(
@@ -66,7 +74,11 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
         if (removedTagIds.Length > 0)
         {
             var removedApplications = await _db.TagApplications
-                .Where(application => application.HostType == hostType && application.HostId == hostId && removedTagIds.Contains(application.TagId))
+                .Where(application => application.HostType == hostType
+                    && application.HostId == hostId
+                    && application.ContextType == null
+                    && application.ContextId == null
+                    && removedTagIds.Contains(application.TagId))
                 .ToListAsync(cancellationToken);
 
             if (removedApplications.Count > 0)
@@ -131,11 +143,17 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
         string? sourceRunId,
         string? modelKey,
         float? confidence,
+        string? contextType,
+        int? contextId,
+        double? totalDurationSec,
+        double? hostDurationSec,
         CancellationToken cancellationToken)
     {
-        var normalizedSourceKey = NormalizeRequired(sourceKey);
+        var normalizedSourceKey = NormalizeSourceKey(sourceKey);
         var normalizedSourceRunId = NormalizeOptional(sourceRunId);
         var normalizedModelKey = NormalizeOptional(modelKey);
+        var normalizedContextType = NormalizeContextType(contextType);
+        var normalizedContextId = normalizedContextType == null ? null : contextId;
 
         TagApplication? application;
         if (tagId.HasValue)
@@ -143,6 +161,8 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
             application = _db.TagApplications.Local.FirstOrDefault(
                 candidate => candidate.HostType == hostType
                     && candidate.HostId == hostId
+                    && candidate.ContextType == normalizedContextType
+                    && candidate.ContextId == normalizedContextId
                     && candidate.TagId == tagId.Value
                     && candidate.SourceKey == normalizedSourceKey
                     && candidate.SourceRunId == normalizedSourceRunId
@@ -153,6 +173,8 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
                 application = await _db.TagApplications.FirstOrDefaultAsync(
                     candidate => candidate.HostType == hostType
                         && candidate.HostId == hostId
+                        && candidate.ContextType == normalizedContextType
+                        && candidate.ContextId == normalizedContextId
                         && candidate.TagId == tagId.Value
                         && candidate.SourceKey == normalizedSourceKey
                         && candidate.SourceRunId == normalizedSourceRunId
@@ -165,6 +187,8 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
             application = _db.TagApplications.Local.FirstOrDefault(
                 candidate => candidate.HostType == hostType
                     && candidate.HostId == hostId
+                    && candidate.ContextType == normalizedContextType
+                    && candidate.ContextId == normalizedContextId
                     && ReferenceEquals(candidate.Tag, tag)
                     && candidate.SourceKey == normalizedSourceKey
                     && candidate.SourceRunId == normalizedSourceRunId
@@ -177,12 +201,16 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
             {
                 HostType = hostType,
                 HostId = hostId,
+                ContextType = normalizedContextType,
+                ContextId = normalizedContextId,
                 TagId = tagId ?? 0,
                 Tag = tag,
                 SourceKey = normalizedSourceKey,
                 SourceRunId = normalizedSourceRunId,
                 ModelKey = normalizedModelKey,
                 Confidence = confidence,
+                TotalDurationSec = totalDurationSec,
+                HostDurationSec = hostDurationSec,
             };
             _db.TagApplications.Add(application);
             return;
@@ -192,16 +220,44 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
         {
             application.Confidence = confidence.Value;
         }
+
+        if (totalDurationSec.HasValue)
+        {
+            application.TotalDurationSec = totalDurationSec.Value;
+        }
+
+        if (hostDurationSec.HasValue)
+        {
+            application.HostDurationSec = hostDurationSec.Value;
+        }
     }
 
     private static HashSet<int> NormalizeTagIds(IReadOnlyCollection<int> tagIds)
         => tagIds.Where(static tagId => tagId > 0).ToHashSet();
 
-    private static string NormalizeRequired(string value)
-        => string.IsNullOrWhiteSpace(value) ? "user" : value.Trim();
+    private static string NormalizeSourceKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "user";
+        }
+
+        var trimmed = value.Trim();
+        return trimmed.ToLowerInvariant() switch
+        {
+            "system" => "auto-tag",
+            "scraper" => "scraper:local",
+            "metadata" => "metadata:default",
+            "import:stash" => "stash-import",
+            _ => trimmed,
+        };
+    }
 
     private static string NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private static string? NormalizeContextType(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
 
     private static TagProvenanceDto MapToDto(TagApplication application)
         => new(
@@ -209,5 +265,9 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
             string.IsNullOrWhiteSpace(application.SourceRunId) ? null : application.SourceRunId,
             string.IsNullOrWhiteSpace(application.ModelKey) ? null : application.ModelKey,
             application.Confidence,
-            application.CreatedAt.ToString("o"));
+            application.CreatedAt.ToString("o"),
+            application.ContextType,
+            application.ContextId,
+            application.TotalDurationSec,
+            application.HostDurationSec);
 }

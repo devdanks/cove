@@ -9,6 +9,8 @@ import { ExtensionLoaderProvider, useExtensions } from "./extensions/ExtensionLo
 import { SceneQueueProvider } from "./state/SceneQueueContext";
 import { SetupWizardPage } from "./pages/SetupWizardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { AuthBootstrapPage } from "./pages/AuthBootstrapPage";
+import { RedeemInvitePage } from "./pages/RedeemInvitePage";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { useKeySequence } from "./hooks/useKeySequence";
 import { LOCATION_CHANGE_EVENT, Route, buildCurrentUrl, buildRoutePath, buildRouteUrl, navigateToUrl, parseCurrentRoute, parseLegacyHashRoute, readStoredRoute, resolveCurrentRoute, syncRouteHistory } from "./router/location";
@@ -24,9 +26,9 @@ function normalizeRoute(route: Route): Route {
 const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
   scenes: "scenes.read",
   scene: "scenes.read",
-  "scene-span": "markers.read",
-  segments: "markers.read",
-  segment: "markers.read",
+  "scene-span": "segments.read",
+  segments: "segments.read",
+  segment: "segments.read",
   face: "faces.read",
   performers: "performers.read",
   performer: "performers.read",
@@ -210,8 +212,41 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   );
 }
 
+function getPostLoginRedirectUrl(): string {
+  const redirect = new URLSearchParams(window.location.search).get("redirect");
+  if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) {
+    return "/";
+  }
+
+  try {
+    const url = new URL(redirect, window.location.origin);
+    if (url.origin !== window.location.origin || url.pathname === "/login") {
+      return "/";
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
 function AuthGateInner({ children }: { children: React.ReactNode }) {
   const { authEnabled, user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!authEnabled || !user || window.location.pathname !== "/login") {
+      return;
+    }
+
+    navigateToUrl(getPostLoginRedirectUrl(), { replace: true });
+  }, [authEnabled, user]);
+
+  if (window.location.pathname === "/auth/bootstrap") {
+    return <AuthBootstrapPage />;
+  }
+  if (window.location.pathname === "/auth/redeem-invite") {
+    return <RedeemInvitePage />;
+  }
   if (authEnabled && loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">

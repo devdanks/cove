@@ -34,7 +34,7 @@ public partial class CoveContext
     private bool CanReadGalleries => CurrentPrincipal?.Has(PermissionKeys.GalleriesRead) == true;
     private bool CanReadImages => CurrentPrincipal?.Has(PermissionKeys.ImagesRead) == true;
     private bool CanReadGroups => CurrentPrincipal?.Has(PermissionKeys.GroupsRead) == true;
-    private bool CanReadMarkers => CurrentPrincipal?.Has(PermissionKeys.MarkersRead) == true;
+    private bool CanReadSegments => CurrentPrincipal?.Has(PermissionKeys.SegmentsRead) == true;
     private bool CanReadFaces => CurrentPrincipal?.Has(PermissionKeys.FacesRead) == true;
     private bool CanReadEmbeddings => CurrentPrincipal?.Has(PermissionKeys.EmbeddingsRead) == true;
     private bool CanReadAiRuns => CurrentPrincipal?.Has(PermissionKeys.AiRunsRead) == true;
@@ -45,7 +45,7 @@ public partial class CoveContext
     private bool CanReadGalleriesByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Gallery) == true;
     private bool CanReadImagesByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Image) == true;
     private bool CanReadGroupsByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Group) == true;
-    private bool CanReadMarkersByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Marker) == true;
+    private bool CanReadSegmentsByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Marker) == true;
 
     private bool RequiresSceneReadScopeEvaluation => CurrentShareLinkId != null || CurrentPrincipal?.ReadRestrictedEntityKinds.Contains(EntityKinds.Scene) == true;
     private bool RequiresPerformerReadScopeEvaluation => CurrentShareLinkId != null || CurrentPrincipal?.ReadRestrictedEntityKinds.Contains(EntityKinds.Performer) == true;
@@ -155,8 +155,8 @@ public partial class CoveContext
             AuthorizationFiltersBypassed
                 ? true
                 : (!RequiresMarkerReadScopeEvaluation
-                    ? CanReadMarkers
-                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadMarkers, CanReadMarkersByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Marker, marker.Id))
+                    ? CanReadSegments
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadSegments, CanReadSegmentsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Marker, marker.Id))
                 && (!RequiresSceneReadScopeEvaluation
                     ? CanReadScenes
                     : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, marker.SceneId)));
@@ -417,8 +417,8 @@ public partial class CoveContext
             AuthorizationFiltersBypassed
                 ? true
                 : (!RequiresMarkerReadScopeEvaluation
-                    ? CanReadMarkers
-                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadMarkers, CanReadMarkersByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Marker, link.SceneMarkerId))
+                    ? CanReadSegments
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadSegments, CanReadSegmentsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Marker, link.SceneMarkerId))
                 && (!RequiresTagReadScopeEvaluation
                     ? CanReadTags
                     : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTags, CanReadTagsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Tag, link.TagId)));

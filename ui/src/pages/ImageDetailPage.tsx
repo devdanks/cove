@@ -405,7 +405,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</h2>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {image.tags.map((tag) => (
-              <TagBadge key={tag.id} name={tag.name} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+              <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
             ))}
           </div>
         </section>

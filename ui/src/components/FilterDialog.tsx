@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X, ChevronDown, ChevronRight, Search, Pin, PinOff, Plus, Minus, Star } from "lucide-react";
-import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi, scenes as scenesApi } from "../api/client";
+import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi, scenes as scenesApi, tagGroups as tagGroupsApi } from "../api/client";
+import { filterTagsForSelector, GroupedTagOptionList } from "./TagSelector";
 import {
   convertToRatingFormat,
   convertFromRatingFormat,
@@ -19,6 +20,8 @@ import type {
   DateCriterion,
   TimestampCriterion,
   FingerprintCriterion,
+  TagDurationClause,
+  TagDurationCriterion,
   SceneFilterCriteria,
   PerformerFilterCriteria,
   TagFilterCriteria,
@@ -31,8 +34,8 @@ import { RESOLUTION_FILTER_OPTIONS } from "../utils/resolutionBuckets";
 
 // ===== Criterion definitions =====
 
-export type CriterionType = "string" | "number" | "bool" | "date" | "timestamp" | "duration" | "careerLength" | "rating" | "resolution" | "multiId" | "enum" | "hash";
-export type EntityType = "tags" | "performers" | "studios" | "groups" | "galleries" | "scenes";
+export type CriterionType = "string" | "number" | "bool" | "date" | "timestamp" | "duration" | "tagDuration" | "careerLength" | "rating" | "resolution" | "multiId" | "enum" | "hash";
+export type EntityType = "tags" | "tagGroups" | "performers" | "studios" | "groups" | "galleries" | "scenes";
 
 export interface CriterionDefinition<TFilterKey extends string = string> {
   id: string;
@@ -77,6 +80,7 @@ const TYPE_MODIFIERS: Record<CriterionType, CriterionModifier[]> = {
   date: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN", "IS_NULL", "NOT_NULL"],
   timestamp: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN", "IS_NULL", "NOT_NULL"],
   duration: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"],
+  tagDuration: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"],
   careerLength: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"],
   rating: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN", "IS_NULL", "NOT_NULL"],
   resolution: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN"],
@@ -142,6 +146,22 @@ function hasFingerprintCriterionValue(criterion: { modifier?: CriterionModifier;
   return hasStringCriterionValue(criterion);
 }
 
+function isTagDurationClauseValid(clause: TagDurationClause | undefined) {
+  return Boolean(clause?.tagId && clause.tagId > 0 && hasNumericCriterionValue(clause));
+}
+
+function getTagDurationClauses(value: TagDurationCriterion | undefined) {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value.clauses) && value.clauses.length > 0) {
+    return value.clauses;
+  }
+
+  return [value];
+}
+
 function isCriterionValueValid(value: unknown, criterion: CriterionDefinition) {
   if (value == null) {
     return false;
@@ -151,8 +171,14 @@ function isCriterionValueValid(value: unknown, criterion: CriterionDefinition) {
     case "bool":
       return typeof (value as BoolCriterion).value === "boolean";
     case "multiId": {
-      const ids = (value as MultiIdCriterion).value;
-      return Array.isArray(ids) && ids.length > 0;
+      const criterionValue = value as MultiIdCriterion;
+      const ids = criterionValue.value;
+      const excludes = criterionValue.excludes;
+      return (Array.isArray(ids) && ids.length > 0) || (Array.isArray(excludes) && excludes.length > 0);
+    }
+    case "tagDuration": {
+      const criterionValue = value as TagDurationCriterion;
+      return getTagDurationClauses(criterionValue).some((clause) => isTagDurationClauseValid(clause));
     }
     case "string":
     case "hash":
@@ -205,6 +231,7 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
   { id: "likeCounter", label: "Likes", type: "number", filterKey: "likeCounterCriterion" },
   { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
   { id: "duration", label: "Duration", type: "duration", filterKey: "durationCriterion" },
+  { id: "tagDuration", label: "Tag Duration", type: "tagDuration", entityType: "tags", filterKey: "tagDurationCriterion" },
   { id: "resolution", label: "Resolution", type: "resolution", filterKey: "resolutionCriterion" },
     { id: "playCount", label: "Play Count", type: "number", filterKey: "playCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
@@ -298,6 +325,7 @@ export const TAG_CRITERIA: CriteriaDefinitionList<TagFilterCriteria> = [
   { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS, auxiliaryToggleKey: "performerCountIncludesChildren", auxiliaryToggleLabel: "Count performers from child tags" },
   { id: "parents", label: "Parent Tags", type: "multiId", entityType: "tags", filterKey: "parentsCriterion" },
   { id: "children", label: "Sub-Tags", type: "multiId", entityType: "tags", filterKey: "childrenCriterion" },
+  { id: "tagGroup", label: "Tag Group", type: "multiId", entityType: "tagGroups", filterKey: "tagGroupsCriterion", modifiers: ["INCLUDES"] },
   { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
   { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
   { id: "name", label: "Name", type: "string", filterKey: "nameCriterion" },
@@ -500,7 +528,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
   }, [activeFilterSignature, lastSyncedFilterSignature, open]);
 
   const activeCriterionCount = useMemo(() => {
-    const criteriaCount = criteria.filter((criterion) => editFilter[criterion.filterKey] !== undefined).length;
+    const criteriaCount = criteria.filter((criterion) => isCriterionValueValid(editFilter[criterion.filterKey], criterion)).length;
     const customCount = (customSections ?? []).filter((section) => section.isActive(editFilter[section.filterKey])).length;
     return criteriaCount + customCount;
   }, [criteria, customSections, editFilter]);
@@ -643,7 +671,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
                 </span>
               ))}
             {criteria
-              .filter((c) => editFilter[c.filterKey] !== undefined)
+              .filter((c) => isCriterionValueValid(editFilter[c.filterKey], c))
               .map((c) => (
                 <span
                   key={c.id}
@@ -810,7 +838,8 @@ function CriterionRow({
   pinned: boolean;
   onTogglePin: () => void;
 }) {
-  const isActive = value !== undefined;
+  const hasDraftValue = value !== undefined;
+  const isActive = isCriterionValueValid(value, criterion);
 
   return (
     <div className={`rounded mb-0.5 ${isActive ? "bg-accent/5 border border-accent/20" : ""}`}>
@@ -834,7 +863,7 @@ function CriterionRow({
         >
           {pinned ? <Pin className="w-3 h-3" /> : <PinOff className="w-3 h-3" />}
         </button>
-        {isActive && (
+        {hasDraftValue && (
           <button
             onClick={(e) => { e.stopPropagation(); onRemove(); }}
             aria-label={`Remove ${criterion.label} filter row`}
@@ -897,6 +926,8 @@ function CriterionEditor({
           onAuxiliaryToggleChange={onAuxiliaryToggleChange}
         />
       );
+    case "tagDuration":
+      return <TagDurationEditor value={value as TagDurationCriterion | undefined} onChange={onChange} modifiers={modifiers} />;
     case "hash":
       return <HashEditor value={value as FingerprintCriterion | undefined} onChange={onChange} modifiers={modifiers} options={criterion.options ?? []} />;
     case "string":
@@ -910,7 +941,7 @@ function CriterionEditor({
     case "timestamp":
       return <TimestampEditor value={value as TimestampCriterion | undefined} onChange={onChange} modifiers={modifiers} />;
     case "multiId":
-      return <MultiIdEditor value={value as MultiIdCriterion | undefined} onChange={onChange} entityType={entityType!} hierarchyToggleLabel={criterion.hierarchyToggleLabel} />;
+      return <MultiIdEditor value={value as MultiIdCriterion | undefined} onChange={onChange} entityType={entityType!} modifiers={modifiers} hierarchyToggleLabel={criterion.hierarchyToggleLabel} />;
     default:
       return null;
   }
@@ -1013,6 +1044,202 @@ function NumberEditor({
           <span>{auxiliaryToggleLabel}</span>
         </label>
       )}
+    </div>
+  );
+}
+
+function createDraftTagDurationClause(): TagDurationClause {
+  return { modifier: "GREATER_THAN", unit: "seconds" };
+}
+
+function getEditableTagDurationClauses(value?: TagDurationCriterion): TagDurationClause[] {
+  if (value?.clauses && value.clauses.length > 0) {
+    return value.clauses;
+  }
+
+  if (value && (value.tagId || value.value != null || value.value2 != null)) {
+    return [{ tagId: value.tagId, value: value.value, value2: value.value2, modifier: value.modifier ?? "GREATER_THAN", unit: value.unit ?? "seconds" }];
+  }
+
+  return [createDraftTagDurationClause()];
+}
+
+function TagDurationEditor({ value, onChange, modifiers }: { value?: TagDurationCriterion; onChange: (v: unknown) => void; modifiers: CriterionModifier[] }) {
+  const clauses = getEditableTagDurationClauses(value);
+  const existingNames: Record<string, string> = value?._names ?? {};
+  const { data: tags } = useQuery({
+    queryKey: ["tags", "all"],
+    queryFn: () => tagsApi.find({ perPage: 5000, sort: "name", direction: "asc" }).then((response) => response.items),
+    staleTime: 60000,
+  });
+
+  const commit = (nextClauses: TagDurationClause[], nextNames: Record<string, string> = existingNames) => {
+    const cleanedClauses = nextClauses.map((clause) => ({
+      tagId: clause.tagId,
+      value: clause.value,
+      value2: clause.value2,
+      modifier: clause.modifier ?? "GREATER_THAN",
+      unit: clause.unit ?? "seconds",
+    }));
+
+    onChange({
+      clauses: cleanedClauses,
+      _names: Object.keys(nextNames).length > 0 ? nextNames : undefined,
+    });
+  };
+
+  const updateClause = (index: number, patch: Partial<TagDurationClause>, namesPatch?: Record<string, string>) => {
+    const nextNames = namesPatch ? { ...existingNames, ...namesPatch } : existingNames;
+    commit(clauses.map((clause, clauseIndex) => clauseIndex === index ? { ...clause, ...patch } : clause), nextNames);
+  };
+
+  const removeClause = (index: number) => {
+    const nextClauses = clauses.filter((_, clauseIndex) => clauseIndex !== index);
+    if (nextClauses.length === 0) {
+      onChange(undefined);
+      return;
+    }
+
+    commit(nextClauses);
+  };
+
+  const selectedTagIds = clauses.map((clause) => clause.tagId).filter((tagId): tagId is number => typeof tagId === "number" && tagId > 0);
+
+  return (
+    <div className="space-y-2">
+      <div className="space-y-2">
+        {clauses.map((clause, index) => (
+          <TagDurationClauseEditor
+            key={`${clause.tagId ?? "draft"}-${index}`}
+            clause={clause}
+            modifiers={modifiers}
+            tags={tags ?? []}
+            existingNames={existingNames}
+            excludedTagIds={selectedTagIds.filter((tagId) => tagId !== clause.tagId)}
+            onChange={(patch, namesPatch) => updateClause(index, patch, namesPatch)}
+            onRemove={clauses.length > 1 || value != null ? () => removeClause(index) : undefined}
+          />
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => commit([...clauses, createDraftTagDurationClause()])}
+        className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-secondary hover:border-accent/60 hover:text-foreground"
+      >
+        <Plus className="h-3 w-3" />
+        Add tag duration
+      </button>
+    </div>
+  );
+}
+
+function TagDurationClauseEditor({
+  clause,
+  modifiers,
+  tags,
+  existingNames,
+  excludedTagIds,
+  onChange,
+  onRemove,
+}: {
+  clause: TagDurationClause;
+  modifiers: CriterionModifier[];
+  tags: Array<{ id: number; name: string; color?: string | null; tagGroupId?: number | null; tagGroupName?: string | null; tagGroupColor?: string | null }>;
+  existingNames: Record<string, string>;
+  excludedTagIds: number[];
+  onChange: (patch: Partial<TagDurationClause>, namesPatch?: Record<string, string>) => void;
+  onRemove?: () => void;
+}) {
+  const [tagSearch, setTagSearch] = useState("");
+  const modifier = clause.modifier ?? "GREATER_THAN";
+  const unit = clause.unit ?? "seconds";
+  const isBetween = modifier === "BETWEEN" || modifier === "NOT_BETWEEN";
+  const selectedTag = tags.find((tag) => tag.id === clause.tagId);
+  const selectedTagName = clause.tagId ? selectedTag?.name ?? existingNames[String(clause.tagId)] ?? `Tag #${clause.tagId}` : null;
+  const tagResults = useMemo(
+    () => filterTagsForSelector(tags, tagSearch, excludedTagIds).slice(0, 50),
+    [excludedTagIds, tagSearch, tags]
+  );
+
+  const update = (patch: Partial<TagDurationClause>, namesPatch?: Record<string, string>) => {
+    onChange({ modifier, unit, ...patch }, namesPatch);
+  };
+
+  const setUnit = (nextUnit: TagDurationClause["unit"]) => {
+    update({ unit: nextUnit, value: undefined, value2: undefined });
+  };
+
+  const renderValueInput = (field: "value" | "value2", label: string) => {
+    const currentValue = field === "value" ? clause.value : clause.value2;
+    return unit === "percent" ? (
+      <PercentInput value={currentValue} onChange={(nextValue) => update({ [field]: nextValue })} ariaLabel={label} />
+    ) : (
+      <DurationInput value={currentValue} onChange={(nextValue) => update({ [field]: nextValue })} ariaLabel={label} />
+    );
+  };
+
+  return (
+    <div className="space-y-2 rounded border border-border/70 bg-input/30 p-2">
+      <ModifierSelector modifiers={modifiers} selected={modifier} onSelect={(m) => update({ modifier: m })} />
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="relative">
+          {selectedTagName ? (
+            <div className="mb-1 flex items-center justify-between gap-2 rounded border border-accent/30 bg-accent/10 px-2 py-1 text-xs text-foreground">
+              <span className="min-w-0 truncate">{selectedTagName}</span>
+              <button
+                type="button"
+                onClick={() => update({ tagId: undefined })}
+                aria-label="Clear tag duration tag"
+                className="text-muted hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ) : null}
+          <input
+            type="text"
+            value={tagSearch}
+            onChange={(event) => setTagSearch(event.target.value)}
+            placeholder="Search tags"
+            className="w-full rounded border border-border bg-input px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+          />
+          {tagResults.length > 0 && tagSearch.trim() !== "" ? (
+            <GroupedTagOptionList
+              tags={tagResults}
+              onSelect={(tag) => { update({ tagId: tag.id }, { [String(tag.id)]: tag.name }); setTagSearch(""); }}
+              className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded border border-border bg-surface shadow-xl"
+            />
+          ) : null}
+        </div>
+        <select
+          value={unit}
+          onChange={(event) => setUnit(event.target.value as TagDurationClause["unit"])}
+          className="rounded border border-border bg-input px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+          aria-label="Tag duration unit"
+        >
+          <option value="seconds">Seconds</option>
+          <option value="percent">Percent</option>
+        </select>
+      </div>
+      <div className="flex items-center gap-2">
+        {renderValueInput("value", unit === "percent" ? "Tag duration percent" : "Tag duration time")}
+        {isBetween ? (
+          <>
+            <span className="text-xs text-muted">and</span>
+            {renderValueInput("value2", unit === "percent" ? "Tag duration end percent" : "Tag duration end time")}
+          </>
+        ) : null}
+        {onRemove ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Remove tag duration clause"
+            className="ml-auto rounded p-1 text-muted hover:bg-red-900/20 hover:text-red-300"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -1429,8 +1656,9 @@ function TimestampEditor({ value, onChange, modifiers }: { value?: TimestampCrit
 
 // ===== MultiId Editor =====
 
-function MultiIdEditor({ value, onChange, entityType, hierarchyToggleLabel }: { value?: MultiIdCriterion; onChange: (v: unknown) => void; entityType: EntityType; hierarchyToggleLabel?: string }) {
-  const modifier = value?.modifier ?? "INCLUDES_ALL";
+function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggleLabel }: { value?: MultiIdCriterion; onChange: (v: unknown) => void; entityType: EntityType; modifiers: CriterionModifier[]; hierarchyToggleLabel?: string }) {
+  const includeModifiers = modifiers.filter((modifier) => modifier === "INCLUDES" || modifier === "INCLUDES_ALL");
+  const modifier = value?.modifier ?? (includeModifiers.includes("INCLUDES_ALL") ? "INCLUDES_ALL" : "INCLUDES");
   const includedIds = value?.value ?? [];
   const excludedIds = value?.excludes ?? [];
   const includeHierarchy = (value as any)?.depth === -1;
@@ -1443,6 +1671,7 @@ function MultiIdEditor({ value, onChange, entityType, hierarchyToggleLabel }: { 
     queryFn: async () => {
       switch (entityType) {
         case "tags": return (await tagsApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items;
+        case "tagGroups": return await tagGroupsApi.list();
         case "performers": return (await performersApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items;
         case "studios": return (await studiosApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items;
         case "groups": return (await groupsApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items;
@@ -1506,7 +1735,7 @@ function MultiIdEditor({ value, onChange, entityType, hierarchyToggleLabel }: { 
     <div className="space-y-2">
       {/* Include/Exclude mode toggle */}
       <div className="flex flex-wrap gap-1">
-        {(["INCLUDES", "INCLUDES_ALL"] as CriterionModifier[]).map((m) => (
+        {(includeModifiers.length > 0 ? includeModifiers : (["INCLUDES"] as CriterionModifier[])).map((m) => (
           <button
             key={m}
             onClick={() => onChange(buildCriterion(includedIds, excludedIds, m, includeHierarchy))}
@@ -1577,7 +1806,36 @@ function MultiIdEditor({ value, onChange, entityType, hierarchyToggleLabel }: { 
         />
       </div>
       <div className="max-h-32 overflow-y-auto border border-border rounded bg-input">
-        {filteredEntities.slice(0, 50).map((entity: any) => {
+        {entityType === "tags" ? (
+          <GroupedTagOptionList
+            tags={filteredEntities as any[]}
+            maxItems={50}
+            className="border-0 bg-transparent"
+            renderTag={(entity: any) => {
+              const isIncluded = includedIds.includes(entity.id);
+              const isExcluded = excludedIds.includes(entity.id);
+              return (
+                <div className={`w-full px-2 py-1 text-xs flex items-center gap-1 ${isIncluded ? "text-green-300" : isExcluded ? "text-red-300" : "text-foreground"}`}>
+                  <button
+                    onClick={() => isIncluded ? removeId(entity.id) : addInclude(entity.id)}
+                    className={`hover:text-green-400 ${isIncluded ? "text-green-400" : "text-muted"}`}
+                    title="Include"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => isExcluded ? removeId(entity.id) : addExclude(entity.id)}
+                    className={`hover:text-red-400 ${isExcluded ? "text-red-400" : "text-muted"}`}
+                    title="Exclude"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="min-w-0 flex-1 truncate">{getName(entity)}</span>
+                </div>
+              );
+            }}
+          />
+        ) : filteredEntities.slice(0, 50).map((entity: any) => {
           const isIncluded = includedIds.includes(entity.id);
           const isExcluded = excludedIds.includes(entity.id);
           return (
@@ -1633,27 +1891,68 @@ function ModifierSelector({ modifiers, selected, onSelect }: { modifiers: Criter
   );
 }
 
-function DurationInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const h = Math.floor(value / 3600);
-  const m = Math.floor((value % 3600) / 60);
-  const s = value % 60;
-  const text = h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+function formatDurationInputValue(value?: number) {
+  if (value == null) {
+    return "";
+  }
+
+  const h = Math.floor((value ?? 0) / 3600);
+  const m = Math.floor(((value ?? 0) % 3600) / 60);
+  const s = (value ?? 0) % 60;
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function DurationInput({ value, onChange, ariaLabel }: { value?: number; onChange: (v: number | undefined) => void; ariaLabel?: string }) {
+  const [inputText, setInputText] = useState(() => formatDurationInputValue(value));
+
+  useEffect(() => {
+    setInputText(formatDurationInputValue(value));
+  }, [value]);
 
   const parse = (str: string) => {
-    const parts = str.split(":").map(Number);
+    const trimmed = str.trim();
+    if (trimmed === "") return undefined;
+    const parts = trimmed.split(":").map(Number);
+    if (parts.some((part) => !Number.isFinite(part))) return undefined;
     if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
     if (parts.length === 2) return parts[0] * 60 + parts[1];
-    return parts[0] || 0;
+    return parts[0];
+  };
+
+  const commit = (rawValue: string) => {
+    const parsed = parse(rawValue);
+    setInputText(formatDurationInputValue(parsed));
+    onChange(parsed);
   };
 
   return (
     <input
       type="text"
-      defaultValue={text}
-      onBlur={(e) => onChange(parse(e.target.value))}
+      value={inputText}
+      onChange={(event) => setInputText(event.target.value)}
+      onBlur={(event) => commit(event.target.value)}
       placeholder="H:MM:SS"
+      aria-label={ariaLabel}
       className="w-24 bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
     />
+  );
+}
+
+function PercentInput({ value, onChange, ariaLabel }: { value?: number; onChange: (v: number | undefined) => void; ariaLabel?: string }) {
+  return (
+    <label className="relative inline-flex w-24 items-center">
+      <input
+        type="number"
+        min={0}
+        max={100}
+        step={0.1}
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))}
+        aria-label={ariaLabel}
+        className="w-full rounded border border-border bg-input px-2 py-1 pr-6 text-xs text-foreground outline-none focus:border-accent"
+      />
+      <span className="pointer-events-none absolute right-2 text-xs text-muted">%</span>
+    </label>
   );
 }
 

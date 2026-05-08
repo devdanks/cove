@@ -407,7 +407,7 @@ function PerformerRecommendationCard({ performer, engagement, onNavigate }: { pe
     >
       <div className="relative aspect-[2/3] bg-surface">
         {performer.imagePath ? (
-          <img src={`/api/performers/${performer.id}/image`} alt={performer.name} className="w-full h-full object-cover" loading="lazy" />
+          <img src={performer.imagePath} alt={performer.name} className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <User className="w-10 h-10 text-muted" />
@@ -440,7 +440,7 @@ function StudioRecommendationCard({ studio, engagement, onNavigate }: { studio: 
     >
       <div className="relative aspect-video bg-surface flex items-center justify-center p-4">
         {studio.imagePath ? (
-          <img src={`/api/studios/${studio.id}/image`} alt={studio.name} className="max-w-full max-h-full object-contain" loading="lazy" />
+          <img src={studio.imagePath} alt={studio.name} className="max-w-full max-h-full object-contain" loading="lazy" />
         ) : (
           <Building2 className="w-10 h-10 text-muted" />
         )}
@@ -469,7 +469,7 @@ function TagRecommendationCard({ tag, onNavigate }: { tag: Tag; onNavigate: (r: 
     >
       <div className="relative aspect-video bg-surface flex items-center justify-center">
         {tag.imagePath ? (
-          <img src={`/api/tags/${tag.id}/image`} alt={tag.name} className="max-w-full max-h-full object-contain" loading="lazy" />
+          <img src={tag.imagePath} alt={tag.name} className="max-w-full max-h-full object-contain" loading="lazy" />
         ) : (
           <TagIcon className="w-8 h-8 text-muted" />
         )}

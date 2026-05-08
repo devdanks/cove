@@ -10,7 +10,9 @@ import {
   HardDrive,
   Info,
   Loader2,
+  LogOut,
   Monitor,
+  Power,
   Plug,
   Plus,
   RefreshCw,
@@ -30,8 +32,8 @@ import {
   UserCog,
   X,
 } from "lucide-react";
-import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi } from "../api/client";
-import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, StashAiImportResult } from "../api/client";
+import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi } from "../api/client";
+import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, StashAiImportResult, UserRow } from "../api/client";
 import type {
   JobInfo,
   PackageSource,
@@ -48,6 +50,7 @@ import type {
   DownloaderPathOverrideConfig,
   IdentifyDefaultsConfig,
   MetadataServerValidationResult,
+  TagGroup,
   UserTrackingPreferences,
 } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
@@ -135,7 +138,7 @@ const tabDescriptions: Record<SettingsTab, string> = {
   "user-settings": "Preferences that follow the current user or shared profile.",
   "display-profiles": "Manage resolved-span display profiles and the rules attached to each profile.",
   "ai-data": "Inspect and safely purge AI-produced embeddings, detections, segments, tag provenance, and face-owned data.",
-  security: "Authentication and session settings for the local instance.",
+  security: "Authentication requirements and anonymous share-link access.",
   users: "Manage local user accounts and their role assignments.",
   roles: "Define roles and the permissions they grant. Built-in roles are read-only.",
   "content-rules": "Restrict what each role can see or modify per entity kind. Deny rules override allow.",
@@ -184,6 +187,11 @@ function isSettingsTab(value: string | null): value is SettingsTab {
 }
 
 function readSettingsTabFromUrl(): SettingsTab {
+  const pathParts = window.location.pathname.split("/").filter(Boolean);
+  if (pathParts[0] === "settings" && isSettingsTab(pathParts[1] ?? null)) {
+    return pathParts[1] as SettingsTab;
+  }
+
   const tab = new URLSearchParams(window.location.search).get(SETTINGS_TAB_QUERY_KEY);
   return isSettingsTab(tab) ? tab : "library";
 }
@@ -446,8 +454,9 @@ export function SettingsPage() {
   const { authEnabled, user, hasPermission } = useAuth();
   const { getSettingsPanelsForTab, resolveComponent } = useExtensions();
   const canWriteSystemSettings = hasPermission("system.settings.write");
-  const canReadMarkers = hasPermission("markers.read");
-  const canWriteMarkers = hasPermission("markers.write");
+  const canShutdownSystem = hasPermission("system.shutdown");
+  const canReadSegments = hasPermission("segments.read");
+  const canWriteSegments = hasPermission("segments.write");
   const libraryExtensionsPanels = getSettingsPanelsForTab("library", "extensions");
   const libraryStandalonePanels = getSettingsPanelsForTab("library");
   const queryClient = useQueryClient();
@@ -459,6 +468,23 @@ export function SettingsPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const [metadataServerValidation, setMetadataServerValidation] = useState<Record<string, MetadataServerValidationResult>>({});
+
+  const securityUsersQ = useQuery<UserRow[]>({
+    queryKey: ["admin", "users", "security"],
+    queryFn: usersApi.list,
+    enabled: activeTab === "security" && hasPermission("users.read"),
+  });
+
+  const revokeSessionsMutation = useMutation({
+    mutationFn: authApi.revokeSessions,
+    onSuccess: () => window.dispatchEvent(new CustomEvent("cove-auth-required")),
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const shutdownMutation = useMutation({
+    mutationFn: system.shutdown,
+    onError: (err: Error) => setError(err.message),
+  });
 
   const { data: availableScrapers = [] } = useQuery({
     queryKey: ["system-scrapers"],
@@ -549,13 +575,10 @@ export function SettingsPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (activeTab === "library") {
-      params.delete(SETTINGS_TAB_QUERY_KEY);
-    } else {
-      params.set(SETTINGS_TAB_QUERY_KEY, activeTab);
-    }
+    params.delete(SETTINGS_TAB_QUERY_KEY);
+    const pathname = activeTab === "library" ? "/settings" : `/settings/${activeTab}`;
 
-    navigateToUrl(buildCurrentUrl(window.location.pathname, params), { replace: true });
+    navigateToUrl(buildCurrentUrl(pathname, params), { replace: true });
   }, [activeTab]);
 
   const saveMutation = useMutation({
@@ -630,8 +653,8 @@ export function SettingsPage() {
   const visiblePrimaryTabs = useMemo(
     () => (canWriteSystemSettings
       ? primaryTabs
-      : primaryTabs.filter((tab) => isLimitedPrimarySettingsTabVisible(tab.key, canReadMarkers))),
-    [canReadMarkers, canWriteSystemSettings],
+      : primaryTabs.filter((tab) => isLimitedPrimarySettingsTabVisible(tab.key, canReadSegments))),
+    [canReadSegments, canWriteSystemSettings],
   );
 
   const visibleTabs = useMemo(() => [...visiblePrimaryTabs, ...visibleAuthTabs], [visibleAuthTabs, visiblePrimaryTabs]);
@@ -1059,7 +1082,6 @@ export function SettingsPage() {
                 />
               </div>
             </SectionCard>
-
             {libraryStandalonePanels.map((panel) => {
               const Component = resolveComponent(panel.componentName);
               if (!Component) return null;
@@ -1287,50 +1309,62 @@ export function SettingsPage() {
 
         {resolvedActiveTab === "user-settings" && <UserSettingsPanel />}
 
-        {resolvedActiveTab === "display-profiles" && canReadMarkers && (
-          <DisplayProfilesSettingsPanel canWrite={canWriteMarkers} />
+        {resolvedActiveTab === "display-profiles" && canReadSegments && (
+          <DisplayProfilesSettingsPanel canWrite={canWriteSegments} />
         )}
 
         {resolvedActiveTab === "ai-data" && <AiDataSettingsPanel />}
 
         {resolvedActiveTab === "security" && (
           <>
-            <SectionCard title="Authentication" description="These values persist to config immediately. Enabling or disabling auth may still require a restart for middleware changes.">
+            <SectionCard title="Authentication" description="These values persist to config immediately.">
               <div className="space-y-4">
                 <CheckboxLabel
-                  label="Require authentication"
+                  label="Authentication required"
                   checked={draft.security.enabled}
                   onChange={(checked) => updateDraft((current) => ({ ...current, security: { ...current.security, enabled: checked } }))}
                 />
-                <div className="grid gap-4 md:grid-cols-2">
-                  <TextField
-                    label="Username"
-                    value={draft.security.username ?? ""}
-                    onChange={(value) => updateDraft((current) => ({ ...current, security: { ...current.security, username: value || undefined } }))}
-                    placeholder="cove"
-                  />
-                  <NumberField
-                    label="Maximum session age (minutes)"
-                    value={draft.security.maxSessionAgeMinutes}
-                    min={1}
-                    onChange={(value) =>
-                      updateDraft((current) => ({
-                        ...current,
-                        security: {
-                          ...current.security,
-                          maxSessionAgeMinutes: value ?? current.security.maxSessionAgeMinutes,
-                        },
-                      }))
-                    }
-                  />
-                </div>
-                <TextField
-                  label="New password"
-                  type="password"
-                  value={draft.security.newPassword ?? ""}
-                  onChange={(value) => updateDraft((current) => ({ ...current, security: { ...current.security, newPassword: value || undefined } }))}
-                  placeholder="Leave blank to keep the current password"
+                {!draft.security.enabled ? (
+                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                    Anyone with network access to this Cove can use it. The outside-IP failsafe is still active.
+                  </div>
+                ) : null}
+                <CheckboxLabel
+                  label="Allow anonymous share links"
+                  checked={draft.security.allowAnonymousShareLinks}
+                  onChange={(checked) => updateDraft((current) => ({ ...current, security: { ...current.security, allowAnonymousShareLinks: checked } }))}
                 />
+                {draft.security.enabled ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-border bg-background px-3 py-3 text-sm md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="font-medium text-foreground">Owner user</div>
+                      <div className="text-secondary">
+                        {securityUsersQ.data?.find((item) => item.roles.includes("Owner") || item.isSystem)?.username ?? "Not loaded"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab("users");
+                        navigateToUrl("/settings/users", { state: { page: "settings" } });
+                      }}
+                      className="inline-flex justify-center rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground hover:border-accent hover:text-accent"
+                    >
+                      User management
+                    </button>
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-2 border-t border-border pt-4 md:flex-row md:items-center md:justify-between">
+                  <div className="text-sm text-secondary">Refresh tokens remain rotatable and revocable.</div>
+                  <button
+                    type="button"
+                    disabled={!authEnabled || !user || revokeSessionsMutation.isPending}
+                    onClick={() => revokeSessionsMutation.mutate()}
+                    className="inline-flex justify-center rounded-lg border border-red-500/50 px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                  >
+                    {revokeSessionsMutation.isPending ? "Revoking..." : "Revoke all sessions"}
+                  </button>
+                </div>
               </div>
             </SectionCard>
           </>
@@ -2047,6 +2081,30 @@ export function SettingsPage() {
                 />
               </div>
             </SectionCard>
+
+            {canShutdownSystem ? (
+              <SectionCard title="Runtime" description="Stop the current Cove server process after pending requests complete.">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">Shutdown server</h3>
+                    <p className="mt-1 text-sm text-secondary">The browser will lose connection until Cove is started again.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Shut down the Cove server?")) {
+                        shutdownMutation.mutate();
+                      }
+                    }}
+                    disabled={shutdownMutation.isPending}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {shutdownMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
+                    Shutdown
+                  </button>
+                </div>
+              </SectionCard>
+            ) : null}
           </>
         )}
 
@@ -2259,10 +2317,21 @@ function LocalInterfacePanel({
 }
 
 function UserSettingsPanel() {
-  const { authEnabled, user } = useAuth();
+  const { authEnabled, user, logout } = useAuth();
   const accountBackedPreferences = supportsServerBackedUiPreferences(user);
   const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
   const [trackingPreferences, setTrackingPreferences] = useState<ResolvedTrackingPreferences>(() => resolveTrackingPreferences(user?.uiPreferences?.tracking));
+  const [logoutPending, setLogoutPending] = useState(false);
+
+  const handleLogout = async () => {
+    setLogoutPending(true);
+    try {
+      await logout();
+      navigateToUrl("/login", { replace: true });
+    } finally {
+      setLogoutPending(false);
+    }
+  };
 
   useEffect(() => {
     setTrackingPreferences(resolveTrackingPreferences(user?.uiPreferences?.tracking));
@@ -2293,53 +2362,73 @@ function UserSettingsPanel() {
   }
 
   return (
-    <SectionCard
-      title={sharedProfilePreferences ? "Shared Engagement" : "Personal Engagement"}
-      description={sharedProfilePreferences
-        ? "These preferences are stored in Cove's shared built-in profile and control activity recording for the current profile."
-        : "These preferences follow your signed-in account and control activity recording for your own profile."}
-    >
-      <div className="space-y-4">
-        <CheckboxLabel
-          label="Enable engagement history"
-          checked={trackingPreferences.enabled ?? defaultTrackingPreferences.enabled}
-          onChange={(checked) => updateTrackingPreferences({ enabled: checked })}
-        />
-        <div className="grid gap-4 md:grid-cols-2">
-          <NumberField
-            label="Minimum scene view seconds"
-            value={trackingPreferences.minViewSeconds ?? defaultTrackingPreferences.minViewSeconds}
-            min={0}
-            onChange={(value) => updateTrackingPreferences({ minViewSeconds: value ?? defaultTrackingPreferences.minViewSeconds })}
-          />
-          <NumberField
-            label="Scene completion ratio"
-            value={trackingPreferences.viewCompletionRatio ?? defaultTrackingPreferences.viewCompletionRatio}
-            min={0.01}
-            max={1}
-            onChange={(value) => updateTrackingPreferences({ viewCompletionRatio: value ?? defaultTrackingPreferences.viewCompletionRatio })}
-          />
-          <NumberField
-            label="Minimum image view seconds"
-            value={trackingPreferences.minImageDetailViewSeconds ?? defaultTrackingPreferences.minImageDetailViewSeconds}
-            min={0}
-            onChange={(value) => updateTrackingPreferences({ minImageDetailViewSeconds: value ?? defaultTrackingPreferences.minImageDetailViewSeconds })}
-          />
-          <NumberField
-            label="Minimum session length for derived likes"
-            value={trackingPreferences.minDerivedLikeSessionSeconds ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds}
-            min={0}
-            onChange={(value) => updateTrackingPreferences({ minDerivedLikeSessionSeconds: value ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds })}
-          />
-          <NumberField
-            label="Session idle timeout seconds"
-            value={trackingPreferences.sessionIdleTimeoutSec ?? defaultTrackingPreferences.sessionIdleTimeoutSec}
-            min={10}
-            onChange={(value) => updateTrackingPreferences({ sessionIdleTimeoutSec: value ?? defaultTrackingPreferences.sessionIdleTimeoutSec })}
-          />
+    <div className="space-y-5">
+      <SectionCard title="Account" description="Current sign-in controls for this browser session.">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">{user?.username ?? "Current user"}</h3>
+            <p className="mt-1 text-sm text-secondary">End this session and return to the sign-in screen.</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={logoutPending}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {logoutPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+            Logout
+          </button>
         </div>
-      </div>
-    </SectionCard>
+      </SectionCard>
+
+      <SectionCard
+        title={sharedProfilePreferences ? "Shared Engagement" : "Personal Engagement"}
+        description={sharedProfilePreferences
+          ? "These preferences are stored in Cove's shared built-in profile and control activity recording for the current profile."
+          : "These preferences follow your signed-in account and control activity recording for your own profile."}
+      >
+        <div className="space-y-4">
+          <CheckboxLabel
+            label="Enable engagement history"
+            checked={trackingPreferences.enabled ?? defaultTrackingPreferences.enabled}
+            onChange={(checked) => updateTrackingPreferences({ enabled: checked })}
+          />
+          <div className="grid gap-4 md:grid-cols-2">
+            <NumberField
+              label="Minimum scene view seconds"
+              value={trackingPreferences.minViewSeconds ?? defaultTrackingPreferences.minViewSeconds}
+              min={0}
+              onChange={(value) => updateTrackingPreferences({ minViewSeconds: value ?? defaultTrackingPreferences.minViewSeconds })}
+            />
+            <NumberField
+              label="Scene completion ratio"
+              value={trackingPreferences.viewCompletionRatio ?? defaultTrackingPreferences.viewCompletionRatio}
+              min={0.01}
+              max={1}
+              onChange={(value) => updateTrackingPreferences({ viewCompletionRatio: value ?? defaultTrackingPreferences.viewCompletionRatio })}
+            />
+            <NumberField
+              label="Minimum image view seconds"
+              value={trackingPreferences.minImageDetailViewSeconds ?? defaultTrackingPreferences.minImageDetailViewSeconds}
+              min={0}
+              onChange={(value) => updateTrackingPreferences({ minImageDetailViewSeconds: value ?? defaultTrackingPreferences.minImageDetailViewSeconds })}
+            />
+            <NumberField
+              label="Minimum session length for derived likes"
+              value={trackingPreferences.minDerivedLikeSessionSeconds ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds}
+              min={0}
+              onChange={(value) => updateTrackingPreferences({ minDerivedLikeSessionSeconds: value ?? defaultTrackingPreferences.minDerivedLikeSessionSeconds })}
+            />
+            <NumberField
+              label="Session idle timeout seconds"
+              value={trackingPreferences.sessionIdleTimeoutSec ?? defaultTrackingPreferences.sessionIdleTimeoutSec}
+              min={10}
+              onChange={(value) => updateTrackingPreferences({ sessionIdleTimeoutSec: value ?? defaultTrackingPreferences.sessionIdleTimeoutSec })}
+            />
+          </div>
+        </div>
+      </SectionCard>
+    </div>
   );
 }
 function LogsPanel() {

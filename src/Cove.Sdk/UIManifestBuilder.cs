@@ -123,6 +123,25 @@ public class UIManifestBuilder
         return this;
     }
 
+    /// <summary>Add an action that is visible only when the current principal has the required permission.</summary>
+    public UIManifestBuilder AddAction(
+        string id,
+        string label,
+        string actionType,
+        string[] entityTypes,
+        string? icon,
+        string? apiEndpoint,
+        string? handlerName,
+        int order,
+        string requiredPermission)
+    {
+        _manifest.Actions.Add(new ExtensionAction(id, label, _extensionId, actionType, entityTypes, icon, apiEndpoint, handlerName, order)
+        {
+            RequiredPermission = requiredPermission,
+        });
+        return this;
+    }
+
     /// <summary>Add a settings panel.</summary>
     public UIManifestBuilder AddSettingsPanel(UISettingsPanel panel)
     {

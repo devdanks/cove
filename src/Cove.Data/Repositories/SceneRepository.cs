@@ -18,7 +18,7 @@ public class SceneRepository : ISceneRepository
         => await _db.Scenes
             .Include(s => s.Studio)
             .Include(s => s.Urls)
-            .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
+            .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
             .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
             .Include(s => s.GroupItems).ThenInclude(item => item.Group)
@@ -125,7 +125,7 @@ public class SceneRepository : ISceneRepository
         var items = await _db.Scenes
             .Include(s => s.Studio)
             .Include(s => s.Urls)
-            .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
+            .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
             .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
             .Include(s => s.Files)
@@ -158,7 +158,7 @@ public class SceneRepository : ISceneRepository
             if (filter.GalleryId.HasValue)
                 query = query.Where(s => s.SceneGalleries.Any(sg => sg.GalleryId == filter.GalleryId.Value));
             if (filter.TagIds?.Count > 0)
-                query = query.Where(s => s.TagIds.Any(id => filter.TagIds.Contains(id)));
+                query = ApplySceneTagAny(query, filter.TagIds);
             if (filter.PerformerIds?.Count > 0)
                 query = query.Where(s => s.PerformerIds.Any(id => filter.PerformerIds.Contains(id)));
 
@@ -185,7 +185,8 @@ public class SceneRepository : ISceneRepository
             if (filter.FileCountCriterion != null)
                 query = ApplyIntCriterion(query, filter.FileCountCriterion, s => s.FileCount);
 
-            query = ApplyMultiIdCriterion(query, filter.TagsCriterion, s => s.TagIds, hierarchicalTagGroups);
+            query = ApplySceneTagCriterion(query, filter.TagsCriterion, hierarchicalTagGroups);
+            query = ApplyTagDurationCriterion(query, filter.TagDurationCriterion);
             query = ApplyMultiIdCriterion(query, filter.PerformersCriterion, s => s.PerformerIds);
 
             if (filter.StudiosCriterion != null)
@@ -301,18 +302,7 @@ public class SceneRepository : ISceneRepository
             query = FilterHelpers.ApplyTimestamp(query, filter.UpdatedAtCriterion, s => s.UpdatedAt);
             query = EngagementQueryHelpers.ApplyAffinityTimestampCriterion(_db, query, currentUserId, AffinityHostType.Scene, nameof(UserEntityAffinity.LastConsumedAt), filter.LastPlayedAtCriterion);
 
-            // Performer tags criterion (filter scenes by tags of their performers)
-            if (filter.PerformerTagsCriterion != null)
-            {
-                var ptIds = filter.PerformerTagsCriterion.Value;
-                query = filter.PerformerTagsCriterion.Modifier switch
-                {
-                    CriterionModifier.Includes => query.Where(s => s.ScenePerformers.Any(sp => sp.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
-                    CriterionModifier.Excludes => query.Where(s => !s.ScenePerformers.Any(sp => sp.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
-                    CriterionModifier.IncludesAll => query.Where(s => ptIds.All(tid => s.ScenePerformers.Any(sp => sp.Performer!.PerformerTags.Any(pt => pt.TagId == tid)))),
-                    _ => query.Where(s => s.ScenePerformers.Any(sp => sp.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
-                };
-            }
+            query = ApplyPerformerOccurrenceTagCriterion(query, filter.PerformerTagsCriterion, GetIncludedPerformerIds(filter));
 
             // Performer age criterion (age at time of scene based on scene date and performer birthdate)
             query = ApplyPerformerAgeCriterion(query, filter.PerformerAgeCriterion);
@@ -778,4 +768,225 @@ public class SceneRepository : ISceneRepository
         System.Linq.Expressions.Expression<Func<Scene, IEnumerable<int>>> idsSelector,
         IReadOnlyList<int[]>? valueGroups = null)
         => MultiIdCriterionQueryHelper.Apply(query, criterion, idsSelector, valueGroups);
+
+    private IQueryable<Scene> ApplySceneTagCriterion(IQueryable<Scene> query, MultiIdCriterion? criterion, IReadOnlyList<int[]>? valueGroups = null)
+    {
+        if (criterion == null)
+            return query;
+
+        var groups = valueGroups?.Where(group => group.Length > 0).ToArray()
+            ?? criterion.Value.Where(tagId => tagId > 0).Select(tagId => new[] { tagId }).ToArray();
+        if (groups.Length == 0)
+            return query;
+
+        var ids = groups.SelectMany(group => group).Distinct().ToArray();
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Excludes => ApplySceneTagNone(query, ids),
+            CriterionModifier.ExcludesAll => ApplySceneTagExcludesAll(query, groups),
+            CriterionModifier.IncludesAll => ApplySceneTagIncludesAll(query, groups),
+            _ => ApplySceneTagAny(query, ids),
+        };
+    }
+
+    private IQueryable<Scene> ApplySceneTagIncludesAll(IQueryable<Scene> query, IReadOnlyList<int[]> groups)
+    {
+        foreach (var group in groups)
+        {
+            query = ApplySceneTagAny(query, group);
+        }
+
+        return query;
+    }
+
+    private IQueryable<Scene> ApplySceneTagExcludesAll(IQueryable<Scene> query, IReadOnlyList<int[]> groups)
+    {
+        var matchingAll = query;
+        foreach (var group in groups)
+        {
+            matchingAll = ApplySceneTagAny(matchingAll, group);
+        }
+
+        return query.Where(scene => !matchingAll.Select(match => match.Id).Contains(scene.Id));
+    }
+
+    private IQueryable<Scene> ApplySceneTagAny(IQueryable<Scene> query, IReadOnlyCollection<int> tagIds)
+    {
+        var ids = tagIds.Where(tagId => tagId > 0).Distinct().ToArray();
+        if (ids.Length == 0)
+            return query;
+
+        return query.Where(scene => scene.SceneTags.Any(sceneTag => ids.Contains(sceneTag.TagId))
+            || _db.TagApplications.Any(application => application.HostType == AffinityHostType.Scene
+                && application.HostId == scene.Id
+                && ids.Contains(application.TagId)));
+    }
+
+    private IQueryable<Scene> ApplySceneTagNone(IQueryable<Scene> query, IReadOnlyCollection<int> tagIds)
+    {
+        var ids = tagIds.Where(tagId => tagId > 0).Distinct().ToArray();
+        if (ids.Length == 0)
+            return query;
+
+        return query.Where(scene => !scene.SceneTags.Any(sceneTag => ids.Contains(sceneTag.TagId))
+            && !_db.TagApplications.Any(application => application.HostType == AffinityHostType.Scene
+                && application.HostId == scene.Id
+                && ids.Contains(application.TagId)));
+    }
+
+    private static int[] GetIncludedPerformerIds(SceneFilter filter)
+    {
+        var ids = new HashSet<int>();
+        if (filter.PerformerIds is { Count: > 0 })
+        {
+            foreach (var performerId in filter.PerformerIds.Where(id => id > 0))
+                ids.Add(performerId);
+        }
+
+        if (filter.PerformersCriterion?.Value is { Count: > 0 }
+            && filter.PerformersCriterion.Modifier is CriterionModifier.Includes or CriterionModifier.IncludesAll)
+        {
+            foreach (var performerId in filter.PerformersCriterion.Value.Where(id => id > 0))
+                ids.Add(performerId);
+        }
+
+        return ids.ToArray();
+    }
+
+    private IQueryable<Scene> ApplyPerformerOccurrenceTagCriterion(IQueryable<Scene> query, MultiIdCriterion? criterion, IReadOnlyCollection<int> performerIds)
+    {
+        if (criterion == null)
+            return query;
+
+        var tagIds = criterion.Value.Where(tagId => tagId > 0).Distinct().ToArray();
+        var excludedTagIds = criterion.Excludes?.Where(tagId => tagId > 0).Distinct().ToArray() ?? [];
+        if (tagIds.Length == 0 && excludedTagIds.Length == 0)
+            return query;
+
+        var scopedApplications = _db.TagApplications.AsNoTracking()
+            .Where(application => application.HostType == AffinityHostType.Scene
+                && application.ContextType == "performer"
+                && application.ContextId != null);
+
+        if (performerIds.Count > 0)
+        {
+            var performerIdArray = performerIds.ToArray();
+            scopedApplications = scopedApplications.Where(application => application.ContextId != null && performerIdArray.Contains(application.ContextId.Value));
+        }
+
+        if (tagIds.Length > 0)
+        {
+            query = criterion.Modifier switch
+            {
+                CriterionModifier.Excludes => query.Where(scene => !scopedApplications.Any(application => application.HostId == scene.Id && tagIds.Contains(application.TagId))),
+                CriterionModifier.ExcludesAll => ApplyPerformerOccurrenceTagExcludesAll(query, scopedApplications, tagIds),
+                CriterionModifier.IncludesAll => ApplyPerformerOccurrenceTagIncludesAll(query, scopedApplications, tagIds),
+                _ => query.Where(scene => scopedApplications.Any(application => application.HostId == scene.Id && tagIds.Contains(application.TagId))),
+            };
+        }
+
+        if (excludedTagIds.Length > 0)
+        {
+            query = query.Where(scene => !scopedApplications.Any(application => application.HostId == scene.Id && excludedTagIds.Contains(application.TagId)));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<Scene> ApplyPerformerOccurrenceTagIncludesAll(IQueryable<Scene> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    {
+        foreach (var tagId in tagIds)
+        {
+            query = query.Where(scene => applications.Any(application => application.HostId == scene.Id && application.TagId == tagId));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<Scene> ApplyPerformerOccurrenceTagExcludesAll(IQueryable<Scene> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    {
+        var matchingAll = query;
+        foreach (var tagId in tagIds)
+        {
+            matchingAll = matchingAll.Where(scene => applications.Any(application => application.HostId == scene.Id && application.TagId == tagId));
+        }
+
+        return query.Where(scene => !matchingAll.Select(match => match.Id).Contains(scene.Id));
+    }
+
+    private IQueryable<Scene> ApplyTagDurationCriterion(IQueryable<Scene> query, TagDurationCriterion? criterion)
+    {
+        foreach (var clause in GetTagDurationClauses(criterion))
+        {
+            query = ApplyTagDurationClause(query, clause);
+        }
+
+        return query;
+    }
+
+    private static IReadOnlyList<TagDurationClause> GetTagDurationClauses(TagDurationCriterion? criterion)
+    {
+        if (criterion == null)
+            return [];
+
+        var clauses = criterion.Clauses.Where(IsTagDurationClauseValid).ToArray();
+        if (clauses.Length > 0)
+            return clauses;
+
+        return IsTagDurationClauseValid(criterion) ? [criterion] : [];
+    }
+
+    private static bool IsTagDurationClauseValid(TagDurationClause clause)
+        => clause.TagId > 0 && clause.Value.HasValue;
+
+    private IQueryable<Scene> ApplyTagDurationClause(IQueryable<Scene> query, TagDurationClause criterion)
+    {
+        if (!IsTagDurationClauseValid(criterion))
+            return query;
+
+        var value = criterion.Value.GetValueOrDefault();
+        var value2 = criterion.Value2 ?? value;
+
+        var applications = _db.TagApplications.AsNoTracking()
+            .Where(application => application.HostType == AffinityHostType.Scene && application.TagId == criterion.TagId);
+
+        var contextMode = criterion.ContextMode?.Trim().ToLowerInvariant();
+        if (contextMode == "host")
+            applications = applications.Where(application => application.ContextType == null && application.ContextId == null);
+        else if (contextMode == "context")
+            applications = applications.Where(application => application.ContextType != null && application.ContextId != null);
+
+        var contextType = criterion.ContextType?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(contextType))
+            applications = applications.Where(application => application.ContextType == contextType);
+
+        var usePercent = string.Equals(criterion.Unit, "percent", StringComparison.OrdinalIgnoreCase);
+        var durationQuery = usePercent
+            ? applications
+                .GroupBy(application => application.HostId)
+                .Select(group => new
+                {
+                    HostId = group.Key,
+                    Value = group.Max(application => application.TotalDurationSec != null && application.HostDurationSec != null && application.HostDurationSec > 0
+                        ? application.TotalDurationSec * 100d / application.HostDurationSec
+                        : null),
+                })
+            : applications
+                .GroupBy(application => application.HostId)
+                .Select(group => new
+                {
+                    HostId = group.Key,
+                    Value = group.Max(application => application.TotalDurationSec),
+                });
+
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value == value)),
+            CriterionModifier.NotEquals => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value != value)),
+            CriterionModifier.LessThan => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value < value)),
+            CriterionModifier.Between => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value >= value && row.Value <= value2)),
+            CriterionModifier.NotBetween => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && (row.Value < value || row.Value > value2))),
+            _ => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value > value)),
+        };
+    }
 }

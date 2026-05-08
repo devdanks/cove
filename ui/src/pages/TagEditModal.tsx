@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { tags, entityImages } from "../api/client";
+import { tags, entityImages, tagGroups } from "../api/client";
 import type { TagDetail, TagUpdate, Tag } from "../api/types";
 import { EditModal, Field, NumberInput, SaveButton, SelectInput, TextArea, TextInput } from "../components/EditModal";
 import { ImageInput } from "../components/ImageInput";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
+import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
 
 interface Props {
   tag: TagDetail;
@@ -21,6 +22,10 @@ export function TagEditModal({ tag, open, onClose }: Props) {
   const [name, setName] = useState(tag.name);
   const [sortName, setSortName] = useState(tag.sortName ?? "");
   const [description, setDescription] = useState(tag.description ?? "");
+  const [color, setColor] = useState(tag.color ?? "");
+  const [tagGroupId, setTagGroupId] = useState<number | undefined>(tag.tagGroupId ?? undefined);
+  const [minOccurrenceSec, setMinOccurrenceSec] = useState<number | undefined>(tag.minOccurrenceSec ?? undefined);
+  const [minOccurrencePercent, setMinOccurrencePercent] = useState<number | undefined>(tag.minOccurrencePercent ?? undefined);
   const [ignoreAutoTag, setIgnoreAutoTag] = useState(tag.ignoreAutoTag);
   const [playerBarMode, setPlayerBarMode] = useState<PlayerBarMode>(() => readPlayerBarMode(tag.showAsSegment));
   const [segmentColorOverride, setSegmentColorOverride] = useState(tag.segmentColorOverride ?? "");
@@ -42,10 +47,19 @@ export function TagEditModal({ tag, open, onClose }: Props) {
     queryFn: () => tags.find({ perPage: 500, sort: "name", direction: "asc" }),
   });
 
+  const { data: groups = [] } = useQuery({
+    queryKey: ["tag-groups"],
+    queryFn: tagGroups.list,
+  });
+
   useEffect(() => {
     setName(tag.name);
     setSortName(tag.sortName ?? "");
     setDescription(tag.description ?? "");
+    setColor(tag.color ?? "");
+    setTagGroupId(tag.tagGroupId ?? undefined);
+    setMinOccurrenceSec(tag.minOccurrenceSec ?? undefined);
+    setMinOccurrencePercent(tag.minOccurrencePercent ?? undefined);
     setIgnoreAutoTag(tag.ignoreAutoTag);
     setPlayerBarMode(readPlayerBarMode(tag.showAsSegment));
     setSegmentColorOverride(tag.segmentColorOverride ?? "");
@@ -71,6 +85,10 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       name,
       sortName: sortName || undefined,
       description: description || undefined,
+      color: color.trim() || null,
+      tagGroupId: tagGroupId ?? null,
+      minOccurrenceSec: minOccurrenceSec ?? null,
+      minOccurrencePercent: minOccurrencePercent ?? null,
       ignoreAutoTag,
       showAsSegment: playerBarMode === "default" ? null : playerBarMode === "always",
       segmentColorOverride: playerBarMode === "always" ? (segmentColorOverride.trim() || null) : null,
@@ -85,13 +103,8 @@ export function TagEditModal({ tag, open, onClose }: Props) {
   // Exclude self from parent/child options
   const excludedIds = new Set([tag.id, ...selectedParentIds, ...selectedChildIds]);
 
-  const filteredParents = allTags?.items.filter(
-    (t) => !excludedIds.has(t.id) && t.name.toLowerCase().includes(parentSearch.toLowerCase())
-  ) ?? [];
-
-  const filteredChildren = allTags?.items.filter(
-    (t) => !excludedIds.has(t.id) && t.name.toLowerCase().includes(childSearch.toLowerCase())
-  ) ?? [];
+  const filteredParents = filterTagsForSelector(allTags?.items ?? [], parentSearch, excludedIds);
+  const filteredChildren = filterTagsForSelector(allTags?.items ?? [], childSearch, excludedIds);
 
   const selectedParents = allTags?.items.filter((t) => selectedParentIds.includes(t.id)) ?? tag.parents;
   const selectedChildren = allTags?.items.filter((t) => selectedChildIds.includes(t.id)) ?? tag.children;
@@ -117,6 +130,36 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       <Field label="Description">
         <TextArea value={description} onChange={setDescription} placeholder="Tag description" rows={3} />
       </Field>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="Badge Color">
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#6ee7b7"}
+              onChange={(event) => setColor(event.target.value)}
+              className="h-9 w-11 rounded border border-border bg-card p-1"
+            />
+            <TextInput value={color} onChange={setColor} placeholder="#6ee7b7" />
+          </div>
+        </Field>
+        <Field label="Tag Group">
+          <SelectInput
+            value={tagGroupId?.toString() ?? ""}
+            onChange={(value) => setTagGroupId(value ? Number(value) : undefined)}
+            options={groups.map((group) => ({ value: group.id.toString(), label: group.name }))}
+          />
+        </Field>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="Min Seconds">
+          <NumberInput value={minOccurrenceSec} onChange={setMinOccurrenceSec} min={0} />
+        </Field>
+        <Field label="Min Percent">
+          <NumberInput value={minOccurrencePercent} onChange={setMinOccurrencePercent} min={0} max={100} />
+        </Field>
+      </div>
 
       <Field label="Aliases">
         <StringListEditor
@@ -169,17 +212,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
 
       {/* Parent Tags */}
       <Field label="Parent Tags">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedParents.map((t) => (
-            <span
-              key={t.id}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300"
-            >
-              {t.name}
-              <button onClick={() => setSelectedParentIds(selectedParentIds.filter((id) => id !== t.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
+        <SelectedTagChips tags={selectedParents} onRemove={(tag) => setSelectedParentIds(selectedParentIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
         <input
           type="text"
           value={parentSearch}
@@ -188,33 +221,13 @@ export function TagEditModal({ tag, open, onClose }: Props) {
           className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
         />
         {parentSearch && filteredParents.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredParents.slice(0, 10).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { setSelectedParentIds([...selectedParentIds, t.id]); setParentSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {t.name}
-              </button>
-            ))}
-          </div>
+          <GroupedTagOptionList tags={filteredParents} maxItems={20} onSelect={(tag) => { setSelectedParentIds([...selectedParentIds, tag.id]); setParentSearch(""); }} />
         )}
       </Field>
 
       {/* Child Tags */}
       <Field label="Child Tags">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedChildren.map((t) => (
-            <span
-              key={t.id}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/10 text-accent-hover"
-            >
-              {t.name}
-              <button onClick={() => setSelectedChildIds(selectedChildIds.filter((id) => id !== t.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
+        <SelectedTagChips tags={selectedChildren} onRemove={(tag) => setSelectedChildIds(selectedChildIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
         <input
           type="text"
           value={childSearch}
@@ -223,17 +236,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
           className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
         />
         {childSearch && filteredChildren.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredChildren.slice(0, 10).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { setSelectedChildIds([...selectedChildIds, t.id]); setChildSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {t.name}
-              </button>
-            ))}
-          </div>
+          <GroupedTagOptionList tags={filteredChildren} maxItems={20} onSelect={(tag) => { setSelectedChildIds([...selectedChildIds, tag.id]); setChildSearch(""); }} />
         )}
       </Field>
 

@@ -311,18 +311,19 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var provenanceLookup = tagProvenanceService == null
             ? null
             : await tagProvenanceService.GetLookupAsync(AffinityHostType.Scene, scene.Id, tagIds, cancellationToken);
+        var contextTagApplications = await LoadContextTagApplicationsAsync(scene.Id, cancellationToken);
 
-        return MapToDto(scene, engagement, preferUserSnapshot, provenanceLookup);
+        return MapToDto(scene, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications);
     }
 
-    private SceneDto MapToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
+    private SceneDto MapToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
         s.Organized, s.StudioId, s.Studio?.Name,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
-        s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
-        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
+        s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!, GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
+        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
         s.Files.Select(f => new VideoFileDto(
             f.Id,
             CanReadFiles ? f.Path : string.Empty,
@@ -342,7 +343,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
         s.RemoteIds.Select(remoteId => new SceneRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
         s.CustomFields,
-        s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
+        s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o"),
+        contextTagApplications
     );
 
     private SceneDto MapListToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
@@ -351,8 +353,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.Organized, s.StudioId, s.Studio?.Name,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
-        s.SceneTags.Where(st => st.Tag != null).Select(st => new TagDto(st.Tag!.Id, st.Tag.Name, st.Tag.Description, st.Tag.Favorite, st.Tag.IgnoreAutoTag, [])).ToList(),
-        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
+        s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!)).ToList(),
+        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
         s.Files.Select(f => new VideoFileDto(
             f.Id,
             CanReadFiles ? f.Path : string.Empty,
@@ -374,6 +376,44 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         null,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
+
+    private async Task<List<TagApplicationDto>> LoadContextTagApplicationsAsync(int sceneId, CancellationToken ct)
+    {
+        var applications = await db.TagApplications
+            .AsNoTracking()
+            .Include(application => application.Tag).ThenInclude(tag => tag!.Aliases)
+            .Include(application => application.Tag).ThenInclude(tag => tag!.TagGroup)
+            .AsSplitQuery()
+            .Where(application => application.HostType == AffinityHostType.Scene
+                && application.HostId == sceneId
+                && application.ContextType != null
+                && application.ContextId != null)
+            .OrderBy(application => application.ContextType)
+            .ThenBy(application => application.ContextId)
+            .ThenBy(application => application.Tag!.Name)
+            .ToListAsync(ct);
+
+        return applications.Select(TagApplicationsController.Map).ToList();
+    }
+
+    private static TagDto MapTagDto(Tag tag, List<TagProvenanceDto>? provenance = null)
+        => new(
+            tag.Id,
+            tag.Name,
+            tag.Description,
+            tag.Favorite,
+            tag.IgnoreAutoTag,
+            tag.Aliases.Select(alias => alias.Alias).ToList(),
+            tag.ShowAsSegment,
+            tag.SegmentColorOverride,
+            tag.SegmentLaneOverride,
+            provenance,
+            tag.Color,
+            tag.TagGroupId,
+            tag.TagGroup?.Name,
+            tag.TagGroup?.Color,
+            tag.MinOccurrenceSec,
+            tag.MinOccurrencePercent);
 
     private static List<TagProvenanceDto> GetTagProvenance(IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup, int tagId)
         => provenanceLookup != null && provenanceLookup.TryGetValue(tagId, out var provenance) ? provenance : [];

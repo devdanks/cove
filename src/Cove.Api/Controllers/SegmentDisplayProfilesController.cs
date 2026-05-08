@@ -10,7 +10,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/segment-display-profiles")]
-[RequiresPermission(Permissions.MarkersRead)]
+[RequiresPermission(Permissions.SegmentsRead)]
 public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolver spanResolver, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
 {
     [HttpGet]
@@ -42,7 +42,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpPost]
-    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresPermission(Permissions.SegmentsWrite)]
     public async Task<ActionResult<SegmentDisplayProfileDto>> Create([FromBody] SegmentDisplayProfileCreateDto dto, CancellationToken ct)
     {
         var name = NormalizeRequiredText(dto.Name, "Profile name is required.");
@@ -70,7 +70,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpPut("{id:int}")]
-    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresPermission(Permissions.SegmentsWrite)]
     public async Task<ActionResult<SegmentDisplayProfileDto>> Update(int id, [FromBody] SegmentDisplayProfileUpdateDto dto, CancellationToken ct)
     {
         var profile = await LoadEditableProfileAsync(id, ct);
@@ -89,7 +89,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpDelete("{id:int}")]
-    [RequiresPermission(Permissions.MarkersDelete)]
+    [RequiresPermission(Permissions.SegmentsDelete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var profile = await LoadEditableProfileAsync(id, ct);
@@ -111,7 +111,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpPut("{id:int}/default")]
-    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresPermission(Permissions.SegmentsWrite)]
     public async Task<ActionResult<SegmentDisplayProfileDto>> SetDefault(int id, CancellationToken ct)
     {
         var profile = await LoadEditableProfileAsync(id, ct);
@@ -143,7 +143,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpPost("{profileId:int}/rules")]
-    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresPermission(Permissions.SegmentsWrite)]
     public async Task<ActionResult<SegmentDisplayRuleDto>> CreateRule(int profileId, [FromBody] SegmentDisplayRuleCreateDto dto, CancellationToken ct)
     {
         var profile = await LoadEditableProfileAsync(profileId, ct);
@@ -179,7 +179,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpPost("{profileId:int}/rules/bulk")]
-    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresPermission(Permissions.SegmentsWrite)]
     public async Task<IActionResult> CreateRulesBulk(int profileId, [FromBody] List<SegmentDisplayRuleCreateDto>? dtos, CancellationToken ct)
     {
         var profile = await LoadEditableProfileAsync(profileId, ct);
@@ -221,7 +221,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpPut("{profileId:int}/rules/{id:int}")]
-    [RequiresPermission(Permissions.MarkersWrite)]
+    [RequiresPermission(Permissions.SegmentsWrite)]
     public async Task<ActionResult<SegmentDisplayRuleDto>> UpdateRule(int profileId, int id, [FromBody] SegmentDisplayRuleUpdateDto dto, CancellationToken ct)
     {
         var profile = await LoadEditableProfileAsync(profileId, ct);
@@ -259,7 +259,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpDelete("{profileId:int}/rules/{id:int}")]
-    [RequiresPermission(Permissions.MarkersDelete)]
+    [RequiresPermission(Permissions.SegmentsDelete)]
     public async Task<IActionResult> DeleteRule(int profileId, int id, CancellationToken ct)
     {
         var profile = await LoadEditableProfileAsync(profileId, ct);
@@ -278,7 +278,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     }
 
     [HttpPost("preview")]
-    [RequiresPermission(Permissions.MarkersRead)]
+    [RequiresPermission(Permissions.SegmentsRead)]
     public async Task<ActionResult<ResolvedSpanListDto>> Preview([FromBody] SegmentDisplayProfilePreviewRequestDto dto, CancellationToken ct)
     {
         if (dto.SceneId <= 0)

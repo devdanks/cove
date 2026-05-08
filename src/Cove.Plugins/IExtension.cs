@@ -317,7 +317,11 @@ public record ExtensionAction(
     int Order = 100,
     /// <summary>Only show in these pages (empty = show everywhere applicable).</summary>
     string[]? Pages = null
-);
+)
+{
+    /// <summary>Permission required to show and invoke this action.</summary>
+    public string? RequiredPermission { get; init; }
+}
 
 // ============================================================================
 // EXTENSION MANIFEST FILE — extension.json schema

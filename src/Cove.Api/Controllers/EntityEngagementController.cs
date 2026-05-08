@@ -145,7 +145,7 @@ public class EntityEngagementController(IUserEngagementService engagementService
             InteractionHostType.Performer => Permissions.PerformersRead,
             InteractionHostType.Face => Permissions.FacesRead,
             InteractionHostType.Tag => Permissions.TagsRead,
-            InteractionHostType.Segment => Permissions.MarkersRead,
+            InteractionHostType.Segment => Permissions.SegmentsRead,
             InteractionHostType.Studio => Permissions.StudiosRead,
             InteractionHostType.Gallery => Permissions.GalleriesRead,
             InteractionHostType.Group => Permissions.GroupsRead,

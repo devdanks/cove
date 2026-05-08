@@ -3,6 +3,7 @@ import type {
   Scene, SceneCreate, SceneUpdate,
   Performer, PerformerCreate, PerformerUpdate,
   Tag, TagDetail, TagCreate, TagUpdate, TagSegmentWall,
+  TagApplication, TagApplicationCreate, TagGroup, TagGroupCreate, TagGroupUpdate,
   TagGraphNode, TagGraphResponse,
   Studio, StudioCreate, StudioUpdate,
   Gallery, GalleryCreate, GalleryUpdate, GalleryChapter, GalleryChapterCreate, GalleryChapterUpdate,
@@ -549,6 +550,21 @@ export const tags = {
     request<{ jobId: string; itemCount: number }>("/tags/metadata-server/batch-tag", { method: "POST", body: JSON.stringify(data) }),
 };
 
+export const tagGroups = {
+  list: () => request<TagGroup[]>("/taggroups"),
+  get: (id: number) => request<TagGroup>(`/taggroups/${id}`),
+  create: (data: TagGroupCreate) => request<TagGroup>("/taggroups", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: TagGroupUpdate) => request<TagGroup>(`/taggroups/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: number) => request<void>(`/taggroups/${id}`, { method: "DELETE" }),
+};
+
+export const tagApplications = {
+  list: (params?: { hostType?: string; hostId?: number; contextType?: string; contextId?: number }) =>
+    request<TagApplication[]>(`/tagapplications${buildQuery(undefined, params)}`),
+  create: (data: TagApplicationCreate) => request<TagApplication>("/tagapplications", { method: "POST", body: JSON.stringify(data) }),
+  delete: (id: number) => request<void>(`/tagapplications/${id}`, { method: "DELETE" }),
+};
+
 export const aiData = {
   summary: (selector?: AiDataSelector) => request<AiDataSummary>(`/ai-data/summary${buildAiDataQuery(selector)}`),
   purge: (request_: AiDataPurgeRequest) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(request_) }),
@@ -771,6 +787,7 @@ export const entityImages = {
 // ===== System =====
 export const system = {
   status: () => request<SystemStatus>("/system/status"),
+  shutdown: () => request<{ message: string }>("/system/shutdown", { method: "POST" }),
   stats: () => request<Stats>("/system/stats"),
   getConfig: () => request<CoveConfig>("/system/config"),
   saveConfig: (config: CoveConfig) =>
@@ -1131,6 +1148,7 @@ export interface UserRow {
   isLocked: boolean;
   isSystem: boolean;
   mustChangePassword: boolean;
+  hasPassword: boolean;
   lastLoginAt?: string | null;
   lastLoginIp?: string | null;
   createdAt: string;
@@ -1222,8 +1240,53 @@ export interface ShareLinkIssuedRow {
   hasPassword: boolean;
 }
 
+export interface BootstrapStatusRow {
+  ownerExists: boolean;
+  authEnabled: boolean;
+  hasSetupToken: boolean;
+}
+
+export interface AuthLoginResponse {
+  token: string;
+  refreshToken: string;
+  accessExpires: string;
+  refreshExpires: string;
+  user?: UserRow;
+  username: string;
+}
+
+export interface InviteTokenRow {
+  token: string;
+  url: string;
+  expiresAt: string;
+}
+
+export interface InviteTokenInfoRow {
+  valid: boolean;
+  usernameRequired: boolean;
+  username?: string | null;
+  expiresAt: string;
+}
+
 export const auth = {
   me: () => request<MeResponse>("/auth/me"),
+  bootstrapStatus: () => request<BootstrapStatusRow>("/auth/bootstrap-status"),
+  bootstrapOwner: (username: string, password: string) =>
+    request<AuthLoginResponse>("/auth/bootstrap-owner", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  redeemSetupToken: (token: string, password: string, username?: string) =>
+    request<AuthLoginResponse>("/auth/setup-token-redeem", {
+      method: "POST",
+      body: JSON.stringify({ token, password, username: username || undefined }),
+    }),
+  inviteInfo: (token: string) => request<InviteTokenInfoRow>(`/auth/invite-info?token=${encodeURIComponent(token)}`),
+  redeemInvite: (token: string, password: string, username?: string) =>
+    request<AuthLoginResponse>("/auth/invite-redeem", {
+      method: "POST",
+      body: JSON.stringify({ token, password, username: username || undefined }),
+    }),
   login: (username: string, password: string) =>
     request<{ token: string; refreshToken: string; user: unknown; username: string }>("/auth/login", {
       method: "POST",
@@ -1236,6 +1299,7 @@ export const auth = {
       method: "POST",
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
+  revokeSessions: () => request<{ message: string }>("/auth/revoke-sessions", { method: "POST" }),
   updateUiPreferences: (preferences: UserUiPreferences | null) =>
     request<UserUiPreferences | null>("/auth/me/ui-preferences", {
       method: "PUT",
@@ -1246,8 +1310,10 @@ export const auth = {
 export const usersApi = {
   list: () => request<UserRow[]>("/users"),
   get: (id: number) => request<UserRow>(`/users/${id}`),
-  create: (req: { username: string; password: string; displayName?: string; email?: string; roles?: string[]; mustChangePassword?: boolean }) =>
+  create: (req: { username: string; password?: string | null; displayName?: string; email?: string; roles?: string[]; mustChangePassword?: boolean }) =>
     request<UserRow>("/users", { method: "POST", body: JSON.stringify(req) }),
+  createInvite: (req: { username?: string; displayName?: string; email?: string; roles?: string[] }) =>
+    request<InviteTokenRow>("/users/invite", { method: "POST", body: JSON.stringify(req) }),
   update: (id: number, req: { displayName?: string; email?: string; isActive?: boolean; mustChangePassword?: boolean }) =>
     request<UserRow>(`/users/${id}`, { method: "PUT", body: JSON.stringify(req) }),
   remove: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
@@ -1255,6 +1321,7 @@ export const usersApi = {
     request<UserRow>(`/users/${id}/roles`, { method: "POST", body: JSON.stringify({ roles }) }),
   adminChangePassword: (id: number, newPassword: string) =>
     request<void>(`/users/${id}/password`, { method: "POST", body: JSON.stringify({ newPassword }) }),
+  invite: (id: number) => request<InviteTokenRow>(`/users/${id}/invite`, { method: "POST" }),
   unlock: (id: number) => request<void>(`/users/${id}/unlock`, { method: "POST" }),
 };
 

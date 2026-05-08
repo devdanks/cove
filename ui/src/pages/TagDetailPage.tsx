@@ -196,38 +196,6 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         heroContent={(
           <>
             {autoTagMut.isSuccess ? <p className="text-sm text-emerald-300">Auto-tag job queued.</p> : null}
-            <div className="mt-4 rounded-xl border border-border bg-card/70 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold uppercase tracking-wide text-muted">Player bar</div>
-                  <div className="mt-2 text-sm text-foreground">{formatPlayerBarSummary(tag)}</div>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-secondary">
-                    {tag.showAsSegment === true ? <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-emerald-300">Always visible</span> : null}
-                    {tag.showAsSegment === false ? <span className="rounded-full bg-red-500/15 px-2 py-1 text-red-300">Never visible</span> : null}
-                    {tag.showAsSegment == null ? <span className="rounded-full bg-surface px-2 py-1 text-secondary">Uses display profiles</span> : null}
-                    {tag.segmentColorOverride ? (
-                      <span className="inline-flex items-center gap-2 rounded-full bg-surface px-2 py-1 text-secondary">
-                        <span className="h-2.5 w-2.5 rounded-full border border-white/20" style={{ backgroundColor: tag.segmentColorOverride }} />
-                        {tag.segmentColorOverride}
-                      </span>
-                    ) : null}
-                    {tag.segmentLaneOverride != null ? <span className="rounded-full bg-surface px-2 py-1 text-secondary">Lane {tag.segmentLaneOverride}</span> : null}
-                  </div>
-                </div>
-                {canWriteTag ? (
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => onNavigate({ page: "settings" })} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent">
-                      <Layers className="h-4 w-4" />
-                      Open display profiles
-                    </button>
-                    <button type="button" onClick={() => setEditing(true)} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent">
-                      <Pencil className="h-4 w-4" />
-                      Edit player bar
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </div>
             <CustomFieldsDisplay customFields={tag.customFields} />
             <TagMetadataServerPanel tag={tag} metadataServers={metadataServers} onNavigate={onNavigate} />
           </>
@@ -460,18 +428,6 @@ function TagMetadataServerPanel({ tag, metadataServers, onNavigate }: { tag: Tag
   );
 }
 
-function formatPlayerBarSummary(tag: TagDetailModel) {
-  if (tag.showAsSegment === true) {
-    return "This tag is forced visible on the player bar for all display profiles.";
-  }
-
-  if (tag.showAsSegment === false) {
-    return "This tag is suppressed on the player bar for all display profiles.";
-  }
-
-  return "This tag inherits its player-bar behavior from the active display profile rules.";
-}
-
 function TagHierarchyLinks({
   tag,
   onNavigate,
@@ -494,7 +450,7 @@ function TagHierarchyLinks({
               <TagIcon className="h-3 w-3" /> Parents
             </span>
             {tag.parents.map((parent) => (
-              <TagBadge key={parent.id} name={parent.name} onClick={() => onNavigate({ page: "tag", id: parent.id })} />
+              <TagBadge key={parent.id} name={parent.name} tag={parent} onClick={() => onNavigate({ page: "tag", id: parent.id })} />
             ))}
           </div>
         ) : null}
@@ -504,7 +460,7 @@ function TagHierarchyLinks({
               <TagIcon className="h-3 w-3" /> Sub Tags
             </span>
             {tag.children.map((child) => (
-              <TagBadge key={child.id} name={child.name} onClick={() => onNavigate({ page: "tag", id: child.id })} />
+              <TagBadge key={child.id} name={child.name} tag={child} onClick={() => onNavigate({ page: "tag", id: child.id })} />
             ))}
           </div>
         ) : null}

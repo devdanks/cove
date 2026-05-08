@@ -219,6 +219,76 @@ public class TagFilterBehaviorTests
         Assert.Equal(["Child A", "Child B", "Parent"], items.Select(tag => tag.Name).ToArray());
     }
 
+    [Fact]
+    public async Task TagGroupsCriterion_FiltersIncludedAndExcludedGroups()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+
+        var actionGroup = new TagGroup { Name = "Action", SortOrder = 1 };
+        var subjectGroup = new TagGroup { Name = "Subject", SortOrder = 2 };
+        context.TagGroups.AddRange(actionGroup, subjectGroup);
+        await context.SaveChangesAsync();
+
+        context.Tags.AddRange(
+            new Tag { Name = "Action Tag", TagGroupId = actionGroup.Id },
+            new Tag { Name = "Subject Tag", TagGroupId = subjectGroup.Id },
+            new Tag { Name = "Ungrouped Tag" });
+        await context.SaveChangesAsync();
+
+        var repository = new TagRepository(context);
+        var (includedItems, includedCount) = await repository.FindAsync(
+            new TagFilter
+            {
+                TagGroupsCriterion = new MultiIdCriterion
+                {
+                    Modifier = CriterionModifier.Includes,
+                    Value = [actionGroup.Id],
+                },
+            },
+            new FindFilter { Page = 1, PerPage = 20, Sort = "name" });
+
+        var (excludedItems, excludedCount) = await repository.FindAsync(
+            new TagFilter
+            {
+                TagGroupsCriterion = new MultiIdCriterion
+                {
+                    Excludes = [subjectGroup.Id],
+                },
+            },
+            new FindFilter { Page = 1, PerPage = 20, Sort = "name" });
+
+        Assert.Equal(1, includedCount);
+        Assert.Equal(["Action Tag"], includedItems.Select(tag => tag.Name).ToArray());
+        Assert.Equal(2, excludedCount);
+        Assert.Equal(["Action Tag", "Ungrouped Tag"], excludedItems.Select(tag => tag.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task TagGroupSort_OrdersByGroupSortOrderThenTagName()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+
+        var actionGroup = new TagGroup { Name = "Action", SortOrder = 1 };
+        var subjectGroup = new TagGroup { Name = "Subject", SortOrder = 2 };
+        context.TagGroups.AddRange(actionGroup, subjectGroup);
+        await context.SaveChangesAsync();
+
+        context.Tags.AddRange(
+            new Tag { Name = "Zulu Action", TagGroupId = actionGroup.Id },
+            new Tag { Name = "Alpha Action", TagGroupId = actionGroup.Id },
+            new Tag { Name = "Subject Tag", TagGroupId = subjectGroup.Id },
+            new Tag { Name = "Ungrouped Tag" });
+        await context.SaveChangesAsync();
+
+        var repository = new TagRepository(context);
+        var (items, totalCount) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "tag_group" });
+
+        Assert.Equal(4, totalCount);
+        Assert.Equal(["Alpha Action", "Zulu Action", "Subject Tag", "Ungrouped Tag"], items.Select(tag => tag.Name).ToArray());
+    }
+
     private static async Task<(Tag Parent, Tag Child, Tag Grandchild)> SeedTagHierarchyAsync(CoveContext context)
     {
         var parent = new Tag { Name = "Parent" };

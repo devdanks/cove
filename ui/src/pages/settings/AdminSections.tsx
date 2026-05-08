@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   apiTokensApi,
   auditApi,
@@ -13,6 +13,7 @@ import {
   type ApiTokenRow,
   type ContentRuleRow,
   type EntityOverrideRow,
+  type InviteTokenRow,
   type PermissionInfo,
   type RoleRow,
   type ShareLinkIssuedRow,
@@ -22,7 +23,7 @@ import {
 import { useAuth } from "../../auth/AuthContext";
 import { buildRoutePath } from "../../router/location";
 
-const ENTITY_KINDS = ["scene", "performer", "tag", "studio", "gallery", "image", "group", "marker"] as const;
+const ENTITY_KINDS = ["scene", "performer", "tag", "studio", "gallery", "image", "group", "segment"] as const;
 const SCOPE_KINDS = ["all", "tag", "studio", "identifier", "attribute", "expression"] as const;
 const APPLIES_TO = ["read", "write", "delete", "all"] as const;
 const EFFECTS = ["deny", "allow"] as const;
@@ -56,8 +57,13 @@ const ENTITY_LIST_ROUTES: Record<string, string> = {
   gallery: "galleries",
   image: "images",
   group: "groups",
-  marker: "scenes",
+  segment: "segments",
+  marker: "segments",
 };
+
+function formatEntityKind(entityKind: string) {
+  return entityKind === "marker" ? "segment" : entityKind;
+}
 
 type SimpleScopeKind = (typeof SIMPLE_SCOPE_KINDS)[number];
 type IdentifierScheme = (typeof IDENTIFIER_SCHEMES)[number]["value"];
@@ -471,10 +477,13 @@ export function UsersTab() {
   const qc = useQueryClient();
   const usersQ = useQuery({ queryKey: ["admin", "users"], queryFn: usersApi.list });
   const rolesQ = useQuery({ queryKey: ["admin", "roles"], queryFn: rolesApi.list });
+  const canWriteUsers = auth.hasPermission("users.write");
+  const canInviteUsers = auth.hasPermission("users.invite");
+  const canDeleteUsers = auth.hasPermission("users.delete");
 
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
-  const [pwUser, setPwUser] = useState<UserRow | null>(null);
+  const [inviteUser, setInviteUser] = useState<UserRow | null>(null);
 
   const removeM = useMutation({
     mutationFn: (id: number) => usersApi.remove(id),
@@ -484,13 +493,17 @@ export function UsersTab() {
     mutationFn: (id: number) => usersApi.unlock(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "users"] }),
   });
+  const activeM = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => usersApi.update(id, { isActive }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "users"] }),
+  });
 
   return (
     <div className="space-y-6">
       <Section
         title="Users"
         description="Local user accounts and their role assignments."
-        actions={auth.hasPermission("users.create") ? <Btn variant="primary" onClick={() => setCreating(true)}>+ New user</Btn> : null}
+        actions={canWriteUsers ? <Btn variant="primary" onClick={() => setCreating(true)}>+ New user</Btn> : null}
       >
         {usersQ.isLoading ? <p className="text-sm text-secondary">Loading…</p> : null}
         {usersQ.error ? <p className="text-sm text-red-400">Failed to load users.</p> : null}
@@ -512,20 +525,32 @@ export function UsersTab() {
                   <tr key={u.id} className="border-b border-app/40">
                     <td className="px-2 py-2 font-medium">{u.username}{u.isSystem ? <span className="ml-1 text-xs text-secondary">(system)</span> : null}</td>
                     <td className="px-2 py-2">{u.displayName ?? <span className="text-secondary">—</span>}</td>
-                    <td className="px-2 py-2">{u.roles.join(", ") || <span className="text-secondary">—</span>}</td>
+                    <td className="px-2 py-2">
+                      {u.roles.length ? (
+                        <div className="flex flex-wrap gap-1">
+                          {u.roles.map((role) => <span key={role} className="rounded border border-app bg-surface-2 px-2 py-0.5 text-xs">{role}</span>)}
+                        </div>
+                      ) : <span className="text-secondary">—</span>}
+                    </td>
                     <td className="px-2 py-2">
                       {u.isLocked ? <span className="text-amber-400">locked</span> :
                        !u.isActive ? <span className="text-secondary">disabled</span> :
+                       !u.hasPassword ? <span className="text-blue-300">invited</span> :
                        <span className="text-emerald-400">active</span>}
                     </td>
                     <td className="px-2 py-2 text-secondary">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "—"}</td>
-                    <td className="px-2 py-2 text-right space-x-1">
-                      {auth.hasPermission("users.update") ? <Btn onClick={() => setEditing(u)}>Edit</Btn> : null}
-                      {auth.hasPermission("users.update") ? <Btn onClick={() => setPwUser(u)}>Password</Btn> : null}
-                      {u.isLocked && auth.hasPermission("users.update") ? <Btn onClick={() => unlockM.mutate(u.id)}>Unlock</Btn> : null}
-                      {auth.hasPermission("users.delete") && !u.isSystem ? (
+                    <td className="px-2 py-2">
+                      <div className="flex flex-wrap justify-end gap-1">
+                      {canWriteUsers ? <Btn onClick={() => setEditing(u)}>Edit</Btn> : null}
+                      {canInviteUsers ? <Btn onClick={() => setInviteUser(u)}>{u.hasPassword ? "Reset password" : "Copy invite link"}</Btn> : null}
+                      {u.isLocked && canWriteUsers ? <Btn onClick={() => unlockM.mutate(u.id)}>Unlock</Btn> : null}
+                      {canWriteUsers && !u.isSystem ? (
+                        <Btn onClick={() => activeM.mutate({ id: u.id, isActive: !u.isActive })}>{u.isActive ? "Disable" : "Enable"}</Btn>
+                      ) : null}
+                      {canDeleteUsers && !u.isSystem ? (
                         <Btn variant="danger" onClick={() => { if (confirm(`Delete user "${u.username}"?`)) removeM.mutate(u.id); }}>Delete</Btn>
                       ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -536,39 +561,74 @@ export function UsersTab() {
       </Section>
 
       {creating ? (
-        <CreateUserDialog roles={rolesQ.data ?? []} onClose={() => setCreating(false)} />
+        <CreateUserDialog roles={rolesQ.data ?? []} canInvite={canInviteUsers} onClose={() => setCreating(false)} />
       ) : null}
       {editing ? (
         <EditUserDialog user={editing} roles={rolesQ.data ?? []} onClose={() => setEditing(null)} />
       ) : null}
-      {pwUser ? (
-        <PasswordDialog user={pwUser} onClose={() => setPwUser(null)} />
+      {inviteUser ? (
+        <InviteDialog user={inviteUser} onClose={() => setInviteUser(null)} />
       ) : null}
     </div>
   );
 }
 
-function CreateUserDialog({ roles, onClose }: { roles: RoleRow[]; onClose: () => void }) {
+function CreateUserDialog({ roles, canInvite, onClose }: { roles: RoleRow[]; canInvite: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
-  const [mustChange, setMustChange] = useState(false);
+  const [credentialMode, setCredentialMode] = useState<"invite" | "password">(canInvite ? "invite" : "password");
+  const [mustChange, setMustChange] = useState(true);
+  const [inviteToken, setInviteToken] = useState<InviteTokenRow | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const m = useMutation({
-    mutationFn: () => usersApi.create({ username, password, displayName: displayName || undefined, email: email || undefined, roles: selectedRoles, mustChangePassword: mustChange }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin", "users"] }); onClose(); },
+    mutationFn: async () => {
+      if (credentialMode === "invite" && canInvite) {
+        return await usersApi.createInvite({
+          username: username.trim() || undefined,
+          displayName: displayName || undefined,
+          email: email || undefined,
+          roles: selectedRoles,
+        });
+      }
+
+      const created = await usersApi.create({
+        username,
+        password,
+        displayName: displayName || undefined,
+        email: email || undefined,
+        roles: selectedRoles,
+        mustChangePassword: mustChange,
+      });
+      return null;
+    },
+    onSuccess: (invite) => {
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+      if (invite) {
+        setInviteToken(invite);
+      } else {
+        onClose();
+      }
+    },
     onError: (e: any) => setErr(e?.message ?? "Failed"),
   });
+
+  if (inviteToken) {
+    return (
+      <Modal title="Invite link" onClose={onClose}>
+        <InviteLinkPanel invite={inviteToken} onClose={onClose} />
+      </Modal>
+    );
+  }
 
   return (
     <Modal title="Create user" onClose={onClose}>
       <div className="space-y-3">
-        <Field label="Username"><input className="input" value={username} onChange={(e) => setUsername(e.target.value)} /></Field>
-        <Field label="Password"><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        <Field label={credentialMode === "invite" ? "Username (optional)" : "Username"}><input className="input" value={username} onChange={(e) => setUsername(e.target.value)} /></Field>
         <Field label="Display name"><input className="input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></Field>
         <Field label="Email"><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
         <Field label="Roles">
@@ -581,14 +641,38 @@ function CreateUserDialog({ roles, onClose }: { roles: RoleRow[]; onClose: () =>
             ))}
           </div>
         </Field>
-        <label className="inline-flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={mustChange} onChange={(e) => setMustChange(e.target.checked)} />
-          Force password change at next login
-        </label>
+        <Field label="Password setup">
+          <div className="grid grid-cols-2 gap-2 rounded border border-app bg-surface-2 p-1">
+            <button
+              type="button"
+              onClick={() => setCredentialMode("password")}
+              className={`rounded px-3 py-2 text-sm font-medium ${credentialMode === "password" ? "bg-blue-600 text-white" : "text-secondary hover:text-primary"}`}
+            >
+              Set now
+            </button>
+            <button
+              type="button"
+              disabled={!canInvite}
+              onClick={() => setCredentialMode("invite")}
+              className={`rounded px-3 py-2 text-sm font-medium ${credentialMode === "invite" ? "bg-blue-600 text-white" : "text-secondary hover:text-primary"} disabled:opacity-50`}
+            >
+              Invite link
+            </button>
+          </div>
+        </Field>
+        {credentialMode === "password" ? (
+          <>
+            <Field label="Password"><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={mustChange} onChange={(e) => setMustChange(e.target.checked)} />
+              Force password change at next login
+            </label>
+          </>
+        ) : null}
         {err ? <p className="text-sm text-red-400">{err}</p> : null}
         <div className="flex justify-end gap-2 pt-2">
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={() => m.mutate()} disabled={!username || !password || m.isPending}>Create</Btn>
+          <Btn variant="primary" onClick={() => m.mutate()} disabled={(credentialMode === "password" && (!username || !password)) || m.isPending}>{credentialMode === "invite" ? "Create invite" : "Create"}</Btn>
         </div>
       </div>
     </Modal>
@@ -641,25 +725,47 @@ function EditUserDialog({ user, roles, onClose }: { user: UserRow; roles: RoleRo
   );
 }
 
-function PasswordDialog({ user, onClose }: { user: UserRow; onClose: () => void }) {
-  const [password, setPassword] = useState("");
+function InviteDialog({ user, onClose }: { user: UserRow; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [invite, setInvite] = useState<InviteTokenRow | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const m = useMutation({
-    mutationFn: () => usersApi.adminChangePassword(user.id, password),
-    onSuccess: () => onClose(),
+    mutationFn: () => usersApi.invite(user.id),
+    onSuccess: (nextInvite) => {
+      setInvite(nextInvite);
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
     onError: (e: any) => setErr(e?.message ?? "Failed"),
   });
+
+  useEffect(() => {
+    m.mutate();
+    // Run once per opened dialog.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <Modal title={`Change password for ${user.username}`} onClose={onClose}>
+    <Modal title={`Invite ${user.username}`} onClose={onClose}>
       <div className="space-y-3">
-        <Field label="New password"><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        {m.isPending ? <p className="text-sm text-secondary">Generating invite link...</p> : null}
+        {invite ? <InviteLinkPanel invite={invite} onClose={onClose} /> : null}
         {err ? <p className="text-sm text-red-400">{err}</p> : null}
-        <div className="flex justify-end gap-2 pt-2">
-          <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={() => m.mutate()} disabled={!password || m.isPending}>Set password</Btn>
-        </div>
+        {!invite ? <div className="flex justify-end gap-2 pt-2"><Btn onClick={onClose}>Close</Btn></div> : null}
       </div>
     </Modal>
+  );
+}
+
+function InviteLinkPanel({ invite, onClose }: { invite: InviteTokenRow; onClose: () => void }) {
+  return (
+    <div className="space-y-3">
+      <Field label="Invite URL"><input className="input font-mono text-xs" value={invite.url} readOnly /></Field>
+      <p className="text-sm text-amber-400">Copy this link now. It will not be shown again.</p>
+      <div className="flex justify-end gap-2 pt-2">
+        <Btn onClick={() => navigator.clipboard.writeText(invite.token)}>Copy raw token</Btn>
+        <Btn variant="primary" onClick={() => { navigator.clipboard.writeText(invite.url); onClose(); }}>Copy link & close</Btn>
+      </div>
+    </div>
   );
 }
 
@@ -685,7 +791,7 @@ export function RolesTab() {
       <Section
         title="Roles"
         description="Roles bundle permissions and are assigned to users."
-        actions={auth.hasPermission("roles.create") ? <Btn variant="primary" onClick={() => setCreating(true)}>+ New role</Btn> : null}
+        actions={auth.hasPermission("roles.write") ? <Btn variant="primary" onClick={() => setCreating(true)}>+ New role</Btn> : null}
       >
         {rolesQ.isLoading ? <p className="text-sm text-secondary">Loading…</p> : null}
         {rolesQ.data ? (
@@ -708,7 +814,7 @@ export function RolesTab() {
                     <td className="px-2 py-2 text-secondary">{r.source}</td>
                     <td className="px-2 py-2 text-secondary">{r.permissions.length}</td>
                     <td className="px-2 py-2 text-right space-x-1">
-                      {auth.hasPermission("roles.update") ? <Btn onClick={() => setEditing(r)}>{r.isBuiltin ? "View" : "Edit"}</Btn> : null}
+                      {auth.hasPermission("roles.write") ? <Btn onClick={() => setEditing(r)}>{r.isBuiltin ? "View" : "Edit"}</Btn> : null}
                       {auth.hasPermission("roles.delete") && !r.isBuiltin ? (
                         <Btn variant="danger" onClick={() => { if (confirm(`Delete role "${r.name}"?`)) removeM.mutate(r.id); }}>Delete</Btn>
                       ) : null}
@@ -1003,7 +1109,7 @@ function ContentRuleTable({ rules, canWrite, onDelete }: { rules: ContentRuleRow
           {rules.map((rule) => (
             <tr key={rule.id} className="border-b border-app/40">
               <td className="px-2 py-2 font-medium">{rule.roleName}</td>
-              <td className="px-2 py-2">{rule.entityKind}</td>
+              <td className="px-2 py-2">{formatEntityKind(rule.entityKind)}</td>
               <td className="px-2 py-2">
                 <span className={rule.effect === "deny" ? "text-amber-400" : "text-emerald-400"}>{rule.effect}</span>
               </td>
@@ -1045,7 +1151,7 @@ function EntityOverrideTable({ overrides, canWrite, onDelete }: { overrides: Ent
           {overrides.map((overrideItem) => (
             <tr key={overrideItem.id} className="border-b border-app/40">
               <td className="px-2 py-2 font-medium">{overrideItem.roleName}</td>
-              <td className="px-2 py-2">{overrideItem.entityKind}</td>
+              <td className="px-2 py-2">{formatEntityKind(overrideItem.entityKind)}</td>
               <td className="px-2 py-2 text-secondary">{overrideItem.entityId}</td>
               <td className="px-2 py-2">
                 <span className={overrideItem.effect === "deny" ? "text-amber-400" : "text-emerald-400"}>{overrideItem.effect}</span>
@@ -1346,7 +1452,7 @@ function ShareLinksTable({ links, onRevoke }: { links: ShareLinkRow[]; onRevoke:
           {links.map((link) => (
             <tr key={link.id} className="border-b border-app/40">
               <td className="px-2 py-2">{link.createdByUsername ?? <span className="text-secondary">—</span>}</td>
-              <td className="px-2 py-2">{link.entityKind}</td>
+              <td className="px-2 py-2">{formatEntityKind(link.entityKind)}</td>
               <td className="px-2 py-2 text-secondary">{link.entityIds.length}</td>
               <td className="px-2 py-2 text-secondary">{link.viewCount}</td>
               <td className="px-2 py-2 text-secondary">{link.expiresAt ? new Date(link.expiresAt).toLocaleString() : "never"}</td>
@@ -1420,10 +1526,11 @@ function CreateShareLinkDialog({ onClose, onIssued }: { onClose: () => void; onI
 
 function IssuedShareLinkDialog({ link, onClose }: { link: ShareLinkIssuedRow; onClose: () => void }) {
   const primaryEntityId = link.entityIds.length === 1 ? Number(link.entityIds[0]) : undefined;
-  const canUseDetailRoute = link.entityIds.length === 1 && link.entityKind !== "marker" && Number.isInteger(primaryEntityId) && (primaryEntityId ?? 0) > 0;
+  const routeEntityKind = link.entityKind === "marker" ? "segment" : link.entityKind;
+  const canUseDetailRoute = link.entityIds.length === 1 && Number.isInteger(primaryEntityId) && (primaryEntityId ?? 0) > 0;
   const routePath = buildRoutePath(canUseDetailRoute
-    ? { page: link.entityKind, id: primaryEntityId }
-    : { page: ENTITY_LIST_ROUTES[link.entityKind] ?? link.entityKind });
+    ? { page: routeEntityKind, id: primaryEntityId }
+    : { page: ENTITY_LIST_ROUTES[link.entityKind] ?? routeEntityKind });
   const shareUrl = new URL(routePath, window.location.origin);
   shareUrl.searchParams.set("share_token", link.plaintextToken);
 
@@ -1455,8 +1562,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  const pointerStartedOnBackdrop = useRef(false);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onPointerDown={(event) => {
+        pointerStartedOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onPointerUp={(event) => {
+        if (pointerStartedOnBackdrop.current && event.target === event.currentTarget) {
+          onClose();
+        }
+        pointerStartedOnBackdrop.current = false;
+      }}
+    >
       <div className={`rounded-2xl border border-app bg-surface p-5 shadow-xl ${wide ? "w-full max-w-3xl" : "w-full max-w-lg"}`} onClick={(e) => e.stopPropagation()}>
         <header className="mb-3 flex items-center justify-between">
           <h3 className="text-base font-semibold">{title}</h3>

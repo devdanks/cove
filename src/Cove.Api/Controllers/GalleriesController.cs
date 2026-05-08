@@ -198,12 +198,12 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         return MapToDto(gallery, null, null, provenanceLookup);
     }
 
-    private static GalleryDto MapToDto(Gallery g, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
+    private GalleryDto MapToDto(Gallery g, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
         g.Id, g.Title, g.Code, g.Date?.ToString("yyyy-MM-dd"), g.Details, g.Photographer,
         g.Organized, g.StudioId, g.Studio?.Name,
         g.Urls.Select(u => u.Url).ToList(),
-        g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => new TagDto(gt.Tag!.Id, gt.Tag.Name, gt.Tag.Description, gt.Tag.Favorite, gt.Tag.IgnoreAutoTag, [], Provenance: GetTagProvenance(provenanceLookup, gt.Tag!.Id))).ToList(),
-        g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => new PerformerSummaryDto(gp.Performer!.Id, gp.Performer.Name, gp.Performer.Disambiguation, gp.Performer.Gender?.ToString(), gp.Performer.Birthdate?.ToString("yyyy-MM-dd"), gp.Performer.Favorite, gp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(gp.Performer.Id, gp.Performer.UpdatedAt) : null)).ToList(),
+        g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => TagDtoMapping.MapTagDto(gt.Tag!, GetTagProvenance(provenanceLookup, gt.Tag!.Id))).ToList(),
+        g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => new PerformerSummaryDto(gp.Performer!.Id, gp.Performer.Name, gp.Performer.Disambiguation, gp.Performer.Gender?.ToString(), gp.Performer.Birthdate?.ToString("yyyy-MM-dd"), gp.Performer.Favorite, gp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, gp.Performer.Id, gp.Performer.UpdatedAt) : null)).ToList(),
         imageCount ?? g.ImageCount,
         sceneCount ?? g.SceneCount,
         g.SceneGalleries?.Select(sg => sg.SceneId).ToList() ?? [],
@@ -217,10 +217,10 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     );
 
     /// <summary>Resolve cover image URL through the unified gallery cover endpoint.</summary>
-    private static string? ResolveCoverPath(Gallery g, int? imageCount = null)
+    private string? ResolveCoverPath(Gallery g, int? imageCount = null)
     {
         var resolvedImageCount = imageCount ?? g.ImageCount;
-        if (g.ImageBlobId != null || g.CoverImageId != null || resolvedImageCount > 0) return EntityImageUrls.GalleryCover(g.Id, g.UpdatedAt);
+        if (g.ImageBlobId != null || g.CoverImageId != null || resolvedImageCount > 0) return EntityImageUrls.GalleryCover(ControllerContext.HttpContext, g.Id, g.UpdatedAt);
         return null;
     }
 

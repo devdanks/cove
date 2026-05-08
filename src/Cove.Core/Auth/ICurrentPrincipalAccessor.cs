@@ -117,7 +117,7 @@ public sealed class CovePrincipal
             case PermissionKeys.GroupsRead:
                 entityKind = EntityKinds.Group;
                 return true;
-            case PermissionKeys.MarkersRead:
+            case PermissionKeys.SegmentsRead:
                 entityKind = EntityKinds.Marker;
                 return true;
             default:

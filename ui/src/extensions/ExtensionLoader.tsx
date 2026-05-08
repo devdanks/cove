@@ -165,7 +165,7 @@ function readStoredStyleOptions(): Record<string, Record<string, string>> {
 
 export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
   const { register, registerSlot } = useRouteRegistry();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const userThemePreferences = supportsServerBackedUiPreferences(user) ? user.uiPreferences?.theme ?? null : null;
   const [manifest, setManifest] = useState<ExtensionManifest | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -551,10 +551,11 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         if (actionType && a.actionType !== actionType) return false;
         if (entityType && a.entityTypes.length > 0 && !a.entityTypes.includes(entityType)) return false;
         if (page && a.pages && a.pages.length > 0 && !a.pages.includes(page)) return false;
+        if (a.requiredPermission && !hasPermission(a.requiredPermission)) return false;
         return true;
       }).sort((a, b) => a.order - b.order);
     },
-    [actions]
+    [actions, hasPermission]
   );
 
   return (

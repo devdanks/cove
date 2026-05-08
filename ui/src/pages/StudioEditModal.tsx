@@ -7,6 +7,7 @@ import { ImageInput } from "../components/ImageInput";
 import { InteractiveRatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
+import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
 
 interface Props {
   studio: Studio;
@@ -79,9 +80,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
     });
   };
 
-  const filteredTags = allTags?.items.filter(
-    (t) => !selectedTagIds.includes(t.id) && t.name.toLowerCase().includes(tagSearch.toLowerCase())
-  ) ?? [];
+  const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, selectedTagIds);
   const selectedTags = allTags?.items.filter((t) => selectedTagIds.includes(t.id)) ?? studio.tags;
 
   // Exclude self from parent studio options
@@ -143,17 +142,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
 
       {/* Tags */}
       <Field label="Tags">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedTags.map((t) => (
-            <span
-              key={t.id}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/20 text-accent"
-            >
-              {t.name}
-              <button onClick={() => setSelectedTagIds(selectedTagIds.filter((id) => id !== t.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
+        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds(selectedTagIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
         <input
           type="text"
           value={tagSearch}
@@ -162,17 +151,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
           className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
         />
         {tagSearch && filteredTags.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredTags.slice(0, 10).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { setSelectedTagIds([...selectedTagIds, t.id]); setTagSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {t.name}
-              </button>
-            ))}
-          </div>
+          <GroupedTagOptionList tags={filteredTags} maxItems={20} onSelect={(tag) => { setSelectedTagIds([...selectedTagIds, tag.id]); setTagSearch(""); }} />
         )}
       </Field>
 

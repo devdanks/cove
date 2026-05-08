@@ -8,7 +8,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/ai-data")]
-[RequiresPermission(Permissions.SystemSettingsWrite)]
+[RequiresPermission(Permissions.AiDataRead)]
 public class AiDataController(
     AiDataPurgeService aiDataPurgeService,
     IAuditService auditService,
@@ -30,6 +30,7 @@ public class AiDataController(
     }
 
     [HttpPost("purge")]
+    [RequiresPermission(Permissions.AiDataClear)]
     public async Task<ActionResult<AiDataPurgeResultDto>> Purge([FromBody] AiDataPurgeRequestDto request, CancellationToken cancellationToken)
     {
         var selector = request.ToSelectorDto();

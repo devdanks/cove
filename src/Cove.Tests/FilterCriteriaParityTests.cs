@@ -122,6 +122,34 @@ public class FilterCriteriaParityTests
         Assert.Equal(50, result.ObjectFilter.InteractiveSpeedCriterion.Value);
     }
 
+    [Fact]
+    public void SceneFilter_TagDurationCriterion_DeserializesClauses()
+    {
+        var json = """
+        {
+            "objectFilter": {
+                "tagDurationCriterion": {
+                    "clauses": [
+                        { "tagId": 1, "value": 30, "modifier": "lessThan", "unit": "seconds" },
+                        { "tagId": 2, "value": 10, "modifier": "greaterThan", "unit": "percent" }
+                    ]
+                }
+            }
+        }
+        """;
+
+        var result = JsonSerializer.Deserialize<FilteredQueryRequest<SceneFilter>>(json, Options);
+
+        Assert.NotNull(result?.ObjectFilter?.TagDurationCriterion);
+        Assert.Equal(2, result.ObjectFilter.TagDurationCriterion.Clauses.Count);
+        Assert.Equal(1, result.ObjectFilter.TagDurationCriterion.Clauses[0].TagId);
+        Assert.Equal(CriterionModifier.LessThan, result.ObjectFilter.TagDurationCriterion.Clauses[0].Modifier);
+        Assert.Equal("seconds", result.ObjectFilter.TagDurationCriterion.Clauses[0].Unit);
+        Assert.Equal(2, result.ObjectFilter.TagDurationCriterion.Clauses[1].TagId);
+        Assert.Equal(CriterionModifier.GreaterThan, result.ObjectFilter.TagDurationCriterion.Clauses[1].Modifier);
+        Assert.Equal("percent", result.ObjectFilter.TagDurationCriterion.Clauses[1].Unit);
+    }
+
     // ===== PERFORMER FILTER CRITERIA EXISTENCE =====
 
     [Fact]

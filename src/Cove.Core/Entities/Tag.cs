@@ -5,8 +5,12 @@ public class Tag : BaseEntity
     public string Name { get; set; } = string.Empty;
     public string? SortName { get; set; }
     public string? Description { get; set; }
+    public string? Color { get; set; }
+    public int? TagGroupId { get; set; }
     public bool Favorite { get; set; }
     public bool IgnoreAutoTag { get; set; }
+    public double? MinOccurrenceSec { get; set; }
+    public double? MinOccurrencePercent { get; set; }
     public bool? ShowAsSegment { get; set; }
     public string? SegmentColorOverride { get; set; }
     public int? SegmentLaneOverride { get; set; }
@@ -28,6 +32,7 @@ public class Tag : BaseEntity
     public ICollection<TagParent> ParentRelations { get; set; } = [];
     public ICollection<TagParent> ChildRelations { get; set; } = [];
     public ICollection<TagRemoteId> RemoteIds { get; set; } = [];
+    public TagGroup? TagGroup { get; set; }
 
     // Reverse nav for many-to-many
     public ICollection<SceneTag> SceneTags { get; set; } = [];
@@ -37,6 +42,16 @@ public class Tag : BaseEntity
     public ICollection<StudioTag> StudioTags { get; set; } = [];
     public ICollection<GroupTag> GroupTags { get; set; } = [];
     public Dictionary<string, object>? CustomFields { get; set; }
+}
+
+public class TagGroup : BaseEntity
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? Color { get; set; }
+    public int SortOrder { get; set; }
+
+    public ICollection<Tag> Tags { get; set; } = [];
 }
 
 public class TagAlias

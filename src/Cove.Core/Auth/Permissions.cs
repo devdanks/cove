@@ -31,6 +31,9 @@ public static class Permissions
     public const string TagsRead = "tags.read";
     public const string TagsWrite = "tags.write";
     public const string TagsDelete = "tags.delete";
+    public const string TagGroupsRead = "taggroups.read";
+    public const string TagGroupsWrite = "taggroups.write";
+    public const string TagGroupsDelete = "taggroups.delete";
 
     // Studios
     public const string StudiosRead = "studios.read";
@@ -53,10 +56,10 @@ public static class Permissions
     public const string GroupsWrite = "groups.write";
     public const string GroupsDelete = "groups.delete";
 
-    // Markers
-    public const string MarkersRead = "markers.read";
-    public const string MarkersWrite = "markers.write";
-    public const string MarkersDelete = "markers.delete";
+    // Segments
+    public const string SegmentsRead = "segments.read";
+    public const string SegmentsWrite = "segments.write";
+    public const string SegmentsDelete = "segments.delete";
 
     // Files
     public const string FilesRead = "files.read";
@@ -81,6 +84,8 @@ public static class Permissions
     // AI core
     public const string EmbeddingsRead = "embeddings.read";
     public const string AiRunsRead = "airuns.read";
+    public const string AiDataRead = "aidata.read";
+    public const string AiDataClear = "aidata.clear";
 
     // Extensions
     public const string ExtensionsRead = "extensions.read";
@@ -91,6 +96,7 @@ public static class Permissions
     // Users / roles
     public const string UsersRead = "users.read";
     public const string UsersWrite = "users.write";
+    public const string UsersInvite = "users.invite";
     public const string UsersDelete = "users.delete";
     public const string RolesRead = "roles.read";
     public const string RolesWrite = "roles.write";
@@ -104,6 +110,7 @@ public static class Permissions
     public const string SystemBackup = "system.backup";
     public const string SystemRestore = "system.restore";
     public const string SystemWipe = "system.wipe";
+    public const string SystemShutdown = "system.shutdown";
 
     // Audit
     public const string AuditRead = "audit.read";
@@ -137,6 +144,9 @@ public static class Permissions
         new(TagsRead, "Tags", "View tags."),
         new(TagsWrite, "Tags", "Create or edit tags.", Implies: [TagsRead]),
         new(TagsDelete, "Tags", "Delete tags.", Dangerous: true, Implies: [TagsRead]),
+        new(TagGroupsRead, "Tag Groups", "View tag groups."),
+        new(TagGroupsWrite, "Tag Groups", "Create or edit tag groups.", Implies: [TagGroupsRead, TagsRead]),
+        new(TagGroupsDelete, "Tag Groups", "Delete tag groups.", Dangerous: true, Implies: [TagGroupsRead, TagsRead]),
 
         new(StudiosRead, "Studios", "View studios."),
         new(StudiosWrite, "Studios", "Create or edit studios.", Implies: [StudiosRead]),
@@ -155,9 +165,9 @@ public static class Permissions
         new(GroupsWrite, "Groups", "Create or edit groups.", Implies: [GroupsRead]),
         new(GroupsDelete, "Groups", "Delete groups.", Dangerous: true, Implies: [GroupsRead]),
 
-        new(MarkersRead, "Segments", "View segments and detections."),
-        new(MarkersWrite, "Segments", "Create or edit segments and detections.", Implies: [MarkersRead]),
-        new(MarkersDelete, "Segments", "Delete segments and detections.", Implies: [MarkersRead]),
+        new(SegmentsRead, "Segments", "View segments and detections."),
+        new(SegmentsWrite, "Segments", "Create or edit segments and detections.", Implies: [SegmentsRead]),
+        new(SegmentsDelete, "Segments", "Delete segments and detections.", Implies: [SegmentsRead]),
 
         new(FilesRead, "Files", "List orphan/raw files in the library."),
         new(FilesWrite, "Files", "Move files or edit raw-file metadata/fingerprints.", Dangerous: true, Implies: [FilesRead]),
@@ -177,6 +187,8 @@ public static class Permissions
 
         new(EmbeddingsRead, "AI", "View embeddings and similarity-search results."),
         new(AiRunsRead, "AI", "View AI run provenance and summaries."),
+        new(AiDataRead, "AI", "View AI-managed artifact summaries."),
+        new(AiDataClear, "AI", "Preview and clear AI-managed artifacts.", Dangerous: true, Implies: [AiDataRead]),
 
         new(ExtensionsRead, "Extensions", "View installed extensions and registry."),
         new(ExtensionsInstall, "Extensions", "Install or update extensions.", Dangerous: true, Implies: [ExtensionsRead]),
@@ -185,6 +197,7 @@ public static class Permissions
 
         new(UsersRead, "Users", "View user accounts."),
         new(UsersWrite, "Users", "Create or edit user accounts.", Dangerous: true, Implies: [UsersRead]),
+        new(UsersInvite, "Users", "Create one-time user password invite links.", Dangerous: true, Implies: [UsersRead]),
         new(UsersDelete, "Users", "Delete user accounts.", Dangerous: true, Implies: [UsersRead]),
         new(RolesRead, "Roles", "View roles and permissions."),
         new(RolesWrite, "Roles", "Create or edit roles and permission assignments.", Dangerous: true, Implies: [RolesRead]),
@@ -197,6 +210,7 @@ public static class Permissions
         new(SystemBackup, "System", "Trigger backup operations.", Implies: [SystemRead]),
         new(SystemRestore, "System", "Restore from a backup.", Dangerous: true, Implies: [SystemRead]),
         new(SystemWipe, "System", "Wipe the entire library. Cannot be undone.", Dangerous: true),
+        new(SystemShutdown, "System", "Shut down the Cove server process.", Dangerous: true, Implies: [SystemRead]),
 
         new(AuditRead, "Audit", "View the security audit log."),
 
@@ -211,9 +225,9 @@ public static class Permissions
         ScenesWrite, ScenesScrape,
         PerformersWrite, PerformersScrape,
         FacesWrite, FacesDelete,
-        TagsWrite, StudiosWrite,
+        TagsWrite, TagGroupsWrite, StudiosWrite,
         GalleriesWrite, ImagesWrite, GroupsWrite,
-        MarkersWrite, MarkersDelete,
+        SegmentsWrite, SegmentsDelete,
         FilesRead, FilesWrite,
         LibraryScan, LibraryAutoTag,
         SavedFiltersWrite, SavedFiltersDelete,
@@ -227,7 +241,8 @@ public static class Permissions
     public static readonly string[] ViewerDefaults =
     [
         ScenesRead, PerformersRead, TagsRead, StudiosRead,
-        GalleriesRead, ImagesRead, GroupsRead, MarkersRead,
+        TagGroupsRead,
+        GalleriesRead, ImagesRead, GroupsRead, SegmentsRead,
         FacesRead, EmbeddingsRead, AiRunsRead,
         SavedFiltersRead, JobsRead, ExtensionsRead, SystemRead,
         StreamRead,
@@ -237,6 +252,7 @@ public static class Permissions
     public static readonly string[] GuestDefaults =
     [
         ScenesRead, PerformersRead, TagsRead, StudiosRead,
+        TagGroupsRead,
         GalleriesRead, ImagesRead, GroupsRead,
         StreamRead,
     ];
@@ -248,6 +264,7 @@ public static class Permissions
         {
             if (p.Key == All) continue;
             if (p.Key == SystemWipe) continue;
+            if (p.Key == SystemShutdown) continue;
             yield return p.Key;
         }
     }

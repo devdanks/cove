@@ -11,7 +11,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/scenes/{sceneId:int}/segments")]
-[RequiresPermission(Permissions.MarkersRead)]
+[RequiresPermission(Permissions.SegmentsRead)]
 public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanResolver) : ControllerBase
 {
     [HttpGet]
@@ -92,8 +92,8 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
     }
 
     [HttpPost]
-    [RequiresPermission(Permissions.MarkersWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsWrite, RouteValueName = "sceneId")]
     public async Task<ActionResult<SegmentDto>> Create(int sceneId, [FromBody] SegmentCreateDto dto, CancellationToken ct)
     {
         if (!await SceneExistsAsync(sceneId, ct)) return NotFound();
@@ -126,8 +126,8 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
     }
 
     [HttpPut("{id:int}")]
-    [RequiresPermission(Permissions.MarkersWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsWrite, RouteValueName = "sceneId")]
     public async Task<ActionResult<SegmentDto>> Update(int sceneId, int id, [FromBody] SegmentUpdateDto dto, CancellationToken ct)
     {
         if (dto.EndSec.HasValue && dto.EndSec.Value < dto.StartSec)
@@ -158,8 +158,8 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
     }
 
     [HttpDelete("{id:int}")]
-    [RequiresPermission(Permissions.MarkersDelete)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersDelete, RouteValueName = "sceneId")]
+    [RequiresPermission(Permissions.SegmentsDelete)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsDelete, RouteValueName = "sceneId")]
     public async Task<IActionResult> Delete(int sceneId, int id, CancellationToken ct)
     {
         // SceneSegmentsController.Delete only deletes persisted raw Segment rows.

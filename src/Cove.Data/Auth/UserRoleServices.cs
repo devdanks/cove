@@ -10,6 +10,10 @@ public sealed class UserService : IUserService
 {
     public const int MaxFailedLogins = 8;
     public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+    private const string InvitePurpose = "invite";
+    private const string SetupPurpose = "setup";
+    private static readonly TimeSpan InviteTokenTtl = TimeSpan.FromDays(7);
+    private static readonly TimeSpan SetupTokenTtl = TimeSpan.FromHours(1);
     private static readonly JsonSerializerOptions UiPreferencesJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -26,6 +30,9 @@ public sealed class UserService : IUserService
         _audit = audit;
         _log = log;
     }
+
+    public Task<bool> OwnerExistsAsync(CancellationToken ct = default)
+        => _db.Users.AnyAsync(user => user.IsSystem || user.Roles.Any(role => role.Role!.Name == BuiltinRoles.Owner), ct);
 
     public async Task<UserDto?> FindByUsernameAsync(string username, CancellationToken ct = default)
     {
@@ -55,7 +62,9 @@ public sealed class UserService : IUserService
     public async Task<UserDto> CreateAsync(CreateUserRequest req, CovePrincipal? actor, CancellationToken ct = default)
     {
         Validation.Username(req.Username);
-        Validation.Password(req.Password);
+        var hasPassword = !string.IsNullOrWhiteSpace(req.Password);
+        if (hasPassword)
+            Validation.Password(req.Password!);
 
         var exists = await _db.Users.AnyAsync(u => u.Username.ToLower() == req.Username.ToLower(), ct);
         if (exists) throw new InvalidOperationException("Username already in use.");
@@ -65,10 +74,10 @@ public sealed class UserService : IUserService
             Username = req.Username,
             DisplayName = req.DisplayName,
             Email = string.IsNullOrWhiteSpace(req.Email) ? null : req.Email,
-            PasswordHash = PasswordHasher.HashPassword(req.Password),
+            PasswordHash = hasPassword ? PasswordHasher.HashPassword(req.Password!) : string.Empty,
             PasswordAlgo = PasswordHasher.Algorithm,
             IsActive = true,
-            MustChangePassword = req.MustChangePassword,
+            MustChangePassword = req.MustChangePassword || !hasPassword,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -82,6 +91,45 @@ public sealed class UserService : IUserService
             "user", user.Id.ToString(), new { user.Username }, ct);
 
         return (await GetAsync(user.Id, ct))!;
+    }
+
+    public async Task<UserDto> BootstrapOwnerAsync(string username, string password, CovePrincipal? actor, CancellationToken ct = default)
+    {
+        if (await OwnerExistsAsync(ct))
+            throw new InvalidOperationException("Owner account already exists.");
+
+        Validation.Username(username);
+        Validation.Password(password);
+        var ownerRole = await EnsureOwnerRoleAsync(ct);
+        var now = DateTime.UtcNow;
+        var owner = new User
+        {
+            Username = username.Trim(),
+            DisplayName = "Owner",
+            PasswordHash = PasswordHasher.HashPassword(password),
+            PasswordAlgo = PasswordHasher.Algorithm,
+            IsActive = true,
+            IsLocked = false,
+            IsSystem = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        _db.Users.Add(owner);
+        await _db.SaveChangesAsync(ct);
+        _db.UserRoleAssignments.Add(new UserRoleAssignment
+        {
+            UserId = owner.Id,
+            RoleId = ownerRole.Id,
+            GrantedAt = now,
+            GrantedByUserId = actor?.UserId,
+        });
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync(AuditActions.UserCreate, AuditOutcomes.Success, actor,
+            "user", owner.Id.ToString(), new { owner.Username, role = BuiltinRoles.Owner, bootstrap = true }, ct);
+
+        return (await GetAsync(owner.Id, ct))!;
     }
 
     public async Task<UserDto> UpdateAsync(int id, UpdateUserRequest req, CovePrincipal? actor, CancellationToken ct = default)
@@ -134,6 +182,7 @@ public sealed class UserService : IUserService
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null) return false;
+        if (string.IsNullOrWhiteSpace(user.PasswordHash)) return false;
 
         var verified = PasswordHasher.Verify(password, user.PasswordHash, user.PasswordAlgo);
         if (!verified) return false;
@@ -147,6 +196,285 @@ public sealed class UserService : IUserService
         }
 
         return true;
+    }
+
+    public async Task<InviteTokenDto> CreateInviteAsync(int userId, string baseUrl, CovePrincipal? actor, CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new KeyNotFoundException("User not found.");
+
+        var (plain, hash) = TokenService.NewOpaqueToken();
+        var expires = DateTime.UtcNow.Add(InviteTokenTtl);
+        _db.UserInviteTokens.Add(new UserInviteToken
+        {
+            UserId = user.Id,
+            TokenHash = hash,
+            Purpose = InvitePurpose,
+            ExpiresAt = expires,
+            CreatedByUserId = actor?.UserId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync(AuditActions.UserInviteCreate, AuditOutcomes.Success, actor,
+            "user", user.Id.ToString(), new { user.Username, expiresAt = expires }, ct);
+
+        return new InviteTokenDto(plain, BuildInviteUrl(baseUrl, plain), expires);
+    }
+
+    public async Task<InviteTokenDto> CreatePendingInviteAsync(CreateInviteRequest req, string baseUrl, CovePrincipal? actor, CancellationToken ct = default)
+    {
+        var username = NormalizeOptional(req.Username);
+        if (username is not null)
+        {
+            Validation.Username(username);
+            var exists = await _db.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower(), ct);
+            if (exists) throw new InvalidOperationException("Username already in use.");
+        }
+
+        var roles = NormalizeRoles(req.Roles);
+        if (roles.Count > 0)
+            await LoadRolesAsync(roles, ct);
+
+        var (plain, hash) = TokenService.NewOpaqueToken();
+        var expires = DateTime.UtcNow.Add(InviteTokenTtl);
+        _db.UserInviteTokens.Add(new UserInviteToken
+        {
+            TokenHash = hash,
+            Purpose = InvitePurpose,
+            Username = username,
+            DisplayName = NormalizeOptional(req.DisplayName),
+            Email = NormalizeOptional(req.Email),
+            RolesJson = roles.Count > 0 ? JsonSerializer.Serialize(roles) : null,
+            ExpiresAt = expires,
+            CreatedByUserId = actor?.UserId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync(AuditActions.UserInviteCreate, AuditOutcomes.Success, actor,
+            "user", username, new { username, expiresAt = expires, usernameRequired = username is null }, ct);
+
+        return new InviteTokenDto(plain, BuildInviteUrl(baseUrl, plain), expires);
+    }
+
+    public async Task<InviteTokenInfoDto?> GetInviteInfoAsync(string token, CancellationToken ct = default)
+    {
+        var row = await FindLiveTokenAsync(token, InvitePurpose, ct);
+        if (row is null)
+            return null;
+
+        string? username = NormalizeOptional(row.Username);
+        if (row.UserId is int userId)
+        {
+            username = await _db.Users.AsNoTracking()
+                .Where(user => user.Id == userId)
+                .Select(user => user.Username)
+                .FirstOrDefaultAsync(ct);
+            if (username is null)
+                return null;
+        }
+
+        return new InviteTokenInfoDto(true, username is null, username, row.ExpiresAt);
+    }
+
+    public async Task<UserDto> RedeemInviteAsync(string token, string password, string? username, CovePrincipal? actor, CancellationToken ct = default)
+    {
+        Validation.Password(password);
+        var row = await FindLiveTokenAsync(token, InvitePurpose, ct);
+        if (row is null)
+            throw new InviteTokenException("Invite token is invalid or expired.");
+
+        if (row.UserId is int userId)
+            return await RedeemExistingUserInviteAsync(row, userId, password, username, actor, ct);
+
+        return await RedeemPendingUserInviteAsync(row, password, username, actor, ct);
+    }
+
+    private async Task<UserDto> RedeemExistingUserInviteAsync(UserInviteToken row, int userId, string password, string? username, CovePrincipal? actor, CancellationToken ct)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new InviteTokenException("Invite token is invalid or expired.");
+
+        var requestedUsername = NormalizeOptional(username);
+        if (requestedUsername is not null && !string.Equals(requestedUsername, user.Username, StringComparison.OrdinalIgnoreCase))
+            throw new InviteTokenException("This invite is locked to its assigned username.");
+
+        user.PasswordHash = PasswordHasher.HashPassword(password);
+        user.PasswordAlgo = PasswordHasher.Algorithm;
+        user.MustChangePassword = false;
+        user.IsActive = true;
+        user.IsLocked = false;
+        user.FailedLoginCount = 0;
+        user.LockedUntil = null;
+        user.UpdatedAt = DateTime.UtcNow;
+        row.ConsumedAt = DateTime.UtcNow;
+        row.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync(AuditActions.UserInviteRedeem, AuditOutcomes.Success, actor,
+            "user", user.Id.ToString(), new { user.Username }, ct);
+
+        return (await GetAsync(user.Id, ct))!;
+    }
+
+    private async Task<UserDto> RedeemPendingUserInviteAsync(UserInviteToken row, string password, string? username, CovePrincipal? actor, CancellationToken ct)
+    {
+        var lockedUsername = NormalizeOptional(row.Username);
+        var requestedUsername = NormalizeOptional(username);
+        if (lockedUsername is not null && requestedUsername is not null && !string.Equals(lockedUsername, requestedUsername, StringComparison.OrdinalIgnoreCase))
+            throw new InviteTokenException("This invite is locked to its assigned username.");
+
+        var finalUsername = lockedUsername ?? requestedUsername;
+        if (finalUsername is null)
+            throw new InviteTokenException("Username is required for this invite.");
+
+        Validation.Username(finalUsername);
+        var exists = await _db.Users.AnyAsync(u => u.Username.ToLower() == finalUsername.ToLower(), ct);
+        if (exists) throw new InviteTokenException("Username already in use.");
+
+        var roles = DeserializeRoles(row.RolesJson);
+        var roleRows = roles.Count > 0 ? await LoadRolesAsync(roles, ct) : new List<Role>();
+        var now = DateTime.UtcNow;
+        var user = new User
+        {
+            Username = finalUsername,
+            DisplayName = NormalizeOptional(row.DisplayName),
+            Email = NormalizeOptional(row.Email),
+            PasswordHash = PasswordHasher.HashPassword(password),
+            PasswordAlgo = PasswordHasher.Algorithm,
+            IsActive = true,
+            IsLocked = false,
+            MustChangePassword = false,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync(ct);
+
+        foreach (var role in roleRows)
+        {
+            _db.UserRoleAssignments.Add(new UserRoleAssignment
+            {
+                UserId = user.Id,
+                RoleId = role.Id,
+                GrantedAt = now,
+                GrantedByUserId = actor?.UserId,
+            });
+        }
+
+        row.UserId = user.Id;
+        row.ConsumedAt = now;
+        row.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync(AuditActions.UserCreate, AuditOutcomes.Success, actor,
+            "user", user.Id.ToString(), new { user.Username, invite = true }, ct);
+        await _audit.LogAsync(AuditActions.UserInviteRedeem, AuditOutcomes.Success, actor,
+            "user", user.Id.ToString(), new { user.Username }, ct);
+
+        return (await GetAsync(user.Id, ct))!;
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
+    private static IReadOnlyList<string> NormalizeRoles(IEnumerable<string>? roles)
+    {
+        return roles?
+            .Select(role => role.Trim())
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            ?? [];
+    }
+
+    private static IReadOnlyList<string> DeserializeRoles(string? rolesJson)
+    {
+        if (string.IsNullOrWhiteSpace(rolesJson))
+            return [];
+
+        try
+        {
+            return NormalizeRoles(JsonSerializer.Deserialize<List<string>>(rolesJson));
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private async Task<List<Role>> LoadRolesAsync(IReadOnlyList<string> roleNames, CancellationToken ct)
+    {
+        var roles = await _db.Roles.Where(role => roleNames.Contains(role.Name)).ToListAsync(ct);
+        if (roles.Count != roleNames.Count)
+        {
+            var missing = roleNames.Except(roles.Select(role => role.Name), StringComparer.OrdinalIgnoreCase);
+            throw new InvalidOperationException($"Unknown role(s): {string.Join(", ", missing)}");
+        }
+
+        return roles;
+    }
+
+    public async Task<SetupTokenDto> CreateSetupTokenAsync(CovePrincipal? actor, CancellationToken ct = default)
+    {
+        var (plain, hash) = TokenService.NewOpaqueToken();
+        var expires = DateTime.UtcNow.Add(SetupTokenTtl);
+        _db.UserInviteTokens.Add(new UserInviteToken
+        {
+            TokenHash = hash,
+            Purpose = SetupPurpose,
+            ExpiresAt = expires,
+            CreatedByUserId = actor?.UserId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync(AuditActions.AuthSetupTokenCreate, AuditOutcomes.Success, actor,
+            "auth", "setup", new { expiresAt = expires }, ct);
+
+        return new SetupTokenDto(plain, expires);
+    }
+
+    public Task<bool> HasSetupTokenAsync(CancellationToken ct = default)
+        => _db.UserInviteTokens.AnyAsync(token => token.Purpose == SetupPurpose
+            && token.ConsumedAt == null
+            && token.ExpiresAt > DateTime.UtcNow, ct);
+
+    public async Task<UserDto> RedeemSetupTokenAsync(string token, string password, string? username, CovePrincipal? actor, CancellationToken ct = default)
+    {
+        var row = await FindLiveTokenAsync(token, SetupPurpose, ct)
+            ?? throw new InviteTokenException("Setup token is invalid or expired.");
+
+        var owner = await _db.Users
+            .Include(user => user.Roles).ThenInclude(role => role.Role)
+            .FirstOrDefaultAsync(user => user.IsSystem || user.Roles.Any(role => role.Role!.Name == BuiltinRoles.Owner), ct);
+
+        UserDto dto;
+        if (owner is null)
+        {
+            dto = await BootstrapOwnerAsync(string.IsNullOrWhiteSpace(username) ? "owner" : username.Trim(), password, actor, ct);
+        }
+        else
+        {
+            await ChangePasswordAsync(owner.Id, password, actor, ct);
+            dto = (await GetAsync(owner.Id, ct))!;
+        }
+
+        row.ConsumedAt = DateTime.UtcNow;
+        row.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.LogAsync(AuditActions.AuthSetupTokenRedeem, AuditOutcomes.Success, actor,
+            "user", dto.Id.ToString(), new { dto.Username }, ct);
+
+        return dto;
     }
 
     public async Task SetRolesAsync(int userId, IEnumerable<string> roleNames, CovePrincipal? actor, CancellationToken ct = default)
@@ -226,9 +554,76 @@ public sealed class UserService : IUserService
     private static UserDto Map(User u) => new(
         u.Id, u.Username, u.DisplayName, u.Email,
         u.IsActive, u.IsLocked, u.IsSystem, u.MustChangePassword,
+        !string.IsNullOrWhiteSpace(u.PasswordHash),
         u.LastLoginAt, u.LastLoginIp, u.CreatedAt,
         u.Roles.Select(r => r.Role!.Name).ToList(),
         ParseUiPreferences(u.UiPreferencesJson));
+
+    private async Task<Role> EnsureOwnerRoleAsync(CancellationToken ct)
+    {
+        var wildcardPermission = await _db.Permissions.FirstOrDefaultAsync(p => p.Key == Permissions.All, ct);
+        if (wildcardPermission is null)
+        {
+            _db.Permissions.Add(new Permission
+            {
+                Key = Permissions.All,
+                Category = "System",
+                Description = "All permissions.",
+                Source = "core",
+                Dangerous = true,
+                Implies = "[]",
+                IsOrphaned = false,
+                RegisteredAt = DateTime.UtcNow,
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+
+        var role = await _db.Roles.Include(r => r.Permissions).FirstOrDefaultAsync(r => r.Name == BuiltinRoles.Owner, ct);
+        if (role is not null)
+        {
+            if (!role.Permissions.Any(p => p.PermissionKey == Permissions.All))
+            {
+                _db.RolePermissions.Add(new RolePermission { RoleId = role.Id, PermissionKey = Permissions.All });
+                await _db.SaveChangesAsync(ct);
+            }
+            return role;
+        }
+
+        role = new Role
+        {
+            Name = BuiltinRoles.Owner,
+            Description = "Superuser; bypasses all checks.",
+            IsBuiltin = true,
+            IsSystem = true,
+            Source = "core",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        _db.Roles.Add(role);
+        await _db.SaveChangesAsync(ct);
+        _db.RolePermissions.Add(new RolePermission { RoleId = role.Id, PermissionKey = Permissions.All });
+        await _db.SaveChangesAsync(ct);
+        return role;
+    }
+
+    private async Task<UserInviteToken?> FindLiveTokenAsync(string rawToken, string purpose, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(rawToken))
+            return null;
+
+        var hash = TokenService.HashToken(rawToken.Trim());
+        var row = await _db.UserInviteTokens.FirstOrDefaultAsync(token => token.TokenHash == hash && token.Purpose == purpose, ct);
+        if (row is null || row.ConsumedAt is not null || row.ExpiresAt <= DateTime.UtcNow)
+            return null;
+
+        return row;
+    }
+
+    private static string BuildInviteUrl(string baseUrl, string token)
+    {
+        var normalizedBase = string.IsNullOrWhiteSpace(baseUrl) ? string.Empty : baseUrl.TrimEnd('/');
+        return $"{normalizedBase}/auth/redeem-invite?token={Uri.EscapeDataString(token)}";
+    }
 
     public static UserUiPreferencesDto? ParseUiPreferences(string? raw)
     {

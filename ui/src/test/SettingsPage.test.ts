@@ -55,7 +55,7 @@ describe("isLimitedPrimarySettingsTabVisible", () => {
     expect(isLimitedPrimarySettingsTabVisible("library", false)).toBe(false);
   });
 
-  it("keeps display profiles gated by marker access", () => {
+  it("keeps display profiles gated by segment access", () => {
     expect(isLimitedPrimarySettingsTabVisible("display-profiles", false)).toBe(false);
     expect(isLimitedPrimarySettingsTabVisible("display-profiles", true)).toBe(true);
   });

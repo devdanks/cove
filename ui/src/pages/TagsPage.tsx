@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { tags } from "../api/client";
+import { tags, tagGroups } from "../api/client";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import type { EntityEngagement, FindFilter, Tag, TagCreate, TagFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useMultiSelect } from "../hooks/useMultiSelect";
-import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
+import { EditModal, Field, NumberInput, SelectInput, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { Tag as TagIcon, Film, Trash2, Loader2, Edit, Merge, Heart, Image, LayoutGrid, Layers, Users, Building2 } from "lucide-react";
 import { MergeDialog } from "../components/MergeDialog";
 import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
@@ -23,11 +23,13 @@ import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCa
 import { StringListEditor } from "../components/StringListEditor";
 import { TagGraphView } from "../components/TagGraphView";
 import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
+import { TagGroupsManager } from "../components/TagGroupsManager";
 
 const GRAPH_VIEW_LIMIT = 5000;
 
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
+  { value: "tag_group", label: "Tag Group" },
   { value: "scene_count", label: "Scene Count" },
   { value: "gallery_count", label: "Gallery Count" },
   { value: "group_count", label: "Group Count" },
@@ -60,6 +62,7 @@ export function TagsPage({ onNavigate }: Props) {
     allowedDisplayModes: ["grid", "list", "graph"] as const,
   });
   const [showCreate, setShowCreate] = useState(false);
+  const [showTagGroups, setShowTagGroups] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showMetadataBatch, setShowMetadataBatch] = useState(false);
@@ -122,6 +125,7 @@ export function TagsPage({ onNavigate }: Props) {
   return (
     <>
       <TagCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "tag", id })} />
+      <TagGroupManagerDialog open={showTagGroups} onClose={() => setShowTagGroups(false)} />
       <MetadataServerBatchDialog
         open={showMetadataBatch}
         entityType="tag"
@@ -145,6 +149,16 @@ export function TagsPage({ onNavigate }: Props) {
       criteriaDefinitions={TAG_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
+      renderOperations={() => canWriteTag ? (
+        <button
+          type="button"
+          onClick={() => setShowTagGroups(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card/70 px-3 py-1 text-xs text-secondary hover:border-accent hover:text-foreground"
+        >
+          <Layers className="h-3.5 w-3.5" />
+          Groups
+        </button>
+      ) : null}
       onNew={canWriteTag ? () => setShowCreate(true) : undefined}
       selectedIds={selectedIds}
       onSelectAll={selectAll}
@@ -255,15 +269,27 @@ export function TagsPage({ onNavigate }: Props) {
   );
 }
 
+function TagGroupManagerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <EditModal title="Tag Groups" open={open} onClose={onClose}>
+      <TagGroupsManager framed={false} description="Create and edit the groups used by tag selectors and tag badges." />
+      <div className="mt-4 flex justify-end">
+        <button type="button" onClick={onClose} className="rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:text-foreground">Done</button>
+      </div>
+    </EditModal>
+  );
+}
+
 /* ── Tag Create Modal ── */
 function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: number) => void }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ name: "", description: "", aliases: [] as string[] });
+  const [form, setForm] = useState({ name: "", description: "", aliases: [] as string[], color: "", tagGroupId: undefined as number | undefined, minOccurrenceSec: undefined as number | undefined, minOccurrencePercent: undefined as number | undefined });
+  const { data: groups = [] } = useQuery({ queryKey: ["tag-groups"], queryFn: tagGroups.list });
   const mutation = useMutation({
     mutationFn: (data: TagCreate) => tags.create(data),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["tags"] });
-      setForm({ name: "", description: "", aliases: [] });
+      setForm({ name: "", description: "", aliases: [], color: "", tagGroupId: undefined, minOccurrenceSec: undefined, minOccurrencePercent: undefined });
       onClose();
       if (created?.id) onCreated(created.id);
     },
@@ -276,6 +302,34 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
       <Field label="Description">
         <TextArea value={form.description} onChange={(v) => setForm({ ...form, description: v })} rows={3} />
       </Field>
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="Badge Color">
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={/^#[0-9a-fA-F]{6}$/.test(form.color) ? form.color : "#6ee7b7"}
+              onChange={(event) => setForm({ ...form, color: event.target.value })}
+              className="h-9 w-11 rounded border border-border bg-card p-1"
+            />
+            <TextInput value={form.color} onChange={(v) => setForm({ ...form, color: v })} placeholder="#6ee7b7" />
+          </div>
+        </Field>
+        <Field label="Tag Group">
+          <SelectInput
+            value={form.tagGroupId?.toString() ?? ""}
+            onChange={(value) => setForm({ ...form, tagGroupId: value ? Number(value) : undefined })}
+            options={groups.map((group) => ({ value: group.id.toString(), label: group.name }))}
+          />
+        </Field>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="Min Seconds">
+          <NumberInput value={form.minOccurrenceSec} onChange={(value) => setForm({ ...form, minOccurrenceSec: value })} min={0} />
+        </Field>
+        <Field label="Min Percent">
+          <NumberInput value={form.minOccurrencePercent} onChange={(value) => setForm({ ...form, minOccurrencePercent: value })} min={0} max={100} />
+        </Field>
+      </div>
       <Field label="Aliases">
         <StringListEditor
           values={form.aliases}
@@ -288,6 +342,10 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
         <SaveButton loading={mutation.isPending} onClick={() => mutation.mutate({
           name: form.name,
           description: form.description || undefined,
+          color: form.color.trim() || null,
+          tagGroupId: form.tagGroupId ?? null,
+          minOccurrenceSec: form.minOccurrenceSec ?? null,
+          minOccurrencePercent: form.minOccurrencePercent ?? null,
           aliases: form.aliases.map((alias) => alias.trim()).filter(Boolean),
         })} />
       </div>
@@ -333,6 +391,12 @@ function TagCard({ tag, engagement, onClick, onNavigate, selected, onSelect, sel
       </div>
       <div className="card-body border-t border-border/50 p-2 text-center">
         <h3 className="font-medium text-sm text-foreground truncate">{tag.name}</h3>
+        {tag.tagGroupName ? (
+          <div className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] text-secondary">
+            <span className="h-2 w-2 rounded-full border border-border" style={{ backgroundColor: tag.tagGroupColor ?? "transparent" }} />
+            <span className="truncate">{tag.tagGroupName}</span>
+          </div>
+        ) : null}
         {tag.description && (
           <p className="text-xs text-secondary mt-0.5 line-clamp-1">{tag.description}</p>
         )}
@@ -388,6 +452,7 @@ function TagListTable({ tags: items, onNavigate, selectedIds, onToggle, selectin
         <tr className="border-b border-border text-left text-muted text-xs">
           {selectedIds && <th className="w-8 py-2 px-3"></th>}
           <th className="py-2 px-3">Name</th>
+          <th className="py-2 px-3">Group</th>
           <th className="py-2 px-3">Description</th>
           <th className="py-2 px-3">Aliases</th>
           <th className="py-2 px-3 text-right">Scenes</th>
@@ -402,6 +467,14 @@ function TagListTable({ tags: items, onNavigate, selectedIds, onToggle, selectin
           >
             {selectedIds && <td className="py-2 px-3"><input type="checkbox" checked={selectedIds.has(t.id)} onChange={() => onToggle?.(t.id)} onClick={(e) => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-border cursor-pointer accent-accent" /></td>}
             <td className="py-2 px-3 text-foreground">{t.name}</td>
+            <td className="py-2 px-3 text-secondary">
+              {t.tagGroupName ? (
+                <span className="inline-flex max-w-[12rem] items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs">
+                  <span className="h-2 w-2 rounded-full border border-border" style={{ backgroundColor: t.tagGroupColor ?? "transparent" }} />
+                  <span className="truncate">{t.tagGroupName}</span>
+                </span>
+              ) : <span className="text-muted">Ungrouped</span>}
+            </td>
             <td className="py-2 px-3 text-secondary truncate max-w-xs">{t.description ?? ""}</td>
             <td className="py-2 px-3 text-muted truncate max-w-xs">{t.aliases.join(", ")}</td>
             <td className="py-2 px-3 text-secondary text-right">{t.sceneCount ?? ""}</td>

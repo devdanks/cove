@@ -26,6 +26,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.HasMany(u => u.Roles).WithOne(r => r.User!).HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(u => u.RefreshTokens).WithOne(t => t.User!).HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(u => u.ApiTokens).WithOne(t => t.User!).HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany<UserInviteToken>().WithOne(t => t.User!).HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -145,6 +146,26 @@ public class ApiTokenConfiguration : IEntityTypeConfiguration<ApiToken>
         builder.Property(t => t.ScopePermissions).HasColumnType("jsonb");
 
         builder.HasIndex(t => t.TokenHash).IsUnique();
+    }
+}
+
+public class UserInviteTokenConfiguration : IEntityTypeConfiguration<UserInviteToken>
+{
+    public void Configure(EntityTypeBuilder<UserInviteToken> builder)
+    {
+        builder.ToTable("user_invite_tokens");
+        builder.HasKey(t => t.Id);
+        builder.Property(t => t.TokenHash).IsRequired().HasMaxLength(128);
+        builder.Property(t => t.Purpose).IsRequired().HasMaxLength(32);
+        builder.Property(t => t.Username).HasMaxLength(64);
+        builder.Property(t => t.DisplayName).HasMaxLength(200);
+        builder.Property(t => t.Email).HasMaxLength(320);
+        builder.Property(t => t.RolesJson).HasColumnType("jsonb");
+
+        builder.HasIndex(t => t.TokenHash).IsUnique();
+        builder.HasIndex(t => new { t.UserId, t.Purpose, t.ConsumedAt });
+
+        builder.HasOne(t => t.CreatedBy).WithMany().HasForeignKey(t => t.CreatedByUserId).OnDelete(DeleteBehavior.SetNull);
     }
 }
 

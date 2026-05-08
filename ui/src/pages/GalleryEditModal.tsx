@@ -8,6 +8,7 @@ import { InteractiveRatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
+import { GroupedTagOptionList, SelectedTagChips } from "../components/TagSelector";
 
 interface Props {
   gallery: Gallery;
@@ -43,7 +44,8 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
   const { data: performerResults } = useQuery({ queryKey: ["performers-search", performerSearch], queryFn: () => performers.find({ q: performerSearch, perPage: 20 }), enabled: performerSearch.length > 0 });
   const { data: sceneResults } = useQuery({ queryKey: ["scenes-search", sceneSearch], queryFn: () => scenesApi.find({ q: sceneSearch, perPage: 20 }), enabled: sceneSearch.length > 0 });
 
-  const selectedTags = gallery.tags.filter((t) => form.tagIds.includes(t.id));
+  const knownTagsById = new Map([...gallery.tags, ...(tagResults?.items ?? [])].map((tag) => [tag.id, tag]));
+  const selectedTags = form.tagIds.map((tagId) => knownTagsById.get(tagId)).filter(Boolean) as Gallery["tags"];
   const selectedPerformers = gallery.performers.filter((p) => form.performerIds.includes(p.id));
 
   const mutation = useMutation({
@@ -110,14 +112,7 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
 
       {/* Tags picker */}
       <Field label="Tags">
-        <div className="flex flex-wrap gap-1 mb-2">
-          {selectedTags.map((t) => (
-            <span key={t.id} className="bg-accent/20 text-accent text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-              {t.name}
-              <X className="w-3 h-3 cursor-pointer" onClick={() => setForm({ ...form, tagIds: form.tagIds.filter((id) => id !== t.id) })} />
-            </span>
-          ))}
-        </div>
+        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setForm({ ...form, tagIds: form.tagIds.filter((id) => id !== tag.id) })} className="mb-2 flex flex-wrap gap-1" />
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2 top-2.5 text-secondary" />
           <input
@@ -125,12 +120,12 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
             className="w-full bg-card border border-border rounded pl-8 pr-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
           />
           {tagSearch && tagResults && (
-            <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded max-h-32 overflow-y-auto">
-              {tagResults.items.filter((t) => !form.tagIds.includes(t.id)).map((t) => (
-                <div key={t.id} onClick={() => { setForm({ ...form, tagIds: [...form.tagIds, t.id] }); setTagSearch(""); }}
-                  className="px-3 py-1.5 text-sm hover:bg-card-hover cursor-pointer">{t.name}</div>
-              ))}
-            </div>
+            <GroupedTagOptionList
+              tags={tagResults.items.filter((tag) => !form.tagIds.includes(tag.id))}
+              maxItems={20}
+              className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded border border-border bg-surface shadow-xl"
+              onSelect={(tag) => { setForm({ ...form, tagIds: [...form.tagIds, tag.id] }); setTagSearch(""); }}
+            />
           )}
         </div>
       </Field>

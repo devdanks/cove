@@ -22,7 +22,8 @@ public record SceneDto(
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     List<VideoFileDto> Files,
     List<GroupSummaryDto> Groups, List<GallerySummaryDto> Galleries,
-    List<SceneRemoteIdDto> RemoteIds, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
+    List<SceneRemoteIdDto> RemoteIds, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
+    List<TagApplicationDto>? ContextTagApplications = null);
 
 public record SceneRemoteIdDto(string Endpoint, string RemoteId);
 
@@ -84,7 +85,11 @@ public record TagProvenanceDto(
     string? SourceRunId,
     string? ModelKey,
     float? Confidence,
-    string AppliedAt);
+    string AppliedAt,
+    string? ContextType = null,
+    int? ContextId = null,
+    double? TotalDurationSec = null,
+    double? HostDurationSec = null);
 
 public record TagDto(
     int Id,
@@ -96,7 +101,13 @@ public record TagDto(
     bool? ShowAsSegment = null,
     string? SegmentColorOverride = null,
     int? SegmentLaneOverride = null,
-    List<TagProvenanceDto>? Provenance = null);
+    List<TagProvenanceDto>? Provenance = null,
+    string? Color = null,
+    int? TagGroupId = null,
+    string? TagGroupName = null,
+    string? TagGroupColor = null,
+    double? MinOccurrenceSec = null,
+    double? MinOccurrencePercent = null);
 
 public record TagListDto(
     int Id,
@@ -115,7 +126,13 @@ public record TagListDto(
     string? ImagePath,
     bool? ShowAsSegment = null,
     string? SegmentColorOverride = null,
-    int? SegmentLaneOverride = null);
+    int? SegmentLaneOverride = null,
+    string? Color = null,
+    int? TagGroupId = null,
+    string? TagGroupName = null,
+    string? TagGroupColor = null,
+    double? MinOccurrenceSec = null,
+    double? MinOccurrencePercent = null);
 
 public record TagDetailDto(
     int Id, string Name, string? SortName, string? Description, bool Favorite, bool IgnoreAutoTag,
@@ -123,7 +140,9 @@ public record TagDetailDto(
     int SceneCount, int PerformerCount, int ImageCount, int GalleryCount,
     int StudioCount, int GroupCount, int SegmentCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    bool? ShowAsSegment = null, string? SegmentColorOverride = null, int? SegmentLaneOverride = null);
+    bool? ShowAsSegment = null, string? SegmentColorOverride = null, int? SegmentLaneOverride = null,
+    string? Color = null, int? TagGroupId = null, string? TagGroupName = null, string? TagGroupColor = null,
+    double? MinOccurrenceSec = null, double? MinOccurrencePercent = null);
 
 public record TagSegmentWallDto(
     int Id,
@@ -155,6 +174,38 @@ public record TagGraphNodeDto(
 public record TagGraphLinkDto(int SourceId, int TargetId);
 public record TagGraphResponseDto(List<TagGraphNodeDto> Items, List<TagGraphLinkDto> Links, int TotalCount);
 
+public record TagGroupDto(int Id, string Name, string? Description, string? Color, int SortOrder, int TagCount, string CreatedAt, string UpdatedAt);
+public record TagGroupCreateDto(string Name, string? Description = null, string? Color = null, int? SortOrder = null);
+public record TagGroupUpdateDto(string? Name = null, string? Description = null, string? Color = null, int? SortOrder = null);
+
+public record TagApplicationDto(
+    int Id,
+    string HostType,
+    int HostId,
+    string? ContextType,
+    int? ContextId,
+    TagDto Tag,
+    string SourceKey,
+    string? SourceRunId,
+    string? ModelKey,
+    float? Confidence,
+    double? TotalDurationSec,
+    double? HostDurationSec,
+    string AppliedAt);
+
+public record TagApplicationCreateDto(
+    string HostType,
+    int HostId,
+    int TagId,
+    string SourceKey = "user",
+    string? ContextType = null,
+    int? ContextId = null,
+    string? SourceRunId = null,
+    string? ModelKey = null,
+    float? Confidence = null,
+    double? TotalDurationSec = null,
+    double? HostDurationSec = null);
+
 public record TagCreateDto(
     string Name,
     string? SortName,
@@ -166,7 +217,11 @@ public record TagCreateDto(
     List<int>? ChildIds,
     bool? ShowAsSegment = null,
     string? SegmentColorOverride = null,
-    int? SegmentLaneOverride = null);
+    int? SegmentLaneOverride = null,
+    string? Color = null,
+    int? TagGroupId = null,
+    double? MinOccurrenceSec = null,
+    double? MinOccurrencePercent = null);
 public record TagUpdateDto(
     string? Name,
     string? SortName,
@@ -179,7 +234,11 @@ public record TagUpdateDto(
     Dictionary<string, object>? CustomFields,
     bool? ShowAsSegment = null,
     string? SegmentColorOverride = null,
-    int? SegmentLaneOverride = null);
+    int? SegmentLaneOverride = null,
+    string? Color = null,
+    int? TagGroupId = null,
+    double? MinOccurrenceSec = null,
+    double? MinOccurrencePercent = null);
 
 // ===== STUDIO DTOs =====
 public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
@@ -953,7 +1012,8 @@ public record SecurityConfigDto
 {
     public bool Enabled { get; init; }
     public string? Username { get; init; }
-    public int MaxSessionAgeMinutes { get; init; } = 60;
+    public bool AllowAnonymousShareLinks { get; init; } = true;
+    public List<string>? KnownProxies { get; init; } = [];
     public string? NewPassword { get; init; }
 }
 

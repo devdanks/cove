@@ -98,7 +98,8 @@ public class ConfigService
             {
                 Enabled = cfg.Auth.Enabled,
                 Username = cfg.Auth.Username,
-                MaxSessionAgeMinutes = cfg.Auth.MaxSessionAgeMinutes,
+                AllowAnonymousShareLinks = cfg.Auth.AllowAnonymousShareLinks,
+                KnownProxies = cfg.Auth.KnownProxies,
             },
             Scraping = new ScrapingConfigDto
             {
@@ -267,9 +268,12 @@ public class ConfigService
 
         cfg.Auth.Enabled = dto.Security.Enabled;
         cfg.Auth.Username = string.IsNullOrWhiteSpace(dto.Security.Username) ? null : dto.Security.Username.Trim();
-        cfg.Auth.MaxSessionAgeMinutes = dto.Security.MaxSessionAgeMinutes > 0
-            ? dto.Security.MaxSessionAgeMinutes
-            : cfg.Auth.MaxSessionAgeMinutes;
+        cfg.Auth.AllowAnonymousShareLinks = dto.Security.AllowAnonymousShareLinks;
+        cfg.Auth.KnownProxies = (dto.Security.KnownProxies ?? [])
+            .Where(proxy => !string.IsNullOrWhiteSpace(proxy))
+            .Select(proxy => proxy.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         if (!string.IsNullOrWhiteSpace(dto.Security.NewPassword))
             cfg.Auth.HashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.Security.NewPassword);
 

@@ -1,8 +1,11 @@
 import { useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { auth } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 
 export function LoginPage() {
   const { login } = useAuth();
+  const { data: bootstrapStatus } = useQuery({ queryKey: ["auth", "bootstrap-status"], queryFn: auth.bootstrapStatus });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -60,9 +63,15 @@ export function LoginPage() {
             disabled={submitting || !username || !password}
             className="w-full rounded bg-accent text-accent-foreground px-3 py-2 font-medium disabled:opacity-50 hover:opacity-90"
           >
-            {submitting ? "Signing in…" : "Sign in"}
+            {submitting ? "Signing in..." : "Sign in"}
           </button>
         </form>
+        <div className="flex flex-col gap-2 border-t border-border pt-3 text-center text-sm">
+          {bootstrapStatus?.ownerExists === false ? (
+            <a className="text-accent hover:underline" href="/auth/bootstrap">First time here? Owner setup -&gt;</a>
+          ) : null}
+          <a className="text-muted-foreground hover:text-accent hover:underline" href="/auth/redeem-invite">Have an invite token? -&gt;</a>
+        </div>
       </div>
     </div>
   );

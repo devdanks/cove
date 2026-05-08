@@ -32,6 +32,7 @@ public partial class CoveContext : DbContext
     public DbSet<Scene> Scenes => Set<Scene>();
     public DbSet<Performer> Performers => Set<Performer>();
     public DbSet<Tag> Tags => Set<Tag>();
+    public DbSet<TagGroup> TagGroups => Set<TagGroup>();
     public DbSet<Studio> Studios => Set<Studio>();
     public DbSet<Gallery> Galleries => Set<Gallery>();
     public DbSet<Image> Images => Set<Image>();
@@ -66,6 +67,7 @@ public partial class CoveContext : DbContext
     public DbSet<RoleEntityOverride> RoleEntityOverrides => Set<RoleEntityOverride>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+    public DbSet<UserInviteToken> UserInviteTokens => Set<UserInviteToken>();
     public DbSet<ShareLink> ShareLinks => Set<ShareLink>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 

@@ -1,5 +1,6 @@
 ﻿using Cove.Core.Auth;
 using Cove.Core.DTOs;
+using Cove.Core.Interfaces;
 using Cove.Data.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -16,13 +17,103 @@ public class AuthController : ControllerBase
     private readonly IUserService _users;
     private readonly IAuditService _audit;
     private readonly ICurrentPrincipalAccessor _principalAccessor;
+    private readonly CoveConfiguration _config;
 
-    public AuthController(ITokenService tokens, IUserService users, IAuditService audit, ICurrentPrincipalAccessor principalAccessor)
+    public AuthController(ITokenService tokens, IUserService users, IAuditService audit, ICurrentPrincipalAccessor principalAccessor, CoveConfiguration config)
     {
         _tokens = tokens;
         _users = users;
         _audit = audit;
         _principalAccessor = principalAccessor;
+        _config = config;
+    }
+
+    [HttpGet("bootstrap-status")]
+    [AllowAnonymous]
+    public async Task<IActionResult> BootstrapStatus(CancellationToken ct)
+    {
+        return Ok(new
+        {
+            ownerExists = await _users.OwnerExistsAsync(ct),
+            authEnabled = _config.Auth.Enabled,
+            hasSetupToken = await _users.HasSetupTokenAsync(ct),
+        });
+    }
+
+    [HttpPost("bootstrap-owner")]
+    [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("auth-strict")]
+    public async Task<IActionResult> BootstrapOwner([FromBody] BootstrapOwnerRequest request, CancellationToken ct)
+    {
+        var ip = GetRequestIp();
+        var ua = HttpContext.Request.Headers.UserAgent.ToString();
+
+        if (!_config.Auth.Enabled && !Cove.Api.Middleware.AuthDisabledRequestGuard.IsTrustedLocalRequest(HttpContext, _config.Auth))
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "LOCAL_ONLY", message = "Owner bootstrap is only available from a local address while authentication is disabled." });
+
+        try
+        {
+            var owner = await _users.BootstrapOwnerAsync(request.Username, request.Password, CovePrincipal.Anonymous(ip, ua), ct);
+            var pair = await _tokens.IssueForUserAsync(owner.Id, ip, ua, ct);
+            WriteAccessCookie(pair.AccessToken, pair.AccessExpires);
+            return Ok(ToLoginResponse(pair));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { code = "OWNER_EXISTS", message = ex.Message });
+        }
+    }
+
+    [HttpPost("setup-token-redeem")]
+    [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("auth-strict")]
+    public async Task<IActionResult> RedeemSetupToken([FromBody] SetupTokenRedeemRequest request, CancellationToken ct)
+    {
+        var ip = GetRequestIp();
+        var ua = HttpContext.Request.Headers.UserAgent.ToString();
+
+        try
+        {
+            var user = await _users.RedeemSetupTokenAsync(request.Token, request.Password, request.Username, CovePrincipal.Anonymous(ip, ua), ct);
+            var pair = await _tokens.IssueForUserAsync(user.Id, ip, ua, ct);
+            WriteAccessCookie(pair.AccessToken, pair.AccessExpires);
+            return Ok(ToLoginResponse(pair));
+        }
+        catch (InviteTokenException ex)
+        {
+            return StatusCode(StatusCodes.Status410Gone, new { code = "TOKEN_EXPIRED", message = ex.Message });
+        }
+    }
+
+    [HttpPost("invite-redeem")]
+    [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("auth-strict")]
+    public async Task<IActionResult> RedeemInvite([FromBody] InviteRedeemRequest request, CancellationToken ct)
+    {
+        var ip = GetRequestIp();
+        var ua = HttpContext.Request.Headers.UserAgent.ToString();
+
+        try
+        {
+            var user = await _users.RedeemInviteAsync(request.Token, request.Password, request.Username, CovePrincipal.Anonymous(ip, ua), ct);
+            var pair = await _tokens.IssueForUserAsync(user.Id, ip, ua, ct);
+            WriteAccessCookie(pair.AccessToken, pair.AccessExpires);
+            return Ok(ToLoginResponse(pair));
+        }
+        catch (InviteTokenException ex)
+        {
+            return StatusCode(StatusCodes.Status410Gone, new { code = "TOKEN_EXPIRED", message = ex.Message });
+        }
+    }
+
+    [HttpGet("invite-info")]
+    [AllowAnonymous]
+    public async Task<IActionResult> InviteInfo([FromQuery] string token, CancellationToken ct)
+    {
+        var info = await _users.GetInviteInfoAsync(token, ct);
+        return info is null
+            ? StatusCode(StatusCodes.Status410Gone, new { code = "TOKEN_EXPIRED", message = "Invite token is invalid or expired." })
+            : Ok(info);
     }
 
     [HttpPost("login")]
@@ -30,10 +121,11 @@ public class AuthController : ControllerBase
     [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("auth-strict")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken ct)
     {
-        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var ip = GetRequestIp();
         var ua = HttpContext.Request.Headers.UserAgent.ToString();
 
         IActionResult invalid = Unauthorized(new { code = "INVALID_CREDENTIALS", message = "Invalid credentials." });
+        IActionResult disabled = Unauthorized(new { code = "ACCOUNT_DISABLED", message = "This account is disabled." });
 
         var user = await _users.FindByUsernameAsync(request.Username, ct);
         if (user is null)
@@ -43,10 +135,16 @@ public class AuthController : ControllerBase
                 CovePrincipal.Anonymous(ip, ua), "user", request.Username, new { reason = "no_user" }, ct);
             return invalid;
         }
-        if (!user.IsActive || user.IsLocked)
+        if (!user.IsActive)
         {
             await _audit.LogAsync(AuditActions.LoginFail, AuditOutcomes.Fail,
-                CovePrincipal.Anonymous(ip, ua), "user", user.Id.ToString(), new { reason = user.IsLocked ? "locked" : "inactive" }, ct);
+                CovePrincipal.Anonymous(ip, ua), "user", user.Id.ToString(), new { reason = "inactive" }, ct);
+            return disabled;
+        }
+        if (user.IsLocked)
+        {
+            await _audit.LogAsync(AuditActions.LoginFail, AuditOutcomes.Fail,
+                CovePrincipal.Anonymous(ip, ua), "user", user.Id.ToString(), new { reason = "locked" }, ct);
             return invalid;
         }
         var ok = await _users.VerifyPasswordAsync(user.Id, request.Password, ct);
@@ -82,7 +180,7 @@ public class AuthController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.RefreshToken))
             return Unauthorized(new { code = "INVALID_REFRESH" });
-        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var ip = GetRequestIp();
         var ua = HttpContext.Request.Headers.UserAgent.ToString();
         try
         {
@@ -117,6 +215,20 @@ public class AuthController : ControllerBase
         var p = _principalAccessor.Current;
         await _audit.LogAsync(AuditActions.Logout, AuditOutcomes.Success, p, null, null, null, ct);
         return Ok(new { message = "Logged out" });
+    }
+
+    [HttpPost("revoke-sessions")]
+    [AllowWithoutPermission]
+    public async Task<IActionResult> RevokeSessions(CancellationToken ct)
+    {
+        var p = _principalAccessor.Current;
+        if (p?.UserId is not int userId)
+            return Unauthorized(new { code = "UNAUTHORIZED" });
+
+        await _tokens.RevokeAllForUserAsync(userId, ct);
+        ClearAccessCookie();
+        await _audit.LogAsync(AuditActions.TokenRevoke, AuditOutcomes.Success, p, "user", userId.ToString(), new { allSessions = true }, ct);
+        return Ok(new { message = "All sessions revoked." });
     }
 
     [HttpGet("me")]
@@ -211,6 +323,19 @@ public class AuthController : ControllerBase
         });
     }
 
+    private string? GetRequestIp()
+        => Cove.Api.Middleware.AuthDisabledRequestGuard.GetEffectiveRemoteAddress(HttpContext, _config.Auth)?.ToString();
+
+    private static object ToLoginResponse(TokenPair pair) => new
+    {
+        token = pair.AccessToken,
+        refreshToken = pair.RefreshToken,
+        accessExpires = pair.AccessExpires,
+        refreshExpires = pair.RefreshExpires,
+        user = pair.User,
+        username = pair.User.Username,
+    };
+
     private static string ToClientUserKind(PrincipalKind kind) => kind switch
     {
         PrincipalKind.ShareLink => "shareLink",
@@ -223,3 +348,6 @@ public class AuthController : ControllerBase
 
 public record RefreshRequest(string RefreshToken);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+public record BootstrapOwnerRequest(string Username, string Password);
+public record SetupTokenRedeemRequest(string Token, string Password, string? Username = null);
+public record InviteRedeemRequest(string Token, string Password, string? Username = null);

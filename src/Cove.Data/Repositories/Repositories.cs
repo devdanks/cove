@@ -238,7 +238,7 @@ public class PerformerRepository : IPerformerRepository
         => await _db.Performers
             .Include(p => p.Urls)
             .Include(p => p.Aliases)
-            .Include(p => p.PerformerTags).ThenInclude(pt => pt.Tag)
+            .Include(p => p.PerformerTags).ThenInclude(pt => pt.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(p => p.RemoteIds)
             .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -584,7 +584,7 @@ public class PerformerRepository : IPerformerRepository
         }
 
         var items = await _db.Performers
-            .Include(p => p.PerformerTags).ThenInclude(pt => pt.Tag)
+            .Include(p => p.PerformerTags).ThenInclude(pt => pt.Tag).ThenInclude(tag => tag!.TagGroup)
             .AsSplitQuery()
             .Where(p => pagedIds.Contains(p.Id))
             .AsNoTracking()
@@ -671,8 +671,9 @@ public class TagRepository : ITagRepository
     public async Task<Tag?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
         => await _db.Tags
             .Include(t => t.Aliases)
-            .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent)
-            .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child)
+            .Include(t => t.TagGroup)
+            .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent).ThenInclude(parent => parent!.TagGroup)
+            .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child).ThenInclude(child => child!.TagGroup)
             .AsSplitQuery()
             .FirstOrDefaultAsync(t => t.Id == id, ct);
 
@@ -726,6 +727,7 @@ public class TagRepository : ITagRepository
             // Multi-ID criteria
             query = FilterHelpers.ApplyMultiId(query, filter.ParentsCriterion, t => t.ParentRelations.Select(tp => tp.ParentId));
             query = FilterHelpers.ApplyMultiId(query, filter.ChildrenCriterion, t => t.ChildRelations.Select(tp => tp.ChildId));
+            query = FilterHelpers.ApplyStudioCriterion(query, filter.TagGroupsCriterion, t => t.TagGroupId);
 
             // Timestamp criteria
             query = FilterHelpers.ApplyTimestamp(query, filter.CreatedAtCriterion, t => t.CreatedAt);
@@ -821,6 +823,7 @@ public class TagRepository : ITagRepository
         query = sort switch
         {
             "name" => desc ? query.OrderByDescending(t => t.Name) : query.OrderBy(t => t.Name),
+            "tag_group" => ApplyTagGroupSort(query, desc),
             "scene_count" => desc ? query.OrderByDescending(t => t.SceneCount) : query.OrderBy(t => t.SceneCount),
             "gallery_count" => desc ? query.OrderByDescending(t => t.GalleryCount) : query.OrderBy(t => t.GalleryCount),
             "group_count" => desc ? query.OrderByDescending(t => t.GroupCount) : query.OrderBy(t => t.GroupCount),
@@ -847,6 +850,7 @@ public class TagRepository : ITagRepository
 
         var items = await _db.Tags
             .Include(t => t.Aliases)
+            .Include(t => t.TagGroup)
             .AsSplitQuery()
             .Where(t => pagedIds.Contains(t.Id))
             .AsNoTracking()
@@ -856,6 +860,22 @@ public class TagRepository : ITagRepository
         var sortedItems = items.OrderBy(t => orderMap.GetValueOrDefault(t.Id, int.MaxValue)).ToList();
 
         return (sortedItems, totalCount);
+    }
+
+    private static IQueryable<Tag> ApplyTagGroupSort(IQueryable<Tag> query, bool desc)
+    {
+        var sortQuery = query.Select(tag => new
+        {
+            Tag = tag,
+            HasGroup = tag.TagGroupId.HasValue,
+            GroupSortOrder = tag.TagGroup != null ? tag.TagGroup.SortOrder : int.MaxValue,
+            GroupName = tag.TagGroup != null ? tag.TagGroup.Name : null,
+            tag.Name,
+        });
+
+        return desc
+            ? sortQuery.OrderBy(item => item.HasGroup ? 0 : 1).ThenByDescending(item => item.GroupSortOrder).ThenByDescending(item => item.GroupName).ThenByDescending(item => item.Name).Select(item => item.Tag)
+            : sortQuery.OrderBy(item => item.HasGroup ? 0 : 1).ThenBy(item => item.GroupSortOrder).ThenBy(item => item.GroupName).ThenBy(item => item.Name).Select(item => item.Tag);
     }
 
     private async Task<IQueryable<Tag>> ApplyTagCountCriteriaAsync(IQueryable<Tag> query, TagFilter filter, CancellationToken ct)
@@ -1129,7 +1149,7 @@ public class StudioRepository : IStudioRepository
         => await _db.Studios
             .Include(s => s.Parent)
             .Include(s => s.Urls).Include(s => s.Aliases)
-            .Include(s => s.StudioTags).ThenInclude(st => st.Tag)
+            .Include(s => s.StudioTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.RemoteIds)
             .AsSplitQuery()
             .FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -1295,7 +1315,7 @@ public class StudioRepository : IStudioRepository
             .Include(s => s.Parent)
             .Include(s => s.Urls)
             .Include(s => s.Aliases)
-            .Include(s => s.StudioTags).ThenInclude(st => st.Tag)
+            .Include(s => s.StudioTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.RemoteIds)
             .AsSplitQuery()
             .Where(s => pagedIds.Contains(s.Id))
@@ -1318,7 +1338,7 @@ public class GalleryRepository : IGalleryRepository
     public async Task<Gallery?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
         => await _db.Galleries
             .Include(g => g.Studio).Include(g => g.Urls)
-            .Include(g => g.GalleryTags).ThenInclude(gt => gt.Tag)
+            .Include(g => g.GalleryTags).ThenInclude(gt => gt.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(g => g.GalleryPerformers).ThenInclude(gp => gp.Performer)
             .Include(g => g.Chapters)
             .Include(g => g.Files).ThenInclude(f => f.ParentFolder)
@@ -1480,7 +1500,7 @@ public class GalleryRepository : IGalleryRepository
         }
 
         var items = await _db.Galleries
-            .Include(g => g.GalleryTags).ThenInclude(gt => gt.Tag)
+            .Include(g => g.GalleryTags).ThenInclude(gt => gt.Tag).ThenInclude(tag => tag!.TagGroup)
             .AsSplitQuery()
             .Where(g => pagedIds.Contains(g.Id))
             .AsNoTracking()
@@ -1718,7 +1738,7 @@ public class ImageRepository : IImageRepository
     public async Task<Image?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
         => await _db.Images
             .Include(i => i.Studio).Include(i => i.Urls)
-            .Include(i => i.ImageTags).ThenInclude(it => it.Tag)
+            .Include(i => i.ImageTags).ThenInclude(it => it.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(i => i.ImagePerformers).ThenInclude(ip => ip.Performer)
             .Include(i => i.ImageGalleries).ThenInclude(ig => ig.Gallery)
             .Include(i => i.Files).ThenInclude(f => f.ParentFolder)
@@ -1808,7 +1828,7 @@ public class ImageRepository : IImageRepository
         // Load full entities only for the paged IDs
         var items = await _db.Images
             .Include(i => i.Studio)
-            .Include(i => i.ImageTags).ThenInclude(it => it.Tag)
+            .Include(i => i.ImageTags).ThenInclude(it => it.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(i => i.ImagePerformers).ThenInclude(ip => ip.Performer)
             .Include(i => i.ImageGalleries).ThenInclude(ig => ig.Gallery)
             .Include(i => i.Files)
@@ -2197,7 +2217,7 @@ public class GroupRepository : IGroupRepository
     public async Task<Group?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
         => await _db.Groups
             .Include(g => g.Studio).Include(g => g.Urls)
-            .Include(g => g.GroupTags).ThenInclude(gt => gt.Tag)
+            .Include(g => g.GroupTags).ThenInclude(gt => gt.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(g => g.GroupItems)
             .Include(g => g.SubGroupRelations)
             .Include(g => g.ContainingGroupRelations)
@@ -2231,7 +2251,7 @@ public class GroupRepository : IGroupRepository
     public async Task<(IReadOnlyList<Group> Items, int TotalCount)> FindAsync(GroupFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
     {
         var query = _db.Groups
-            .Include(g => g.GroupTags).ThenInclude(gt => gt.Tag)
+            .Include(g => g.GroupTags).ThenInclude(gt => gt.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(g => g.GroupItems)
             .AsSplitQuery()
             .AsQueryable();

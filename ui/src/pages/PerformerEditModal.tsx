@@ -7,6 +7,7 @@ import { EditModal, Field, TextInput, TextArea, NumberInput, SaveButton } from "
 import { InteractiveRatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
+import { GroupedTagOptionList, SelectedTagChips, type SelectableTag } from "../components/TagSelector";
 
 interface Props {
   performer: Performer;
@@ -28,13 +29,10 @@ const CIRCUMCISED_OPTIONS = [
   { value: "Uncut", label: "Uncut" },
 ];
 
-type SelectedTagOption = {
-  id: number;
-  name: string;
-};
+type SelectedTagOption = SelectableTag;
 
 function buildSelectedTagLookup(tags: Performer["tags"]): Record<number, SelectedTagOption> {
-  return Object.fromEntries(tags.map((tag) => [tag.id, { id: tag.id, name: tag.name }])) as Record<number, SelectedTagOption>;
+  return Object.fromEntries(tags.map((tag) => [tag.id, tag])) as Record<number, SelectedTagOption>;
 }
 
 export function PerformerEditModal({ performer, open, onClose }: Props) {
@@ -308,14 +306,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
 
       {/* Tags */}
       <Field label="Tags">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedTags.map((t) => (
-            <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/20 text-accent">
-              {t.name}
-              <button onClick={() => setSelectedTagIds((current) => current.filter((id) => id !== t.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
+        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds((current) => current.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
         <input
           type="text"
           value={tagSearch}
@@ -330,13 +321,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
             ) : filteredTags.length === 0 ? (
               <div className="px-3 py-1.5 text-sm text-secondary">No tags found</div>
             ) : (
-              filteredTags.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => addTag(t)}
-                  className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-                >{t.name}</button>
-              ))
+              <GroupedTagOptionList tags={filteredTags} maxItems={20} className="border-0 bg-transparent" onSelect={addTag} />
             )}
           </div>
         )}

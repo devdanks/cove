@@ -187,6 +187,7 @@ public class TagConfiguration : IEntityTypeConfiguration<Tag>
         builder.ToTable("tags");
         builder.HasKey(t => t.Id);
         builder.Property(t => t.Name).IsRequired().HasMaxLength(500);
+        builder.Property(t => t.Color).HasMaxLength(9);
         builder.Property(t => t.CustomFields).HasColumnType("jsonb");
         builder.Property(t => t.SceneCount).HasDefaultValue(0);
         builder.Property(t => t.SceneMarkerCount).HasDefaultValue(0);
@@ -198,8 +199,10 @@ public class TagConfiguration : IEntityTypeConfiguration<Tag>
 
         builder.HasMany(t => t.Aliases).WithOne(a => a.Tag).HasForeignKey(a => a.TagId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(t => t.RemoteIds).WithOne(si => si.Tag).HasForeignKey(si => si.TagId).OnDelete(DeleteBehavior.Cascade);
+    builder.HasOne(t => t.TagGroup).WithMany(group => group.Tags).HasForeignKey(t => t.TagGroupId).OnDelete(DeleteBehavior.SetNull);
 
         builder.HasIndex(t => t.Name).IsUnique();
+    builder.HasIndex(t => t.TagGroupId);
         builder.HasIndex(t => t.Favorite);
         builder.HasIndex(t => t.SceneCount);
         builder.HasIndex(t => t.SceneMarkerCount);
@@ -504,15 +507,35 @@ public class TagApplicationConfiguration : IEntityTypeConfiguration<TagApplicati
     {
         builder.ToTable("tag_applications");
         builder.HasKey(application => application.Id);
+        builder.Property(application => application.ContextType).HasMaxLength(16);
         builder.Property(application => application.SourceKey).IsRequired();
         builder.Property(application => application.SourceRunId).IsRequired().HasDefaultValue(string.Empty);
         builder.Property(application => application.ModelKey).IsRequired().HasDefaultValue(string.Empty);
         builder.HasOne(application => application.Tag).WithMany().HasForeignKey(application => application.TagId).OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(application => new { application.HostType, application.HostId });
+        builder.HasIndex(application => new { application.HostType, application.HostId, application.ContextType, application.ContextId });
         builder.HasIndex(application => application.TagId);
         builder.HasIndex(application => application.SourceKey);
-        builder.HasIndex(application => new { application.HostType, application.HostId, application.TagId, application.SourceKey, application.SourceRunId, application.ModelKey }).IsUnique();
+        builder.HasIndex(application => new { application.HostType, application.HostId, application.TagId, application.SourceKey, application.SourceRunId, application.ModelKey })
+            .IsUnique()
+            .HasFilter("\"ContextType\" IS NULL AND \"ContextId\" IS NULL");
+        builder.HasIndex(application => new { application.HostType, application.HostId, application.ContextType, application.ContextId, application.TagId, application.SourceKey, application.SourceRunId, application.ModelKey })
+            .IsUnique()
+            .HasFilter("\"ContextType\" IS NOT NULL AND \"ContextId\" IS NOT NULL");
+    }
+}
+
+public class TagGroupConfiguration : IEntityTypeConfiguration<TagGroup>
+{
+    public void Configure(EntityTypeBuilder<TagGroup> builder)
+    {
+        builder.ToTable("tag_groups");
+        builder.HasKey(group => group.Id);
+        builder.Property(group => group.Name).IsRequired().HasMaxLength(500);
+        builder.Property(group => group.Color).HasMaxLength(9);
+        builder.HasIndex(group => group.Name).IsUnique();
+        builder.HasIndex(group => group.SortOrder);
     }
 }
 

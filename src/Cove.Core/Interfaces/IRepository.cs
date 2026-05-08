@@ -87,6 +87,21 @@ public class BoolCriterion { public bool Value { get; set; } }
 public class MultiIdCriterion { public List<int> Value { get; set; } = []; public CriterionModifier Modifier { get; set; } = CriterionModifier.Includes; public List<int>? Excludes { get; set; } public int? Depth { get; set; } }
 public class DateCriterion { public string Value { get; set; } = ""; public string? Value2 { get; set; } public CriterionModifier Modifier { get; set; } = CriterionModifier.Equals; }
 public class TimestampCriterion { public string Value { get; set; } = ""; public string? Value2 { get; set; } public CriterionModifier Modifier { get; set; } = CriterionModifier.Equals; }
+public class TagDurationClause
+{
+    public int TagId { get; set; }
+    public double? Value { get; set; }
+    public double? Value2 { get; set; }
+    public CriterionModifier Modifier { get; set; } = CriterionModifier.GreaterThan;
+    public string Unit { get; set; } = "seconds";
+    public string ContextMode { get; set; } = "any";
+    public string? ContextType { get; set; }
+}
+
+public class TagDurationCriterion : TagDurationClause
+{
+    public List<TagDurationClause> Clauses { get; set; } = [];
+}
 
 public class SceneFilter
 {
@@ -108,6 +123,7 @@ public class SceneFilter
     public IntCriterion? PlayCountCriterion { get; set; }
     public IntCriterion? PerformerCountCriterion { get; set; }
     public MultiIdCriterion? TagsCriterion { get; set; }
+    public TagDurationCriterion? TagDurationCriterion { get; set; }
     public MultiIdCriterion? PerformersCriterion { get; set; }
     public MultiIdCriterion? StudiosCriterion { get; set; }
     public MultiIdCriterion? GroupsCriterion { get; set; }
@@ -212,6 +228,7 @@ public class TagFilter
     public bool PerformerCountIncludesChildren { get; set; }
     public MultiIdCriterion? ParentsCriterion { get; set; }
     public MultiIdCriterion? ChildrenCriterion { get; set; }
+    public MultiIdCriterion? TagGroupsCriterion { get; set; }
     public BoolCriterion? IsMissingCriterion { get; set; }
     public TimestampCriterion? CreatedAtCriterion { get; set; }
     public TimestampCriterion? UpdatedAtCriterion { get; set; }

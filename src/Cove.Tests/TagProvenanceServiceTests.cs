@@ -179,7 +179,7 @@ public sealed class TagProvenanceServiceTests
         Assert.Equal(AffinityHostType.Scene, application.HostType);
         Assert.Equal(scene.Id, application.HostId);
         Assert.Equal(tag.Id, application.TagId);
-        Assert.Equal("scraper", application.SourceKey);
+        Assert.Equal("scraper:local", application.SourceKey);
     }
 
     [Fact]

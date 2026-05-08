@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, LayoutGrid, List, Columns3, Grid3X3, Share2, ZoomIn, ZoomOut, SlidersHorizontal, X } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, X } from "lucide-react";
 import type { FindFilter } from "../api/types";
-import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi } from "../api/client";
+import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, tagGroups as tagGroupsApi } from "../api/client";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { SavedFilterMenu } from "./SavedFilterMenu";
 import { FilterDialog, FilterButton, type CriterionDefinition, type FilterDialogCustomSection } from "./FilterDialog";
@@ -10,7 +10,7 @@ import { useKeySequence } from "../hooks/useKeySequence";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { trackInteraction } from "../utils/interactionTracking";
 
-export type DisplayMode = "grid" | "list" | "wall" | "tagger" | "graph";
+export type DisplayMode = "grid" | "list" | "wall" | "tagger" | "graph" | "byGroup";
 
 interface ListPageProps {
   title: string;
@@ -40,8 +40,6 @@ interface ListPageProps {
   criteriaDefinitions?: CriterionDefinition[];
   objectFilter?: Record<string, unknown>;
   onObjectFilterChange?: (filter: Record<string, unknown>) => void;
-  // Quick filter buttons (standard layout's criterion shortcut row)
-  quickFilterIds?: string[];
   wallColumnCount?: number;
   onWallColumnCountChange?: (count: number) => void;
   showPagingControls?: boolean;
@@ -111,6 +109,24 @@ function formatChipEntityId(value: unknown, nameMap?: Map<number, string>): stri
   return String(value ?? "");
 }
 
+function formatDurationChipSeconds(value: unknown): string {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "";
+  }
+
+  const totalSeconds = Math.max(0, Math.round(value));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatPercentChipValue(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${Number(value.toFixed(1))}%` : "";
+}
+
 function formatFilterChipValue(def: CriterionDefinition | undefined, value: unknown, nameMap?: Map<number, string>): string {
   if (Array.isArray(value)) {
     return value.map((item) => formatChipScalar(item)).join(", ");
@@ -123,6 +139,9 @@ function formatFilterChipValue(def: CriterionDefinition | undefined, value: unkn
   const criterion = value as {
     value?: unknown;
     value2?: unknown;
+    tagId?: number;
+    unit?: string;
+    clauses?: Array<{ tagId?: number; value?: unknown; value2?: unknown; modifier?: string; unit?: string }>;
     excludes?: unknown[];
     modifier?: string;
     depth?: number;
@@ -142,6 +161,29 @@ function formatFilterChipValue(def: CriterionDefinition | undefined, value: unkn
     return formatChipEntityId(id, nameMap);
   };
 
+  if (def?.type === "tagDuration") {
+    const clauses = Array.isArray(criterion.clauses) && criterion.clauses.length > 0 ? criterion.clauses : [criterion];
+    const parts = clauses.map((clause) => {
+      if (!clause.tagId || typeof clause.value !== "number") {
+        return "";
+      }
+
+      const tagName = resolveEntityName(clause.tagId);
+      const clauseModifier = clause.modifier ? CHIP_MODIFIER_LABELS[clause.modifier] ?? clause.modifier : "";
+      const formatDurationValue = (clause.unit ?? "seconds") === "percent" ? formatPercentChipValue : formatDurationChipSeconds;
+      const valueText = formatDurationValue(clause.value);
+      const value2Text = formatDurationValue(clause.value2);
+
+      if (clause.modifier === "BETWEEN" || clause.modifier === "NOT_BETWEEN") {
+        return `${tagName} ${clauseModifier} ${valueText} and ${value2Text}`.trim();
+      }
+
+      return `${tagName} ${clauseModifier} ${valueText}`.trim();
+    }).filter(Boolean);
+
+    return parts.join(" · ") || JSON.stringify(value);
+  }
+
   if (def?.type === "multiId") {
     const included = Array.isArray(criterion.value)
       ? criterion.value.map((item) => resolveEntityName(item)).filter(Boolean).join(", ")
@@ -151,7 +193,7 @@ function formatFilterChipValue(def: CriterionDefinition | undefined, value: unkn
       : "";
 
     const parts = [
-      included ? `${modifier} ${included}`.trim() : modifier,
+      included ? `${modifier} ${included}`.trim() : "",
       excluded ? `Except ${excluded}` : "",
       criterion.depth === -1 ? "with sub-tags" : "",
     ].filter(Boolean);
@@ -204,7 +246,6 @@ export function ListPage({
   criteriaDefinitions,
   objectFilter,
   onObjectFilterChange,
-  quickFilterIds,
   wallColumnCount,
   onWallColumnCountChange,
   showPagingControls = true,
@@ -223,7 +264,7 @@ export function ListPage({
     const types = new Set<string>();
     for (const key of Object.keys(objectFilter)) {
       const def = criteriaDefinitions.find((d) => d.id === key || d.filterKey === key);
-      if (def?.type === "multiId" && def.entityType) types.add(def.entityType);
+      if ((def?.type === "multiId" || def?.type === "tagDuration") && def.entityType) types.add(def.entityType);
     }
     return types;
   }, [objectFilter, criteriaDefinitions]);
@@ -253,6 +294,12 @@ export function ListPage({
     staleTime: 60000,
     enabled: activeEntityTypes.has("groups"),
   });
+  const { data: tagGroupEntities } = useQuery({
+    queryKey: ["tag-groups"],
+    queryFn: tagGroupsApi.list,
+    staleTime: 60000,
+    enabled: activeEntityTypes.has("tagGroups"),
+  });
 
   // Build name maps per entity type
   const entityNameMaps = useMemo(() => {
@@ -266,8 +313,9 @@ export function ListPage({
     if (performerEntities) maps.performers = buildMap(performerEntities);
     if (studioEntities) maps.studios = buildMap(studioEntities);
     if (groupEntities) maps.groups = buildMap(groupEntities);
+    if (tagGroupEntities) maps.tagGroups = buildMap(tagGroupEntities);
     return maps;
-  }, [tagEntities, performerEntities, studioEntities, groupEntities]);
+  }, [tagEntities, performerEntities, studioEntities, groupEntities, tagGroupEntities]);
   const perPage = filter.perPage ?? 25;
   const perPageOptions = useMemo(() => {
     if (PER_PAGE_OPTIONS.includes(perPage)) {
@@ -289,7 +337,6 @@ export function ListPage({
   const toolbarSegmentClass = "flex items-center gap-1 rounded-lg border border-border bg-card/70 px-1.5 py-1 shadow-sm";
   const toolbarSelectClass = "min-h-[30px] rounded-md border border-border/60 bg-input px-2 py-1 text-xs text-foreground shadow-inner focus:outline-none focus:border-accent";
   const toolbarIconButtonClass = "rounded-md border border-transparent p-1.5 text-secondary hover:bg-card/80 hover:text-foreground focus:outline-none focus:border-accent";
-
   useEffect(() => {
     if (!pageKey || restoredPrefsRef.current) {
       return;
@@ -369,6 +416,7 @@ export function ListPage({
       ...(availableDisplayModes.includes("wall") ? [{ keys: "v w", action: () => onDisplayModeChange("wall") }] : []),
       ...(availableDisplayModes.includes("tagger") ? [{ keys: "v t", action: () => onDisplayModeChange("tagger") }] : []),
       ...(availableDisplayModes.includes("graph") ? [{ keys: "v h", action: () => onDisplayModeChange("graph") }] : []),
+      ...(availableDisplayModes.includes("byGroup") ? [{ keys: "v b", action: () => onDisplayModeChange("byGroup") }] : []),
     ] : []),
     // Selection
     ...(onSelectAll ? [{ keys: "s a", action: onSelectAll }] : []),
@@ -538,6 +586,15 @@ export function ListPage({
                 title="Graph/Tree"
               >
                 <Share2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {availableDisplayModes.includes("byGroup") && (
+              <button
+                onClick={() => onDisplayModeChange("byGroup")}
+                className={`rounded-md p-1.5 ${displayMode === "byGroup" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                title="By Group"
+              >
+                <FolderTree className="w-3.5 h-3.5" />
               </button>
             )}
           </div>

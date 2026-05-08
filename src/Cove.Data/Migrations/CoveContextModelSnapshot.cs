@@ -591,6 +591,69 @@ namespace Cove.Data.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("Cove.Core.Entities.Auth.UserInviteToken", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("RolesJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "Purpose", "ConsumedAt");
+
+                    b.ToTable("user_invite_tokens", (string)null);
+                });
+
             modelBuilder.Entity("Cove.Core.Entities.Auth.UserRoleAssignment", b =>
                 {
                     b.Property<int>("UserId")
@@ -3023,6 +3086,10 @@ namespace Cove.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("Color")
+                        .HasMaxLength(9)
+                        .HasColumnType("character varying(9)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -3055,6 +3122,12 @@ namespace Cove.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<double?>("MinOccurrencePercent")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("MinOccurrenceSec")
+                        .HasColumnType("double precision");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3093,6 +3166,9 @@ namespace Cove.Data.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<int?>("TagGroupId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -3116,6 +3192,8 @@ namespace Cove.Data.Migrations
                     b.HasIndex("SceneMarkerCount");
 
                     b.HasIndex("StudioCount");
+
+                    b.HasIndex("TagGroupId");
 
                     b.ToTable("tags", (string)null);
                 });
@@ -3153,8 +3231,18 @@ namespace Cove.Data.Migrations
                     b.Property<float?>("Confidence")
                         .HasColumnType("real");
 
+                    b.Property<int?>("ContextId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ContextType")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("HostDurationSec")
+                        .HasColumnType("double precision");
 
                     b.Property<int>("HostId")
                         .HasColumnType("integer");
@@ -3181,6 +3269,9 @@ namespace Cove.Data.Migrations
                     b.Property<int>("TagId")
                         .HasColumnType("integer");
 
+                    b.Property<double?>("TotalDurationSec")
+                        .HasColumnType("double precision");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -3192,10 +3283,56 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("HostType", "HostId");
 
+                    b.HasIndex("HostType", "HostId", "ContextType", "ContextId");
+
                     b.HasIndex("HostType", "HostId", "TagId", "SourceKey", "SourceRunId", "ModelKey")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"ContextType\" IS NULL AND \"ContextId\" IS NULL");
+
+                    b.HasIndex("HostType", "HostId", "ContextType", "ContextId", "TagId", "SourceKey", "SourceRunId", "ModelKey")
+                        .IsUnique()
+                        .HasFilter("\"ContextType\" IS NOT NULL AND \"ContextId\" IS NOT NULL");
 
                     b.ToTable("tag_applications", (string)null);
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TagGroup", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(9)
+                        .HasColumnType("character varying(9)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("SortOrder");
+
+                    b.ToTable("tag_groups", (string)null);
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.TagParent", b =>
@@ -3515,6 +3652,23 @@ namespace Cove.Data.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("CreatedBy");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.Auth.UserInviteToken", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Auth.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Cove.Core.Entities.Auth.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("CreatedBy");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.Auth.UserRoleAssignment", b =>
@@ -4157,6 +4311,16 @@ namespace Cove.Data.Migrations
                     b.Navigation("Studio");
                 });
 
+            modelBuilder.Entity("Cove.Core.Entities.Tag", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.TagGroup", "TagGroup")
+                        .WithMany("Tags")
+                        .HasForeignKey("TagGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("TagGroup");
+                });
+
             modelBuilder.Entity("Cove.Core.Entities.TagAlias", b =>
                 {
                     b.HasOne("Cove.Core.Entities.Tag", "Tag")
@@ -4429,6 +4593,11 @@ namespace Cove.Data.Migrations
                     b.Navigation("SceneTags");
 
                     b.Navigation("StudioTags");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TagGroup", b =>
+                {
+                    b.Navigation("Tags");
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.VideoFile", b =>

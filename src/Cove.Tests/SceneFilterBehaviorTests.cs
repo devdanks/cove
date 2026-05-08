@@ -168,14 +168,26 @@ public class SceneFilterBehaviorTests
     }
 
     [Fact]
-    public async Task PerformerTagsCriterion_Includes_MatchesScenesByPerformerTag()
+    public async Task PerformerTagsCriterion_Includes_MatchesScenesByPerformerOccurrenceTag()
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "Featured" };
+        var taggedScene = CreateSceneWithFile("tagged-performer-scene", performer: CreatePerformer("Tagged", new DateOnly(2000, 1, 1)));
+        var untaggedScene = CreateSceneWithFile("untagged-performer-scene", performer: CreatePerformer("Untagged", new DateOnly(2000, 1, 1)));
 
-        context.Scenes.AddRange(
-            CreateSceneWithFile("tagged-performer-scene", performer: CreatePerformer("Tagged", new DateOnly(2000, 1, 1), tag)),
-            CreateSceneWithFile("untagged-performer-scene", performer: CreatePerformer("Untagged", new DateOnly(2000, 1, 1))));
+        context.Tags.Add(tag);
+        context.Scenes.AddRange(taggedScene, untaggedScene);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.Add(new TagApplication
+        {
+            HostType = AffinityHostType.Scene,
+            HostId = taggedScene.Id,
+            ContextType = "performer",
+            ContextId = taggedScene.ScenePerformers.Single().Performer!.Id,
+            TagId = tag.Id,
+            SourceKey = "test",
+        });
         await context.SaveChangesAsync();
 
         var repository = new SceneRepository(context);
@@ -192,6 +204,105 @@ public class SceneFilterBehaviorTests
 
         Assert.Equal(1, totalCount);
         Assert.Equal(["tagged-performer-scene"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+    }
+
+    [Fact]
+    public async Task PerformerTagsCriterion_WithPerformerCriterion_MatchesSamePerformerOccurrence()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Occurrence Tag" };
+        var targetPerformer = CreatePerformer("Target", new DateOnly(2000, 1, 1));
+        var otherPerformer = CreatePerformer("Other", new DateOnly(2000, 1, 1));
+        var targetTaggedScene = CreateSceneWithFile("target-tagged", performer: targetPerformer);
+        var wrongPerformerTaggedScene = CreateSceneWithFile("wrong-performer-tagged", performer: targetPerformer);
+        wrongPerformerTaggedScene.ScenePerformers.Add(new ScenePerformer { Performer = otherPerformer });
+
+        context.Tags.Add(tag);
+        context.Scenes.AddRange(targetTaggedScene, wrongPerformerTaggedScene);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.AddRange(
+            new TagApplication
+            {
+                HostType = AffinityHostType.Scene,
+                HostId = targetTaggedScene.Id,
+                ContextType = "performer",
+                ContextId = targetPerformer.Id,
+                TagId = tag.Id,
+                SourceKey = "test",
+            },
+            new TagApplication
+            {
+                HostType = AffinityHostType.Scene,
+                HostId = wrongPerformerTaggedScene.Id,
+                ContextType = "performer",
+                ContextId = otherPerformer.Id,
+                TagId = tag.Id,
+                SourceKey = "test",
+            });
+        await context.SaveChangesAsync();
+
+        var repository = new SceneRepository(context);
+        var filter = new SceneFilter
+        {
+            PerformersCriterion = new MultiIdCriterion
+            {
+                Value = [targetPerformer.Id],
+                Modifier = CriterionModifier.Includes,
+            },
+            PerformerTagsCriterion = new MultiIdCriterion
+            {
+                Value = [tag.Id],
+                Modifier = CriterionModifier.Includes,
+            },
+        };
+
+        var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
+
+        Assert.Equal(1, totalCount);
+        Assert.Equal(["target-tagged"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+    }
+
+    [Fact]
+    public async Task TagDurationCriterion_AppliesAllClauses()
+    {
+        await using var context = CreateContext();
+        var shortTag = new Tag { Name = "Short" };
+        var percentTag = new Tag { Name = "Percent" };
+        var matchingScene = CreateSceneWithFile("matching-duration");
+        var longScene = CreateSceneWithFile("too-long");
+        var lowPercentScene = CreateSceneWithFile("low-percent");
+
+        context.Tags.AddRange(shortTag, percentTag);
+        context.Scenes.AddRange(matchingScene, longScene, lowPercentScene);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.AddRange(
+            CreateDurationApplication(matchingScene.Id, shortTag.Id, totalDurationSec: 20, hostDurationSec: 100),
+            CreateDurationApplication(matchingScene.Id, percentTag.Id, totalDurationSec: 20, hostDurationSec: 100),
+            CreateDurationApplication(longScene.Id, shortTag.Id, totalDurationSec: 40, hostDurationSec: 100),
+            CreateDurationApplication(longScene.Id, percentTag.Id, totalDurationSec: 20, hostDurationSec: 100),
+            CreateDurationApplication(lowPercentScene.Id, shortTag.Id, totalDurationSec: 20, hostDurationSec: 100),
+            CreateDurationApplication(lowPercentScene.Id, percentTag.Id, totalDurationSec: 5, hostDurationSec: 100));
+        await context.SaveChangesAsync();
+
+        var repository = new SceneRepository(context);
+        var filter = new SceneFilter
+        {
+            TagDurationCriterion = new TagDurationCriterion
+            {
+                Clauses =
+                [
+                    new TagDurationClause { TagId = shortTag.Id, Modifier = CriterionModifier.LessThan, Unit = "seconds", Value = 30 },
+                    new TagDurationClause { TagId = percentTag.Id, Modifier = CriterionModifier.GreaterThan, Unit = "percent", Value = 10 },
+                ],
+            },
+        };
+
+        var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
+
+        Assert.Equal(1, totalCount);
+        Assert.Equal(["matching-duration"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
@@ -449,6 +560,17 @@ public class SceneFilterBehaviorTests
 
         return performer;
     }
+
+    private static TagApplication CreateDurationApplication(int sceneId, int tagId, double totalDurationSec, double hostDurationSec)
+        => new()
+        {
+            HostType = AffinityHostType.Scene,
+            HostId = sceneId,
+            TagId = tagId,
+            TotalDurationSec = totalDurationSec,
+            HostDurationSec = hostDurationSec,
+            SourceKey = "test",
+        };
 
     private static CoveContext CreateContext()
     {

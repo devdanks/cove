@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { scenes, tags as tagsApi, performers as performersApi, galleries as galleriesApi, groups as groupsApi } from "../api/client";
-import type { Scene, SceneUpdate, Tag, Performer, Studio } from "../api/types";
+import { scenes, tags as tagsApi, performers as performersApi, galleries as galleriesApi, groups as groupsApi, tagApplications } from "../api/client";
+import type { Scene, SceneUpdate, Tag, Performer, Studio, TagApplication } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StudioSelector } from "../components/StudioSelector";
+import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector, type SelectableTag } from "../components/TagSelector";
 
 interface Props {
   scene: Scene;
@@ -33,6 +34,8 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   const [selectedGroups, setSelectedGroups] = useState<{ groupId: number; sceneIndex: number }[]>(
     scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex }))
   );
+  const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(scene));
+  const [contextTagSearchByPerformer, setContextTagSearchByPerformer] = useState<Record<number, string>>({});
   const [customFields, setCustomFields] = useState<Record<string, string>>(
     Object.fromEntries(Object.entries(scene.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")]))
   );
@@ -78,13 +81,20 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     setSelectedPerformerIds(scene.performers.map((p) => p.id));
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
+    setContextTagIdsByPerformer(buildPerformerContextTagIds(scene));
+    setContextTagSearchByPerformer({});
     setCustomFields(Object.fromEntries(Object.entries(scene.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")])));
   }, [scene]);
 
   const mutation = useMutation({
-    mutationFn: (data: SceneUpdate) => scenes.update(scene.id, data),
+    mutationFn: async (data: SceneUpdate) => {
+      const updated = await scenes.update(scene.id, data);
+      await syncPerformerContextTags(scene.id, scene.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
+      return updated;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scene", scene.id] });
+      queryClient.invalidateQueries({ queryKey: ["tagapplications"] });
       queryClient.invalidateQueries({ queryKey: ["scenes"] });
       onClose();
     },
@@ -130,6 +140,13 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   const selectedPerformers = allPerformers?.items.filter((p) => selectedPerformerIds.includes(p.id)) ??
     scene.performers.map((p) => ({ ...p, disambiguation: p.disambiguation, favorite: p.favorite }));
   const selectedGalleries = allGalleries?.items.filter((g) => selectedGalleryIds.includes(g.id)) ?? scene.galleries;
+  const knownContextTags = (scene.contextTagApplications ?? []).map((application) => application.tag);
+  const knownTags = [...(allTags?.items ?? []), ...scene.tags, ...knownContextTags];
+  const tagById = new Map(knownTags.map((tag) => [tag.id, tag]));
+
+  const setPerformerContextTagIds = (performerId: number, tagIds: number[]) => {
+    setContextTagIdsByPerformer((current) => ({ ...current, [performerId]: Array.from(new Set(tagIds)) }));
+  };
 
   return (
     <EditModal title="Edit Scene" open={open} onClose={onClose}>
@@ -196,17 +213,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
 
       {/* Tags */}
       <Field label="Tags">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedTags.map((t) => (
-            <span
-              key={t.id}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/20 text-accent"
-            >
-              {t.name}
-              <button onClick={() => setSelectedTagIds(selectedTagIds.filter((id) => id !== t.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
+        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds(selectedTagIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
         <input
           type="text"
           value={tagSearch}
@@ -215,17 +222,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
           className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
         />
         {tagSearch && filteredTags.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredTags.slice(0, 10).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { setSelectedTagIds([...selectedTagIds, t.id]); setTagSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {t.name}
-              </button>
-            ))}
-          </div>
+          <GroupedTagOptionList tags={filteredTags} selectedIds={selectedTagIds} maxItems={20} onSelect={(tag) => { setSelectedTagIds([...selectedTagIds, tag.id]); setTagSearch(""); }} />
         )}
       </Field>
 
@@ -263,6 +260,54 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
           </div>
         )}
       </Field>
+
+      {selectedPerformers.length > 0 ? (
+        <Field label="Performer Occurrence Tags">
+          <div className="space-y-3 rounded-lg border border-border bg-surface/40 p-3">
+            {selectedPerformers.map((performer) => {
+              const tagIds = contextTagIdsByPerformer[performer.id] ?? [];
+              const search = contextTagSearchByPerformer[performer.id] ?? "";
+              const selectedContextTags = tagIds.map((tagId) => tagById.get(tagId)).filter(Boolean) as SelectableTag[];
+              const availableTags = filterTagsForSelector(allTags?.items ?? [], search, tagIds);
+
+              return (
+                <div key={performer.id} className="rounded-lg border border-border bg-card/70 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div className="min-w-0 text-sm font-medium text-foreground">{performer.name}</div>
+                    <div className="text-xs text-muted">{tagIds.length} tag{tagIds.length === 1 ? "" : "s"}</div>
+                  </div>
+                  <SelectedTagChips
+                    tags={selectedContextTags}
+                    emptyText="No occurrence tags"
+                    onRemove={(tag) => setPerformerContextTagIds(performer.id, tagIds.filter((tagId) => tagId !== tag.id))}
+                    className="mb-2 flex flex-wrap gap-1.5"
+                  />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(event) => setContextTagSearchByPerformer((current) => ({ ...current, [performer.id]: event.target.value }))}
+                    placeholder="Search tags for this occurrence..."
+                    className="w-full rounded border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
+                  />
+                  {search.trim() && availableTags.length > 0 ? (
+                    <div className="mt-1">
+                      <GroupedTagOptionList
+                        tags={availableTags}
+                        selectedIds={tagIds}
+                        maxItems={20}
+                        onSelect={(tag) => {
+                          setPerformerContextTagIds(performer.id, [...tagIds, tag.id]);
+                          setContextTagSearchByPerformer((current) => ({ ...current, [performer.id]: "" }));
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </Field>
+      ) : null}
 
       <Field label="Galleries">
         <div className="flex flex-wrap gap-1.5 mb-2">
@@ -361,4 +406,66 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       </div>
     </EditModal>
   );
+}
+
+function buildPerformerContextTagIds(scene: Scene): Record<number, number[]> {
+  const result: Record<number, number[]> = {};
+  for (const application of scene.contextTagApplications ?? []) {
+    if (application.contextType !== "performer" || application.contextId == null) {
+      continue;
+    }
+
+    result[application.contextId] = [...(result[application.contextId] ?? []), application.tag.id];
+  }
+
+  return result;
+}
+
+async function syncPerformerContextTags(sceneId: number, existingApplications: TagApplication[], desiredByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) {
+  const selectedPerformers = new Set(selectedPerformerIds);
+  const desiredKeys = new Set<string>();
+
+  for (const [performerIdText, tagIds] of Object.entries(desiredByPerformer)) {
+    const performerId = Number(performerIdText);
+    if (!selectedPerformers.has(performerId)) {
+      continue;
+    }
+
+    for (const tagId of tagIds) {
+      desiredKeys.add(`${performerId}:${tagId}`);
+    }
+  }
+
+  const existingContextApplications = existingApplications.filter((application) => application.contextType === "performer" && application.contextId != null);
+
+  for (const application of existingContextApplications) {
+    const key = `${application.contextId}:${application.tag.id}`;
+    if (!desiredKeys.has(key)) {
+      await tagApplications.delete(application.id);
+    }
+  }
+
+  const existingKeys = new Set(existingContextApplications.map((application) => `${application.contextId}:${application.tag.id}`));
+  for (const [performerIdText, tagIds] of Object.entries(desiredByPerformer)) {
+    const performerId = Number(performerIdText);
+    if (!selectedPerformers.has(performerId)) {
+      continue;
+    }
+
+    for (const tagId of tagIds) {
+      const key = `${performerId}:${tagId}`;
+      if (existingKeys.has(key)) {
+        continue;
+      }
+
+      await tagApplications.create({
+        hostType: "scene",
+        hostId: sceneId,
+        contextType: "performer",
+        contextId: performerId,
+        tagId,
+        sourceKey: "user",
+      });
+    }
+  }
 }

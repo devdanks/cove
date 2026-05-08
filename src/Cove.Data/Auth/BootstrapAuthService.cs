@@ -23,6 +23,7 @@ public sealed class BootstrapAuthService : IHostedService
     private readonly IPermissionRegistry _registry;
     private readonly CoveConfiguration _config;
     private readonly ILogger<BootstrapAuthService> _log;
+    private readonly SemaphoreSlim _bootstrapLock = new(1, 1);
     private CancellationTokenSource? _bootstrapCts;
     private Task? _bootstrapTask;
 
@@ -68,22 +69,39 @@ public sealed class BootstrapAuthService : IHostedService
 
         try
         {
+            await EnsureAuthStateAsync(includeOwnerUser: true, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Auth bootstrap failed");
+        }
+    }
+
+    public Task RefreshPermissionCatalogAsync(CancellationToken ct)
+        => EnsureAuthStateAsync(includeOwnerUser: false, ct);
+
+    private async Task EnsureAuthStateAsync(bool includeOwnerUser, CancellationToken ct)
+    {
+        await _bootstrapLock.WaitAsync(ct);
+        try
+        {
             using var scope = _services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
 
             await AuthorizationSqlBootstrap.EnsureAsync(db, ct);
             await UpsertPermissionsAsync(db, ct);
             await SeedBuiltinRolesAsync(db, ct);
-            await EnsureOwnerUserAsync(db, ct);
+            if (includeOwnerUser)
+                await EnsureOwnerUserAsync(db, ct);
 
             _log.LogInformation("Auth bootstrap complete (permissions={PermCount}, roles={RoleCount}, users={UserCount})",
                 await db.Permissions.CountAsync(ct),
                 await db.Roles.CountAsync(ct),
                 await db.Users.CountAsync(ct));
         }
-        catch (Exception ex)
+        finally
         {
-            _log.LogError(ex, "Auth bootstrap failed");
+            _bootstrapLock.Release();
         }
     }
 
@@ -205,7 +223,11 @@ public sealed class BootstrapAuthService : IHostedService
 
         // Owner: always has *, even after upgrades.
         EnsurePermissions(db, owner, ["*"]);
-        EnsurePermissions(db, admin, [Permissions.ApiTokensWrite, Permissions.ShareLinksWrite]);
+        EnsurePermissions(db, admin, [Permissions.ApiTokensWrite, Permissions.ShareLinksWrite, Permissions.AiDataRead, Permissions.AiDataClear]);
+        EnsurePermissions(db, admin, _registry.All
+            .Where(IsDefaultAdminExtensionPermission)
+            .Select(permission => permission.Key)
+            .ToArray());
 
         // For Admin/Member/Viewer/Guest, only seed if currently empty (we don't want to
         // stomp admin customizations on every boot).
@@ -231,6 +253,9 @@ public sealed class BootstrapAuthService : IHostedService
             have.Add(key);
         }
     }
+
+    private static bool IsDefaultAdminExtensionPermission(PermissionDefinition definition)
+        => definition.Source.StartsWith("extension:cove.ai.", StringComparison.OrdinalIgnoreCase);
 
     private async Task EnsureOwnerUserAsync(CoveContext db, CancellationToken ct)
     {

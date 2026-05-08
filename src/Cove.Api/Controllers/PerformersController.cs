@@ -364,7 +364,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         return NoContent();
     }
 
-    private static PerformerDto MapToDto(Performer p, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null) => new(
+    private PerformerDto MapToDto(Performer p, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null) => new(
         p.Id, p.Name, p.Disambiguation, p.Gender?.ToString(),
         p.Birthdate?.ToString("yyyy-MM-dd"), p.DeathDate?.ToString("yyyy-MM-dd"),
         p.Ethnicity, p.Country, p.EyeColor, p.HairColor, p.HeightCm, p.Weight,
@@ -373,10 +373,10 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         p.Tattoos, p.Piercings, p.Favorite, p.Details, p.IgnoreAutoTag,
         p.Urls.Select(u => u.Url).ToList(),
         p.Aliases.Select(a => a.Alias).ToList(),
-        p.PerformerTags.Where(pt => pt.Tag != null).Select(pt => new TagDto(pt.Tag!.Id, pt.Tag.Name, pt.Tag.Description, pt.Tag.Favorite, pt.Tag.IgnoreAutoTag, [])).ToList(),
+        p.PerformerTags.Where(pt => pt.Tag != null).Select(pt => TagDtoMapping.MapTagDto(pt.Tag!)).ToList(),
         p.RemoteIds.Select(remoteId => new PerformerRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
         sceneCount ?? p.SceneCount, imageCount ?? p.ImageCount, galleryCount ?? p.GalleryCount, groupCount ?? 0,
-        p.ImageBlobId != null ? EntityImageUrls.Performer(p.Id, p.UpdatedAt) : null,
+        p.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, p.Id, p.UpdatedAt) : null,
         p.CustomFields,
         p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o")
     );

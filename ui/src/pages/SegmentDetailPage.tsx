@@ -23,8 +23,8 @@ type SegmentTab = "overview" | "metadata" | "context" | "similar" | "spans" | "p
 export function SegmentDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
-  const canWriteSegments = canWriteEntity("marker", hasPermission);
-  const canDeleteSegments = canDeleteEntity("marker", hasPermission);
+  const canWriteSegments = canWriteEntity("segment", hasPermission);
+  const canDeleteSegments = canDeleteEntity("segment", hasPermission);
   const canReadScenes = canReadEntity("scene", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
   const { backLabel, goBack } = useBackNavigation({ page: "segments" }, onNavigate);

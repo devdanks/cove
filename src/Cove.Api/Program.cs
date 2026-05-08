@@ -109,6 +109,7 @@ try
     builder.Services.AddSingleton<ITranscodeService, TranscodeService>();
     builder.Services.AddScoped<StashMigrationService>();
     builder.Services.AddScoped<ITagProvenanceService, TagProvenanceService>();
+    builder.Services.AddScoped<TagApplicationService>();
     builder.Services.AddScoped<AiDataPurgeService>();
     builder.Services.AddHttpClient("scraper", client =>
     {
@@ -165,7 +166,8 @@ try
         builder.Services.AddHostedService<PostgresManagerService>();
 
     // Auth bootstrap (must run AFTER PostgresManagerService so the DB is reachable).
-    builder.Services.AddHostedService<Cove.Data.Auth.BootstrapAuthService>();
+    builder.Services.AddSingleton<Cove.Data.Auth.BootstrapAuthService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<Cove.Data.Auth.BootstrapAuthService>());
 
     // FFmpeg — auto-downloads if not found in PATH or configured path
     builder.Services.AddHostedService<FfmpegManagerService>();
@@ -322,6 +324,7 @@ try
     app.UseCors();
     app.UseOutputCache();
     app.UseRateLimiter();
+    app.UseMiddleware<Cove.Api.Middleware.OutsideIpFailsafeMiddleware>();
 
     // Extension middleware (runs before auth, after CORS)
     extensionManager.ConfigureMiddleware(app);
@@ -574,6 +577,9 @@ try
                     }
                 }
             }
+
+            await app.Services.GetRequiredService<Cove.Data.Auth.BootstrapAuthService>()
+                .RefreshPermissionCatalogAsync(CancellationToken.None);
         }
 
     }

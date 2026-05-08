@@ -256,7 +256,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
             {canReadTags && studio.tags.length > 0 ? (
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {studio.tags.map((tag) => (
-                  <TagBadge key={tag.id} name={tag.name} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                  <TagBadge key={tag.id} name={tag.name} tag={tag} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
                 ))}
               </div>
             ) : null}

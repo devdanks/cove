@@ -75,7 +75,9 @@ public class AuthConfig
     public string? HashedPassword { get; set; } // bcrypt hash
     public string? ApiKey { get; set; }
     public string JwtSecret { get; set; } = Guid.NewGuid().ToString();
-    public int MaxSessionAgeMinutes { get; set; } = 60;
+    public int RefreshTokenDays { get; set; } = 30;
+    public bool AllowAnonymousShareLinks { get; set; } = true;
+    public List<string> KnownProxies { get; set; } = [];
     /// <summary>
     /// When true, every controller action MUST declare a permission policy via
     /// [RequiresPermission], [AllowWithoutPermission], or [AllowAnonymous]; actions

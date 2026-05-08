@@ -10,7 +10,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/scenes/{sceneId:int}/detections")]
-[RequiresPermission(Permissions.MarkersRead)]
+[RequiresPermission(Permissions.SegmentsRead)]
 public class SceneDetectionsController(CoveContext db) : ControllerBase
 {
     [HttpGet]
@@ -39,8 +39,8 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
     }
 
     [HttpPost]
-    [RequiresPermission(Permissions.MarkersWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsWrite, RouteValueName = "sceneId")]
     public async Task<ActionResult<DetectionDto>> Create(int sceneId, [FromBody] DetectionCreateDto dto, CancellationToken ct)
     {
         if (!await SceneExistsAsync(sceneId, ct)) return NotFound();
@@ -77,8 +77,8 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    [RequiresPermission(Permissions.MarkersWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersWrite, RouteValueName = "sceneId")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsWrite, RouteValueName = "sceneId")]
     public async Task<ActionResult<DetectionDto>> Update(int sceneId, int id, [FromBody] DetectionUpdateDto dto, CancellationToken ct)
     {
         if (dto.FrameWidth <= 0 || dto.FrameHeight <= 0)
@@ -111,8 +111,8 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [RequiresPermission(Permissions.MarkersDelete)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.MarkersDelete, RouteValueName = "sceneId")]
+    [RequiresPermission(Permissions.SegmentsDelete)]
+    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsDelete, RouteValueName = "sceneId")]
     public async Task<IActionResult> Delete(int sceneId, int id, CancellationToken ct)
     {
         var detection = await db.Detections

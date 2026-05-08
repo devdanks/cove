@@ -263,14 +263,14 @@ public sealed class Phase10TagProvenanceTests
     {
         public List<(AffinityHostType HostType, int HostId, int TagId, string SourceKey)> RecordCalls { get; } = [];
 
-        public Task RecordAsync(AffinityHostType hostType, int hostId, int tagId, string sourceKey, string? sourceRunId = null, string? modelKey = null, float? confidence = null, CancellationToken cancellationToken = default)
+        public Task RecordAsync(AffinityHostType hostType, int hostId, int tagId, string sourceKey, string? sourceRunId = null, string? modelKey = null, float? confidence = null, string? contextType = null, int? contextId = null, double? totalDurationSec = null, double? hostDurationSec = null, CancellationToken cancellationToken = default)
         {
             RecordCalls.Add((hostType, hostId, tagId, sourceKey));
             return Task.CompletedTask;
         }
 
-        public Task RecordAsync(AffinityHostType hostType, int hostId, Tag tag, string sourceKey, string? sourceRunId = null, string? modelKey = null, float? confidence = null, CancellationToken cancellationToken = default)
-            => RecordAsync(hostType, hostId, tag.Id, sourceKey, sourceRunId, modelKey, confidence, cancellationToken);
+        public Task RecordAsync(AffinityHostType hostType, int hostId, Tag tag, string sourceKey, string? sourceRunId = null, string? modelKey = null, float? confidence = null, string? contextType = null, int? contextId = null, double? totalDurationSec = null, double? hostDurationSec = null, CancellationToken cancellationToken = default)
+            => RecordAsync(hostType, hostId, tag.Id, sourceKey, sourceRunId, modelKey, confidence, contextType, contextId, totalDurationSec, hostDurationSec, cancellationToken);
 
         public Task SyncTagSetAsync(AffinityHostType hostType, int hostId, IReadOnlyCollection<int> previousTagIds, IReadOnlyCollection<int> currentTagIds, string sourceKey = "user", CancellationToken cancellationToken = default)
             => Task.CompletedTask;

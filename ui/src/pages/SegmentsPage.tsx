@@ -61,7 +61,7 @@ export function SegmentsPage({ onNavigate }: Props) {
   const { hasPermission } = useAuth();
   const canReadScenes = canReadEntity("scene", hasPermission);
   const canWriteGroups = canWriteEntity("group", hasPermission);
-  const canDeleteSegments = canDeleteEntity("marker", hasPermission);
+  const canDeleteSegments = canDeleteEntity("segment", hasPermission);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
   const [activeProfileId, setActiveProfileId] = useState<number>();
   const [contentView, setContentView] = useState<SegmentsPageContentView>(() => readSegmentsPageContentView());

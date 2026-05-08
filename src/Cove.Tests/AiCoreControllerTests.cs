@@ -199,6 +199,46 @@ public class AiCoreControllerTests
     }
 
     [Fact]
+    public async Task FacesController_GetById_PropagatesBearerTokenIntoCoverImageUrl()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+
+        var face = new Face
+        {
+            Label = "Lead",
+            CoverBlobId = "blob-1",
+            PrimarySourceKey = "ext:ai.faces",
+        };
+        context.Faces.Add(face);
+        await context.SaveChangesAsync();
+
+        var embeddingService = new EmbeddingService(context, []);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers.Authorization = "Bearer owner-token";
+        var controller = new FacesController(
+            context,
+            embeddingService,
+            new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            new FacePerformerPropagationService(context),
+            Array.Empty<IFaceLifecycleParticipant>(),
+            NullLogger<FacesController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = httpContext,
+            },
+        };
+
+        var result = await controller.GetById(face.Id, CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<FaceDto>(ok.Value);
+
+        Assert.NotNull(dto.CoverImageUrl);
+        Assert.Contains("access_token=owner-token", dto.CoverImageUrl, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EntityImageController_GetFaceImage_ReturnsStoredBlob()
     {
         await using var scope = await CreateContextAsync();

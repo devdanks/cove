@@ -76,6 +76,8 @@ public class PermissionRegistryTests
         Assert.Contains("users.write", keys);
         Assert.Contains("audit.read", keys);
         Assert.Contains("system.wipe", keys);
+        Assert.Contains("system.shutdown", keys);
+        Assert.Contains("aidata.clear", keys);
     }
 
     [Fact]

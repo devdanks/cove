@@ -254,19 +254,19 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         return Ok();
     }
 
-    private static GroupDto MapToDto(Group g) => new(
+    private GroupDto MapToDto(Group g) => new(
         g.Id, g.Name, g.Aliases, g.Duration, g.Date?.ToString("yyyy-MM-dd"),
         g.StudioId, g.Studio?.Name, g.Director, g.Synopsis,
         g.Urls.Select(u => u.Url).ToList(),
-        g.GroupTags.Where(gt => gt.Tag != null).Select(gt => new TagDto(gt.Tag!.Id, gt.Tag.Name, gt.Tag.Description, gt.Tag.Favorite, gt.Tag.IgnoreAutoTag, [])).ToList(),
+        g.GroupTags.Where(gt => gt.Tag != null).Select(gt => TagDtoMapping.MapTagDto(gt.Tag!)).ToList(),
         g.GroupItems.Select(item => item.SceneId).Distinct().Count(),
         g.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange),
         g.SubGroupRelations?.Count ?? 0,
         g.ContainingGroupRelations?.Count ?? 0,
         g.CustomFields,
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
-        g.FrontImageBlobId != null ? EntityImageUrls.GroupFront(g.Id, g.UpdatedAt) : null,
-        g.BackImageBlobId != null ? EntityImageUrls.GroupBack(g.Id, g.UpdatedAt) : null
+        g.FrontImageBlobId != null ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, g.Id, g.UpdatedAt) : null,
+        g.BackImageBlobId != null ? EntityImageUrls.GroupBack(ControllerContext.HttpContext, g.Id, g.UpdatedAt) : null
     );
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Cove.Core.Auth;
 using Cove.Core.Entities;
 using Cove.Core.Entities.Auth;
+using Cove.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Data.Auth;
@@ -20,17 +21,20 @@ public sealed class ShareLinkService : IShareLinkService
         EntityKinds.Image,
         EntityKinds.Group,
         EntityKinds.Marker,
+        "segment",
     };
 
     private readonly CoveContext _db;
     private readonly IAuditService _audit;
     private readonly IPermissionRegistry _registry;
+    private readonly CoveConfiguration _config;
 
-    public ShareLinkService(CoveContext db, IAuditService audit, IPermissionRegistry registry)
+    public ShareLinkService(CoveContext db, IAuditService audit, IPermissionRegistry registry, CoveConfiguration config)
     {
         _db = db;
         _audit = audit;
         _registry = registry;
+        _config = config;
     }
 
     public async Task<IReadOnlyList<ShareLinkDto>> ListAsync(int? createdByUserId = null, CancellationToken ct = default)
@@ -45,7 +49,7 @@ public sealed class ShareLinkService : IShareLinkService
 
     public async Task<ShareLinkIssued> CreateAsync(CreateShareLinkRequest req, CovePrincipal? actor, CancellationToken ct = default)
     {
-        var entityKind = req.EntityKind.Trim().ToLowerInvariant();
+        var entityKind = NormalizeEntityKind(req.EntityKind);
         if (!ValidEntityKinds.Contains(entityKind))
             throw new InvalidOperationException("Invalid entity kind.");
 
@@ -89,7 +93,7 @@ public sealed class ShareLinkService : IShareLinkService
             new { entity.EntityKind, ids = entityIds, req.ExpiresAt, hasPassword = entity.PasswordHash is not null },
             ct);
 
-        return new ShareLinkIssued(id, rawToken, entity.EntityKind, entityIds, entity.CreatedAt, entity.ExpiresAt, entity.PasswordHash is not null);
+        return new ShareLinkIssued(id, rawToken, ToClientEntityKind(entity.EntityKind), entityIds, entity.CreatedAt, entity.ExpiresAt, entity.PasswordHash is not null);
     }
 
     public async Task RevokeAsync(Guid id, CovePrincipal? actor, CancellationToken ct = default)
@@ -107,6 +111,9 @@ public sealed class ShareLinkService : IShareLinkService
 
     public async Task<CovePrincipal?> ResolveAsync(string token, string? password, string? ip, string? userAgent, CancellationToken ct = default)
     {
+        if (!_config.Auth.AllowAnonymousShareLinks)
+            return null;
+
         if (string.IsNullOrWhiteSpace(token) || !token.StartsWith("cove_share_", StringComparison.Ordinal))
             return null;
 
@@ -231,7 +238,7 @@ public sealed class ShareLinkService : IShareLinkService
             shareLink.Id,
             shareLink.CreatedByUserId,
             shareLink.CreatedBy?.Username,
-            shareLink.EntityKind,
+            ToClientEntityKind(shareLink.EntityKind),
             ids,
             shareLink.CreatedAt,
             shareLink.ExpiresAt,
@@ -239,4 +246,13 @@ public sealed class ShareLinkService : IShareLinkService
             shareLink.PasswordHash is not null,
             shareLink.RevokedAt is not null);
     }
+
+    private static string NormalizeEntityKind(string entityKind)
+    {
+        var normalized = entityKind.Trim().ToLowerInvariant();
+        return normalized == "segment" ? EntityKinds.Marker : normalized;
+    }
+
+    private static string ToClientEntityKind(string entityKind) =>
+        entityKind.Equals(EntityKinds.Marker, StringComparison.OrdinalIgnoreCase) ? "segment" : entityKind;
 }

@@ -118,7 +118,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                     tag.Name,
                     tag.Favorite,
                     tag.Description,
-                    tag.ImageBlobId != null ? EntityImageUrls.Tag(tag.Id, tag.UpdatedAt) : null,
+                    tag.ImageBlobId != null ? EntityImageUrls.Tag(ControllerContext.HttpContext, tag.Id, tag.UpdatedAt) : null,
                     parentIdsByTagId[tag.Id],
                     childIdsByTagId[tag.Id],
                     usageCounts.TotalUsageCount,
@@ -146,8 +146,9 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var tag = await db.Tags
             .AsNoTracking()
             .Include(t => t.Aliases)
-            .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent)
-            .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child)
+            .Include(t => t.TagGroup)
+            .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent).ThenInclude(parent => parent!.TagGroup)
+            .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child).ThenInclude(child => child!.TagGroup)
             .AsSplitQuery()
             .FirstOrDefaultAsync(t => t.Id == id, ct);
         if (tag == null) return NotFound();
@@ -193,11 +194,18 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var existing = await tagRepo.GetByNameAsync(dto.Name, ct);
         if (existing != null) return Conflict(new { message = $"Tag '{dto.Name}' already exists" });
 
+        var validation = await ValidateTagMetadataAsync(dto.Color, dto.TagGroupId, ct);
+        if (validation != null) return validation;
+
         var tag = new Tag
         {
             Name = dto.Name, SortName = dto.SortName, Description = dto.Description,
+            Color = NormalizeOptionalText(dto.Color),
+            TagGroupId = NormalizeOptionalId(dto.TagGroupId),
             Favorite = dto.Favorite,
             IgnoreAutoTag = dto.IgnoreAutoTag,
+            MinOccurrenceSec = NormalizeOptionalPositive(dto.MinOccurrenceSec),
+            MinOccurrencePercent = NormalizeOptionalPercent(dto.MinOccurrencePercent),
             ShowAsSegment = dto.ShowAsSegment,
             SegmentColorOverride = NormalizeOptionalText(dto.SegmentColorOverride),
             SegmentLaneOverride = dto.SegmentLaneOverride,
@@ -222,16 +230,24 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             ? await tagRepo.GetByIdWithRelationsAsync(id, ct)
             : await db.Tags
                 .Include(t => t.Aliases)
+                .Include(t => t.TagGroup)
                 .Include(t => t.ParentRelations)
                 .Include(t => t.ChildRelations)
                 .FirstOrDefaultAsync(t => t.Id == id, ct);
         if (tag == null) return NotFound();
 
+            var validation = await ValidateTagMetadataAsync(dto.Color, dto.TagGroupId, ct);
+            if (validation != null) return validation;
+
         if (dto.Name != null) tag.Name = dto.Name;
         if (dto.SortName != null) tag.SortName = dto.SortName;
         if (dto.Description != null) tag.Description = dto.Description;
+        tag.Color = NormalizeOptionalText(dto.Color);
+        tag.TagGroupId = NormalizeOptionalId(dto.TagGroupId);
         if (dto.Favorite.HasValue) tag.Favorite = dto.Favorite.Value;
         if (dto.IgnoreAutoTag.HasValue) tag.IgnoreAutoTag = dto.IgnoreAutoTag.Value;
+        tag.MinOccurrenceSec = NormalizeOptionalPositive(dto.MinOccurrenceSec);
+        tag.MinOccurrencePercent = NormalizeOptionalPercent(dto.MinOccurrencePercent);
         tag.ShowAsSegment = dto.ShowAsSegment;
         tag.SegmentColorOverride = NormalizeOptionalText(dto.SegmentColorOverride);
         tag.SegmentLaneOverride = dto.SegmentLaneOverride;
@@ -268,8 +284,9 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             : await db.Tags
                 .AsNoTracking()
                 .Include(t => t.Aliases)
-                .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent)
-                .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child)
+                .Include(t => t.TagGroup)
+                .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent).ThenInclude(parent => parent!.TagGroup)
+                .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child).ThenInclude(child => child!.TagGroup)
                 .FirstOrDefaultAsync(t => t.Id == id, ct);
         return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
@@ -451,8 +468,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             t.Favorite,
             t.IgnoreAutoTag,
             t.Aliases.Select(a => a.Alias).ToList(),
-            t.ParentRelations.Where(pr => pr.Parent != null).Select(pr => new TagDto(pr.Parent!.Id, pr.Parent.Name, pr.Parent.Description, pr.Parent.Favorite, pr.Parent.IgnoreAutoTag, [], pr.Parent.ShowAsSegment, pr.Parent.SegmentColorOverride, pr.Parent.SegmentLaneOverride)).ToList(),
-            t.ChildRelations.Where(cr => cr.Child != null).Select(cr => new TagDto(cr.Child!.Id, cr.Child.Name, cr.Child.Description, cr.Child.Favorite, cr.Child.IgnoreAutoTag, [], cr.Child.ShowAsSegment, cr.Child.SegmentColorOverride, cr.Child.SegmentLaneOverride)).ToList(),
+            t.ParentRelations.Where(pr => pr.Parent != null).Select(pr => MapTagDto(pr.Parent!)).ToList(),
+            t.ChildRelations.Where(cr => cr.Child != null).Select(cr => MapTagDto(cr.Child!)).ToList(),
             t.SceneCount,
             t.PerformerCount,
             t.ImageCount,
@@ -465,10 +482,16 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             t.UpdatedAt.ToString("o"),
             t.ShowAsSegment,
             t.SegmentColorOverride,
-            t.SegmentLaneOverride);
+                t.SegmentLaneOverride,
+                t.Color,
+                t.TagGroupId,
+                t.TagGroup?.Name,
+                t.TagGroup?.Color,
+                t.MinOccurrenceSec,
+                t.MinOccurrencePercent);
     }
 
-    private static List<TagListDto> MapTagListDtos(IReadOnlyList<Tag> items, IReadOnlyDictionary<int, int> segmentCountsByTagId)
+    private List<TagListDto> MapTagListDtos(IReadOnlyList<Tag> items, IReadOnlyDictionary<int, int> segmentCountsByTagId)
     {
         if (items.Count == 0) return [];
 
@@ -488,15 +511,77 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 t.GroupCount,
                 t.PerformerCount,
                 t.StudioCount,
-                t.ImageBlobId != null ? EntityImageUrls.Tag(t.Id, t.UpdatedAt) : null,
+                t.ImageBlobId != null ? EntityImageUrls.Tag(ControllerContext.HttpContext, t.Id, t.UpdatedAt) : null,
                 t.ShowAsSegment,
                 t.SegmentColorOverride,
-                t.SegmentLaneOverride);
+                t.SegmentLaneOverride,
+                t.Color,
+                t.TagGroupId,
+                t.TagGroup?.Name,
+                t.TagGroup?.Color,
+                t.MinOccurrenceSec,
+                t.MinOccurrencePercent);
         }).ToList();
     }
 
+    private static TagDto MapTagDto(Tag tag, List<TagProvenanceDto>? provenance = null)
+        => new(
+            tag.Id,
+            tag.Name,
+            tag.Description,
+            tag.Favorite,
+            tag.IgnoreAutoTag,
+            tag.Aliases.Select(alias => alias.Alias).ToList(),
+            tag.ShowAsSegment,
+            tag.SegmentColorOverride,
+            tag.SegmentLaneOverride,
+            provenance,
+            tag.Color,
+            tag.TagGroupId,
+            tag.TagGroup?.Name,
+            tag.TagGroup?.Color,
+            tag.MinOccurrenceSec,
+            tag.MinOccurrencePercent);
+
     private static string? NormalizeOptionalText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static int? NormalizeOptionalId(int? value)
+        => value is > 0 ? value : null;
+
+    private static double? NormalizeOptionalPositive(double? value)
+        => value is > 0 ? value : null;
+
+    private static double? NormalizeOptionalPercent(double? value)
+        => value is > 0 ? Math.Min(value.Value, 100d) : null;
+
+    private async Task<ActionResult<TagDetailDto>?> ValidateTagMetadataAsync(string? color, int? tagGroupId, CancellationToken ct)
+    {
+        var normalizedColor = NormalizeOptionalText(color);
+        if (normalizedColor != null && !IsHexColor(normalizedColor))
+            return BadRequest(new { message = "Color must be #RRGGBB or #RRGGBBAA." });
+
+        var normalizedGroupId = NormalizeOptionalId(tagGroupId);
+        if (normalizedGroupId.HasValue && !await db.TagGroups.AsNoTracking().AnyAsync(group => group.Id == normalizedGroupId.Value, ct))
+            return BadRequest(new { message = "Tag group does not exist." });
+
+        return null;
+    }
+
+    private static bool IsHexColor(string value)
+    {
+        if (value.Length is not (7 or 9) || value[0] != '#')
+            return false;
+
+        for (var i = 1; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                return false;
+        }
+
+        return true;
+    }
 
     private async Task<Dictionary<int, int>> LoadSceneSegmentCountsAsync(IEnumerable<int> tagIds, CancellationToken ct)
     {
