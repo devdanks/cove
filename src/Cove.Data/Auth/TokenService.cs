@@ -167,6 +167,7 @@ public sealed class TokenService : ITokenService
         if (string.IsNullOrWhiteSpace(authorizationHeader)) return null;
         if (!authorizationHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null;
         var token = authorizationHeader["Bearer ".Length..].Trim();
+        if (string.IsNullOrWhiteSpace(token)) return null;
 
         // Cove API tokens are prefixed "cove_pat_<id>_<secret>".
         if (token.StartsWith("cove_pat_", StringComparison.Ordinal))
@@ -178,6 +179,12 @@ public sealed class TokenService : ITokenService
     private async Task<CovePrincipal?> ResolveJwtAsync(string token, string? ip, string? userAgent, CancellationToken ct)
     {
         var handler = new JwtSecurityTokenHandler();
+        if (!handler.CanReadToken(token))
+        {
+            _log.LogDebug("Bearer token rejected because it is not a readable JWT");
+            return null;
+        }
+
         var keyBytes = Encoding.UTF8.GetBytes(_config.Auth.JwtSecret);
         try
         {
@@ -221,6 +228,11 @@ public sealed class TokenService : ITokenService
                 Ip = ip,
                 UserAgent = userAgent,
             };
+        }
+        catch (SecurityTokenMalformedException ex)
+        {
+            _log.LogDebug(ex, "Bearer token rejected because it is malformed");
+            return null;
         }
         catch (SecurityTokenException ex)
         {

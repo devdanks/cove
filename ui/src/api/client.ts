@@ -353,6 +353,7 @@ export const scenes = {
   screenshotUrl: (id: number, version?: string, seconds?: number) => buildMediaUrl(`/stream/scene/${id}/screenshot`, version, undefined, { seconds }),
   segmentPreviewUrl: (id: number, seconds: number, version?: string) => buildMediaUrl(`/stream/scene/${id}/segment-preview`, version, undefined, { seconds }),
   previewUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview`),
+  previewStatusUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview/status`),
   captionUrl: (sceneId: number, captionId: number) => buildMediaUrl(`/stream/scene/${sceneId}/caption/${captionId}`),
   transcodeUrl: (id: number, resolution?: string) => buildMediaUrl(`/stream/scene/${id}/transcode`, undefined, undefined, { resolution }),
   hlsMasterUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/hls/master.m3u8`),

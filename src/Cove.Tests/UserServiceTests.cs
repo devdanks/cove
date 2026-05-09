@@ -216,6 +216,18 @@ public class UserServiceTests
         Assert.InRange(pair.RefreshExpires - DateTime.UtcNow, TimeSpan.FromDays(29), TimeSpan.FromDays(31));
     }
 
+    [Fact]
+    public async Task ResolveAsync_returns_null_for_malformed_bearer_token()
+    {
+        await using var db = NewDb("token-malformed");
+        var config = new CoveConfiguration { Auth = { JwtSecret = "test-secret-that-is-long-enough-for-hmac", RefreshTokenDays = 30 } };
+        var tokens = new TokenService(db, config, new PermissionRegistry(), NullLogger<TokenService>.Instance);
+
+        var principal = await tokens.ResolveAsync("Bearer not-a-jwt", "127.0.0.1", "test");
+
+        Assert.Null(principal);
+    }
+
     private sealed class TestCoveContext(DbContextOptions<CoveContext> options) : CoveContext(options)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder)

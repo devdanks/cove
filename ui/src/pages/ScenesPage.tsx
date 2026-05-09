@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { aiVisual, scenes, tags, performers, galleries } from "../api/client";
+import { aiVisual, entityImages, scenes, tags, performers, galleries } from "../api/client";
 import type { EntityEngagement, FindFilter, Scene, SceneCreate, SceneFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
@@ -771,8 +771,10 @@ function SceneListTable({ scenes, engagementById, onNavigate, selectedIds, onTog
 
 function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scene: Scene; onClick: () => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
+  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
   const previewUrl = scenes.previewUrl(scene.id);
+  const previewStatusUrl = scenes.previewStatusUrl(scene.id);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
   const title = scene.title || file?.basename || "Untitled";
   const { config } = useAppConfig();
@@ -782,9 +784,10 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
   return (
     <WallMediaCard
       title={title}
-      imageSrc={screenshotUrl}
+      imageSrc={coverUrl}
+      imageFallbackSrc={screenshotUrl}
       videoSrc={previewUrl}
-      videoStatusSrc={`${previewUrl}/status`}
+      videoStatusSrc={previewStatusUrl}
       useVideo={wallPreviewType === "video" || wallPreviewType === "webp"}
       // Browsers generally block autoplay with audio, so wall previews stay muted to animate reliably.
       muted
