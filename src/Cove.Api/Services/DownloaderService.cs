@@ -919,13 +919,32 @@ public class DownloaderService(
 
         if (!allowDuplicateDownload)
         {
-            var duplicateReason = await GetDuplicateDownloadReasonAsync(entity, item.EntityId, effectiveUrl, ct);
-            if (!string.IsNullOrWhiteSpace(duplicateReason))
-                throw new InvalidOperationException(duplicateReason);
+            var normalizedEffectiveUrl = NormalizeUrlForLookup(effectiveUrl);
+            var reservationKey = string.Empty;
+            var reservationAdded = false;
 
-            var reservationKey = $"{entity}:{NormalizeUrlForLookup(effectiveUrl)}";
-            if (!reservedDownloads.TryAdd(reservationKey, 0))
-                throw new InvalidOperationException("This URL is already queued elsewhere in this batch.");
+            if (!string.IsNullOrWhiteSpace(normalizedEffectiveUrl))
+            {
+                reservationKey = $"{entity}:{normalizedEffectiveUrl}";
+                if (!reservedDownloads.TryAdd(reservationKey, 0))
+                    throw new InvalidOperationException("This URL is already queued elsewhere in this batch.");
+
+                reservationAdded = true;
+            }
+
+            try
+            {
+                var duplicateReason = await GetDuplicateDownloadReasonAsync(entity, item.EntityId, effectiveUrl, ct);
+                if (!string.IsNullOrWhiteSpace(duplicateReason))
+                    throw new InvalidOperationException(duplicateReason);
+            }
+            catch
+            {
+                if (reservationAdded)
+                    reservedDownloads.TryRemove(reservationKey, out _);
+
+                throw;
+            }
         }
 
         var entityId = item.EntityId;
