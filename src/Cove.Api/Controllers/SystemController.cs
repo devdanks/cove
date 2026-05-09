@@ -336,17 +336,22 @@ public class SystemController(
             }
         }
 
+        var preflight = await downloaderService.PreflightBatchAsync(dto.Items, dto.FollowUp, ct);
+        var itemsToQueue = preflight.ItemsToQueue;
+        if (itemsToQueue.Count == 0)
+            return Accepted(new { jobId = (string?)null, queuedCount = 0, issues = preflight.Issues });
+
         var jobId = jobService.Enqueue(
             "download-batch",
-            $"Downloading {dto.Items.Count} item{(dto.Items.Count == 1 ? string.Empty : "s")}",
+            $"Downloading {itemsToQueue.Count} item{(itemsToQueue.Count == 1 ? string.Empty : "s")}",
             async (progress, ct) =>
             {
-                var summary = await downloaderService.DownloadAndIngestBatchAsync(dto.Items, dto.FollowUp, progress, ct);
+                var summary = await downloaderService.DownloadAndIngestBatchAsync(itemsToQueue, dto.FollowUp, progress, ct);
                 progress.Report(1d, BuildBatchDownloadCompletionMessage(summary));
             },
             exclusive: false);
 
-        return Accepted(new { jobId, queuedCount = dto.Items.Count });
+        return Accepted(new { jobId, queuedCount = itemsToQueue.Count, issues = preflight.Issues });
     }
 
     [HttpPost("metadata-servers/validate")]

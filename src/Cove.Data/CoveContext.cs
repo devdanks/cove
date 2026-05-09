@@ -41,6 +41,7 @@ public partial class CoveContext : DbContext
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
     public DbSet<SceneMarker> SceneMarkers => Set<SceneMarker>();
     public DbSet<TagApplication> TagApplications => Set<TagApplication>();
+    public DbSet<FieldProvenance> FieldProvenance => Set<FieldProvenance>();
     public DbSet<Segment> Segments => Set<Segment>();
     public DbSet<SegmentDisplayProfile> SegmentDisplayProfiles => Set<SegmentDisplayProfile>();
     public DbSet<SegmentDisplayRule> SegmentDisplayRules => Set<SegmentDisplayRule>();

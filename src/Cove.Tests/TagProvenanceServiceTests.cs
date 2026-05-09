@@ -184,6 +184,64 @@ public sealed class TagProvenanceServiceTests
     }
 
     [Fact]
+    public async Task FieldProvenanceService_RecordAsync_UpsertsMatchingSourceField()
+    {
+        await using var context = CreateContext();
+        var scene = new Scene { Title = "Tracked Scene" };
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        var service = new FieldProvenanceService(context);
+        await service.RecordAsync(AffinityHostType.Scene, scene.Id, "Title", "First Title", "scraper");
+        await context.SaveChangesAsync();
+        await service.RecordAsync(AffinityHostType.Scene, scene.Id, "title", "Second Title", "scraper");
+        await context.SaveChangesAsync();
+
+        var rows = await service.GetForHostAsync(AffinityHostType.Scene, scene.Id);
+        var row = Assert.Single(rows);
+
+        Assert.Equal("title", row.FieldKey);
+        Assert.Equal("scraper:local", row.SourceKey);
+        Assert.True(row.Value.HasValue);
+        Assert.Equal("Second Title", row.Value.Value.GetString());
+    }
+
+    [Fact]
+    public async Task SceneMetadataApplyService_RecordsScraperFieldProvenance()
+    {
+        await using var context = CreateContext();
+
+        var scene = new Scene { Title = "Original Scene" };
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        var fieldProvenance = new FieldProvenanceService(context);
+        var service = new SceneMetadataApplyService(context, new EventBus(), new NoOpSceneCoverService(), new TagProvenanceService(context), fieldProvenance);
+
+        var applied = await service.ApplyAsync(
+            scene.Id,
+            new ScrapedSceneDto
+            {
+                Title = "Scraped Title",
+                Details = "Scraped details",
+                Date = "2024-05-01",
+                Urls = ["https://example.com/watch/field-provenance"],
+                PerformerNames = ["Performer One"],
+            },
+            CancellationToken.None);
+
+        Assert.True(applied);
+
+        var rows = await fieldProvenance.GetForHostAsync(AffinityHostType.Scene, scene.Id);
+        Assert.Contains(rows, row => row.FieldKey == "title" && row.Value.HasValue && row.Value.Value.GetString() == "Scraped Title");
+        Assert.Contains(rows, row => row.FieldKey == "details" && row.Value.HasValue && row.Value.Value.GetString() == "Scraped details");
+        Assert.Contains(rows, row => row.FieldKey == "date" && row.Value.HasValue && row.Value.Value.GetString() == "2024-05-01");
+        var performers = Assert.Single(rows, row => row.FieldKey == "performers");
+        Assert.True(performers.Value.HasValue);
+        Assert.Contains(performers.Value.Value.EnumerateArray(), value => value.GetString() == "Performer One");
+    }
+
+    [Fact]
     public async Task GetLookupAsync_UsesSeparateContextWhenCallerHasActiveReader()
     {
         await using var callerContext = CreateContext();

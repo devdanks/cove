@@ -23,6 +23,8 @@ public class ScanService(
     ExtensionManager extensionManager,
     ILogger<ScanService> logger) : IScanService
 {
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> FolderCreationLocks = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Resolves the max degree of parallelism from config.
     /// -1 means use all processors; 0 or 1 means single-threaded; >1 means that many threads.
@@ -570,24 +572,48 @@ public class ScanService(
         var folder = await db.Folders.FirstOrDefaultAsync(f => f.Path == dirPath, ct);
         if (folder != null) return folder;
 
-        folder = new Folder
+        var folderLock = FolderCreationLocks.GetOrAdd(dirPath, static _ => new SemaphoreSlim(1, 1));
+        await folderLock.WaitAsync(ct);
+        try
         {
-            Path = dirPath,
-            ModTime = Directory.GetLastWriteTimeUtc(dirPath)
-        };
+            folder = await db.Folders.FirstOrDefaultAsync(f => f.Path == dirPath, ct);
+            if (folder != null) return folder;
 
-        // Link parent folder if path has a parent
-        var parentDir = Path.GetDirectoryName(dirPath);
-        if (!string.IsNullOrEmpty(parentDir) && parentDir != dirPath)
-        {
-            var parentFolder = await db.Folders.FirstOrDefaultAsync(f => f.Path == parentDir, ct);
-            if (parentFolder != null)
-                folder.ParentFolderId = parentFolder.Id;
+            folder = new Folder
+            {
+                Path = dirPath,
+                ModTime = Directory.GetLastWriteTimeUtc(dirPath)
+            };
+
+            // Link parent folder if path has a parent
+            var parentDir = Path.GetDirectoryName(dirPath);
+            if (!string.IsNullOrEmpty(parentDir) && parentDir != dirPath)
+            {
+                var parentFolder = await db.Folders.FirstOrDefaultAsync(f => f.Path == parentDir, ct);
+                if (parentFolder != null)
+                    folder.ParentFolderId = parentFolder.Id;
+            }
+
+            db.Folders.Add(folder);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return folder;
+            }
+            catch (DbUpdateException)
+            {
+                db.Entry(folder).State = EntityState.Detached;
+                var existing = await db.Folders.FirstOrDefaultAsync(f => f.Path == dirPath, ct);
+                if (existing != null)
+                    return existing;
+
+                throw;
+            }
         }
-
-        db.Folders.Add(folder);
-        await db.SaveChangesAsync(ct);
-        return folder;
+        finally
+        {
+            folderLock.Release();
+        }
     }
 
     private async Task<VideoFile> ProcessVideoFileAsync(CoveContext db, string path, int? sceneId, CancellationToken ct)

@@ -23,7 +23,17 @@ public record SceneDto(
     List<VideoFileDto> Files,
     List<GroupSummaryDto> Groups, List<GallerySummaryDto> Galleries,
     List<SceneRemoteIdDto> RemoteIds, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    List<TagApplicationDto>? ContextTagApplications = null);
+    List<TagApplicationDto>? ContextTagApplications = null,
+    List<FieldProvenanceDto>? FieldProvenance = null);
+
+public record FieldProvenanceDto(
+    string FieldKey,
+    string SourceKey,
+    string? SourceRunId,
+    string? ModelKey,
+    JsonElement? Value,
+    float? Confidence,
+    string AppliedAt);
 
 public record SceneRemoteIdDto(string Endpoint, string RemoteId);
 
@@ -1425,6 +1435,8 @@ public record DownloaderBatchStartRequestDto
     public List<DownloaderBatchItemDto> Items { get; init; } = [];
     public DownloaderBatchFollowUpDto FollowUp { get; init; } = new();
 }
+
+public record DownloaderBatchStartIssueDto(string Kind, string Label, string Reason);
 
 // ===== PLAYBACK TRACKING DTOs =====
 public record PlaybackIntervalInputDto(double StartSec, double EndSec);

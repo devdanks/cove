@@ -321,6 +321,55 @@ public class DownloaderServiceTests
     }
 
     [Fact]
+    public async Task DownloadAndIngestAsync_ThrowsWhenCanonicalSceneUrlAlreadyExists()
+    {
+        var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(libraryRoot);
+        var scanService = new FakeScanService();
+
+        var service = CreateService(
+            out var services,
+            new CoveConfiguration
+            {
+                CovePaths = [new CovePath { Path = libraryRoot }]
+            },
+            scanService,
+            seedDatabase: db =>
+            {
+                var existingScene = new Scene
+                {
+                    Title = "Canonical Scene",
+                };
+
+                db.Scenes.Add(existingScene);
+                db.Set<SceneUrl>().Add(new SceneUrl { Scene = existingScene, Url = "https://www.example.com/watch/existing/?b=Two&utm_source=feed&a=One#ignored" });
+            });
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.DownloadAndIngestAsync(
+                new DownloaderRequest(
+                    "tests.fake-downloader/example",
+                    "http://example.com/watch/existing?a=one&b=two",
+                    DownloaderEntity.Scene,
+                    new DownloaderPermissions(["example.com"]),
+                    "hd"),
+                entityId: null,
+                progress: null,
+                CancellationToken.None));
+
+            Assert.Contains("already downloaded", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Canonical Scene", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await services.DisposeAsync();
+            if (Directory.Exists(libraryRoot))
+                Directory.Delete(libraryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DownloadAndIngestAsync_AllowsDuplicateWhenRequested()
     {
         var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
@@ -526,6 +575,110 @@ public class DownloaderServiceTests
             await services.DisposeAsync();
             if (Directory.Exists(libraryRoot))
                 Directory.Delete(libraryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAndIngestBatchAsync_SkipsCanonicalDuplicateWithinBatch()
+    {
+        var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(libraryRoot);
+
+        var scanService = new FakeScanService();
+        var service = CreateService(
+            out var services,
+            new CoveConfiguration
+            {
+                CovePaths = [new CovePath { Path = libraryRoot }],
+                MaxConcurrentDownloads = 2,
+            },
+            scanService);
+
+        try
+        {
+            var summary = await service.DownloadAndIngestBatchAsync(
+                [
+                    new DownloaderBatchItemDto
+                    {
+                        Url = "https://www.example.com/watch/batch-dupe?utm_source=mail&b=two&a=one",
+                        Entity = "Scene",
+                        Title = "Batch Dupe One",
+                        CreateEntityIfMissing = true,
+                    },
+                    new DownloaderBatchItemDto
+                    {
+                        Url = "http://example.com/watch/batch-dupe?a=one&b=two#fragment",
+                        Entity = "Scene",
+                        Title = "Batch Dupe Two",
+                        CreateEntityIfMissing = true,
+                    },
+                ],
+                new DownloaderBatchFollowUpDto(),
+                progress: null,
+                CancellationToken.None);
+
+            Assert.Equal(2, summary.TotalCount);
+            Assert.Equal(1, summary.SucceededCount);
+            Assert.Equal(1, summary.SkippedCount);
+            Assert.Equal(0, summary.FailedCount);
+            Assert.Contains(summary.Issues, issue => issue.Contains("already queued", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            await services.DisposeAsync();
+            if (Directory.Exists(libraryRoot))
+                Directory.Delete(libraryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PreflightBatchAsync_SkipsExistingSceneUrlsBeforeQueueing()
+    {
+        var service = CreateService(
+            out var services,
+            seedDatabase: db =>
+            {
+                var existingScene = new Scene { Title = "Already In Cove" };
+                db.Scenes.Add(existingScene);
+                db.Set<SceneUrl>().Add(new SceneUrl
+                {
+                    Scene = existingScene,
+                    Url = "https://www.example.com/watch/existing?utm_source=mail&b=two&a=one",
+                });
+            });
+
+        try
+        {
+            var preflight = await service.PreflightBatchAsync(
+                [
+                    new DownloaderBatchItemDto
+                    {
+                        Url = "http://example.com/watch/existing?a=one&b=two#fragment",
+                        Entity = "Scene",
+                        Title = "Should Skip",
+                        CreateEntityIfMissing = true,
+                    },
+                    new DownloaderBatchItemDto
+                    {
+                        Url = "https://example.com/watch/new",
+                        Entity = "Scene",
+                        Title = "Should Queue",
+                        CreateEntityIfMissing = true,
+                    },
+                ],
+                new DownloaderBatchFollowUpDto(),
+                CancellationToken.None);
+
+            var item = Assert.Single(preflight.ItemsToQueue);
+            Assert.Equal("https://example.com/watch/new", item.Url);
+            var issue = Assert.Single(preflight.Issues);
+            Assert.Equal("skipped", issue.Kind);
+            Assert.Equal("Should Skip", issue.Label);
+            Assert.Contains("Already In Cove", issue.Reason);
+        }
+        finally
+        {
+            await services.DisposeAsync();
         }
     }
 

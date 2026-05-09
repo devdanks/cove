@@ -12,7 +12,7 @@ public interface ISceneMetadataApplyService
     Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, CancellationToken ct = default);
 }
 
-public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, ISceneCoverService sceneCoverService, ITagProvenanceService tagProvenanceService) : ISceneMetadataApplyService
+public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, ISceneCoverService sceneCoverService, ITagProvenanceService tagProvenanceService, IFieldProvenanceService? fieldProvenanceService = null) : ISceneMetadataApplyService
 {
     public async Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, CancellationToken ct = default)
     {
@@ -28,27 +28,64 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         if (scene == null)
             return false;
 
+        var fieldProvenance = new Dictionary<string, object?>();
+
         if (!string.IsNullOrWhiteSpace(metadata.Title))
+        {
             scene.Title = metadata.Title.Trim();
+            fieldProvenance["title"] = scene.Title;
+        }
 
         if (!string.IsNullOrWhiteSpace(metadata.Code))
+        {
             scene.Code = metadata.Code.Trim();
+            fieldProvenance["code"] = scene.Code;
+        }
 
         if (!string.IsNullOrWhiteSpace(metadata.Details))
+        {
             scene.Details = metadata.Details.Trim();
+            fieldProvenance["details"] = scene.Details;
+        }
 
         if (!string.IsNullOrWhiteSpace(metadata.Director))
+        {
             scene.Director = metadata.Director.Trim();
+            fieldProvenance["director"] = scene.Director;
+        }
 
         if (ScrapedSceneDateParser.TryParse(metadata.Date, out var parsedDate))
+        {
             scene.Date = parsedDate;
+            fieldProvenance["date"] = parsedDate.ToString("yyyy-MM-dd");
+        }
 
         await sceneCoverService.TryApplyRemoteCoverAsync(scene, metadata.ImageUrl, ct);
+        if (!string.IsNullOrWhiteSpace(metadata.ImageUrl))
+            fieldProvenance["image_url"] = metadata.ImageUrl.Trim();
 
-        ApplyUrls(scene, metadata.Urls);
-        await ApplyTagsAsync(scene, metadata.TagNames, ct);
-        await ApplyPerformersAsync(scene, metadata.PerformerNames, ct);
-        await ApplyStudioAsync(scene, metadata.StudioName, ct);
+        var urls = NormalizeNames(metadata.Urls);
+        if (urls.Count > 0)
+            fieldProvenance["urls"] = urls;
+        ApplyUrls(scene, urls);
+
+        var tagNames = NormalizeNames(metadata.TagNames);
+        if (tagNames.Count > 0)
+            fieldProvenance["tags"] = tagNames;
+        await ApplyTagsAsync(scene, tagNames, ct);
+
+        var performerNames = NormalizeNames(metadata.PerformerNames);
+        if (performerNames.Count > 0)
+            fieldProvenance["performers"] = performerNames;
+        await ApplyPerformersAsync(scene, performerNames, ct);
+
+        var studioName = string.IsNullOrWhiteSpace(metadata.StudioName) ? null : metadata.StudioName.Trim();
+        if (!string.IsNullOrWhiteSpace(studioName))
+            fieldProvenance["studio"] = studioName;
+        await ApplyStudioAsync(scene, studioName, ct);
+
+        if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, "scraper", cancellationToken: ct);
 
         await db.SaveChangesAsync(ct);
         eventBus.Publish(new EntityEvent(EventType.SceneUpdated, "Scene", scene.Id));

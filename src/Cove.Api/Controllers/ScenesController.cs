@@ -16,7 +16,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.ScenesRead)]
-public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService customFields, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService customFields, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
     private bool HasUserScopedEngagement => principalAccessor?.Current?.UserId != null;
@@ -336,12 +336,15 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             ? null
             : await tagProvenanceService.GetLookupAsync(AffinityHostType.Scene, scene.Id, tagIds, cancellationToken);
         var contextTagApplications = await LoadContextTagApplicationsAsync(scene.Id, cancellationToken);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Scene, scene.Id, cancellationToken)).ToList();
 
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, scene.Id, cancellationToken);
-        return MapToDto(scene, customFieldValues, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications);
+        return MapToDto(scene, customFieldValues, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications, fieldProvenance);
     }
 
-    private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null) => new(
+    private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
         s.Organized, s.StudioId, s.Studio?.Name,
@@ -369,7 +372,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.RemoteIds.Select(remoteId => new SceneRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
         customFieldValues,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o"),
-        contextTagApplications
+        contextTagApplications,
+        fieldProvenance
     );
 
     private SceneDto MapListToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(

@@ -78,6 +78,48 @@ public class PerformerScrapeServiceTests
     }
 
     [Fact]
+    public async Task ApplyAsync_RecordsScraperFieldAndTagProvenance()
+    {
+        await using var context = CreateContext();
+        var performer = new Performer { Name = "Original Name" };
+        context.Performers.Add(performer);
+        await context.SaveChangesAsync();
+
+        var fieldProvenance = new FieldProvenanceService(context);
+        var tagProvenance = new TagProvenanceService(context);
+        var service = new PerformerScrapeService(context, null!, fieldProvenanceService: fieldProvenance, tagProvenanceService: tagProvenance);
+        var scraped = new ScrapedPerformerDto
+        {
+            Name = "Updated Name",
+            Details = "Imported biography",
+            Birthdate = "2024-05-01",
+            Urls = ["https://site.example/models/updated-name"],
+            Aliases = ["Alt Name"],
+            TagNames = ["Tag One"],
+        };
+
+        await service.ApplyAsync(performer, scraped, createMissingTags: true);
+        await context.SaveChangesAsync();
+
+        var rows = await fieldProvenance.GetForHostAsync(AffinityHostType.Performer, performer.Id);
+        Assert.Contains(rows, row => row.FieldKey == "name" && row.Value.HasValue && row.Value.Value.GetString() == "Updated Name");
+        Assert.Contains(rows, row => row.FieldKey == "details" && row.Value.HasValue && row.Value.Value.GetString() == "Imported biography");
+        Assert.Contains(rows, row => row.FieldKey == "birthdate" && row.Value.HasValue && row.Value.Value.GetString() == "2024-05-01");
+        Assert.All(rows, row => Assert.Equal("scraper:local", row.SourceKey));
+
+        var urls = Assert.Single(rows, row => row.FieldKey == "urls");
+        Assert.True(urls.Value.HasValue);
+        Assert.Contains(urls.Value.Value.EnumerateArray(), value => value.GetString() == "https://site.example/models/updated-name");
+
+        var tag = await context.Tags.SingleAsync();
+        var application = await context.TagApplications.SingleAsync();
+        Assert.Equal(AffinityHostType.Performer, application.HostType);
+        Assert.Equal(performer.Id, application.HostId);
+        Assert.Equal(tag.Id, application.TagId);
+        Assert.Equal("scraper:local", application.SourceKey);
+    }
+
+    [Fact]
     public async Task ApplyAsync_DownloadsAndReplacesPerformerImage()
     {
         await using var context = CreateContext();

@@ -2,17 +2,20 @@ using System.Globalization;
 using System.Text.Json;
 
 using Cove.Core.Entities;
+using Cove.Core.Interfaces;
 
 using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Data.Services;
 
-public sealed class FacePerformerPropagationService(CoveContext db)
+public sealed class FacePerformerPropagationService(CoveContext db, IFieldProvenanceService? fieldProvenanceService = null)
 {
     private const string ExtensionId = "cove.ai.faces";
+    private const string SourceKey = "ext:ai.faces";
     private const string AssignmentKeyPrefix = "performer-assignment:";
 
     private readonly CoveContext _db = db;
+    private readonly IFieldProvenanceService? _fieldProvenanceService = fieldProvenanceService;
 
     public async Task ApplyLinkChangeAsync(int faceId, int? oldPerformerId, int? newPerformerId, CancellationToken cancellationToken = default)
     {
@@ -41,14 +44,15 @@ public sealed class FacePerformerPropagationService(CoveContext db)
                 appearance.HostType == FaceAppearanceHostType.Scene ? FaceHostKind.Scene : FaceHostKind.Image,
                 appearance.HostId,
                 appearance.FirstSeenAtSec,
-                appearance.LastSeenAtSec))
+                appearance.LastSeenAtSec,
+                appearance.SourceKey,
+                appearance.SourceRunId,
+                appearance.TopConfidence))
             .ToListAsync(cancellationToken);
 
         if (appearances.Count > 0)
         {
-            return appearances
-                .DistinctBy(static item => (item.Kind, item.HostId))
-                .ToArray();
+            return CollapseHosts(appearances);
         }
 
         var detections = await _db.Detections
@@ -57,20 +61,28 @@ public sealed class FacePerformerPropagationService(CoveContext db)
                 detection.RefId == faceId
                 && detection.RefKind != null
                 && detection.RefKind.ToLower() == "face")
-            .GroupBy(detection => new { detection.HostType, detection.HostId })
-            .Select(group => new FaceHostRef(
-                group.Key.HostType == DetectionHostType.Scene ? FaceHostKind.Scene : FaceHostKind.Image,
-                group.Key.HostId,
-                group.Min(item => item.ObservedAtSec),
-                group.Max(item => item.ObservedAtSec)))
+            .Select(detection => new FaceHostRef(
+                detection.HostType == DetectionHostType.Scene ? FaceHostKind.Scene : FaceHostKind.Image,
+                detection.HostId,
+                detection.ObservedAtSec,
+                detection.ObservedAtSec,
+                detection.SourceKey,
+                detection.SourceRunId,
+                detection.Score))
             .ToListAsync(cancellationToken);
 
-        return detections;
+        return CollapseHosts(detections);
     }
 
     private async Task AddAssignmentsAsync(int faceId, int performerId, CancellationToken cancellationToken)
     {
         var hosts = await LoadFaceHostsAsync(faceId, cancellationToken);
+        var faceSourceKey = await _db.Faces
+            .AsNoTracking()
+            .Where(face => face.Id == faceId)
+            .Select(face => face.PrimarySourceKey)
+            .FirstOrDefaultAsync(cancellationToken);
+
         foreach (var host in hosts)
         {
             var added = host.Kind switch
@@ -83,6 +95,7 @@ public sealed class FacePerformerPropagationService(CoveContext db)
             if (added || await HasOwnedHostAssignmentAsync(performerId, host, cancellationToken))
             {
                 await UpsertAssignmentAsync(faceId, performerId, host, cancellationToken);
+                await RecordHostPerformerProvenanceAsync(performerId, host, ResolveSourceKey(host, faceSourceKey), cancellationToken);
             }
         }
     }
@@ -118,7 +131,63 @@ public sealed class FacePerformerPropagationService(CoveContext db)
             }
 
             _db.ExtensionData.Remove(owned.Row);
+            await RecordHostPerformerProvenanceAsync(null, new FaceHostRef(owned.Assignment.Kind, owned.Assignment.HostId), SourceKey, cancellationToken);
         }
+    }
+
+    private async Task RecordHostPerformerProvenanceAsync(int? currentPerformerId, FaceHostRef host, string sourceKey, CancellationToken cancellationToken)
+    {
+        if (_fieldProvenanceService == null)
+            return;
+
+        var performerIds = new HashSet<int>();
+        var assignmentKeys = await _db.ExtensionData
+            .AsNoTracking()
+            .Where(item => item.ExtensionId == ExtensionId && item.Key.StartsWith(AssignmentKeyPrefix))
+            .Select(item => item.Key)
+            .ToListAsync(cancellationToken);
+
+        assignmentKeys.AddRange(_db.ExtensionData.Local
+            .Where(item => item.ExtensionId == ExtensionId
+                && item.Key.StartsWith(AssignmentKeyPrefix)
+                && _db.Entry(item).State != EntityState.Deleted)
+            .Select(item => item.Key));
+
+        var deletedAssignmentKeys = _db.ExtensionData.Local
+            .Where(item => item.ExtensionId == ExtensionId
+                && item.Key.StartsWith(AssignmentKeyPrefix)
+                && _db.Entry(item).State == EntityState.Deleted)
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        assignmentKeys.RemoveAll(deletedAssignmentKeys.Contains);
+
+        foreach (var assignment in assignmentKeys.Select(TryParseAssignment).OfType<FaceAssignment>())
+        {
+            if (assignment.Kind == host.Kind && assignment.HostId == host.HostId)
+                performerIds.Add(assignment.PerformerId);
+        }
+
+        if (currentPerformerId.HasValue)
+            performerIds.Add(currentPerformerId.Value);
+
+        List<string> performerNames = performerIds.Count == 0
+            ? []
+            : await _db.Performers
+                .AsNoTracking()
+                .Where(performer => performerIds.Contains(performer.Id))
+                .OrderBy(performer => performer.Name)
+                .Select(performer => string.IsNullOrWhiteSpace(performer.Name) ? performer.Id.ToString() : performer.Name.Trim())
+                .ToListAsync(cancellationToken);
+
+        await _fieldProvenanceService.RecordAsync(
+            ToAffinityHostType(host.Kind),
+            host.HostId,
+            "performers",
+            performerNames,
+            sourceKey,
+            sourceRunId: host.SourceRunId,
+            confidence: host.Confidence,
+            cancellationToken: cancellationToken);
     }
 
     private async Task<bool> AddScenePerformerAsync(int sceneId, int performerId, CancellationToken cancellationToken)
@@ -233,6 +302,32 @@ public sealed class FacePerformerPropagationService(CoveContext db)
 
     private static string FormatHostKind(FaceHostKind kind) => kind == FaceHostKind.Scene ? "scene" : "image";
 
+    private static IReadOnlyList<FaceHostRef> CollapseHosts(IEnumerable<FaceHostRef> hosts)
+        => hosts
+            .GroupBy(static item => (item.Kind, item.HostId))
+            .Select(static group =>
+            {
+                var best = group.OrderByDescending(static item => item.Confidence ?? -1f).First();
+                return best with
+                {
+                    FirstSeenAtSec = group.Min(static item => item.FirstSeenAtSec),
+                    LastSeenAtSec = group.Max(static item => item.LastSeenAtSec),
+                };
+            })
+            .ToArray();
+
+    private static string ResolveSourceKey(FaceHostRef host, string? faceSourceKey)
+    {
+        var sourceKey = !string.IsNullOrWhiteSpace(host.SourceKey) ? host.SourceKey : faceSourceKey;
+        if (string.IsNullOrWhiteSpace(sourceKey) || string.Equals(sourceKey, ExtensionId, StringComparison.OrdinalIgnoreCase))
+            return SourceKey;
+
+        return sourceKey.Trim();
+    }
+
+    private static AffinityHostType ToAffinityHostType(FaceHostKind kind)
+        => kind == FaceHostKind.Scene ? AffinityHostType.Scene : AffinityHostType.Image;
+
     private static bool TryParseHostKind(string value, out FaceHostKind kind)
     {
         if (string.Equals(value, "scene", StringComparison.OrdinalIgnoreCase))
@@ -254,7 +349,14 @@ public sealed class FacePerformerPropagationService(CoveContext db)
     private readonly record struct FaceAssignment(int FaceId, int PerformerId, FaceHostKind Kind, int HostId);
 }
 
-public readonly record struct FaceHostRef(FaceHostKind Kind, int HostId, double? FirstSeenAtSec = null, double? LastSeenAtSec = null);
+public readonly record struct FaceHostRef(
+    FaceHostKind Kind,
+    int HostId,
+    double? FirstSeenAtSec = null,
+    double? LastSeenAtSec = null,
+    string? SourceKey = null,
+    string? SourceRunId = null,
+    float? Confidence = null);
 
 public enum FaceHostKind
 {

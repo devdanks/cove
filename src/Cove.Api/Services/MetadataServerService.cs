@@ -211,6 +211,7 @@ query Me {
     private readonly CoveContext _db;
     private readonly IBlobService _blobService;
     private readonly ITagProvenanceService _tagProvenanceService;
+    private readonly IFieldProvenanceService? _fieldProvenanceService;
     private readonly ILogger<MetadataServerService> _logger;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -218,13 +219,14 @@ query Me {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public MetadataServerService(HttpClient httpClient, CoveConfiguration config, CoveContext db, IBlobService blobService, ITagProvenanceService tagProvenanceService, ILogger<MetadataServerService> logger)
+    public MetadataServerService(HttpClient httpClient, CoveConfiguration config, CoveContext db, IBlobService blobService, ITagProvenanceService tagProvenanceService, ILogger<MetadataServerService> logger, IFieldProvenanceService? fieldProvenanceService = null)
     {
         _httpClient = httpClient;
         _config = config;
         _db = db;
         _blobService = blobService;
         _tagProvenanceService = tagProvenanceService;
+        _fieldProvenanceService = fieldProvenanceService;
         _logger = logger;
     }
 
@@ -1086,12 +1088,21 @@ query Me {
         var defaultScalarStrategy = fieldStrategies == null ? MetadataFieldStrategy.Overwrite : MetadataFieldStrategy.Merge;
         var allowedPerformerGenders = BuildAllowedPerformerGenderSet(importConfig?.PerformerGenders);
         var skipSingleNamePerformers = importConfig?.SkipSingleNamePerformers ?? false;
+        var fieldProvenance = new Dictionary<string, object?>();
 
-        scene.Title = MergeStringField(scene.Title, remote.Title, GetMetadataFieldStrategy(fieldStrategies, "title", defaultScalarStrategy)) ?? scene.Title;
-        scene.Code = MergeStringField(scene.Code, remote.Code, GetMetadataFieldStrategy(fieldStrategies, "code", defaultScalarStrategy)) ?? scene.Code;
-        scene.Details = MergeStringField(scene.Details, remote.Details, GetMetadataFieldStrategy(fieldStrategies, "details", defaultScalarStrategy)) ?? scene.Details;
-        scene.Director = MergeStringField(scene.Director, remote.Director, GetMetadataFieldStrategy(fieldStrategies, "director", defaultScalarStrategy)) ?? scene.Director;
-        scene.Date = MergeDateField(scene.Date, ParseDate(remote.Date), GetMetadataFieldStrategy(fieldStrategies, "date", defaultScalarStrategy)) ?? scene.Date;
+        ApplyMetadataStringField(fieldProvenance, "title", remote.Title, GetMetadataFieldStrategy(fieldStrategies, "title", defaultScalarStrategy), value => scene.Title = value, scene.Title);
+        ApplyMetadataStringField(fieldProvenance, "code", remote.Code, GetMetadataFieldStrategy(fieldStrategies, "code", defaultScalarStrategy), value => scene.Code = value, scene.Code);
+        ApplyMetadataStringField(fieldProvenance, "details", remote.Details, GetMetadataFieldStrategy(fieldStrategies, "details", defaultScalarStrategy), value => scene.Details = value, scene.Details);
+        ApplyMetadataStringField(fieldProvenance, "director", remote.Director, GetMetadataFieldStrategy(fieldStrategies, "director", defaultScalarStrategy), value => scene.Director = value, scene.Director);
+        var parsedRemoteDate = ParseDate(remote.Date);
+        var dateStrategy = GetMetadataFieldStrategy(fieldStrategies, "date", defaultScalarStrategy);
+        var mergedDate = MergeDateField(scene.Date, parsedRemoteDate, dateStrategy);
+        if (mergedDate.HasValue)
+        {
+            scene.Date = mergedDate;
+            if (parsedRemoteDate.HasValue && dateStrategy != MetadataFieldStrategy.Ignore)
+                fieldProvenance["date"] = mergedDate.Value.ToString("yyyy-MM-dd");
+        }
         if (markOrganized) scene.Organized = true;
 
         var urlsStrategy = GetMetadataFieldStrategy(fieldStrategies, "urls", MetadataFieldStrategy.Merge);
@@ -1099,7 +1110,10 @@ query Me {
         {
             if (urlsStrategy == MetadataFieldStrategy.Overwrite)
                 scene.Urls.Clear();
-            MergeSceneUrls(scene, remote.Urls.Select(url => url.Url));
+            var remoteUrls = remote.Urls.Select(url => url.Url).Where(url => !string.IsNullOrWhiteSpace(url)).Select(url => url.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            MergeSceneUrls(scene, remoteUrls);
+            if (remoteUrls.Count > 0)
+                fieldProvenance["urls"] = remoteUrls;
         }
 
         var studioStrategy = GetMetadataFieldStrategy(fieldStrategies, "studio", fieldStrategies == null ? MetadataFieldStrategy.Overwrite : MetadataFieldStrategy.Merge);
@@ -1110,6 +1124,7 @@ query Me {
             {
                 scene.Studio = studio;
                 scene.StudioId = studio.Id == 0 ? null : studio.Id;
+                fieldProvenance["studio"] = studio.Name;
             }
         }
 
@@ -1118,6 +1133,8 @@ query Me {
         {
             if (tagsStrategy == MetadataFieldStrategy.Overwrite)
                 scene.SceneTags.Clear();
+
+            var appliedTagNames = new List<string>();
 
             foreach (var remoteTag in remote.Tags)
             {
@@ -1129,6 +1146,7 @@ query Me {
                 var tag = await ResolveSceneTagAsync(remoteTag, endpoint, tagOverride, ct, allowCreate: !onlyExistingTags);
                 if (tag == null)
                     continue;
+                appliedTagNames.Add(tag.Name);
                 var alreadyLinkedTag = tag.Id == 0
                     ? scene.SceneTags.Any(link => ReferenceEquals(link.Tag, tag))
                     : scene.SceneTags.Any(link => link.TagId == tag.Id);
@@ -1138,6 +1156,9 @@ query Me {
                     await _tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, "metadata", cancellationToken: ct);
                 }
             }
+
+            if (appliedTagNames.Count > 0)
+                fieldProvenance["tags"] = appliedTagNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         var performersStrategy = GetMetadataFieldStrategy(fieldStrategies, "performers", MetadataFieldStrategy.Merge);
@@ -1145,6 +1166,8 @@ query Me {
         {
             if (performersStrategy == MetadataFieldStrategy.Overwrite)
                 scene.ScenePerformers.Clear();
+
+            var appliedPerformerNames = new List<string>();
 
             foreach (var remotePerformer in remote.Performers.Select(appearance => appearance.Performer).OfType<MetadataServerRemotePerformer>())
             {
@@ -1161,6 +1184,7 @@ query Me {
                 var performer = await ResolveScenePerformerAsync(remotePerformer, endpoint, performerOverride, ct, allowCreate: !onlyExistingPerformers);
                 if (performer == null)
                     continue;
+                appliedPerformerNames.Add(performer.Name);
                 var alreadyLinkedPerformer = performer.Id == 0
                     ? scene.ScenePerformers.Any(link => ReferenceEquals(link.Performer, performer))
                     : scene.ScenePerformers.Any(link => link.PerformerId == performer.Id);
@@ -1169,12 +1193,16 @@ query Me {
                     scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, Performer = performer });
                 }
             }
+
+            if (appliedPerformerNames.Count > 0)
+                fieldProvenance["performers"] = appliedPerformerNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         // Download scene cover image
         if (setCoverImage && remote.Images.Count > 0)
         {
             await DownloadSceneCoverAsync(scene.Id, remote.Images[0].Url, ct);
+            fieldProvenance["image_url"] = remote.Images[0].Url;
         }
 
         var remoteId = scene.RemoteIds.FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
@@ -1186,6 +1214,9 @@ query Me {
         {
             remoteId.RemoteId = remote.Id;
         }
+
+        if (fieldProvenance.Count > 0 && _fieldProvenanceService != null)
+            await _fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, "metadata", sourceRunId: endpoint, cancellationToken: ct);
     }
 
     // ===== Submissions =====
@@ -2328,6 +2359,22 @@ query Me {
             "overwrite" or "replace" => MetadataFieldStrategy.Overwrite,
             _ => MetadataFieldStrategy.Merge,
         };
+    }
+
+    private static void ApplyMetadataStringField(
+        Dictionary<string, object?> fieldProvenance,
+        string fieldKey,
+        string? remoteValue,
+        MetadataFieldStrategy strategy,
+        Action<string?> apply,
+        string? currentValue)
+    {
+        var mergedValue = MergeStringField(currentValue, remoteValue, strategy);
+        if (mergedValue != null)
+            apply(mergedValue);
+
+        if (strategy != MetadataFieldStrategy.Ignore && !string.IsNullOrWhiteSpace(remoteValue))
+            fieldProvenance[fieldKey] = remoteValue.Trim();
     }
 
     private static string? MergeStringField(string? currentValue, string? nextValue, MetadataFieldStrategy strategy)

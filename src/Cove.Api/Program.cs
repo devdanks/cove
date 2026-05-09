@@ -109,6 +109,7 @@ try
     builder.Services.AddSingleton<ITranscodeService, TranscodeService>();
     builder.Services.AddScoped<StashMigrationService>();
     builder.Services.AddScoped<ITagProvenanceService, TagProvenanceService>();
+    builder.Services.AddScoped<IFieldProvenanceService, FieldProvenanceService>();
     builder.Services.AddScoped<TagApplicationService>();
     builder.Services.AddScoped<CustomFieldService>();
     builder.Services.AddScoped<AiDataPurgeService>();

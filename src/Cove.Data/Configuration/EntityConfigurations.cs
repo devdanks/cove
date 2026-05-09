@@ -562,6 +562,26 @@ public class TagApplicationConfiguration : IEntityTypeConfiguration<TagApplicati
     }
 }
 
+public class FieldProvenanceConfiguration : IEntityTypeConfiguration<FieldProvenance>
+{
+    public void Configure(EntityTypeBuilder<FieldProvenance> builder)
+    {
+        builder.ToTable("field_provenance");
+        builder.HasKey(provenance => provenance.Id);
+        builder.Property(provenance => provenance.FieldKey).IsRequired().HasMaxLength(100);
+        builder.Property(provenance => provenance.ValueJson).HasColumnType("jsonb");
+        builder.Property(provenance => provenance.SourceKey).IsRequired();
+        builder.Property(provenance => provenance.SourceRunId).IsRequired().HasDefaultValue(string.Empty);
+        builder.Property(provenance => provenance.ModelKey).IsRequired().HasDefaultValue(string.Empty);
+
+        builder.HasIndex(provenance => new { provenance.HostType, provenance.HostId });
+        builder.HasIndex(provenance => new { provenance.HostType, provenance.HostId, provenance.FieldKey });
+        builder.HasIndex(provenance => provenance.SourceKey);
+        builder.HasIndex(provenance => new { provenance.HostType, provenance.HostId, provenance.FieldKey, provenance.SourceKey, provenance.SourceRunId, provenance.ModelKey })
+            .IsUnique();
+    }
+}
+
 public class TagGroupConfiguration : IEntityTypeConfiguration<TagGroup>
 {
     public void Configure(EntityTypeBuilder<TagGroup> builder)

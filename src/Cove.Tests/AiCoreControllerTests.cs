@@ -166,6 +166,46 @@ public class AiCoreControllerTests
     }
 
     [Fact]
+    public async Task FacePerformerPropagation_RecordsAiFacePerformerFieldProvenance()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+
+        var performer = new Performer { Name = "Alex" };
+        var scene = new Scene { Title = "Clip" };
+        var face = new Face { Label = "Alex Face", PrimarySourceKey = "ext:ai.faces" };
+        context.AddRange(performer, scene, face);
+        await context.SaveChangesAsync();
+
+        context.FaceAppearances.Add(new FaceAppearance
+        {
+            FaceId = face.Id,
+            HostType = FaceAppearanceHostType.Scene,
+            HostId = scene.Id,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-1",
+            TopConfidence = 0.92f,
+        });
+        await context.SaveChangesAsync();
+
+        var fieldProvenance = new FieldProvenanceService(context);
+        var propagation = new FacePerformerPropagationService(context, fieldProvenance);
+
+        await propagation.ApplyLinkChangeAsync(face.Id, null, performer.Id, CancellationToken.None);
+        await context.SaveChangesAsync();
+
+        Assert.True(await context.Set<ScenePerformer>().AnyAsync(item => item.SceneId == scene.Id && item.PerformerId == performer.Id));
+
+        var rows = await fieldProvenance.GetForHostAsync(AffinityHostType.Scene, scene.Id);
+        var performers = Assert.Single(rows, row => row.FieldKey == "performers");
+        Assert.Equal("ext:ai.faces", performers.SourceKey);
+        Assert.Equal("run-1", performers.SourceRunId);
+        Assert.Equal(0.92f, performers.Confidence);
+        Assert.True(performers.Value.HasValue);
+        Assert.Contains(performers.Value.Value.EnumerateArray(), value => value.GetString() == "Alex");
+    }
+
+    [Fact]
     public async Task FacesController_GetById_UsesCanonicalFaceImageRouteWhenCoverExists()
     {
         await using var scope = await CreateContextAsync();

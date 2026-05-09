@@ -3282,7 +3282,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
       refetchJobs();
       const summary = formatBatchDownloadSummary(downloadImportEntity.toLowerCase(), result);
       setDownloadImportStatus({
-        type: result.queuedCount > 0 ? "success" : "error",
+        type: result.queuedCount > 0 || result.issues.length > 0 ? "success" : "error",
         text: summary,
       });
     },

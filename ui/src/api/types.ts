@@ -1755,8 +1755,13 @@ export interface DownloaderBatchStartRequest {
 }
 
 export interface DownloaderBatchStartResponse {
-  jobId: string;
+  jobId?: string | null;
   queuedCount: number;
+  issues?: Array<{
+    kind: "skipped" | "failed";
+    label: string;
+    reason: string;
+  }>;
 }
 
 export interface MetadataServerValidationResult {

@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Api.Services;
 
-public class ScrapeAttemptService(CoveContext db, ScraperService scraperService, ISceneCoverService sceneCoverService, PerformerScrapeService performerScrapeService, ITagProvenanceService tagProvenanceService, ILogger<ScrapeAttemptService> logger)
+public class ScrapeAttemptService(CoveContext db, ScraperService scraperService, ISceneCoverService sceneCoverService, PerformerScrapeService performerScrapeService, ITagProvenanceService tagProvenanceService, ILogger<ScrapeAttemptService> logger, IFieldProvenanceService? fieldProvenanceService = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -221,6 +221,10 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (dto.HydratePerformers)
             await HydratePerformersAsync(root, dto.CreateMissingPerformers, dto.CreateMissingTags, ct);
         await ApplyStudioAsync(scene, root, collectionModes, dto.CreateMissingStudio, ct);
+
+        var fieldProvenance = BuildAppliedSceneFieldProvenance(root, replaceFields, collectionModes);
+        if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, "scraper", sourceRunId: attempt.Id.ToString(), cancellationToken: ct);
 
         if (dto.MarkOrganized)
             scene.Organized = true;
@@ -570,6 +574,47 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         });
 
         return skipped ? "AppliedPartial" : "Applied";
+    }
+
+    private static Dictionary<string, object?> BuildAppliedSceneFieldProvenance(JsonElement root, HashSet<string> replaceFields, IDictionary<string, string> collectionModes)
+    {
+        var fields = new Dictionary<string, object?>();
+
+        AddStringField(fields, "title", replaceFields.Contains("title"), GetString(root, "Title", "Name"));
+        AddStringField(fields, "code", replaceFields.Contains("code"), GetString(root, "Code"));
+        AddStringField(fields, "details", replaceFields.Contains("details"), GetString(root, "Details", "Description", "Synopsis"));
+        AddStringField(fields, "director", replaceFields.Contains("director"), GetString(root, "Director"));
+
+        if (replaceFields.Contains("date") && ScrapedSceneDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
+            fields["date"] = parsedDate.ToString("yyyy-MM-dd");
+
+        AddStringField(fields, "image_url", replaceFields.Contains("image"), GetString(root, "Image", "ImageUrl", "ImageURL"));
+        AddListField(fields, "urls", GetMode(collectionModes, "urls") != "skip", GetStringList(root, "URLs", "Url", "URL"));
+        AddListField(fields, "tags", GetMode(collectionModes, "tags") != "skip", GetNamedItems(root, "Tags", "Tag", "TagNames"));
+        AddListField(fields, "performers", GetMode(collectionModes, "performers") != "skip", GetNamedItems(root, "Performers", "Performer", "PerformerNames"));
+
+        var studioName = GetNamedItems(root, "Studio", "StudioName").FirstOrDefault() ?? GetString(root, "Studio", "StudioName");
+        AddStringField(fields, "studio", GetMode(collectionModes, "studio") != "skip", studioName);
+
+        return fields;
+    }
+
+    private static void AddStringField(Dictionary<string, object?> fields, string fieldKey, bool applied, string? value)
+    {
+        if (applied && !string.IsNullOrWhiteSpace(value))
+            fields[fieldKey] = value.Trim();
+    }
+
+    private static void AddListField(Dictionary<string, object?> fields, string fieldKey, bool applied, IReadOnlyList<string> values)
+    {
+        if (!applied || values.Count == 0)
+            return;
+
+        fields[fieldKey] = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static string GetMode(IDictionary<string, string> collectionModes, string key)

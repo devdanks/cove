@@ -129,7 +129,7 @@ export async function queueBatchDownloads(
     followUp: buildBatchFollowUp(entity, normalizedOptions),
   });
 
-  return { queuedCount: response.queuedCount, issues, jobId: response.jobId };
+  return { queuedCount: response.queuedCount, issues: [...issues, ...normalizeResponseIssues(response.issues)], jobId: response.jobId ?? undefined };
 }
 
 export async function queueImportedUrlDownloads(
@@ -172,13 +172,15 @@ export async function queueImportedUrlDownloads(
     followUp: buildBatchFollowUp(entity, normalizedOptions),
   });
 
-  return { queuedCount: response.queuedCount, issues, jobId: response.jobId };
+  return { queuedCount: response.queuedCount, issues: [...issues, ...normalizeResponseIssues(response.issues)], jobId: response.jobId ?? undefined };
 }
 
 export function formatBatchDownloadSummary(entityLabel: string, result: BatchDownloadResult) {
   const skippedCount = result.issues.filter((issue) => issue.kind === "skipped").length;
   const failedCount = result.issues.filter((issue) => issue.kind === "failed").length;
-  const parts = [`Queued ${result.queuedCount} ${entityLabel}${result.queuedCount === 1 ? "" : "s"}.`];
+  const parts = result.queuedCount > 0
+    ? [`Queued ${result.queuedCount} ${entityLabel}${result.queuedCount === 1 ? "" : "s"}.`]
+    : [`No ${entityLabel} downloads queued.`];
 
   if (result.jobId) {
     parts.push(`Batch job ${result.jobId} is running.`);
@@ -200,6 +202,20 @@ export function formatBatchDownloadSummary(entityLabel: string, result: BatchDow
   return parts.join("\n");
 }
 
+function normalizeResponseIssues(issues?: BatchDownloadIssue[] | null): BatchDownloadIssue[] {
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+
+  return issues
+    .filter((issue) => issue.kind === "skipped" || issue.kind === "failed")
+    .map((issue) => ({
+      kind: issue.kind,
+      label: issue.label?.trim() || "Batch item",
+      reason: issue.reason?.trim() || "No details were returned.",
+    }));
+}
+
 function getItemLabel(item: DownloadSelectionItem, entity: DownloadSelectionEntity) {
   const trimmedTitle = item.title?.trim();
   if (trimmedTitle) {
@@ -212,8 +228,7 @@ function getItemLabel(item: DownloadSelectionItem, entity: DownloadSelectionEnti
 function normalizeUrlLines(urls: string[]) {
   return urls
     .map((value) => value.trim())
-    .filter(Boolean)
-    .filter((value, index, items) => items.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index);
+    .filter(Boolean);
 }
 
 function deriveImportedItemTitle(url: string) {

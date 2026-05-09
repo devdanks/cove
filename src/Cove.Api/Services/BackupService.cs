@@ -309,14 +309,23 @@ public class BackupService(
             ? toolName + ".exe"
             : toolName;
 
-        if (config.Postgres.Managed)
+        var managedDataPath = string.IsNullOrWhiteSpace(config.Postgres.DataPath)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "cove")
+            : config.Postgres.DataPath;
+        var managedCandidate = Path.Combine(managedDataPath, "pgsql", "bin", executableName);
+        if (File.Exists(managedCandidate))
+            return managedCandidate;
+
+        var defaultManagedCandidate = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "cove",
+            "pgsql",
+            "bin",
+            executableName);
+        if (!string.Equals(defaultManagedCandidate, managedCandidate, StringComparison.OrdinalIgnoreCase)
+            && File.Exists(defaultManagedCandidate))
         {
-            var managedDataPath = string.IsNullOrWhiteSpace(config.Postgres.DataPath)
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "cove")
-                : config.Postgres.DataPath;
-            var managedCandidate = Path.Combine(managedDataPath, "pgsql", "bin", executableName);
-            if (File.Exists(managedCandidate))
-                return managedCandidate;
+            return defaultManagedCandidate;
         }
 
         var pgBin = Environment.GetEnvironmentVariable("PG_BIN");

@@ -16,6 +16,10 @@ public sealed record DownloaderBatchExecutionSummary(
     string? FollowUpJobId,
     IReadOnlyList<string> Issues);
 
+public sealed record DownloaderBatchPreflightResult(
+    IReadOnlyList<DownloaderBatchItemDto> ItemsToQueue,
+    IReadOnlyList<DownloaderBatchStartIssueDto> Issues);
+
 public class DownloaderService(
     ExtensionManager extensionManager,
     IHttpClientFactory httpClientFactory,
@@ -259,6 +263,71 @@ public class DownloaderService(
         return summary;
     }
 
+    public async Task<DownloaderBatchPreflightResult> PreflightBatchAsync(
+        IReadOnlyList<DownloaderBatchItemDto> items,
+        DownloaderBatchFollowUpDto? followUp,
+        CancellationToken ct)
+    {
+        if (items.Count == 0)
+            return new DownloaderBatchPreflightResult([], []);
+
+        followUp ??= new DownloaderBatchFollowUpDto();
+        if (followUp.AllowDuplicateDownloads)
+            return new DownloaderBatchPreflightResult(items, []);
+
+        var entities = items
+            .Select(item => Enum.TryParse<DownloaderEntity>(item.Entity, true, out var entity) ? entity : (DownloaderEntity?)null)
+            .OfType<DownloaderEntity>()
+            .Distinct()
+            .ToArray();
+        var existingUrls = await LoadExistingDownloadUrlLookupAsync(entities, ct);
+        var downloadedEntityIds = await LoadDownloadedEntityIdLookupAsync(entities, ct);
+        var reservedDownloads = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var itemsToQueue = new List<DownloaderBatchItemDto>();
+        var issues = new List<DownloaderBatchStartIssueDto>();
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            var label = BuildBatchItemLabel(item, index);
+
+            if (!Enum.TryParse<DownloaderEntity>(item.Entity, true, out var entity))
+            {
+                itemsToQueue.Add(item);
+                continue;
+            }
+
+            if (item.EntityId.HasValue
+                && downloadedEntityIds.TryGetValue(entity, out var downloadedIds)
+                && downloadedIds.Contains(item.EntityId.Value))
+            {
+                issues.Add(new DownloaderBatchStartIssueDto("skipped", label, $"{entity} {item.EntityId.Value} already has downloaded files."));
+                continue;
+            }
+
+            var normalizedUrl = NormalizeUrlForLookup(item.Url);
+            if (!string.IsNullOrWhiteSpace(normalizedUrl)
+                && existingUrls.TryGetValue(entity, out var entityLookup)
+                && entityLookup.TryGetValue(normalizedUrl, out var duplicateTargets)
+                && duplicateTargets.FirstOrDefault(target => !item.EntityId.HasValue || target.EntityId != item.EntityId.Value) is { } duplicate)
+            {
+                issues.Add(new DownloaderBatchStartIssueDto("skipped", label, $"This URL is already downloaded for {duplicate.Label}."));
+                continue;
+            }
+
+            var reservationKey = $"{entity}:{normalizedUrl}";
+            if (!string.IsNullOrWhiteSpace(normalizedUrl) && !reservedDownloads.Add(reservationKey))
+            {
+                issues.Add(new DownloaderBatchStartIssueDto("skipped", label, "This URL is already queued elsewhere in this batch."));
+                continue;
+            }
+
+            itemsToQueue.Add(item);
+        }
+
+        return new DownloaderBatchPreflightResult(itemsToQueue, issues);
+    }
+
     internal static ScrapedSceneDto? ConvertScrapeResultToSceneMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
     {
         if (result.Count == 0)
@@ -482,6 +551,119 @@ public class DownloaderService(
             : $"This URL is already downloaded for {duplicateLabel}.";
     }
 
+    private async Task<Dictionary<DownloaderEntity, Dictionary<string, List<ExistingDownloadTarget>>>> LoadExistingDownloadUrlLookupAsync(
+        IReadOnlyCollection<DownloaderEntity> entities,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<DownloaderEntity, Dictionary<string, List<ExistingDownloadTarget>>>();
+        if (entities.Count == 0)
+            return result;
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetService<CoveContext>();
+        if (db == null)
+            return result;
+
+        if (entities.Contains(DownloaderEntity.Scene))
+        {
+            var rows = await db.Set<Cove.Core.Entities.SceneUrl>()
+                .AsNoTracking()
+                .Select(item => new { item.SceneId, item.Url, item.Scene!.Title })
+                .ToListAsync(ct);
+            result[DownloaderEntity.Scene] = BuildExistingUrlLookup(rows.Select(item => new ExistingUrlRow(item.SceneId, item.Url, item.Title ?? $"Scene {item.SceneId}")));
+        }
+
+        if (entities.Contains(DownloaderEntity.Image))
+        {
+            var rows = await db.Set<Cove.Core.Entities.ImageUrl>()
+                .AsNoTracking()
+                .Select(item => new { item.ImageId, item.Url, item.Image!.Title })
+                .ToListAsync(ct);
+            result[DownloaderEntity.Image] = BuildExistingUrlLookup(rows.Select(item => new ExistingUrlRow(item.ImageId, item.Url, item.Title ?? $"Image {item.ImageId}")));
+        }
+
+        if (entities.Contains(DownloaderEntity.Gallery))
+        {
+            var rows = await db.Set<Cove.Core.Entities.GalleryUrl>()
+                .AsNoTracking()
+                .Select(item => new { item.GalleryId, item.Url, item.Gallery!.Title })
+                .ToListAsync(ct);
+            result[DownloaderEntity.Gallery] = BuildExistingUrlLookup(rows.Select(item => new ExistingUrlRow(item.GalleryId, item.Url, item.Title ?? $"Gallery {item.GalleryId}")));
+        }
+
+        return result;
+    }
+
+    private async Task<Dictionary<DownloaderEntity, HashSet<int>>> LoadDownloadedEntityIdLookupAsync(
+        IReadOnlyCollection<DownloaderEntity> entities,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<DownloaderEntity, HashSet<int>>();
+        if (entities.Count == 0)
+            return result;
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetService<CoveContext>();
+        if (db == null)
+            return result;
+
+        if (entities.Contains(DownloaderEntity.Scene))
+        {
+            var ids = await db.VideoFiles
+                .AsNoTracking()
+                .Where(item => item.SceneId != null)
+                .Select(item => item.SceneId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+            result[DownloaderEntity.Scene] = ids.ToHashSet();
+        }
+
+        if (entities.Contains(DownloaderEntity.Image))
+        {
+            var ids = await db.ImageFiles
+                .AsNoTracking()
+                .Where(item => item.ImageId != null)
+                .Select(item => item.ImageId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+            result[DownloaderEntity.Image] = ids.ToHashSet();
+        }
+
+        if (entities.Contains(DownloaderEntity.Gallery))
+        {
+            var ids = await db.GalleryFiles
+                .AsNoTracking()
+                .Where(item => item.GalleryId != null)
+                .Select(item => item.GalleryId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+            result[DownloaderEntity.Gallery] = ids.ToHashSet();
+        }
+
+        return result;
+    }
+
+    private static Dictionary<string, List<ExistingDownloadTarget>> BuildExistingUrlLookup(IEnumerable<ExistingUrlRow> rows)
+    {
+        var lookup = new Dictionary<string, List<ExistingDownloadTarget>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            var normalizedUrl = NormalizeUrlForLookup(row.Url);
+            if (string.IsNullOrWhiteSpace(normalizedUrl))
+                continue;
+
+            if (!lookup.TryGetValue(normalizedUrl, out var targets))
+            {
+                targets = [];
+                lookup[normalizedUrl] = targets;
+            }
+
+            targets.Add(new ExistingDownloadTarget(row.EntityId, row.Label));
+        }
+
+        return lookup;
+    }
+
     private string MoveDownloadedFileToLibrary(DownloaderResult result, DownloaderEntity entity, string? downloaderId, string? sourceUrl)
     {
         var sourcePath = result.LocalPath;
@@ -559,12 +741,69 @@ public class DownloaderService(
         return matchingOverrides.FirstOrDefault(overridePath => string.IsNullOrWhiteSpace(overridePath.Site))?.Path;
     }
 
-    private static string NormalizeUrlForLookup(string? url)
+    internal static string NormalizeUrlForLookup(string? url)
     {
-        return string.IsNullOrWhiteSpace(url)
-            ? string.Empty
-            : url.Trim().TrimEnd('/').ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(url))
+            return string.Empty;
+
+        var trimmed = url.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) || string.IsNullOrWhiteSpace(uri.Host))
+            return trimmed.TrimEnd('/').ToLowerInvariant();
+
+        var host = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
+            ? uri.Host[4..]
+            : uri.Host;
+        host = host.ToLowerInvariant();
+
+        var port = uri.IsDefaultPort ? string.Empty : $":{uri.Port}";
+        var path = uri.AbsolutePath.TrimEnd('/');
+        if (path.Length == 0)
+            path = "/";
+
+        return string.Concat(host, port, path.ToLowerInvariant(), NormalizeQueryForLookup(uri.Query));
     }
+
+    private static string NormalizeQueryForLookup(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query) || query == "?")
+            return string.Empty;
+
+        var parts = query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(ParseQueryPart)
+            .Where(part => !IsTrackingQueryParameter(part.Key))
+            .OrderBy(part => part.Key, StringComparer.Ordinal)
+            .ThenBy(part => part.Value, StringComparer.Ordinal)
+            .Select(part => string.IsNullOrEmpty(part.Value) ? part.Key : $"{part.Key}={part.Value}")
+            .ToList();
+
+        return parts.Count == 0 ? string.Empty : "?" + string.Join('&', parts);
+    }
+
+    private static (string Key, string Value) ParseQueryPart(string part)
+    {
+        var separator = part.IndexOf('=');
+        var rawKey = separator < 0 ? part : part[..separator];
+        var rawValue = separator < 0 ? string.Empty : part[(separator + 1)..];
+        return (NormalizeQueryToken(rawKey), NormalizeQueryToken(rawValue));
+    }
+
+    private static string NormalizeQueryToken(string value)
+    {
+        var plusAsSpace = value.Replace('+', ' ');
+        try
+        {
+            return Uri.UnescapeDataString(plusAsSpace).Trim().ToLowerInvariant();
+        }
+        catch
+        {
+            return plusAsSpace.Trim().ToLowerInvariant();
+        }
+    }
+
+    private static bool IsTrackingQueryParameter(string key)
+        => key.StartsWith("utm_", StringComparison.Ordinal)
+            || key is "fbclid" or "gclid" or "dclid" or "gbraid" or "wbraid" or "msclkid" or "mc_cid" or "mc_eid" or "igshid";
 
     private string? TryQueueFollowUpGenerateJob(GenerateOptionsDto? generate, IEnumerable<string> importedPaths, Cove.Core.Interfaces.IJobProgress? progress)
     {
@@ -828,6 +1067,10 @@ public class DownloaderService(
 
     private sealed record IndexedBatchItem(DownloaderBatchItemDto Item, int Index);
 
+    private sealed record ExistingUrlRow(int EntityId, string Url, string Label);
+
+    private sealed record ExistingDownloadTarget(int EntityId, string Label);
+
     private static string? NormalizeOverrideSite(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -843,76 +1086,58 @@ public class DownloaderService(
 
     private static async Task<string?> FindDuplicateSceneLabelAsync(CoveContext db, int? entityId, string normalizedUrl, CancellationToken ct)
     {
-        var candidateIds = await db.Set<Cove.Core.Entities.SceneUrl>()
-            .Where(item => item.Url != null && item.Url.ToLower() == normalizedUrl)
-            .Select(item => item.SceneId)
-            .Distinct()
-            .ToListAsync(ct);
-
-        if (candidateIds.Count == 0)
-            return null;
-
-        var duplicateId = await db.VideoFiles
-            .Where(item => item.SceneId.HasValue)
-            .Where(item => candidateIds.Contains(item.SceneId!.Value))
+        var candidateUrls = await db.Set<Cove.Core.Entities.SceneUrl>()
             .Where(item => !entityId.HasValue || item.SceneId != entityId.Value)
+            .Select(item => new { item.SceneId, item.Url })
+            .AsNoTracking()
+            .ToListAsync(ct);
+        var duplicateId = candidateUrls
+            .Where(item => NormalizeUrlForLookup(item.Url) == normalizedUrl)
             .Select(item => item.SceneId)
-            .FirstOrDefaultAsync(ct);
+            .FirstOrDefault();
 
-        if (!duplicateId.HasValue)
+        if (duplicateId == 0)
             return null;
 
-        var duplicate = await db.Scenes.FirstOrDefaultAsync(item => item.Id == duplicateId.Value, ct);
+        var duplicate = await db.Scenes.FirstOrDefaultAsync(item => item.Id == duplicateId, ct);
         return duplicate == null ? null : duplicate.Title ?? $"Scene {duplicate.Id}";
     }
 
     private static async Task<string?> FindDuplicateImageLabelAsync(CoveContext db, int? entityId, string normalizedUrl, CancellationToken ct)
     {
-        var candidateIds = await db.Set<Cove.Core.Entities.ImageUrl>()
-            .Where(item => item.Url != null && item.Url.ToLower() == normalizedUrl)
-            .Select(item => item.ImageId)
-            .Distinct()
-            .ToListAsync(ct);
-
-        if (candidateIds.Count == 0)
-            return null;
-
-        var duplicateId = await db.ImageFiles
-            .Where(item => item.ImageId.HasValue)
-            .Where(item => candidateIds.Contains(item.ImageId!.Value))
+        var candidateUrls = await db.Set<Cove.Core.Entities.ImageUrl>()
             .Where(item => !entityId.HasValue || item.ImageId != entityId.Value)
+            .Select(item => new { item.ImageId, item.Url })
+            .AsNoTracking()
+            .ToListAsync(ct);
+        var duplicateId = candidateUrls
+            .Where(item => NormalizeUrlForLookup(item.Url) == normalizedUrl)
             .Select(item => item.ImageId)
-            .FirstOrDefaultAsync(ct);
+            .FirstOrDefault();
 
-        if (!duplicateId.HasValue)
+        if (duplicateId == 0)
             return null;
 
-        var duplicate = await db.Images.FirstOrDefaultAsync(item => item.Id == duplicateId.Value, ct);
+        var duplicate = await db.Images.FirstOrDefaultAsync(item => item.Id == duplicateId, ct);
         return duplicate == null ? null : duplicate.Title ?? $"Image {duplicate.Id}";
     }
 
     private static async Task<string?> FindDuplicateGalleryLabelAsync(CoveContext db, int? entityId, string normalizedUrl, CancellationToken ct)
     {
-        var candidateIds = await db.Set<Cove.Core.Entities.GalleryUrl>()
-            .Where(item => item.Url != null && item.Url.ToLower() == normalizedUrl)
-            .Select(item => item.GalleryId)
-            .Distinct()
-            .ToListAsync(ct);
-
-        if (candidateIds.Count == 0)
-            return null;
-
-        var duplicateId = await db.GalleryFiles
-            .Where(item => item.GalleryId.HasValue)
-            .Where(item => candidateIds.Contains(item.GalleryId!.Value))
+        var candidateUrls = await db.Set<Cove.Core.Entities.GalleryUrl>()
             .Where(item => !entityId.HasValue || item.GalleryId != entityId.Value)
+            .Select(item => new { item.GalleryId, item.Url })
+            .AsNoTracking()
+            .ToListAsync(ct);
+        var duplicateId = candidateUrls
+            .Where(item => NormalizeUrlForLookup(item.Url) == normalizedUrl)
             .Select(item => item.GalleryId)
-            .FirstOrDefaultAsync(ct);
+            .FirstOrDefault();
 
-        if (!duplicateId.HasValue)
+        if (duplicateId == 0)
             return null;
 
-        var duplicate = await db.Galleries.FirstOrDefaultAsync(item => item.Id == duplicateId.Value, ct);
+        var duplicate = await db.Galleries.FirstOrDefaultAsync(item => item.Id == duplicateId, ct);
         return duplicate == null ? null : duplicate.Title ?? $"Gallery {duplicate.Id}";
     }
 
