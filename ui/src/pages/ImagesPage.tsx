@@ -51,6 +51,7 @@ const SORT_OPTIONS = [
   { value: "date", label: "Date" },
   { value: "file_mod_time", label: "File Modification Time" },
   { value: "file_size", label: "File Size" },
+  { value: "resolution", label: "Resolution" },
   { value: "path", label: "Path" },
   { value: "title", label: "Title" },
   { value: "rating", label: "Rating" },
@@ -143,7 +144,7 @@ export function ImagesPage({ onNavigate }: Props) {
   const items = data?.items ?? [];
   const { engagementById } = useEntityEngagementBatch("image", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount);
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
+  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
   const selectedImage = selectedIds.size === 1 ? items.find((image) => selectedIds.has(image.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
@@ -259,6 +260,7 @@ export function ImagesPage({ onNavigate }: Props) {
       selectedIds={selectedIds}
       onSelectAll={selectAll}
       onSelectNone={selectNone}
+      onInvertSelection={invertSelection}
       selectionActions={
         <>
           {canDownloadSelectedImage && (

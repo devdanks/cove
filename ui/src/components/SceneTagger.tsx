@@ -23,6 +23,9 @@ import {
 interface SceneTaggerProps {
   scenes: Scene[];
   onNavigate?: (sceneId: number) => void;
+  selectedIds?: Set<number>;
+  selecting?: boolean;
+  onSelect?: (sceneId: number) => void;
 }
 
 interface TaggerConfig {
@@ -128,7 +131,7 @@ async function runWithConcurrency<T>(
   await Promise.all(workers);
 }
 
-export function SceneTagger({ scenes: sceneList, onNavigate }: SceneTaggerProps) {
+export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, selecting = false, onSelect }: SceneTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
 
@@ -521,6 +524,9 @@ export function SceneTagger({ scenes: sceneList, onNavigate }: SceneTaggerProps)
             endpoint={taggerConfig.selectedEndpoint}
             taggerConfig={taggerConfig}
             onNavigate={onNavigate}
+            selected={selectedIds?.has(scene.id) ?? false}
+            selecting={selecting}
+            onSelect={onSelect}
           />
         ))}
       </div>
@@ -541,6 +547,9 @@ interface TaggerSceneRowProps {
   endpoint: string;
   taggerConfig: TaggerConfig;
   onNavigate?: (sceneId: number) => void;
+  selected?: boolean;
+  selecting?: boolean;
+  onSelect?: (sceneId: number) => void;
 }
 
 function TaggerSceneRow({
@@ -554,6 +563,9 @@ function TaggerSceneRow({
   endpoint,
   taggerConfig,
   onNavigate,
+  selected = false,
+  selecting = false,
+  onSelect,
 }: TaggerSceneRowProps) {
   const file = scene.files[0];
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
@@ -609,8 +621,19 @@ function TaggerSceneRow({
   });
 
   return (
-    <div className={`px-3 py-2 ${state?.saved ? "opacity-50" : ""}`}>
+    <div className={`px-3 py-2 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
       <div className="flex gap-3">
+        {onSelect && (
+          <button
+            type="button"
+            onClick={() => onSelect(scene.id)}
+            className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[10px] ${selected ? "border-accent bg-accent text-white" : selecting ? "border-accent/60 text-accent" : "border-border text-transparent hover:border-accent hover:text-accent"}`}
+            aria-label={selected ? "Deselect scene" : "Select scene"}
+            title={selected ? "Deselect" : "Select"}
+          >
+            <Check className="h-3 w-3" />
+          </button>
+        )}
         {/* Scene preview — compact */}
         <a
           {...sceneLinkProps}

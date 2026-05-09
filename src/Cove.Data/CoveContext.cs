@@ -37,6 +37,8 @@ public partial class CoveContext : DbContext
     public DbSet<Gallery> Galleries => Set<Gallery>();
     public DbSet<Image> Images => Set<Image>();
     public DbSet<Group> Groups => Set<Group>();
+    public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
+    public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
     public DbSet<SceneMarker> SceneMarkers => Set<SceneMarker>();
     public DbSet<TagApplication> TagApplications => Set<TagApplication>();
     public DbSet<Segment> Segments => Set<Segment>();

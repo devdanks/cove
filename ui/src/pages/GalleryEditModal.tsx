@@ -32,9 +32,7 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
     performerIds: gallery.performers.map((p) => p.id),
     sceneIds: gallery.sceneIds ?? [],
   });
-  const [customFields, setCustomFields] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(gallery.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")]))
-  );
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(gallery.customFields ?? {}) });
 
   const [tagSearch, setTagSearch] = useState("");
   const [performerSearch, setPerformerSearch] = useState("");
@@ -71,7 +69,7 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
       tagIds: form.tagIds,
       performerIds: form.performerIds,
       sceneIds: form.sceneIds,
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      customFields,
     });
   };
 
@@ -164,7 +162,7 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
             const s = sceneResults?.items.find((sc) => sc.id === sid);
             return (
               <span key={sid} className="bg-teal-600/30 text-teal-300 text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-                {s?.title || `Scene #${sid}`}
+                {s?.title || s?.files?.[0]?.basename || "Untitled scene"}
                 <X className="w-3 h-3 cursor-pointer" onClick={() => setForm({ ...form, sceneIds: form.sceneIds.filter((id) => id !== sid) })} />
               </span>
             );
@@ -180,7 +178,7 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
             <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded max-h-32 overflow-y-auto">
               {sceneResults.items.filter((sc) => !form.sceneIds.includes(sc.id)).map((sc) => (
                 <div key={sc.id} onClick={() => { setForm({ ...form, sceneIds: [...form.sceneIds, sc.id] }); setSceneSearch(""); }}
-                  className="px-3 py-1.5 text-sm hover:bg-card-hover cursor-pointer">{sc.title || sc.files?.[0]?.basename || `Scene #${sc.id}`}</div>
+                  className="px-3 py-1.5 text-sm hover:bg-card-hover cursor-pointer">{sc.title || sc.files?.[0]?.basename || "Untitled scene"}</div>
               ))}
             </div>
           )}
@@ -188,7 +186,7 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
       </Field>
 
       <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} />
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="gallery" />
       </Field>
 
       <div className="flex justify-end mt-4">

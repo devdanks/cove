@@ -10,6 +10,9 @@ import {
 
 interface PerformerTaggerProps {
   performers: Performer[];
+  selectedIds?: Set<number>;
+  selecting?: boolean;
+  onSelect?: (performerId: number) => void;
 }
 
 interface TaggerConfig {
@@ -38,7 +41,7 @@ async function runWithConcurrency<T>(items: T[], fn: (item: T) => Promise<void>,
   await Promise.all(workers);
 }
 
-export function PerformerTagger({ performers: performerList }: PerformerTaggerProps) {
+export function PerformerTagger({ performers: performerList, selectedIds, selecting = false, onSelect }: PerformerTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
 
@@ -174,6 +177,9 @@ export function PerformerTagger({ performers: performerList }: PerformerTaggerPr
             onSearch={() => searchPerformer(performer)}
             onUpdateState={(update) => updateSearchState(performer.id, update)}
             endpoint={taggerConfig.selectedEndpoint}
+            selected={selectedIds?.has(performer.id) ?? false}
+            selecting={selecting}
+            onSelect={onSelect}
           />
         ))}
       </div>
@@ -189,6 +195,9 @@ function PerformerTaggerRow({
   onSearch,
   onUpdateState,
   endpoint,
+  selected,
+  selecting,
+  onSelect,
 }: {
   performer: Performer;
   state?: PerformerSearchState;
@@ -197,6 +206,9 @@ function PerformerTaggerRow({
   onSearch: () => void;
   onUpdateState: (update: Partial<PerformerSearchState>) => void;
   endpoint: string;
+  selected: boolean;
+  selecting: boolean;
+  onSelect?: (performerId: number) => void;
 }) {
   const imageUrl = performer.imagePath;
 
@@ -216,8 +228,19 @@ function PerformerTaggerRow({
   });
 
   return (
-    <div className={`px-4 py-3 ${state?.saved ? "opacity-50" : ""}`}>
+    <div className={`px-4 py-3 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
       <div className="flex gap-4">
+        {onSelect && (
+          <button
+            type="button"
+            onClick={() => onSelect(performer.id)}
+            className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[10px] ${selected ? "border-accent bg-accent text-white" : selecting ? "border-accent/60 text-accent" : "border-border text-transparent hover:border-accent hover:text-accent"}`}
+            aria-label={selected ? "Deselect performer" : "Select performer"}
+            title={selected ? "Deselect" : "Select"}
+          >
+            <Check className="h-3 w-3" />
+          </button>
+        )}
         {/* Performer image */}
         <div className="flex-shrink-0 w-24">
           <div className="relative aspect-[2/3] bg-card rounded overflow-hidden">

@@ -5,7 +5,7 @@ import type { EntityEngagement, FindFilter, Gallery, GalleryCreate, GalleryFilte
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { InteractiveRatingField, RatingBanner } from "../components/Rating";
-import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
+import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { FolderOpen, Image, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
@@ -23,6 +23,7 @@ import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDi
 import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
+import { CustomFieldsEditor } from "../components/shared";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -76,7 +77,7 @@ export function GalleriesPage({ onNavigate }: Props) {
   const items = data?.items ?? [];
   const { engagementById } = useEntityEngagementBatch("gallery", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount);
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
+  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
   const selectedGallery = selectedIds.size === 1 ? items.find((gallery) => selectedIds.has(gallery.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
@@ -167,6 +168,7 @@ export function GalleriesPage({ onNavigate }: Props) {
       selectedIds={selectedIds}
       onSelectAll={selectAll}
       onSelectNone={selectNone}
+      onInvertSelection={invertSelection}
       selectionActions={
         <>
           {canDownloadSelectedGallery && (
@@ -410,12 +412,20 @@ function GalleryCreateModal({ open, onClose, onCreated }: { open: boolean; onClo
     photographer: "",
     rating: undefined as number | undefined,
   });
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
+  const [createAnother, setCreateAnother] = useState(false);
+
+  const resetForm = () => {
+    setForm({ title: "", code: "", date: "", details: "", photographer: "", rating: undefined });
+    setCustomFields({});
+  };
 
   const mutation = useMutation({
     mutationFn: (data: GalleryCreate) => galleries.create(data),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["galleries"] });
-      setForm({ title: "", code: "", date: "", details: "", photographer: "", rating: undefined });
+      resetForm();
+      if (createAnother) return;
       onClose();
       if (created?.id) onCreated(created.id);
     },
@@ -431,6 +441,7 @@ function GalleryCreateModal({ open, onClose, onCreated }: { open: boolean; onClo
       details: form.details || undefined,
       photographer: form.photographer || undefined,
       rating: form.rating,
+      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     });
   };
 
@@ -452,9 +463,10 @@ function GalleryCreateModal({ open, onClose, onCreated }: { open: boolean; onClo
         <TextArea value={form.details} onChange={(v) => setForm({ ...form, details: v })} rows={3} />
       </Field>
       <InteractiveRatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} />
-      <div className="flex justify-end mt-4">
-        <SaveButton loading={mutation.isPending} onClick={save} />
-      </div>
+      <Field label="Custom Fields">
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="gallery" />
+      </Field>
+      <CreateModalActions loading={mutation.isPending} onSave={save} createAnother={createAnother} onCreateAnotherChange={setCreateAnother} />
     </EditModal>
   );
 }

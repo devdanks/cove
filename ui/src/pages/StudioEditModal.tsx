@@ -29,9 +29,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
 
   // Tag search
   const [tagSearch, setTagSearch] = useState("");
-  const [customFields, setCustomFields] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(studio.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")]))
-  );
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(studio.customFields ?? {}) });
   const { data: allTags } = useQuery({
     queryKey: ["tags-all"],
     queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
@@ -52,7 +50,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
     setAliases(studio.aliases.length > 0 ? studio.aliases : [""]);
     setParentId(studio.parentId ?? undefined);
     setSelectedTagIds(studio.tags.map((t) => t.id));
-    setCustomFields(Object.fromEntries(Object.entries(studio.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")])));
+    setCustomFields({ ...(studio.customFields ?? {}) });
   }, [studio]);
 
   const mutation = useMutation({
@@ -76,7 +74,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
       urls: urlList,
       aliases: aliasList,
       tagIds: selectedTagIds,
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      customFields,
     });
   };
 
@@ -156,7 +154,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
       </Field>
 
       <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} />
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="studio" />
       </Field>
 
       </div></div>

@@ -50,7 +50,6 @@ public class Scene : BaseEntity
     public ICollection<SceneRemoteId> RemoteIds { get; set; } = [];
     public ICollection<ScenePlayHistory> PlayHistory { get; set; } = [];
     public ICollection<SceneLikeHistory> LikeHistory { get; set; } = [];
-    public Dictionary<string, object>? CustomFields { get; set; }
 }
 
 public class SceneUrl

@@ -9,6 +9,20 @@ let pendingSaveTimer: number | null = null;
 let pendingPreferences: UserUiPreferences | null = null;
 let pendingUserId: string | null = null;
 
+function normalizeKeybindingOverrides(overrides: Record<string, string> | null | undefined): Record<string, string> | null {
+  if (!overrides) {
+    return null;
+  }
+
+  const normalized = Object.fromEntries(
+    Object.entries(overrides)
+      .map(([key, value]) => [key.trim(), value.trim()] as const)
+      .filter(([key, value]) => key.length > 0 && value.length > 0),
+  );
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
 function normalizeThemePreferences(theme: UserThemePreferences | null | undefined): UserThemePreferences | null {
   if (!theme) {
     return null;
@@ -118,7 +132,8 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     ? (preferences as Record<string, unknown>)[legacyTrackingEnabledKey]
     : undefined;
   const tracking = normalizeTrackingPreferences(preferences?.tracking, legacyTrackingEnabled);
-  if (!theme && !ratingSystemOptions && !tracking) {
+  const keybindingOverrides = normalizeKeybindingOverrides(preferences?.keybindingOverrides);
+  if (!theme && !ratingSystemOptions && !tracking && !keybindingOverrides) {
     return null;
   }
 
@@ -126,6 +141,7 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     theme,
     ratingSystemOptions,
     tracking,
+    keybindingOverrides,
   };
 }
 

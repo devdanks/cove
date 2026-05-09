@@ -33,7 +33,7 @@ public record SceneCreateDto(
     string? Date, int? Rating, bool Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups);
+    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields = null);
 
 public record SceneUpdateDto(
     string? Title, string? Code, string? Details, string? Director,
@@ -68,7 +68,7 @@ public record PerformerCreateDto(
     string? Measurements, string? FakeTits, double? PenisLength, string? Circumcised,
     string? CareerStart, string? CareerEnd, string? Tattoos, string? Piercings,
     bool Favorite, int? Rating, string? Details, bool IgnoreAutoTag,
-    List<string>? Urls, List<string>? Aliases, List<int>? TagIds);
+    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, Dictionary<string, object>? CustomFields = null);
 
 public record PerformerUpdateDto(
     string? Name, string? Disambiguation, string? Gender,
@@ -107,7 +107,8 @@ public record TagDto(
     string? TagGroupName = null,
     string? TagGroupColor = null,
     double? MinOccurrenceSec = null,
-    double? MinOccurrencePercent = null);
+    double? MinOccurrencePercent = null,
+    Dictionary<string, object>? CustomFields = null);
 
 public record TagListDto(
     int Id,
@@ -221,7 +222,8 @@ public record TagCreateDto(
     string? Color = null,
     int? TagGroupId = null,
     double? MinOccurrenceSec = null,
-    double? MinOccurrencePercent = null);
+    double? MinOccurrencePercent = null,
+    Dictionary<string, object>? CustomFields = null);
 public record TagUpdateDto(
     string? Name,
     string? SortName,
@@ -249,7 +251,7 @@ public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, 
 public record StudioRemoteIdDto(string Endpoint, string RemoteId);
 
 public record StudioCreateDto(string Name, int? ParentId, int? Rating, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
-    List<string>? Urls, List<string>? Aliases, List<int>? TagIds);
+    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, Dictionary<string, object>? CustomFields = null);
 
 public record StudioUpdateDto(string? Name, int? ParentId, int? Rating, bool? Favorite, string? Details, bool? IgnoreAutoTag, bool? Organized,
     List<string>? Urls, List<string>? Aliases, List<int>? TagIds, Dictionary<string, object>? CustomFields);
@@ -265,7 +267,7 @@ public record GalleryDto(int Id, string? Title, string? Code, string? Date, stri
 public record GalleryFileInfoDto(int Id, string Path, long Size, string ModTime, List<FingerprintDto> Fingerprints);
 
 public record GalleryCreateDto(string? Title, string? Code, string? Date, string? Details, string? Photographer,
-    int? Rating, bool Organized, int? StudioId, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? SceneIds);
+    int? Rating, bool Organized, int? StudioId, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? SceneIds, Dictionary<string, object>? CustomFields = null);
 
 public record GalleryUpdateDto(string? Title, string? Code, string? Date, string? Details, string? Photographer,
     int? Rating, bool? Organized, int? StudioId, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? SceneIds, Dictionary<string, object>? CustomFields);
@@ -280,7 +282,7 @@ public record ImageFileDto(int Id, string Path, string Basename, string Format, 
 
 public record ImageCreateDto(string? Title, string? Code, string? Details, string? Photographer,
     int? Rating, bool Organized, int? StudioId, string? Date,
-    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds);
+    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, Dictionary<string, object>? CustomFields = null);
 
 public record ImageUpdateDto(string? Title, string? Code, string? Details, string? Photographer,
     int? Rating, bool? Organized, int? StudioId, string? Date,
@@ -361,7 +363,7 @@ public record GroupPlaybackManifestDto(List<GroupPlaybackManifestItemDto> Items)
 
 public record GroupCreateDto(string Name, string? Aliases, int? Duration, string? Date,
     int? Rating, int? StudioId, string? Director, string? Synopsis,
-    List<string>? Urls, List<int>? TagIds);
+    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields = null);
 
 public record GroupUpdateDto(string? Name, string? Aliases, int? Duration, string? Date,
     int? Rating, int? StudioId, string? Director, string? Synopsis,
@@ -973,6 +975,48 @@ public record CoveConfigDto
     public List<string> DisabledPlugins { get; init; } = [];
 }
 
+public record CustomFieldDefinitionDto
+{
+    public int Id { get; init; }
+    public string Key { get; init; } = string.Empty;
+    public string Label { get; init; } = string.Empty;
+    public string Type { get; init; } = "text";
+    public List<string> EntityTypes { get; init; } = [];
+    public List<string> Options { get; init; } = [];
+    public bool Filterable { get; init; } = true;
+    public bool Sortable { get; init; }
+    public bool IsMultiValue { get; init; }
+    public int DisplayOrder { get; init; }
+    public string CreatedAt { get; init; } = string.Empty;
+    public string UpdatedAt { get; init; } = string.Empty;
+}
+
+public record CustomFieldDefinitionCreateDto
+{
+    public string? Key { get; init; }
+    public string Label { get; init; } = string.Empty;
+    public string Type { get; init; } = "text";
+    public List<string> EntityTypes { get; init; } = [];
+    public List<string> Options { get; init; } = [];
+    public bool Filterable { get; init; } = true;
+    public bool Sortable { get; init; }
+    public bool IsMultiValue { get; init; }
+    public int? DisplayOrder { get; init; }
+}
+
+public record CustomFieldDefinitionUpdateDto
+{
+    public string? Key { get; init; }
+    public string? Label { get; init; }
+    public string? Type { get; init; }
+    public List<string>? EntityTypes { get; init; }
+    public List<string>? Options { get; init; }
+    public bool? Filterable { get; init; }
+    public bool? Sortable { get; init; }
+    public bool? IsMultiValue { get; init; }
+    public int? DisplayOrder { get; init; }
+}
+
 public record CovePathDto
 {
     public string Path { get; init; } = "";
@@ -992,14 +1036,47 @@ public record InterfaceConfigDto
 {
     public string? Language { get; init; }
     public List<string> MenuItems { get; init; } = [];
+    public bool HandyConnectionEnabled { get; init; }
+    public string? HandyKey { get; init; }
+    public int? DefaultDurationForImages { get; init; }
+    public bool DisableDropdownCreatePerformer { get; init; }
+    public bool DisableDropdownCreateStudio { get; init; }
+    public bool DisableDropdownCreateTag { get; init; }
 }
 
 public record UiConfigDto
 {
     public string? Title { get; init; }
+    public string? FaviconPath { get; init; }
+    public bool TroubleshootingModeEnabled { get; init; }
     public bool AbbreviateCounters { get; init; }
     public RatingSystemOptionsDto RatingSystemOptions { get; init; } = new();
+    public bool ShowStudioAsText { get; init; }
+    public string? CustomCss { get; init; }
+    public string? CustomJs { get; init; }
+    public bool EnableCSSCustomization { get; init; }
+    public bool EnableJSCustomization { get; init; }
+    public string? CustomLocalesPath { get; init; }
+    public bool AutostartVideo { get; init; } = true;
+    public bool AutostartVideoOnPlaySelected { get; init; } = true;
+    public bool AutoplayOnListClick { get; init; }
+    public int MaxLoopDuration { get; init; }
+    public bool AlwaysResumeOnPlayback { get; init; } = true;
+    public bool ContinuePlaylistDefault { get; init; }
+    public bool ShowAbLoopControls { get; init; } = true;
+    public bool SoundOnPreview { get; init; }
+    public double PreviewSegmentDuration { get; init; } = 0.75;
+    public int PreviewSegments { get; init; } = 12;
+    public string PreviewExcludeStart { get; init; } = "0";
+    public string PreviewExcludeEnd { get; init; } = "0";
+    public bool WallShowTitle { get; init; } = true;
+    public int WallPlayback { get; init; } = 1;
+    public string WallPreviewType { get; init; } = "video";
     public bool DeleteFileDefault { get; init; }
+    public int SlideshowDelay { get; init; } = 5000;
+    public bool NoBrowser { get; init; }
+    public bool NotificationsEnabled { get; init; } = true;
+    public Dictionary<string, string> KeybindingOverrides { get; init; } = [];
 }
 
 public record RatingSystemOptionsDto
@@ -1213,6 +1290,9 @@ public record MetadataServerSceneImportRequestDto
     public MetadataServerSceneEntityOverrideDto? StudioOverride { get; init; }
     public List<MetadataServerSceneEntityOverrideDto>? PerformerOverrides { get; init; }
     public List<MetadataServerSceneEntityOverrideDto>? TagOverrides { get; init; }
+    public Dictionary<string, string>? FieldStrategies { get; init; }
+    public List<string>? PerformerGenders { get; init; }
+    public bool SkipSingleNamePerformers { get; init; }
 }
 
 public record MetadataServerEndpointDto(string Endpoint);
@@ -1428,6 +1508,7 @@ public enum BulkUpdateMode { Set, Add, Remove }
 public record BulkSceneUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Organized { get; init; }
     public int? StudioId { get; init; }
@@ -1445,8 +1526,12 @@ public record BulkSceneUpdateDto
 public record BulkPerformerUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Favorite { get; init; }
+    public string? Gender { get; init; }
+    public string? Details { get; init; }
+    public bool? IgnoreAutoTag { get; init; }
     public List<int>? TagIds { get; init; }
     public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
 }
@@ -1454,9 +1539,14 @@ public record BulkPerformerUpdateDto
 public record BulkImageUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Organized { get; init; }
     public int? StudioId { get; init; }
+    public string? Date { get; init; }
+    public string? Code { get; init; }
+    public string? Details { get; init; }
+    public string? Photographer { get; init; }
     public List<int>? TagIds { get; init; }
     public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
     public List<int>? PerformerIds { get; init; }
@@ -1468,9 +1558,14 @@ public record BulkImageUpdateDto
 public record BulkGalleryUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Organized { get; init; }
     public int? StudioId { get; init; }
+    public string? Date { get; init; }
+    public string? Code { get; init; }
+    public string? Details { get; init; }
+    public string? Photographer { get; init; }
     public List<int>? TagIds { get; init; }
     public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
     public List<int>? PerformerIds { get; init; }
@@ -1480,8 +1575,12 @@ public record BulkGalleryUpdateDto
 public record BulkStudioUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Favorite { get; init; }
+    public string? Details { get; init; }
+    public bool? IgnoreAutoTag { get; init; }
+    public bool? Organized { get; init; }
     public List<int>? TagIds { get; init; }
     public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
 }
@@ -1489,7 +1588,12 @@ public record BulkStudioUpdateDto
 public record BulkTagUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public string? Description { get; init; }
+    public string? Color { get; init; }
+    public int? TagGroupId { get; init; }
+    public double? MinOccurrenceSec { get; init; }
+    public double? MinOccurrencePercent { get; init; }
     public bool? Favorite { get; init; }
     public bool? IgnoreAutoTag { get; init; }
     public List<int>? ParentIds { get; init; }
@@ -1501,8 +1605,12 @@ public record BulkTagUpdateDto
 public record BulkGroupUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public int? StudioId { get; init; }
+    public string? Date { get; init; }
+    public string? Director { get; init; }
+    public string? Synopsis { get; init; }
     public List<int>? TagIds { get; init; }
     public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
 }
@@ -1518,7 +1626,7 @@ public record AddSubGroupDto(int SubGroupId, int? OrderIndex = null, string? Des
 public record ReorderSubGroupsDto(List<int> SubGroupIds);
 
 // ===== BATCH/BULK DTOs =====
-public record BatchDeleteDto(List<int> Ids);
+public record BatchDeleteDto(List<int> Ids, bool DeleteFiles = false);
 
 // ===== FILE OPERATION DTOs =====
 public record MoveFilesDto(List<int> FileIds, string DestinationPath);
@@ -1560,6 +1668,8 @@ public record GenerateOptionsDto
     public bool Previews { get; init; }
     public bool Sprites { get; init; }
     public bool Markers { get; init; }
+    public bool SegmentThumbnails { get; init; }
+    public bool SegmentPreviews { get; init; }
     public bool Phashes { get; init; }
     public bool Md5 { get; init; }
     public bool ImageThumbnails { get; init; }
@@ -1619,6 +1729,8 @@ public record IdentifyOptionsDto
     public bool MarkOrganized { get; init; }
     public bool SkipMultipleMatches { get; init; } = true;
     public bool SkipSingleNamePerformers { get; init; } = true;
+    public Dictionary<string, string>? FieldStrategies { get; init; }
+    public List<string>? PerformerGenders { get; init; }
 }
 
 // ===== DATABASE OPERATION DTOs =====

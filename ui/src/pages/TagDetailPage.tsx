@@ -196,7 +196,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         heroContent={(
           <>
             {autoTagMut.isSuccess ? <p className="text-sm text-emerald-300">Auto-tag job queued.</p> : null}
-            <CustomFieldsDisplay customFields={tag.customFields} />
+            <CustomFieldsDisplay customFields={tag.customFields} entityType="tag" />
             <TagMetadataServerPanel tag={tag} metadataServers={metadataServers} onNavigate={onNavigate} />
           </>
         )}

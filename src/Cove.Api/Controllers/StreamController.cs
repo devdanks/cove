@@ -40,16 +40,58 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return File(stream, contentType);
     }
 
+    [HttpGet("scene/{sceneId:int}/segment-preview")]
+    public async Task<IActionResult> GetSegmentPreview(int sceneId, [FromQuery] double seconds, CancellationToken ct)
+    {
+        var result = await streamService.GetSegmentAnimatedPreview(sceneId, seconds, ct);
+        if (result == null) return NotFound();
+
+        var (stream, contentType, useLongCache) = result.Value;
+        Response.Headers["Cache-Control"] = useLongCache
+            ? "public, max-age=86400"
+            : "no-store, no-cache, max-age=0, must-revalidate";
+        return File(stream, contentType);
+    }
+
     [HttpGet("scene/{sceneId:int}/preview")]
     public IActionResult GetPreview(int sceneId)
     {
-        var path = thumbnailService.GetPreviewPath(sceneId);
-        if (!System.IO.File.Exists(path)) return NotFound();
+        var path = GetExistingPreviewPath(sceneId);
+        if (path == null) return NotFound();
 
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        SetPreviewHeaders();
+        return File(stream, "video/mp4", enableRangeProcessing: true);
+    }
+
+    [HttpHead("scene/{sceneId:int}/preview")]
+    public IActionResult HeadPreview(int sceneId)
+    {
+        var path = GetExistingPreviewPath(sceneId);
+        if (path == null) return NotFound();
+
+        SetPreviewHeaders();
+        Response.ContentType = "video/mp4";
+        Response.ContentLength = new FileInfo(path).Length;
+        return Ok();
+    }
+
+    [HttpGet("scene/{sceneId:int}/preview/status")]
+    public IActionResult GetPreviewStatus(int sceneId)
+    {
+        return Ok(new { available = GetExistingPreviewPath(sceneId) != null });
+    }
+
+    private string? GetExistingPreviewPath(int sceneId)
+    {
+        var path = thumbnailService.GetPreviewPath(sceneId);
+        return System.IO.File.Exists(path) ? path : null;
+    }
+
+    private void SetPreviewHeaders()
+    {
         Response.Headers["Cache-Control"] = "public, max-age=86400";
         Response.Headers["Accept-Ranges"] = "bytes";
-        return File(stream, "video/mp4", enableRangeProcessing: true);
     }
 
     [HttpGet("scene/{sceneId:int}/sprite")]

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 
@@ -37,11 +38,21 @@ public partial class StashMigrationService
 
         var byId = rows.ToDictionary(r => r.Id);
         var ordered = TopologicalSort(rows.Select(r => r.Id).ToList(), id => tagParents.GetValueOrDefault(id, []));
+        var rowNames = rows
+            .Select(row => row.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var existingTags = await _db.Tags
+            .Where(tag => rowNames.Contains(tag.Name))
+            .ToListAsync(ct);
+        var existingByName = existingTags.ToDictionary(tag => tag.Name, StringComparer.Ordinal);
 
         var idMap = new Dictionary<int, int>();
         const int TagBatchSize = 1000;
         const int TagParentBatchSize = 5000;
         var pendingTags = new List<(int StashId, Tag Entity)>(TagBatchSize);
+        var pendingTagsByName = new Dictionary<string, Tag>(StringComparer.Ordinal);
         progress.Report(startProgress, "Importing tags...");
         _logger.LogDebug(
             "[StashTiming] phase=tags checkpoint=loaded rows={Rows} aliases={AliasOwners} parentLinks={ParentLinks} elapsedMs={ElapsedMilliseconds:F0}",
@@ -58,8 +69,11 @@ public partial class StashMigrationService
             await _db.SaveChangesAsync(ct);
             foreach (var (stashId, entity) in pendingTags)
                 idMap[stashId] = entity.Id;
+            foreach (var entity in pendingTags.Select(tag => tag.Entity).DistinctBy(tag => tag.Name))
+                existingByName[entity.Name] = entity;
 
             pendingTags.Clear();
+            pendingTagsByName.Clear();
             _db.ChangeTracker.Clear();
             ReportPhase(progress, startProgress, endProgress, idMap.Count, ordered.Count, $"Importing tags ({idMap.Count}/{ordered.Count})");
             _logger.LogDebug(
@@ -72,6 +86,18 @@ public partial class StashMigrationService
         foreach (var stashId in ordered)
         {
             var row = byId[stashId];
+            if (existingByName.TryGetValue(row.Name, out var existingTag))
+            {
+                idMap[stashId] = existingTag.Id;
+                continue;
+            }
+
+            if (pendingTagsByName.TryGetValue(row.Name, out var pendingTag))
+            {
+                pendingTags.Add((stashId, pendingTag));
+                continue;
+            }
+
             var entity = new Tag
             {
                 Name = row.Name,
@@ -83,6 +109,7 @@ public partial class StashMigrationService
                 Aliases = aliases.GetValueOrDefault(stashId, []).Select(a => new TagAlias { Alias = a }).ToList(),
             };
             _db.Tags.Add(entity);
+            pendingTagsByName[row.Name] = entity;
             pendingTags.Add((stashId, entity));
 
             if (pendingTags.Count >= TagBatchSize)
@@ -93,8 +120,30 @@ public partial class StashMigrationService
 
         if (tagParents.Count > 0)
         {
-            var pendingParents = new List<TagParent>(TagParentBatchSize);
+            var parentPairs = new HashSet<(int ParentId, int ChildId)>();
+            foreach (var (childStashId, parentStashIds) in tagParents)
+            {
+                if (!idMap.TryGetValue(childStashId, out var childCoveId)) continue;
+                foreach (var parentStashId in parentStashIds)
+                {
+                    if (!idMap.TryGetValue(parentStashId, out var parentCoveId)) continue;
+                    if (parentCoveId == childCoveId) continue;
+                    parentPairs.Add((parentCoveId, childCoveId));
+                }
+            }
 
+            var parentIds = parentPairs.Select(pair => pair.ParentId).Distinct().ToArray();
+            var childIds = parentPairs.Select(pair => pair.ChildId).Distinct().ToArray();
+            var existingParentPairs = parentPairs.Count == 0
+                ? []
+                : await _db.Set<TagParent>()
+                    .Where(parent => parentIds.Contains(parent.ParentId) && childIds.Contains(parent.ChildId))
+                    .Select(parent => new ValueTuple<int, int>(parent.ParentId, parent.ChildId))
+                    .ToListAsync(ct);
+            foreach (var existingPair in existingParentPairs)
+                parentPairs.Remove(existingPair);
+
+            var pendingParents = new List<TagParent>(TagParentBatchSize);
             async Task FlushTagParentsAsync()
             {
                 if (pendingParents.Count == 0)
@@ -106,16 +155,11 @@ public partial class StashMigrationService
                 _db.ChangeTracker.Clear();
             }
 
-            foreach (var (childStashId, parentStashIds) in tagParents)
+            foreach (var (parentCoveId, childCoveId) in parentPairs)
             {
-                if (!idMap.TryGetValue(childStashId, out var childCoveId)) continue;
-                foreach (var parentStashId in parentStashIds)
-                {
-                    if (!idMap.TryGetValue(parentStashId, out var parentCoveId)) continue;
-                    pendingParents.Add(new TagParent { ParentId = parentCoveId, ChildId = childCoveId });
-                    if (pendingParents.Count >= TagParentBatchSize)
-                        await FlushTagParentsAsync();
-                }
+                pendingParents.Add(new TagParent { ParentId = parentCoveId, ChildId = childCoveId });
+                if (pendingParents.Count >= TagParentBatchSize)
+                    await FlushTagParentsAsync();
             }
             await FlushTagParentsAsync();
             _logger.LogDebug(

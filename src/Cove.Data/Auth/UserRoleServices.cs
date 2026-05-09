@@ -643,7 +643,7 @@ public sealed class UserService : IUserService
             {
                 var tracking = new UserTrackingPreferencesDto(legacyEnabled.GetBoolean(), null, null, null, null, null);
                 parsed = parsed is null
-                    ? new UserUiPreferencesDto(null, null, tracking)
+                    ? new UserUiPreferencesDto(null, null, tracking, null)
                     : parsed with { Tracking = tracking };
             }
 
@@ -676,12 +676,27 @@ public sealed class UserService : IUserService
         var theme = NormalizeThemePreferences(preferences.Theme);
         var ratingSystemOptions = NormalizeRatingSystemOptions(preferences.RatingSystemOptions);
         var tracking = NormalizeTrackingPreferences(preferences.Tracking);
-        if (theme is null && ratingSystemOptions is null && tracking is null)
+        var keybindingOverrides = NormalizeKeybindingOverrides(preferences.KeybindingOverrides);
+        if (theme is null && ratingSystemOptions is null && tracking is null && keybindingOverrides is null)
         {
             return null;
         }
 
-        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking);
+        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking, keybindingOverrides);
+    }
+
+    private static Dictionary<string, string>? NormalizeKeybindingOverrides(Dictionary<string, string>? overrides)
+    {
+        if (overrides is null || overrides.Count == 0)
+        {
+            return null;
+        }
+
+        var normalized = overrides
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && !string.IsNullOrWhiteSpace(entry.Value))
+            .ToDictionary(entry => entry.Key.Trim(), entry => entry.Value.Trim(), StringComparer.OrdinalIgnoreCase);
+
+        return normalized.Count > 0 ? normalized : null;
     }
 
     private static UserTrackingPreferencesDto? NormalizeTrackingPreferences(UserTrackingPreferencesDto? tracking)

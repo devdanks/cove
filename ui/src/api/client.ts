@@ -50,6 +50,10 @@ import type {
   MetadataServerStudioMatch,
   MetadataServerStudioImportRequest,
   MetadataServerValidationResult,
+  CustomFieldDefinition,
+  CustomFieldDefinitionCreate,
+  CustomFieldDefinitionUpdate,
+  CustomFieldEntityType,
   FindFilter,
   SavedFilter,
   SavedFilterCreate,
@@ -191,7 +195,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(`API Error ${res.status}: ${text}`);
   }
   if (res.status === 204) return undefined as T;
-  return res.json();
+  const text = await res.text();
+  if (text.trim() === "") return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 function normalizeApiPath(path: string): string {
@@ -320,7 +326,8 @@ export const scenes = {
   update: (id: number, data: SceneUpdate) => request<Scene>(`/scenes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkSceneUpdate) => request<void>("/scenes/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number, deleteFile?: boolean) => request<void>(`/scenes/${id}${deleteFile ? "?deleteFile=true" : ""}`, { method: "DELETE" }),
-  bulkDelete: (ids: number[]) => request<{ deleted: number }>("/scenes/destroy", { method: "POST", body: JSON.stringify({ ids }) }),
+  bulkDelete: (ids: number[], deleteFiles = false) =>
+    request<{ deleted: number }>("/scenes/destroy", { method: "POST", body: JSON.stringify({ ids, deleteFiles }) }),
   merge: (targetId: number, sourceIds: number[]) =>
     request<Scene>("/scenes/merge", { method: "POST", body: JSON.stringify({ targetId, sourceIds }) }),
   recordPlay: (id: number) => request<void>(`/scenes/${id}/play`, { method: "POST" }),
@@ -343,7 +350,8 @@ export const scenes = {
   assignFile: (id: number, fileId: number) =>
     request<void>(`/scenes/${id}/assign-file`, { method: "POST", body: JSON.stringify({ fileId }) }),
   streamUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}`),
-  screenshotUrl: (id: number, version?: string) => buildMediaUrl(`/stream/scene/${id}/screenshot`, version),
+  screenshotUrl: (id: number, version?: string, seconds?: number) => buildMediaUrl(`/stream/scene/${id}/screenshot`, version, undefined, { seconds }),
+  segmentPreviewUrl: (id: number, seconds: number, version?: string) => buildMediaUrl(`/stream/scene/${id}/segment-preview`, version, undefined, { seconds }),
   previewUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview`),
   captionUrl: (sceneId: number, captionId: number) => buildMediaUrl(`/stream/scene/${sceneId}/caption/${captionId}`),
   transcodeUrl: (id: number, resolution?: string) => buildMediaUrl(`/stream/scene/${id}/transcode`, undefined, undefined, { resolution }),
@@ -364,6 +372,7 @@ export const scenes = {
     spanDetail: (sceneId: number, spanKey: string, profile?: number) =>
       request<ResolvedSpanDetail>(`/scenes/${sceneId}/spans/${encodeURIComponent(spanKey)}${buildQuery(undefined, { profile })}`),
   },
+
   detections: {
     list: (sceneId: number) => request<Detection[]>(`/scenes/${sceneId}/detections`),
     create: (sceneId: number, data: DetectionCreate) =>
@@ -373,12 +382,19 @@ export const scenes = {
     delete: (sceneId: number, id: number) =>
       request<void>(`/scenes/${sceneId}/detections/${id}`, { method: "DELETE" }),
   },
-  findDuplicates: (distance = 0, durationDiff?: number) => {
+  findDuplicates: (options: number | { matchType?: string; distance?: number; durationDiff?: number } = 0, durationDiff?: number) => {
+    const duplicateOptions = typeof options === "number" ? { distance: options, durationDiff } : options;
     const params = new URLSearchParams();
-    params.set("distance", String(distance));
-    if (durationDiff !== undefined) params.set("durationDiff", String(durationDiff));
+    params.set("matchType", duplicateOptions.matchType ?? "fingerprint");
+    params.set("distance", String(duplicateOptions.distance ?? 0));
+    if (duplicateOptions.durationDiff !== undefined) params.set("durationDiff", String(duplicateOptions.durationDiff));
     return request<Scene[][]>(`/scenes/duplicates?${params.toString()}`);
   },
+};
+
+export const fileOps = {
+  reveal: (fileId: number) => request<void>(`/files/${fileId}/reveal`, { method: "POST" }),
+  revealFolder: (folderId: number) => request<void>(`/files/folders/${folderId}/reveal`, { method: "POST" }),
 };
 
 export const playback = {
@@ -792,6 +808,16 @@ export const system = {
   getConfig: () => request<CoveConfig>("/system/config"),
   saveConfig: (config: CoveConfig) =>
     request<CoveConfig>("/system/config", { method: "PUT", body: JSON.stringify(config) }),
+  uploadFavicon: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await authedFetch(`${API_BASE}/system/ui/favicon`, { method: "POST", body: form });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`API Error ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<{ path: string; fileName: string }>;
+  },
   listScrapers: () => request<ScraperSummary[]>("/system/scrapers"),
   reloadScrapers: () => request<ScraperSummary[]>("/system/scrapers/reload", { method: "POST" }),
   scrapeUrl: (scraperId: string, entityType: string, url: string) =>
@@ -811,6 +837,18 @@ export const system = {
     request<{ success: boolean }>("/system/config/ui", { method: "POST", body: JSON.stringify(input) }),
   configureUISetting: (key: string, value: unknown) =>
     request<{ key: string; value: unknown; success: boolean }>(`/system/config/ui/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify(value) }),
+};
+
+export const customFields = {
+  list: (entityType?: CustomFieldEntityType) => {
+    const query = entityType ? `?entityType=${encodeURIComponent(entityType)}` : "";
+    return request<CustomFieldDefinition[]>(`/custom-fields${query}`);
+  },
+  create: (data: CustomFieldDefinitionCreate) =>
+    request<CustomFieldDefinition>("/custom-fields", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: CustomFieldDefinitionUpdate) =>
+    request<CustomFieldDefinition>(`/custom-fields/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: number) => request<void>(`/custom-fields/${id}`, { method: "DELETE" }),
 };
 
 export const scrapeAttempts = {
@@ -837,6 +875,8 @@ export const jobs = {
   history: () => request<JobInfo[]>("/jobs/history"),
   get: (id: string) => request<JobInfo>(`/jobs/${id}`),
   cancel: (id: string) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
+  reorder: (id: string, beforeJobId?: string | null) =>
+    request<void>(`/jobs/${id}/reorder`, { method: "PUT", body: JSON.stringify({ beforeJobId: beforeJobId ?? null }) }),
 };
 
 export const aiFaces = {
@@ -864,6 +904,8 @@ export interface GenerateOptions {
   previews?: boolean;
   sprites?: boolean;
   markers?: boolean;
+  segmentThumbnails?: boolean;
+  segmentPreviews?: boolean;
   phashes?: boolean;
   md5?: boolean;
   imageThumbnails?: boolean;
@@ -922,6 +964,8 @@ export const metadata = {
     markOrganized?: boolean;
     skipMultipleMatches?: boolean;
     skipSingleNamePerformers?: boolean;
+    fieldStrategies?: Record<string, "ignore" | "merge" | "overwrite">;
+    performerGenders?: string[];
   }) =>
     request<{ jobId: string }>("/metadata/identify", { method: "POST", body: JSON.stringify(opts ?? {}) }),
   import: (opts?: { filePath: string; duplicateHandling?: boolean }) =>

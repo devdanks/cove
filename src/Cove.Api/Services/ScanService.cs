@@ -1,3 +1,4 @@
+using System.IO.Enumeration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -119,6 +120,7 @@ public class ScanService(
             var allExts = videoExts.Union(imageExts).Union(galleryExts).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var processedVideoPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var processedImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var ignoreRuleCache = new Dictionary<string, List<IgnoreRule>>(StringComparer.OrdinalIgnoreCase);
 
             // Phase 1: Discover files
             progress.Report(0, "Discovering files...");
@@ -146,7 +148,8 @@ public class ScanService(
                     {
                         continue;
                     }
-                    if (IsExcluded(scanTarget.Path, cfg.ExcludePatterns))
+                    if (IsExcluded(scanTarget.Path, cfg.ExcludePatterns)
+                        || IsExcludedByFolderIgnore(scanTarget.Path, Path.GetDirectoryName(scanTarget.Path) ?? scanTarget.Path, ignoreRuleCache))
                     {
                         continue;
                     }
@@ -168,7 +171,8 @@ public class ScanService(
                         if (!allExts.Contains(ext)) return false;
                         if (scanTarget.ExcludeVideo && videoExts.Contains(ext)) return false;
                         if (scanTarget.ExcludeImage && imageExts.Contains(ext)) return false;
-                        return !IsExcluded(f, cfg.ExcludePatterns);
+                        return !IsExcluded(f, cfg.ExcludePatterns)
+                            && !IsExcludedByFolderIgnore(f, scanTarget.Path, ignoreRuleCache);
                     })
                     .Select(f => new DiscoveredFile(NormalizePath(f), Path.GetExtension(f)));
 
@@ -208,7 +212,17 @@ public class ScanService(
                                 var fileInfo = new FileInfo(file.Path);
                                 var needsMetadata = existingFile is VideoFile vf && vf.Width == 0 && vf.Height == 0 && vf.Duration == 0;
                                 if (!options.Rescan && !needsMetadata && existingFile.ModTime >= fileInfo.LastWriteTimeUtc && existingFile.Size == fileInfo.Length)
+                                {
+                                    if (existingFile is VideoFile)
+                                    {
+                                        var existingVideo = await db.VideoFiles
+                                            .Include(item => item.Captions)
+                                            .FirstOrDefaultAsync(item => item.Id == existingFile.Id, ct);
+                                        if (existingVideo != null)
+                                            SyncVideoCaptions(existingVideo, file.Path);
+                                    }
                                     continue; // Not modified and metadata present, skip
+                                }
                             }
                         }
 
@@ -235,10 +249,10 @@ public class ScanService(
                 await db.SaveChangesAsync(ct);
 
                 // Phase 3: Create galleries from folders (if enabled)
-                if (cfg.CreateGalleriesFromFolders)
+                if (cfg.CreateGalleriesFromFolders || HasForceGalleryHints(files))
                 {
                     progress.Report(0.90, "Creating galleries from folders...");
-                    await CreateGalleriesFromFoldersAsync(db, ct);
+                    await CreateGalleriesFromFoldersAsync(db, cfg.CreateGalleriesFromFolders, ct);
                 }
 
                 await GenerateRequestedAssetsAsync(db, progress, processedVideoPaths, processedImagePaths, options, thumbnailService, ct);
@@ -490,7 +504,7 @@ public class ScanService(
     /// <summary>
     /// Create folder-based galleries for folders that contain images but have no gallery yet.
     /// </summary>
-    private async Task CreateGalleriesFromFoldersAsync(CoveContext db, CancellationToken ct)
+    private async Task CreateGalleriesFromFoldersAsync(CoveContext db, bool createAllEligibleFolders, CancellationToken ct)
     {
         // Find folders that contain image files but don't already have a gallery
         var foldersWithImages = await db.ImageFiles
@@ -515,9 +529,16 @@ public class ScanService(
             .Where(f => newFolderIds.Contains(f.Id))
             .ToDictionaryAsync(f => f.Id, ct);
 
+        var eligibleFolderIds = folders
+            .Where(item => ShouldCreateFolderGallery(item.Value.Path, createAllEligibleFolders))
+            .Select(item => item.Key)
+            .ToHashSet();
+
+        if (eligibleFolderIds.Count == 0) return;
+
         // Get image IDs per folder
         var imagesByFolder = await db.ImageFiles
-            .Where(f => newFolderIds.Contains(f.ParentFolderId) && f.ZipFileId == null && f.ImageId != null)
+            .Where(f => eligibleFolderIds.Contains(f.ParentFolderId) && f.ZipFileId == null && f.ImageId != null)
             .GroupBy(f => f.ParentFolderId)
             .Select(g => new { FolderId = g.Key, ImageIds = g.Select(f => f.ImageId!.Value).ToList() })
             .ToListAsync(ct);
@@ -667,33 +688,72 @@ public class ScanService(
             }
         }
 
-        var videoDir = Path.GetDirectoryName(path);
-        var videoBaseName = Path.GetFileNameWithoutExtension(path);
-        if (videoDir != null)
+        SyncVideoCaptions(videoFile, path);
+    }
+
+    private static void SyncVideoCaptions(VideoFile videoFile, string path)
+    {
+        var sidecars = DiscoverCaptionSidecars(path);
+        var expected = sidecars.ToDictionary(item => item.Filename, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var existing in videoFile.Captions.ToList())
         {
-            foreach (var captionFile in Directory.EnumerateFiles(videoDir)
-                .Where(f => f.StartsWith(Path.Combine(videoDir, videoBaseName), StringComparison.OrdinalIgnoreCase)
-                    && (f.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))))
+            if (!expected.TryGetValue(existing.Filename, out var sidecar))
+            {
+                videoFile.Captions.Remove(existing);
+                continue;
+            }
+
+            existing.LanguageCode = sidecar.LanguageCode;
+            existing.CaptionType = sidecar.CaptionType;
+        }
+
+        var existingFilenames = videoFile.Captions
+            .Select(item => item.Filename)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sidecar in sidecars)
+        {
+            if (existingFilenames.Contains(sidecar.Filename))
+                continue;
+
+            videoFile.Captions.Add(new VideoCaption
+            {
+                LanguageCode = sidecar.LanguageCode,
+                CaptionType = sidecar.CaptionType,
+                Filename = sidecar.Filename,
+            });
+        }
+    }
+
+    private static List<CaptionSidecar> DiscoverCaptionSidecars(string path)
+    {
+        var videoDir = Path.GetDirectoryName(path);
+        if (videoDir == null || !Directory.Exists(videoDir))
+            return [];
+
+        var videoBaseName = Path.GetFileNameWithoutExtension(path);
+        return Directory.EnumerateFiles(videoDir)
+            .Where(f => f.StartsWith(Path.Combine(videoDir, videoBaseName), StringComparison.OrdinalIgnoreCase)
+                && (f.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".srt", StringComparison.OrdinalIgnoreCase)))
+            .Select(captionFile =>
             {
                 var captionFilename = Path.GetFileName(captionFile);
                 var ext = Path.GetExtension(captionFile).TrimStart('.').ToLowerInvariant();
-                // Try to extract language code from filename pattern: video.en.vtt or video.en.srt
                 var langCode = "00";
                 var nameWithoutExt = Path.GetFileNameWithoutExtension(captionFile);
                 var parts = nameWithoutExt.Split('.');
                 if (parts.Length >= 2)
                 {
                     var candidate = parts[^1];
-                    if (candidate.Length is 2 or 3) langCode = candidate.ToLowerInvariant();
+                    if (candidate.Length is 2 or 3)
+                        langCode = candidate.ToLowerInvariant();
                 }
-                videoFile.Captions.Add(new VideoCaption
-                {
-                    LanguageCode = langCode,
-                    CaptionType = ext,
-                    Filename = captionFilename
-                });
-            }
-        }
+
+                return new CaptionSidecar(captionFilename, langCode, ext);
+            })
+            .OrderBy(item => item.Filename, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task<Image> ProcessImageFileAsync(CoveContext db, string path, int? imageId, CancellationToken ct)
@@ -1059,6 +1119,105 @@ public class ScanService(
         return false;
     }
 
+    private static bool IsExcludedByFolderIgnore(string path, string rootPath, Dictionary<string, List<IgnoreRule>> ruleCache)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath))
+            return false;
+
+        var fullPath = NormalizePath(path);
+        var root = Directory.Exists(rootPath) ? NormalizePath(rootPath) : NormalizePath(Path.GetDirectoryName(rootPath) ?? rootPath);
+        var directory = Directory.Exists(fullPath) ? fullPath : Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(directory))
+            return false;
+
+        var ancestors = new Stack<string>();
+        for (var current = NormalizePath(directory); !string.IsNullOrWhiteSpace(current) && IsPathWithin(current, root); current = Path.GetDirectoryName(current))
+            ancestors.Push(current);
+
+        bool ignored = false;
+        while (ancestors.Count > 0)
+        {
+            var ruleDirectory = ancestors.Pop();
+            foreach (var rule in GetIgnoreRules(ruleDirectory, ruleCache))
+            {
+                var relativePath = Path.GetRelativePath(ruleDirectory, fullPath).Replace('\\', '/');
+                if (IgnoreRuleMatches(rule.Pattern, relativePath, Path.GetFileName(fullPath)))
+                    ignored = !rule.Negated;
+            }
+        }
+
+        return ignored;
+    }
+
+    private static List<IgnoreRule> GetIgnoreRules(string directory, Dictionary<string, List<IgnoreRule>> ruleCache)
+    {
+        if (ruleCache.TryGetValue(directory, out var cached))
+            return cached;
+
+        var rules = new List<IgnoreRule>();
+        foreach (var fileName in FolderIgnoreFileNames)
+        {
+            var ignoreFile = Path.Combine(directory, fileName);
+            if (!File.Exists(ignoreFile))
+                continue;
+
+            foreach (var line in File.ReadLines(ignoreFile))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0 || trimmed.StartsWith('#'))
+                    continue;
+
+                var negated = trimmed.StartsWith('!');
+                var pattern = (negated ? trimmed[1..] : trimmed).Trim().Replace('\\', '/');
+                if (pattern.Length > 0)
+                    rules.Add(new IgnoreRule(pattern, negated));
+            }
+        }
+
+        ruleCache[directory] = rules;
+        return rules;
+    }
+
+    private static bool IgnoreRuleMatches(string pattern, string relativePath, string fileName)
+    {
+        var normalizedPattern = pattern.TrimStart('/');
+        var directoryPattern = normalizedPattern.EndsWith('/');
+        if (directoryPattern)
+            normalizedPattern = normalizedPattern.TrimEnd('/');
+
+        if (normalizedPattern.Length == 0)
+            return false;
+
+        if (directoryPattern)
+        {
+            return relativePath.StartsWith(normalizedPattern + '/', StringComparison.OrdinalIgnoreCase)
+                || relativePath.Contains('/' + normalizedPattern + '/', StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (normalizedPattern.Contains('/'))
+            return FileSystemName.MatchesSimpleExpression(normalizedPattern, relativePath, ignoreCase: true);
+
+        return FileSystemName.MatchesSimpleExpression(normalizedPattern, fileName, ignoreCase: true)
+            || relativePath.Split('/').Any(segment => FileSystemName.MatchesSimpleExpression(normalizedPattern, segment, ignoreCase: true));
+    }
+
+    private static bool HasForceGalleryHints(IEnumerable<DiscoveredFile> files)
+    {
+        return files
+            .Select(file => Path.GetDirectoryName(file.Path))
+            .Where(directory => !string.IsNullOrWhiteSpace(directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Any(directory => File.Exists(Path.Combine(directory!, ".forcegallery")));
+    }
+
+    private static bool ShouldCreateFolderGallery(string folderPath, bool createAllEligibleFolders)
+    {
+        if (File.Exists(Path.Combine(folderPath, ".nogallery")))
+            return false;
+
+        return createAllEligibleFolders || File.Exists(Path.Combine(folderPath, ".forcegallery"));
+    }
+
     private static List<ScanTarget> ResolveScanTargets(CoveConfiguration cfg, List<string>? selectedPaths)
     {
         if (selectedPaths == null)
@@ -1108,7 +1267,11 @@ public class ScanService(
 
     private static string NormalizePath(string path) => Path.GetFullPath(path);
 
+    private static readonly string[] FolderIgnoreFileNames = [".coveignore", ".stashignore"];
+
+    private record CaptionSidecar(string Filename, string LanguageCode, string CaptionType);
     private record DiscoveredFile(string Path, string Extension);
+    private record IgnoreRule(string Pattern, bool Negated);
     private record ScanTarget(string Path, bool ExcludeVideo, bool ExcludeImage, bool ExcludeAudio, bool IsFile);
 
     /// <summary>

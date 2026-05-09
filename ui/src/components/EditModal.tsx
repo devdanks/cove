@@ -111,3 +111,35 @@ export function SaveButton({ loading, onClick }: { loading: boolean; onClick: ()
     </button>
   );
 }
+
+export function CreateModalActions({
+  loading,
+  onCancel,
+  onSave,
+  createAnother,
+  onCreateAnotherChange,
+}: {
+  loading: boolean;
+  onCancel?: () => void;
+  onSave: () => void;
+  createAnother: boolean;
+  onCreateAnotherChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <label className="flex items-center gap-2 text-sm text-secondary">
+        <input
+          type="checkbox"
+          checked={createAnother}
+          onChange={(event) => onCreateAnotherChange(event.target.checked)}
+          className="rounded bg-card border-border"
+        />
+        Create another
+      </label>
+      <div className="flex items-center justify-end gap-3">
+        {onCancel && <button onClick={onCancel} className="px-4 py-2 text-sm text-secondary hover:text-white">Cancel</button>}
+        <SaveButton loading={loading} onClick={onSave} />
+      </div>
+    </div>
+  );
+}

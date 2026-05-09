@@ -32,7 +32,6 @@ public class Studio : BaseEntity
     public ICollection<Gallery> Galleries { get; set; } = [];
     public ICollection<Image> Images { get; set; } = [];
     public ICollection<Group> Groups { get; set; } = [];
-    public Dictionary<string, object>? CustomFields { get; set; }
 }
 
 public class StudioUrl

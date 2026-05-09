@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
+using Cove.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Data.Repositories;
@@ -13,6 +14,209 @@ namespace Cove.Data.Repositories;
 /// </summary>
 internal static class FilterHelpers
 {
+    public static IQueryable<T> ApplyBooleanKeywordSearch<T>(IQueryable<T> query, string? search, params Expression<Func<T, string?>>[] selectors)
+    {
+        var groups = ParseKeywordSearch(search);
+        if (groups.Count == 0 || selectors.Length == 0) return query;
+
+        var parameter = Expression.Parameter(typeof(T), "entity");
+        Expression? anyGroup = null;
+
+        foreach (var group in groups)
+        {
+            Expression? allTerms = null;
+            foreach (var term in group)
+            {
+                var termExpression = BuildTermExpression(parameter, term.Value, selectors);
+                if (term.Negated) termExpression = Expression.Not(termExpression);
+                allTerms = allTerms == null ? termExpression : Expression.AndAlso(allTerms, termExpression);
+            }
+
+            if (allTerms != null)
+                anyGroup = anyGroup == null ? allTerms : Expression.OrElse(anyGroup, allTerms);
+        }
+
+        return anyGroup == null ? query : query.Where(Expression.Lambda<Func<T, bool>>(anyGroup, parameter));
+    }
+
+    public static IQueryable<T> ApplyCustomFieldCriterion<T>(this IQueryable<T> query, CoveContext db, string entityType, CustomFieldCriterion? criterion)
+        where T : BaseEntity
+    {
+        if (criterion is null || string.IsNullOrWhiteSpace(criterion.Key)) return query;
+
+        var key = criterion.Key.Trim();
+        var normalizedEntityType = entityType.Trim().ToLowerInvariant();
+        var values = db.CustomFieldValues.Where(value => value.EntityType == normalizedEntityType && value.Definition!.Key == key);
+
+        if (criterion.Modifier == CriterionModifier.IsNull)
+        {
+            return query.Where(entity => !values.Any(value => value.EntityId == entity.Id));
+        }
+
+        if (criterion.Modifier == CriterionModifier.NotNull)
+        {
+            return query.Where(entity => values.Any(value => value.EntityId == entity.Id));
+        }
+
+        if (string.IsNullOrWhiteSpace(criterion.Value)) return query;
+
+        var type = CustomFieldTypes.Normalize(criterion.Type);
+        if (CustomFieldTypes.IsNumberLike(type)) return ApplyNumberCustomField(query, values, criterion);
+        if (CustomFieldTypes.IsBoolean(type)) return ApplyBooleanCustomField(query, values, criterion);
+        if (CustomFieldTypes.IsDateLike(type)) return ApplyDateCustomField(query, values, criterion);
+        if (CustomFieldTypes.IsTimestampLike(type)) return ApplyTimestampCustomField(query, values, criterion);
+        if (CustomFieldTypes.IsReference(type)) return ApplyIntegerCustomField(query, values, criterion);
+
+        var text = criterion.Value.Trim();
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.TextValue == text)),
+            CriterionModifier.NotEquals => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.TextValue == text)),
+            CriterionModifier.Includes => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.TextValue != null && EF.Functions.ILike(value.TextValue, $"%{text}%"))),
+            CriterionModifier.Excludes => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.TextValue != null && EF.Functions.ILike(value.TextValue, $"%{text}%"))),
+            _ => query,
+        };
+    }
+
+    public static IQueryable<T> ApplyCustomFieldCriteria<T>(this IQueryable<T> query, CoveContext db, string entityType, CustomFieldCriterion? criterion, IEnumerable<CustomFieldCriterion>? criteria)
+        where T : BaseEntity
+    {
+        query = query.ApplyCustomFieldCriterion(db, entityType, criterion);
+        if (criteria is null) return query;
+
+        foreach (var clause in criteria)
+            query = query.ApplyCustomFieldCriterion(db, entityType, clause);
+
+        return query;
+    }
+
+    public static IQueryable<T> ApplyCustomFieldSort<T>(this IQueryable<T> query, CoveContext db, string entityType, string? sort, bool desc)
+        where T : BaseEntity
+    {
+        if (!TryParseCustomFieldSort(sort, out var key, out var type))
+            return query;
+
+        var normalizedEntityType = entityType.Trim().ToLowerInvariant();
+        var values = db.CustomFieldValues.Where(value => value.EntityType == normalizedEntityType && value.Definition!.Key == key);
+        if (CustomFieldTypes.IsNumberLike(type)) return SortByCustomField(query, values, value => value.NumberValue, desc);
+        if (CustomFieldTypes.IsBoolean(type)) return SortByCustomField(query, values, value => value.BoolValue, desc);
+        if (CustomFieldTypes.IsDateLike(type)) return SortByCustomField(query, values, value => value.DateValue, desc);
+        if (CustomFieldTypes.IsTimestampLike(type)) return SortByCustomField(query, values, value => value.TimestampValue, desc);
+        if (CustomFieldTypes.IsReference(type)) return SortByCustomField(query, values, value => value.IntegerValue, desc);
+        return SortByCustomField(query, values, value => value.TextValue, desc);
+    }
+
+    public static bool TryParseCustomFieldSort(string? sort, out string key, out string type)
+    {
+        key = string.Empty;
+        type = CustomFieldTypes.Text;
+        if (string.IsNullOrWhiteSpace(sort)) return false;
+
+        var parts = sort.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length < 2 || !string.Equals(parts[0], "custom", StringComparison.OrdinalIgnoreCase)) return false;
+
+        if (parts.Length >= 3)
+        {
+            type = CustomFieldTypes.Normalize(parts[1]);
+            key = parts[2];
+        }
+        else
+        {
+            key = parts[1];
+        }
+
+        return !string.IsNullOrWhiteSpace(key);
+    }
+
+    private static IQueryable<T> SortByCustomField<T, TValue>(IQueryable<T> query, IQueryable<CustomFieldValue> values, Expression<Func<CustomFieldValue, TValue?>> valueSelector, bool desc)
+        where T : BaseEntity
+    {
+        var sorted = query.Select(entity => new
+        {
+            Entity = entity,
+            Value = values.Where(value => value.EntityId == entity.Id).OrderBy(value => value.Position).Select(valueSelector).FirstOrDefault(),
+        });
+
+        return desc
+            ? sorted.OrderBy(item => item.Value == null).ThenByDescending(item => item.Value).ThenByDescending(item => item.Entity.Id).Select(item => item.Entity)
+            : sorted.OrderBy(item => item.Value == null).ThenBy(item => item.Value).ThenBy(item => item.Entity.Id).Select(item => item.Entity);
+    }
+
+    private static IQueryable<T> ApplyNumberCustomField<T>(IQueryable<T> query, IQueryable<CustomFieldValue> values, CustomFieldCriterion criterion)
+        where T : BaseEntity
+    {
+        if (!decimal.TryParse(criterion.Value, NumberStyles.Number, CultureInfo.InvariantCulture, out var number)) return query;
+        var number2 = decimal.TryParse(criterion.Value2, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsedNumber2) ? parsedNumber2 : number;
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.NumberValue == number)),
+            CriterionModifier.NotEquals => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.NumberValue == number)),
+            CriterionModifier.GreaterThan => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.NumberValue > number)),
+            CriterionModifier.LessThan => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.NumberValue < number)),
+            CriterionModifier.Between => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.NumberValue >= number && value.NumberValue <= number2)),
+            CriterionModifier.NotBetween => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.NumberValue >= number && value.NumberValue <= number2)),
+            _ => query,
+        };
+    }
+
+    private static IQueryable<T> ApplyIntegerCustomField<T>(IQueryable<T> query, IQueryable<CustomFieldValue> values, CustomFieldCriterion criterion)
+        where T : BaseEntity
+    {
+        if (!int.TryParse(criterion.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number)) return query;
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals or CriterionModifier.Includes => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.IntegerValue == number)),
+            CriterionModifier.NotEquals or CriterionModifier.Excludes => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.IntegerValue == number)),
+            _ => query,
+        };
+    }
+
+    private static IQueryable<T> ApplyBooleanCustomField<T>(IQueryable<T> query, IQueryable<CustomFieldValue> values, CustomFieldCriterion criterion)
+        where T : BaseEntity
+    {
+        if (!bool.TryParse(criterion.Value, out var boolValue)) return query;
+        return criterion.Modifier switch
+        {
+            CriterionModifier.NotEquals or CriterionModifier.Excludes => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.BoolValue == boolValue)),
+            _ => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.BoolValue == boolValue)),
+        };
+    }
+
+    private static IQueryable<T> ApplyDateCustomField<T>(IQueryable<T> query, IQueryable<CustomFieldValue> values, CustomFieldCriterion criterion)
+        where T : BaseEntity
+    {
+        if (!DateOnly.TryParse(criterion.Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) return query;
+        var date2 = DateOnly.TryParse(criterion.Value2, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate2) ? parsedDate2 : date;
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.DateValue == date)),
+            CriterionModifier.NotEquals => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.DateValue == date)),
+            CriterionModifier.GreaterThan => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.DateValue > date)),
+            CriterionModifier.LessThan => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.DateValue < date)),
+            CriterionModifier.Between => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.DateValue >= date && value.DateValue <= date2)),
+            CriterionModifier.NotBetween => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.DateValue >= date && value.DateValue <= date2)),
+            _ => query,
+        };
+    }
+
+    private static IQueryable<T> ApplyTimestampCustomField<T>(IQueryable<T> query, IQueryable<CustomFieldValue> values, CustomFieldCriterion criterion)
+        where T : BaseEntity
+    {
+        if (!DateTime.TryParse(criterion.Value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var timestamp)) return query;
+        var timestamp2 = DateTime.TryParse(criterion.Value2, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsedTimestamp2) ? parsedTimestamp2 : timestamp;
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.TimestampValue == timestamp)),
+            CriterionModifier.NotEquals => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.TimestampValue == timestamp)),
+            CriterionModifier.GreaterThan => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.TimestampValue > timestamp)),
+            CriterionModifier.LessThan => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.TimestampValue < timestamp)),
+            CriterionModifier.Between => query.Where(entity => values.Any(value => value.EntityId == entity.Id && value.TimestampValue >= timestamp && value.TimestampValue <= timestamp2)),
+            CriterionModifier.NotBetween => query.Where(entity => !values.Any(value => value.EntityId == entity.Id && value.TimestampValue >= timestamp && value.TimestampValue <= timestamp2)),
+            _ => query,
+        };
+    }
+
+
     /// <summary>Apply an IntCriterion to a queryable using an expression selector.</summary>
     public static IQueryable<T> ApplyInt<T>(IQueryable<T> query, IntCriterion? criterion, Expression<Func<T, int>> selector)
     {
@@ -82,6 +286,15 @@ internal static class FilterHelpers
     /// <summary>Apply a studio (single FK) MultiIdCriterion.</summary>
     public static IQueryable<T> ApplyStudioCriterion<T>(IQueryable<T> query, MultiIdCriterion? criterion, Expression<Func<T, int?>> studioIdSelector)
     {
+        if (criterion?.Modifier == CriterionModifier.IsNull || criterion?.Modifier == CriterionModifier.NotNull)
+        {
+            var nullParam = studioIdSelector.Parameters[0];
+            var nullBody = studioIdSelector.Body;
+            var hasStudioValue = Expression.Property(nullBody, "HasValue");
+            Expression nullPredicate = criterion.Modifier == CriterionModifier.IsNull ? Expression.Not(hasStudioValue) : hasStudioValue;
+            return query.Where(Expression.Lambda<Func<T, bool>>(nullPredicate, nullParam));
+        }
+
         if (criterion == null || (criterion.Value.Count == 0 && (criterion.Excludes == null || criterion.Excludes.Count == 0)))
         {
             return query;
@@ -461,6 +674,130 @@ internal static class FilterHelpers
             Expression.Equal(parentFolder, Expression.Constant(null, typeof(Folder))),
             basename,
             combinedPath);
+    }
+
+    private static Expression BuildTermExpression<T>(ParameterExpression parameter, string value, Expression<Func<T, string?>>[] selectors)
+    {
+        var normalizedValue = Expression.Constant(value.ToLower());
+        var stringContains = typeof(string).GetMethod(nameof(string.Contains), [typeof(string)])!;
+        var stringToLower = typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!;
+        Expression? anyField = null;
+
+        foreach (var selector in selectors)
+        {
+            var body = new ParameterReplaceVisitor(selector.Parameters[0], parameter).Visit(selector.Body)!;
+            var coalesced = Expression.Coalesce(body, Expression.Constant(string.Empty));
+            var lowered = Expression.Call(coalesced, stringToLower);
+            var contains = Expression.Call(lowered, stringContains, normalizedValue);
+            anyField = anyField == null ? contains : Expression.OrElse(anyField, contains);
+        }
+
+        return anyField ?? Expression.Constant(false);
+    }
+
+    private static List<List<SearchTerm>> ParseKeywordSearch(string? search)
+    {
+        var tokens = TokenizeSearch(search);
+        var groups = new List<List<SearchTerm>>();
+        var current = new List<SearchTerm>();
+        var negateNext = false;
+
+        foreach (var token in tokens)
+        {
+            if (token.Equals("OR", StringComparison.OrdinalIgnoreCase))
+            {
+                if (current.Count > 0)
+                {
+                    groups.Add(current);
+                    current = [];
+                }
+                negateNext = false;
+                continue;
+            }
+
+            if (token.Equals("AND", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (token.Equals("NOT", StringComparison.OrdinalIgnoreCase))
+            {
+                negateNext = true;
+                continue;
+            }
+
+            var value = token;
+            var negated = negateNext;
+            negateNext = false;
+            if (value.StartsWith("-", StringComparison.Ordinal) && value.Length > 1)
+            {
+                negated = true;
+                value = value[1..];
+            }
+
+            if (!string.IsNullOrWhiteSpace(value))
+                current.Add(new SearchTerm(value, negated));
+        }
+
+        if (current.Count > 0) groups.Add(current);
+        return groups;
+    }
+
+    private static List<string> TokenizeSearch(string? search)
+    {
+        var tokens = new List<string>();
+        if (string.IsNullOrWhiteSpace(search)) return tokens;
+
+        var current = new List<char>();
+        var inQuote = false;
+        for (var i = 0; i < search.Length; i++)
+        {
+            var ch = search[i];
+            if (ch == '"')
+            {
+                if (inQuote)
+                {
+                    if (current.Count > 0)
+                    {
+                        tokens.Add(new string(current.ToArray()));
+                        current.Clear();
+                    }
+                    inQuote = false;
+                }
+                else
+                {
+                    if (current.Count > 0)
+                    {
+                        tokens.Add(new string(current.ToArray()));
+                        current.Clear();
+                    }
+                    inQuote = true;
+                }
+                continue;
+            }
+
+            if (!inQuote && char.IsWhiteSpace(ch))
+            {
+                if (current.Count > 0)
+                {
+                    tokens.Add(new string(current.ToArray()));
+                    current.Clear();
+                }
+                continue;
+            }
+
+            current.Add(ch);
+        }
+
+        if (current.Count > 0)
+            tokens.Add(new string(current.ToArray()));
+
+        return tokens;
+    }
+
+    private sealed record SearchTerm(string Value, bool Negated);
+
+    private sealed class ParameterReplaceVisitor(ParameterExpression from, ParameterExpression to) : ExpressionVisitor
+    {
+        protected override Expression VisitParameter(ParameterExpression node) => node == from ? to : base.VisitParameter(node);
     }
 
     private static string NormalizePathValue(string value) => value.Replace("\\", "/");

@@ -34,6 +34,8 @@ interface RouteRegistryContextValue {
   slots: SlotEntry[];
   register: (entry: RouteEntry) => void;
   registerSlot: (entry: SlotEntry) => void;
+  unregister: (page: string) => void;
+  unregisterSlot: (id: string) => void;
 }
 
 const RouteRegistryContext = createContext<RouteRegistryContextValue | null>(null);
@@ -67,8 +69,16 @@ export function RouteRegistryProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const unregister = useCallback((page: string) => {
+    setRoutes((prev) => prev.filter((route) => route.page !== page));
+  }, []);
+
+  const unregisterSlot = useCallback((id: string) => {
+    setSlots((prev) => prev.filter((slot) => slot.id !== id));
+  }, []);
+
   return (
-    <RouteRegistryContext.Provider value={{ routes, slots, register, registerSlot }}>
+    <RouteRegistryContext.Provider value={{ routes, slots, register, registerSlot, unregister, unregisterSlot }}>
       {children}
     </RouteRegistryContext.Provider>
   );

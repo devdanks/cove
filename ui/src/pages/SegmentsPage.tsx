@@ -247,7 +247,7 @@ export function SegmentsPage({ onNavigate }: Props) {
     });
   }, [filter, pageNumber, perPage, setFilter, totalCount]);
 
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(selectionItems);
+  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(selectionItems);
   const selecting = selectedIds.size > 0;
   const appliedQuerySelectionKey = appliedQuery == null ? "" : JSON.stringify(appliedQuery);
   const selectedEntries = useMemo<AddToGroupEntry[]>(() => spanItems
@@ -354,6 +354,7 @@ export function SegmentsPage({ onNavigate }: Props) {
         selectedIds={selectedIds}
         onSelectAll={selectAll}
         onSelectNone={selectNone}
+        onInvertSelection={invertSelection}
         selectionActions={
           <>
             {isRawView && canDeleteSegments && selectedRawSegments.length > 0 ? (

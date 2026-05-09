@@ -13,6 +13,7 @@
  */
 import { useEffect, useState, createContext, useContext, useCallback, type ReactNode, type FC } from "react";
 import { useRouteRegistry } from "../router/RouteRegistry";
+import { useAppConfig } from "../state/AppConfigContext";
 import { extensions } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
@@ -164,8 +165,10 @@ function readStoredStyleOptions(): Record<string, Record<string, string>> {
 }
 
 export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
-  const { register, registerSlot } = useRouteRegistry();
+  const { register, registerSlot, unregister, unregisterSlot } = useRouteRegistry();
+  const { config } = useAppConfig();
   const { user, hasPermission } = useAuth();
+  const troubleshootingMode = config?.ui.troubleshootingModeEnabled === true;
   const userThemePreferences = supportsServerBackedUiPreferences(user) ? user.uiPreferences?.theme ?? null : null;
   const [manifest, setManifest] = useState<ExtensionManifest | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -276,7 +279,17 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
 
   // Fetch manifest on mount
   useEffect(() => {
+    if (troubleshootingMode) {
+      setManifest(null);
+      setError(undefined);
+      setLoaded(true);
+      document.getElementById("cove-extension-css-bundle")?.remove();
+      return;
+    }
+
     let cancelled = false;
+    const registeredRoutes: string[] = [];
+    const registeredSlots: string[] = [];
     (async () => {
       try {
         const m = await extensions.getManifest();
@@ -295,6 +308,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
                 order: page.navOrder,
               },
             });
+            registeredRoutes.push(page.route);
           }
         }
 
@@ -334,6 +348,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
               render: () => <div dangerouslySetInnerHTML={{ __html: slot.html! }} />,
               order: slot.order,
             });
+            registeredSlots.push(slot.id);
           } else if (slot.contentType === "component" && slot.componentName) {
             const Component = resolveComponent(slot.componentName);
             if (Component) {
@@ -343,6 +358,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
                 render: (props) => <Component {...props} />,
                 order: slot.order,
               });
+              registeredSlots.push(slot.id);
             }
           }
         }
@@ -366,12 +382,17 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         }
       }
     })();
-    return () => { cancelled = true; };
-  }, [register, registerSlot]);
+    return () => {
+      cancelled = true;
+      registeredRoutes.forEach(unregister);
+      registeredSlots.forEach(unregisterSlot);
+      document.getElementById("cove-extension-css-bundle")?.remove();
+    };
+  }, [register, registerSlot, troubleshootingMode, unregister, unregisterSlot]);
 
   // Apply active theme CSS variables and bundled component style
   useEffect(() => {
-    if (!manifest) return;
+    if (!manifest || troubleshootingMode) return;
 
     const existingStyle = document.getElementById("cove-theme-override");
     if (existingStyle) existingStyle.remove();
@@ -457,17 +478,27 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
       document.documentElement.removeAttribute("data-theme-bg-animation");
       document.documentElement.removeAttribute("data-color-scheme");
     };
-  }, [activeThemeId, manifest, customThemeColors]);
+  }, [activeThemeId, manifest, customThemeColors, troubleshootingMode]);
 
   // Apply component style data attribute (space-separated for composability)
   useEffect(() => {
+    if (troubleshootingMode) {
+      document.documentElement.removeAttribute("data-component-style");
+      return;
+    }
     const styleStr = [...activeComponentStyles].join(" ");
     document.documentElement.setAttribute("data-component-style", styleStr);
     return () => { document.documentElement.removeAttribute("data-component-style"); };
-  }, [activeComponentStyles]);
+  }, [activeComponentStyles, troubleshootingMode]);
 
   // Apply style options (data attributes + CSS custom properties) for the current session
   useEffect(() => {
+    if (troubleshootingMode) {
+      for (const key of Object.keys(document.documentElement.dataset)) {
+        if (key.startsWith("style")) delete document.documentElement.dataset[key];
+      }
+      return;
+    }
     try {
       const raw = userThemePreferences?.styleOptions ?? readStoredStyleOptions();
       // CSS custom property mapping for range-type style configs
@@ -494,13 +525,17 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch { /* ignore parse errors */ }
-  }, [userThemePreferences]);
+  }, [userThemePreferences, troubleshootingMode]);
 
   // Apply layout style data attribute
   useEffect(() => {
+    if (troubleshootingMode) {
+      document.documentElement.removeAttribute("data-layout");
+      return;
+    }
     document.documentElement.setAttribute("data-layout", activeLayoutStyle);
     return () => { document.documentElement.removeAttribute("data-layout"); };
-  }, [activeLayoutStyle]);
+  }, [activeLayoutStyle, troubleshootingMode]);
 
   // Derived lookups
   const getTabsForPage = useCallback(

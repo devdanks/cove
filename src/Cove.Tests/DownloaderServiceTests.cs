@@ -677,13 +677,6 @@ public class DownloaderServiceTests
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-            modelBuilder.Entity<Scene>().Ignore(item => item.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(item => item.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(item => item.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(item => item.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(item => item.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(item => item.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(item => item.CustomFields);
         }
     }
 

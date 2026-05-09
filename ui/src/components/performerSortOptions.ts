@@ -4,6 +4,8 @@ export const PERFORMER_SORT_OPTIONS: { value: string; label: string }[] = [
   { value: "scene_count", label: "Scene Count" },
   { value: "image_count", label: "Image Count" },
   { value: "gallery_count", label: "Gallery Count" },
+  { value: "latest_scene_date", label: "Latest Scene Date" },
+  { value: "total_file_size", label: "Total File Size" },
   { value: "tag_count", label: "Tag Count" },
   { value: "career_length", label: "Career Length" },
   { value: "last_like_at", label: "Last Like At" },

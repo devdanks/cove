@@ -1,3 +1,4 @@
+using Cove.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -32,7 +33,7 @@ public class CleanService(
                 var scene = scenes[i];
                 var file = scene.Files.FirstOrDefault();
 
-                if (file == null || !File.Exists(file.Path))
+                if (!CleanFileExists(file))
                 {
                     orphanSceneIds.Add(scene.Id);
                 }
@@ -51,7 +52,7 @@ public class CleanService(
                 ct.ThrowIfCancellationRequested();
                 var img = images[i];
                 var file = img.Files.FirstOrDefault();
-                if (file == null || !File.Exists(file.Path))
+                if (!CleanFileExists(file))
                 {
                     orphanImageIds.Add(img.Id);
                 }
@@ -67,7 +68,7 @@ public class CleanService(
             foreach (var gallery in galleries)
             {
                 ct.ThrowIfCancellationRequested();
-                if (gallery.Folder != null && !Directory.Exists(gallery.Folder.Path))
+                if (gallery.Folder != null && !CleanFolderExists(gallery.Folder))
                 {
                     orphanGalleryIds.Add(gallery.Id);
                 }
@@ -101,5 +102,24 @@ public class CleanService(
                 logger.LogInformation("Removed {Count} orphaned galleries", orphanGalleryIds.Count);
             }
         }, exclusive: false);
+    }
+
+    private static bool CleanFileExists(BaseFileEntity? file)
+    {
+        if (file == null)
+            return false;
+
+        if (file.ZipFileId.HasValue)
+            return true;
+
+        return File.Exists(file.Path);
+    }
+
+    private static bool CleanFolderExists(Folder folder)
+    {
+        if (folder.ZipFileId.HasValue)
+            return true;
+
+        return Directory.Exists(folder.Path);
     }
 }

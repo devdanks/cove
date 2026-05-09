@@ -92,7 +92,7 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
           <div className="mt-3 flex flex-wrap gap-2 text-xs text-secondary">
             {normalizedItems.slice(0, 6).map((item) => (
               <span key={item.key} className="rounded-full border border-border bg-surface px-2 py-1">
-                {item.title || `Scene #${item.sceneId}`}
+                {item.title || "Untitled scene"}
               </span>
             ))}
             {normalizedItems.length > 6 ? (

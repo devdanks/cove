@@ -1,4 +1,5 @@
 using Cove.Api.Controllers;
+using Cove.Api.Services;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
@@ -162,7 +163,7 @@ public class SceneEngagementControllerTests
         var repository = new SceneRepository(context);
         var engagementService = new UserEngagementService(context, principalAccessor);
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        return new ScenesController(repository, context, null!, null!, null!, memoryCache, null!, null!, null!, engagementService, null, principalAccessor);
+        return new ScenesController(repository, context, null!, null!, null!, memoryCache, null!, null!, null!, engagementService, new CustomFieldService(context), null, principalAccessor);
     }
 
     private static PlaybackController CreatePlaybackController(CoveContext context, CurrentPrincipalAccessor principalAccessor)
@@ -204,14 +205,6 @@ public class SceneEngagementControllerTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
-            modelBuilder.Entity<Face>().Ignore(face => face.CustomFields);
         }
     }
 

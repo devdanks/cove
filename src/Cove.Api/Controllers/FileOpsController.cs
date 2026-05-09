@@ -127,18 +127,32 @@ public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger
             .FirstOrDefaultAsync(f => f.Id == id, ct);
         if (file == null) return NotFound();
 
-        var filePath = Path.Combine(file.ParentFolder?.Path ?? "", file.Basename);
+        var filePath = NormalizeLocalPath(!string.IsNullOrWhiteSpace(file.Path)
+            ? file.Path
+            : Path.Combine(file.ParentFolder?.Path ?? "", file.Basename));
         if (!System.IO.File.Exists(filePath))
             return NotFound("File does not exist on disk");
 
         try
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                Process.Start("explorer.exe", $"/select,\"{filePath}\"");
+            {
+                var startInfo = new ProcessStartInfo("explorer.exe");
+                startInfo.ArgumentList.Add("/select,");
+                startInfo.ArgumentList.Add(filePath);
+                Process.Start(startInfo);
+            }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                Process.Start("open", $"-R \"{filePath}\"");
+            {
+                var startInfo = new ProcessStartInfo("open");
+                startInfo.ArgumentList.Add("-R");
+                startInfo.ArgumentList.Add(filePath);
+                Process.Start(startInfo);
+            }
             else
+            {
                 Process.Start("xdg-open", Path.GetDirectoryName(filePath) ?? filePath);
+            }
 
             return Ok();
         }
@@ -156,17 +170,28 @@ public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger
         var folder = await db.Folders.FirstOrDefaultAsync(f => f.Id == id, ct);
         if (folder == null) return NotFound();
 
-        if (!Directory.Exists(folder.Path))
+        var folderPath = NormalizeLocalPath(folder.Path);
+        if (!Directory.Exists(folderPath))
             return NotFound("Folder does not exist on disk");
 
         try
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                Process.Start("explorer.exe", $"\"{folder.Path}\"");
+            {
+                var startInfo = new ProcessStartInfo("explorer.exe");
+                startInfo.ArgumentList.Add(folderPath);
+                Process.Start(startInfo);
+            }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                Process.Start("open", $"\"{folder.Path}\"");
+            {
+                var startInfo = new ProcessStartInfo("open");
+                startInfo.ArgumentList.Add(folderPath);
+                Process.Start(startInfo);
+            }
             else
-                Process.Start("xdg-open", folder.Path);
+            {
+                Process.Start("xdg-open", folderPath);
+            }
 
             return Ok();
         }
@@ -199,5 +224,20 @@ public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger
 
         await db.SaveChangesAsync(ct);
         return Ok(new { updated = dto.Fingerprints.Count });
+    }
+
+    private static string NormalizeLocalPath(string path)
+    {
+        var normalized = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? path.Replace('/', Path.DirectorySeparatorChar)
+            : path;
+        if (OperatingSystem.IsWindows())
+        {
+            if (normalized.Length > 2 && normalized[1] == ':' && normalized[2] != '\\')
+            {
+                normalized = normalized[..2] + Path.DirectorySeparatorChar + normalized[2..].TrimStart('\\');
+            }
+        }
+        return Path.GetFullPath(normalized);
     }
 }

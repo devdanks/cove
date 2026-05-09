@@ -1,4 +1,3 @@
-using System.Threading.Channels;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -10,7 +9,8 @@ namespace Cove.Api.Services;
 
 public class JobService : IJobService, IHostedService
 {
-    private readonly Channel<JobEntry> _queue = Channel.CreateUnbounded<JobEntry>();
+    private readonly List<JobEntry> _exclusiveQueue = [];
+    private readonly SemaphoreSlim _queueSignal = new(0);
     private readonly Dictionary<string, JobEntry> _jobs = [];
     private readonly List<JobInfo> _history = [];
     private readonly Lock _lock = new();
@@ -57,12 +57,15 @@ public class JobService : IJobService, IHostedService
             Work = work
         };
 
-        lock (_lock) { _jobs[entry.Id] = entry; }
+        lock (_lock)
+        {
+            _jobs[entry.Id] = entry;
+            if (exclusive)
+                _exclusiveQueue.Add(entry);
+        }
 
         if (exclusive)
-        {
-            _queue.Writer.TryWrite(entry);
-        }
+            _queueSignal.Release();
         else
         {
             _ = RunConcurrentJobAsync(entry);
@@ -75,9 +78,20 @@ public class JobService : IJobService, IHostedService
 
     public bool Cancel(string jobId)
     {
+        JobEntry? cancelledPending = null;
         lock (_lock)
         {
-            if (_jobs.TryGetValue(jobId, out var entry) && entry.Cts != null)
+            if (!_jobs.TryGetValue(jobId, out var entry))
+                return false;
+
+            if (entry.Status == JobStatus.Pending)
+            {
+                entry.Status = JobStatus.Cancelled;
+                entry.CompletedAt = DateTime.UtcNow;
+                _exclusiveQueue.Remove(entry);
+                cancelledPending = entry;
+            }
+            else if (entry.Cts != null)
             {
                 entry.Cts.Cancel();
                 entry.Status = JobStatus.Cancelled;
@@ -85,7 +99,41 @@ public class JobService : IJobService, IHostedService
                 return true;
             }
         }
+
+        if (cancelledPending != null)
+        {
+            NotifyClients(cancelledPending);
+            MoveToHistory(cancelledPending);
+            return true;
+        }
+
         return false;
+    }
+
+    public bool ReorderQueued(string jobId, string? beforeJobId)
+    {
+        JobEntry? moved;
+        lock (_lock)
+        {
+            var currentIndex = _exclusiveQueue.FindIndex(job => string.Equals(job.Id, jobId, StringComparison.OrdinalIgnoreCase));
+            if (currentIndex < 0 || _exclusiveQueue[currentIndex].Status != JobStatus.Pending)
+                return false;
+
+            moved = _exclusiveQueue[currentIndex];
+            _exclusiveQueue.RemoveAt(currentIndex);
+
+            var targetIndex = string.IsNullOrWhiteSpace(beforeJobId)
+                ? -1
+                : _exclusiveQueue.FindIndex(job => string.Equals(job.Id, beforeJobId, StringComparison.OrdinalIgnoreCase) && job.Status == JobStatus.Pending);
+
+            if (targetIndex < 0)
+                _exclusiveQueue.Add(moved);
+            else
+                _exclusiveQueue.Insert(targetIndex, moved);
+        }
+
+        NotifyClients(moved);
+        return true;
     }
 
     public JobInfo? GetJob(string jobId)
@@ -101,7 +149,17 @@ public class JobService : IJobService, IHostedService
 
     public IReadOnlyList<JobInfo> GetAllJobs()
     {
-        lock (_lock) { return _jobs.Values.Where(j => j.Status is JobStatus.Pending or JobStatus.Running).Select(j => j.ToInfo()).ToList(); }
+        lock (_lock)
+        {
+            var queuedIds = _exclusiveQueue.Select(job => job.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var running = _jobs.Values
+                .Where(job => job.Status == JobStatus.Running || (job.Status == JobStatus.Pending && !queuedIds.Contains(job.Id)))
+                .Select(job => job.ToInfo());
+            var queued = _exclusiveQueue
+                .Where(job => job.Status == JobStatus.Pending)
+                .Select(job => job.ToInfo());
+            return running.Concat(queued).ToList();
+        }
     }
 
     public IReadOnlyList<JobInfo> GetJobHistory()
@@ -111,8 +169,28 @@ public class JobService : IJobService, IHostedService
 
     private async Task ProcessQueueAsync(CancellationToken ct)
     {
-        await foreach (var entry in _queue.Reader.ReadAllAsync(ct))
+        while (!ct.IsCancellationRequested)
         {
+            await _queueSignal.WaitAsync(ct);
+
+            JobEntry? entry = null;
+            lock (_lock)
+            {
+                while (_exclusiveQueue.Count > 0)
+                {
+                    var candidate = _exclusiveQueue[0];
+                    _exclusiveQueue.RemoveAt(0);
+                    if (candidate.Status == JobStatus.Pending)
+                    {
+                        entry = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (entry == null)
+                continue;
+
             entry.Cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             entry.Status = JobStatus.Running;
             entry.StartedAt = DateTime.UtcNow;

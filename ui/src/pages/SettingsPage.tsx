@@ -32,7 +32,7 @@ import {
   UserCog,
   X,
 } from "lucide-react";
-import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi } from "../api/client";
+import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi, customFields as customFieldsApi } from "../api/client";
 import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, StashAiImportResult, UserRow } from "../api/client";
 import type {
   JobInfo,
@@ -46,6 +46,9 @@ import type {
   MetadataServer,
   CoveConfig,
   CovePathConfig,
+  CustomFieldDefinition,
+  CustomFieldEntityType,
+  CustomFieldType,
   DownloaderDescriptor,
   DownloaderPathOverrideConfig,
   IdentifyDefaultsConfig,
@@ -60,6 +63,7 @@ import { LOCATION_CHANGE_EVENT, buildCurrentUrl, navigateToUrl } from "../router
 import { DisplayProfilesSettingsPanel } from "./settings/DisplayProfilesSettingsPanel";
 import { AiDataSettingsPanel } from "./settings/AiDataSettingsPanel";
 import { SortableList } from "../components/SortableList";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS,
   formatBatchDownloadSummary,
@@ -72,6 +76,9 @@ import { isLimitedPrimarySettingsTabVisible } from "./settings/tabVisibility";
 import { defaultRatingSystemOptions, normalizeRatingOptions } from "../components/Rating";
 import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
+import { KEYBINDING_GROUPS, keybindingDefault } from "../keyboard/keybindings";
+import { readStoredKeybindingOverrides, writeStoredKeybindingOverrides } from "../hooks/useResolvedKeybindingOverrides";
+import { useCustomFieldDefinitions } from "../hooks/useCustomFieldDefinitions";
 
 type SettingsTab = "tasks" | "library" | "interface" | "user-settings" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
@@ -83,6 +90,8 @@ type ResolvedTrackingPreferences = {
   minDerivedLikeSessionSeconds: number;
   sessionIdleTimeoutSec: number;
 };
+
+type CustomFieldDefinitionDraft = CustomFieldDefinition & { draftId: string; isNew?: boolean };
 
 const defaultTrackingPreferences: ResolvedTrackingPreferences = {
   enabled: true,
@@ -175,6 +184,8 @@ const DEFAULT_GENERATE_OPTIONS: GenerateOptions = {
   previews: false,
   sprites: false,
   markers: false,
+  segmentThumbnails: false,
+  segmentPreviews: false,
   phashes: false,
   md5: false,
   imageThumbnails: false,
@@ -365,6 +376,36 @@ const METADATA_BATCH_EXCLUDE_OPTIONS = [
   { id: "parent", label: "Parent studio" },
 ];
 
+const customFieldEntityOptions: { value: CustomFieldEntityType; label: string }[] = [
+  { value: "scene", label: "Scenes" },
+  { value: "performer", label: "Performers" },
+  { value: "tag", label: "Tags" },
+  { value: "studio", label: "Studios" },
+  { value: "gallery", label: "Galleries" },
+  { value: "image", label: "Images" },
+  { value: "group", label: "Groups" },
+];
+
+const customFieldTypeOptions: { value: CustomFieldType; label: string }[] = [
+  { value: "text", label: "Text" },
+  { value: "longText", label: "Long Text" },
+  { value: "number", label: "Number" },
+  { value: "boolean", label: "Boolean" },
+  { value: "date", label: "Date" },
+  { value: "timestamp", label: "Timestamp" },
+  { value: "url", label: "URL" },
+  { value: "enum", label: "Enum" },
+  { value: "duration", label: "Duration" },
+  { value: "percent", label: "Percent" },
+  { value: "tag", label: "Tag Reference" },
+  { value: "performer", label: "Performer Reference" },
+  { value: "studio", label: "Studio Reference" },
+  { value: "scene", label: "Scene Reference" },
+  { value: "gallery", label: "Gallery Reference" },
+  { value: "image", label: "Image Reference" },
+  { value: "group", label: "Group Reference" },
+];
+
 function cloneConfig(config: CoveConfig): CoveConfig {
   return JSON.parse(JSON.stringify(config)) as CoveConfig;
 }
@@ -375,6 +416,53 @@ function linesToList(value: string) {
 
 function listToLines(values: string[]) {
   return values.join("\n");
+}
+
+function createCustomFieldDraftId(seed: string) {
+  return `custom-field-${seed}`;
+}
+
+function toCustomFieldDefinitionDraft(definition: CustomFieldDefinition, index = 0): CustomFieldDefinitionDraft {
+  return {
+    ...definition,
+    draftId: createCustomFieldDraftId(definition.id > 0 ? String(definition.id) : `${definition.key || "draft"}-${index}`),
+  };
+}
+
+function createCustomFieldDefinitionDraft(index: number): CustomFieldDefinitionDraft {
+  const now = new Date().toISOString();
+  return {
+    draftId: createCustomFieldDraftId(`${Date.now()}-${index}`),
+    id: -Date.now() - index,
+    key: "",
+    label: "",
+    type: "text",
+    entityTypes: ["scene"],
+    options: [],
+    filterable: true,
+    sortable: false,
+    isMultiValue: false,
+    displayOrder: index * 10,
+    createdAt: now,
+    updatedAt: now,
+    isNew: true,
+  };
+}
+
+function sanitizeCustomFieldDefinitionDraft(definition: CustomFieldDefinitionDraft) {
+  return {
+    key: definition.key.trim() || undefined,
+    label: definition.label.trim(),
+    type: definition.type,
+    entityTypes: definition.entityTypes.filter(Boolean),
+    options: (definition.type === "enum" ? definition.options : [])
+      .map((option) => option.trim())
+      .filter((option, index, items) => option !== "" && items.findIndex((candidate) => candidate.toLowerCase() === option.toLowerCase()) === index),
+    filterable: definition.filterable,
+    sortable: definition.sortable,
+    isMultiValue: definition.isMultiValue,
+    displayOrder: definition.displayOrder,
+  };
 }
 
 function normalizeConfig(config: CoveConfig): CoveConfig {
@@ -405,6 +493,14 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
     interface: {
       ...config.interface,
       menuItems: config.interface.menuItems.filter(Boolean),
+    },
+    ui: {
+      ...config.ui,
+      keybindingOverrides: Object.fromEntries(
+        Object.entries(config.ui.keybindingOverrides ?? {})
+          .map(([key, value]) => [key.trim(), value.trim()])
+          .filter(([key, value]) => key !== "" && value !== "")
+      ),
     },
     security: {
       ...config.security,
@@ -464,10 +560,19 @@ export function SettingsPage() {
   const [authGroupOpen, setAuthGroupOpen] = useState(() => authTabKeys.has(readSettingsTabFromUrl()));
   const [draftState, setDraft] = useState<CoveConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDefinitionDraft[]>([]);
   const initializedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const [metadataServerValidation, setMetadataServerValidation] = useState<Record<string, MetadataServerValidationResult>>({});
+
+  const customFieldsQuery = useCustomFieldDefinitions(undefined, canWriteSystemSettings && activeTab === "interface");
+
+  useEffect(() => {
+    if (customFieldsQuery.data) {
+      setCustomFieldDrafts(customFieldsQuery.data.map((definition, index) => toCustomFieldDefinitionDraft(definition, index)));
+    }
+  }, [customFieldsQuery.data]);
 
   const securityUsersQ = useQuery<UserRow[]>({
     queryKey: ["admin", "users", "security"],
@@ -483,6 +588,31 @@ export function SettingsPage() {
 
   const shutdownMutation = useMutation({
     mutationFn: system.shutdown,
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const saveCustomFieldDefinitionMutation = useMutation({
+    mutationFn: async (definition: CustomFieldDefinitionDraft) => {
+      const payload = sanitizeCustomFieldDefinitionDraft(definition);
+      return definition.isNew || definition.id <= 0
+        ? customFieldsApi.create(payload)
+        : customFieldsApi.update(definition.id, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["custom-fields"] });
+      setError(null);
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const deleteCustomFieldDefinitionMutation = useMutation({
+    mutationFn: (definition: CustomFieldDefinitionDraft) => definition.isNew || definition.id <= 0
+      ? Promise.resolve()
+      : customFieldsApi.delete(definition.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["custom-fields"] });
+      setError(null);
+    },
     onError: (err: Error) => setError(err.message),
   });
 
@@ -587,6 +717,15 @@ export function SettingsPage() {
       savingRef.current = true;
       queryClient.setQueryData(["system-config"], savedConfig);
       queryClient.invalidateQueries({ queryKey: ["system-scrapers"] });
+      setError(null);
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const uploadFaviconMutation = useMutation({
+    mutationFn: system.uploadFavicon,
+    onSuccess: (result) => {
+      updateDraft((current) => ({ ...current, ui: { ...current.ui, faviconPath: result.path } }));
       setError(null);
     },
     onError: (err: Error) => setError(err.message),
@@ -699,6 +838,31 @@ export function SettingsPage() {
 
   const updateDraft = (updater: (current: CoveConfig) => CoveConfig) => {
     setDraft((current) => (current ? updater(current) : current));
+  };
+
+  const updateCustomFieldDefinition = (index: number, updater: (definition: CustomFieldDefinitionDraft) => CustomFieldDefinitionDraft) => {
+    setCustomFieldDrafts((current) => current.map((definition, candidateIndex) => candidateIndex === index ? updater(definition) : definition));
+  };
+
+  const addCustomFieldDefinition = () => {
+    setCustomFieldDrafts((current) => [...current, createCustomFieldDefinitionDraft(current.length)]);
+  };
+
+  const removeCustomFieldDefinition = (index: number) => {
+    const definition = customFieldDrafts[index];
+    if (!definition) return;
+    setCustomFieldDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index));
+    deleteCustomFieldDefinitionMutation.mutate(definition);
+  };
+
+  const toggleCustomFieldEntity = (index: number, entityType: CustomFieldEntityType) => {
+    updateCustomFieldDefinition(index, (definition) => {
+      const currentTypes = definition.entityTypes ?? [];
+      const nextTypes = currentTypes.includes(entityType)
+        ? currentTypes.filter((candidate) => candidate !== entityType)
+        : [...currentTypes, entityType];
+      return { ...definition, entityTypes: nextTypes };
+    });
   };
 
   const draft = draftState as CoveConfig;
@@ -1111,6 +1275,156 @@ export function SettingsPage() {
                   onChange={(value) => updateDraft((current) => ({ ...current, ui: { ...current.ui, title: value || undefined } }))}
                   placeholder="Cove"
                 />
+                <TextField
+                  label="Favicon path"
+                  value={draft.ui.faviconPath ?? ""}
+                  onChange={(value) => updateDraft((current) => ({ ...current, ui: { ...current.ui, faviconPath: value || undefined } }))}
+                  placeholder="/favicon.ico"
+                />
+                <div className="space-y-1">
+                  <span className="block text-xs font-medium text-secondary">Favicon upload</span>
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground hover:border-accent hover:text-accent">
+                    {uploadFaviconMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    <span>{uploadFaviconMutation.isPending ? "Uploading" : "Choose file"}</span>
+                    <input
+                      type="file"
+                      accept=".ico,image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      disabled={uploadFaviconMutation.isPending}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) uploadFaviconMutation.mutate(file);
+                      }}
+                    />
+                  </label>
+                </div>
+                <CheckboxLabel
+                  label="Troubleshooting mode"
+                  checked={draft.ui.troubleshootingModeEnabled}
+                  onChange={(checked) => updateDraft((current) => ({
+                    ...current,
+                    logLevel: checked ? "Debug" : current.logLevel,
+                    ui: {
+                      ...current.ui,
+                      troubleshootingModeEnabled: checked,
+                      enableCSSCustomization: checked ? false : current.ui.enableCSSCustomization,
+                      enableJSCustomization: checked ? false : current.ui.enableJSCustomization,
+                    },
+                  }))}
+                />
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Custom Fields" description="Define typed metadata fields for entities that need extra structured values.">
+              <div className="space-y-4">
+                {customFieldsQuery.isLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading fields
+                  </div>
+                ) : null}
+                {customFieldDrafts.map((definition, index) => (
+                  <div key={definition.draftId} className="rounded-lg border border-border bg-card p-4">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-foreground">{definition.label || definition.key || "New custom field"}</div>
+                        <div className="truncate text-xs text-muted">{definition.key || "Unsaved key"}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => saveCustomFieldDefinitionMutation.mutate(definition)}
+                          disabled={saveCustomFieldDefinitionMutation.isPending}
+                          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground disabled:opacity-50"
+                        >
+                          {saveCustomFieldDefinitionMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeCustomFieldDefinition(index)}
+                          aria-label="Remove custom field definition"
+                          className="rounded-lg border border-border p-2 text-muted hover:border-red-400 hover:text-red-300"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <TextField
+                        label="Key"
+                        value={definition.key}
+                        onChange={(value) => updateCustomFieldDefinition(index, (current) => ({ ...current, key: value }))}
+                        placeholder="source_id"
+                      />
+                      <TextField
+                        label="Label"
+                        value={definition.label}
+                        onChange={(value) => updateCustomFieldDefinition(index, (current) => ({ ...current, label: value }))}
+                        placeholder="Source ID"
+                      />
+                      <SelectField
+                        label="Type"
+                        value={definition.type}
+                        onChange={(value) => updateCustomFieldDefinition(index, (current) => ({ ...current, type: value as CustomFieldType }))}
+                        options={customFieldTypeOptions}
+                      />
+                      <div className="space-y-2">
+                        <span className="block text-xs font-medium uppercase tracking-wide text-muted">Behavior</span>
+                        <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-background px-3 py-2">
+                          <CheckboxLabel
+                            label="Filterable"
+                            checked={definition.filterable}
+                            onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, filterable: checked }))}
+                          />
+                          <CheckboxLabel
+                            label="Sortable"
+                            checked={definition.sortable}
+                            onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, sortable: checked }))}
+                          />
+                          <CheckboxLabel
+                            label="Multiple values"
+                            checked={definition.isMultiValue}
+                            onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, isMultiValue: checked }))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <span className="block text-xs font-medium uppercase tracking-wide text-muted">Entities</span>
+                      <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-background px-3 py-2">
+                        {customFieldEntityOptions.map((option) => (
+                          <CheckboxLabel
+                            key={option.value}
+                            label={option.label}
+                            checked={(definition.entityTypes ?? []).includes(option.value)}
+                            onChange={() => toggleCustomFieldEntity(index, option.value)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {definition.type === "enum" ? (
+                      <div className="mt-4">
+                        <TextAreaField
+                          label="Options"
+                          value={listToLines(definition.options ?? [])}
+                          onChange={(value) => updateCustomFieldDefinition(index, (current) => ({ ...current, options: linesToList(value) }))}
+                          rows={3}
+                          placeholder="One option per line"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addCustomFieldDefinition}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add field
+                </button>
               </div>
             </SectionCard>
 
@@ -1181,6 +1495,16 @@ export function SettingsPage() {
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, autostartVideoOnPlaySelected: checked } }))}
                 />
                 <CheckboxLabel
+                  label="Autoplay on list click"
+                  checked={draft.ui.autoplayOnListClick}
+                  onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, autoplayOnListClick: checked } }))}
+                />
+                <CheckboxLabel
+                  label="Always resume playback"
+                  checked={draft.ui.alwaysResumeOnPlayback}
+                  onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, alwaysResumeOnPlayback: checked } }))}
+                />
+                <CheckboxLabel
                   label="Continue playlist default"
                   checked={draft.ui.continuePlaylistDefault}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, continuePlaylistDefault: checked } }))}
@@ -1189,6 +1513,12 @@ export function SettingsPage() {
                   label="Show A-B loop controls"
                   checked={draft.ui.showAbLoopControls}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, showAbLoopControls: checked } }))}
+                />
+                <NumberField
+                  label="Max loop duration (seconds)"
+                  value={draft.ui.maxLoopDuration}
+                  min={0}
+                  onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, maxLoopDuration: value ?? 0 } }))}
                 />
               </div>
             </SectionCard>
@@ -1235,12 +1565,12 @@ export function SettingsPage() {
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, wallShowTitle: checked } }))}
                 />
                 <SelectField
-                  label="Wall playback"
-                  value={String(draft.ui.wallPlayback)}
-                  onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, wallPlayback: Number(value) } }))}
+                  label="Wall preview type"
+                  value={draft.ui.wallPreviewType ?? "video"}
+                  onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, wallPreviewType: value } }))}
                   options={[
-                    { value: "0", label: "Audio" },
-                    { value: "1", label: "Silent" },
+                    { value: "video", label: "Video" },
+                    { value: "image", label: "Static Image" },
                   ]}
                 />
               </div>
@@ -2316,11 +2646,72 @@ function LocalInterfacePanel({
   );
 }
 
+function normalizeUserKeybindingOverrides(overrides?: Record<string, string> | null) {
+  return Object.fromEntries(
+    Object.entries(overrides ?? {})
+      .map(([key, value]) => [key.trim(), value.trim()] as const)
+      .filter(([key, value]) => key.length > 0 && value.length > 0),
+  );
+}
+
+function applyUserKeybindingOverride(current: Record<string, string>, id: string, value: string) {
+  const next = { ...current };
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === keybindingDefault(id)) {
+    delete next[id];
+  } else {
+    next[id] = trimmed;
+  }
+
+  return next;
+}
+
+function KeybindingSettingsEditor({
+  overrides,
+  onOverrideChange,
+  onReset,
+}: {
+  overrides: Record<string, string>;
+  onOverrideChange: (id: string, value: string) => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      {KEYBINDING_GROUPS.map((group) => (
+        <div key={group.group} className="space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">{group.group}</div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {group.definitions.map((definition) => (
+              <TextField
+                key={definition.id}
+                label={definition.label}
+                value={overrides[definition.id] ?? definition.keys}
+                onChange={(value) => onOverrideChange(definition.id, value)}
+                placeholder={definition.keys}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={onReset}
+        className="rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground"
+      >
+        Reset shortcuts
+      </button>
+    </div>
+  );
+}
+
 function UserSettingsPanel() {
   const { authEnabled, user, logout } = useAuth();
   const accountBackedPreferences = supportsServerBackedUiPreferences(user);
   const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
   const [trackingPreferences, setTrackingPreferences] = useState<ResolvedTrackingPreferences>(() => resolveTrackingPreferences(user?.uiPreferences?.tracking));
+  const [keybindingOverrides, setKeybindingOverrides] = useState<Record<string, string>>(() => accountBackedPreferences
+    ? normalizeUserKeybindingOverrides(user?.uiPreferences?.keybindingOverrides)
+    : readStoredKeybindingOverrides());
   const [logoutPending, setLogoutPending] = useState(false);
 
   const handleLogout = async () => {
@@ -2337,6 +2728,12 @@ function UserSettingsPanel() {
     setTrackingPreferences(resolveTrackingPreferences(user?.uiPreferences?.tracking));
   }, [user]);
 
+  useEffect(() => {
+    setKeybindingOverrides(accountBackedPreferences
+      ? normalizeUserKeybindingOverrides(user?.uiPreferences?.keybindingOverrides)
+      : readStoredKeybindingOverrides());
+  }, [accountBackedPreferences, user]);
+
   const updateTrackingPreferences = (patch: Partial<ResolvedTrackingPreferences>) => {
     const nextTracking = {
       ...defaultTrackingPreferences,
@@ -2350,14 +2747,44 @@ function UserSettingsPanel() {
     }));
   };
 
+  const commitKeybindingOverrides = (nextOverrides: Record<string, string>) => {
+    setKeybindingOverrides(nextOverrides);
+    if (accountBackedPreferences) {
+      updateAuthenticatedUserUiPreferences((current) => ({
+        ...(current ?? {}),
+        keybindingOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : null,
+      }));
+      return;
+    }
+
+    writeStoredKeybindingOverrides(nextOverrides);
+  };
+
+  const updateKeybindingPreference = (id: string, value: string) => {
+    commitKeybindingOverrides(applyUserKeybindingOverride(keybindingOverrides, id, value));
+  };
+
   if (!accountBackedPreferences) {
     return (
-      <SectionCard
-        title="User Settings"
-        description="Sign in or use the shared built-in profile to store engagement preferences outside this browser."
-      >
-        <p className="text-sm text-secondary">No account-backed user settings are available in the current session.</p>
-      </SectionCard>
+      <div className="space-y-5">
+        <SectionCard
+          title="User Settings"
+          description="Sign in or use the shared built-in profile to store engagement preferences outside this browser."
+        >
+          <p className="text-sm text-secondary">No account-backed user settings are available in the current session.</p>
+        </SectionCard>
+
+        <SectionCard
+          title="Browser Keyboard Shortcuts"
+          description="These shortcuts are stored only in this browser so they still stay user-scoped even without a signed-in profile."
+        >
+          <KeybindingSettingsEditor
+            overrides={keybindingOverrides}
+            onOverrideChange={updateKeybindingPreference}
+            onReset={() => commitKeybindingOverrides({})}
+          />
+        </SectionCard>
+      </div>
     );
   }
 
@@ -2427,6 +2854,19 @@ function UserSettingsPanel() {
             />
           </div>
         </div>
+      </SectionCard>
+
+      <SectionCard
+        title={sharedProfilePreferences ? "Shared Keyboard Shortcuts" : "Personal Keyboard Shortcuts"}
+        description={sharedProfilePreferences
+          ? "These shortcuts are stored in Cove's shared built-in profile and apply to that profile across browsers."
+          : "These shortcuts follow your signed-in account and override Cove's defaults just for you."}
+      >
+        <KeybindingSettingsEditor
+          overrides={keybindingOverrides}
+          onOverrideChange={updateKeybindingPreference}
+          onReset={() => commitKeybindingOverrides({})}
+        />
       </SectionCard>
     </div>
   );
@@ -2504,12 +2944,33 @@ function TasksPanel() {
   });
 
   // ---- Job Queue ----
+  const pendingJobs = activeJobs?.filter((job) => job.status === "pending") ?? [];
+  const moveQueuedJob = (job: JobInfo, direction: "up" | "down") => {
+    const index = pendingJobs.findIndex((item) => item.id === job.id);
+    if (index < 0) return;
+
+    const beforeJobId = direction === "up"
+      ? pendingJobs[index - 1]?.id
+      : pendingJobs[index + 2]?.id ?? null;
+
+    void jobs.reorder(job.id, beforeJobId).then(() => refetchJobs());
+  };
+
   const jobQueue = activeJobs && activeJobs.length > 0 ? (
     <SectionCard title="Job Queue" description="Currently running or queued jobs.">
       <div className="space-y-2">
-        {activeJobs.map((job) => (
-          <JobQueueCard key={job.id} job={job} onCancel={() => jobs.cancel(job.id).then(() => refetchJobs())} />
-        ))}
+        {activeJobs.map((job) => {
+          const pendingIndex = pendingJobs.findIndex((item) => item.id === job.id);
+          return (
+            <JobQueueCard
+              key={job.id}
+              job={job}
+              onCancel={() => jobs.cancel(job.id).then(() => refetchJobs())}
+              onMoveUp={job.status === "pending" && pendingIndex > 0 ? () => moveQueuedJob(job, "up") : undefined}
+              onMoveDown={job.status === "pending" && pendingIndex >= 0 && pendingIndex < pendingJobs.length - 1 ? () => moveQueuedJob(job, "down") : undefined}
+            />
+          );
+        })}
       </div>
     </SectionCard>
   ) : null;
@@ -2546,7 +3007,7 @@ function formatJobDuration(ms: number): string {
   return `${hours}h ${mins.toString().padStart(2, "0")}m`;
 }
 
-function JobQueueCard({ job, onCancel }: { job: JobInfo; onCancel?: () => void }) {
+function JobQueueCard({ job, onCancel, onMoveUp, onMoveDown }: { job: JobInfo; onCancel?: () => void; onMoveUp?: () => void; onMoveDown?: () => void }) {
   const [now, setNow] = useState(Date.now());
   const progressHistory = useRef<{ time: number; progress: number }[]>([]);
 
@@ -2619,14 +3080,39 @@ function JobQueueCard({ job, onCancel }: { job: JobInfo; onCancel?: () => void }
           </>
         )}
       </div>
-      {onCancel && (job.status === "running" || job.status === "pending") ? (
-        <button
-          onClick={onCancel}
-          className="ml-3 text-xs text-muted hover:text-red-300 flex-shrink-0"
-        >
-          Cancel
-        </button>
-      ) : null}
+      <div className="ml-3 flex flex-shrink-0 items-center gap-1">
+        {job.status === "pending" ? (
+          <>
+            <button
+              type="button"
+              onClick={onMoveUp}
+              disabled={!onMoveUp}
+              title="Move queued job up"
+              className="rounded p-1 text-muted hover:bg-card-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onMoveDown}
+              disabled={!onMoveDown}
+              title="Move queued job down"
+              className="rounded p-1 text-muted hover:bg-card-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </button>
+          </>
+        ) : null}
+        {onCancel && (job.status === "running" || job.status === "pending") ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-xs text-muted hover:text-red-300"
+          >
+            Cancel
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -2645,6 +3131,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
   const [showGenOpts, setShowGenOpts] = useState(false);
   const [genOpts, setGenOpts] = useState<GenerateOptions>(() => loadStoredTaskOptions(TASK_GENERATE_OPTIONS_KEY, DEFAULT_GENERATE_OPTIONS));
   const [showDownloadImportOpts, setShowDownloadImportOpts] = useState(false);
+  const [showAutoTagConfirm, setShowAutoTagConfirm] = useState(false);
   const [downloadImportEntity, setDownloadImportEntity] = useState<DownloadSelectionEntity>(() => {
     const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { entity: "Scene" as DownloadSelectionEntity });
     return stored.entity as DownloadSelectionEntity;
@@ -2808,6 +3295,19 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
   });
 
   return (
+    <>
+    <ConfirmDialog
+      open={showAutoTagConfirm}
+      title="Run Auto Tag"
+      message="Auto Tag will queue a job that applies tags from current tag names, aliases, and path patterns across the library."
+      confirmLabel="Run Auto Tag"
+      destructive={false}
+      onCancel={() => setShowAutoTagConfirm(false)}
+      onConfirm={() => {
+        setShowAutoTagConfirm(false);
+        autoTagMut.mutate();
+      }}
+    />
     <SectionCard title="Library Tasks" description="Scan for new content, generate supporting files, and auto-tag your library.">
       <div className="space-y-4">
         {/* Scan */}
@@ -2863,7 +3363,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
         <TaskCard
           label="Auto Tag"
           description="Automatically tag content based on filenames and path patterns."
-          onRun={() => autoTagMut.mutate()}
+          onRun={() => setShowAutoTagConfirm(true)}
           isPending={autoTagMut.isPending}
         />
 
@@ -2883,7 +3383,16 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
               <CheckboxLabel label="Thumbnails / screenshots" checked={!!genOpts.thumbnails} onChange={(c) => setGenOpts({ ...genOpts, thumbnails: c })} />
               <CheckboxLabel label="Video previews" checked={!!genOpts.previews} onChange={(c) => setGenOpts({ ...genOpts, previews: c })} />
               <CheckboxLabel label="Sprite sheets" checked={!!genOpts.sprites} onChange={(c) => setGenOpts({ ...genOpts, sprites: c })} />
-              <CheckboxLabel label="Segment previews" checked={!!genOpts.markers} onChange={(c) => setGenOpts({ ...genOpts, markers: c })} />
+              <CheckboxLabel
+                label="Segment thumbnails"
+                checked={!!genOpts.segmentThumbnails}
+                onChange={(c) => setGenOpts({ ...genOpts, segmentThumbnails: c, segmentPreviews: c ? genOpts.segmentPreviews : false, markers: false })}
+              />
+              <CheckboxLabel
+                label="Animated segment previews"
+                checked={!!genOpts.segmentPreviews}
+                onChange={(c) => setGenOpts({ ...genOpts, segmentThumbnails: c ? true : genOpts.segmentThumbnails, segmentPreviews: c, markers: false })}
+              />
               <CheckboxLabel label="Perceptual hashes (phash)" checked={!!genOpts.phashes} onChange={(c) => setGenOpts({ ...genOpts, phashes: c })} />
               <CheckboxLabel label="MD5 checksums" checked={!!genOpts.md5} onChange={(c) => setGenOpts({ ...genOpts, md5: c })} />
             </div>
@@ -2924,6 +3433,14 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             )}
           </div>
         </TaskCard>
+
+        <TaskCard
+          label="Duplicate Finder"
+          description="Find exact duplicate scene files and choose which records or files to remove."
+          onRun={() => navigateToUrl("/duplicates", { state: { page: "duplicates" } })}
+          isPending={false}
+          runLabel="Open"
+        />
 
         <TaskCard
           label="Download From File"
@@ -3005,6 +3522,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
         </TaskCard>
       </div>
     </SectionCard>
+    </>
   );
 }
 
@@ -3479,6 +3997,7 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
         </div>
       </div>
     </SectionCard>
+
   );
 }
 
@@ -3570,6 +4089,7 @@ function TaskCard({
   expandable,
   expanded,
   onToggleExpand,
+  runLabel = "Run",
   statusMessage,
   children,
 }: {
@@ -3580,6 +4100,7 @@ function TaskCard({
   expandable?: boolean;
   expanded?: boolean;
   onToggleExpand?: () => void;
+  runLabel?: string;
   statusMessage?: { type: "success" | "error"; text: string } | null;
   children?: React.ReactNode;
 }) {
@@ -3603,7 +4124,7 @@ function TaskCard({
           className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60 flex-shrink-0 ml-3"
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-          Run
+          {runLabel}
         </button>
       </div>
       {statusMessage && (
@@ -4853,6 +5374,7 @@ function FindAndInstallExtensions() {
 
   const installedIds = new Set((installedList ?? []).map(e => e.id));
   const updateMap = new Map((updates ?? []).map(u => [u.extensionId, u]));
+  const availableResults = (searchResults?.items ?? []).filter((ext) => !installedIds.has(ext.id));
 
   const viewDetail = async (id: string) => {
     const detail = await import("../api/client").then(m => m.extensions.registryGetExtension(id));
@@ -5060,13 +5582,13 @@ function FindAndInstallExtensions() {
         <div className="flex items-center justify-center py-8">
           <Loader2 className="w-5 h-5 animate-spin text-muted" />
         </div>
-      ) : !searchResults || searchResults.items.length === 0 ? (
+      ) : !searchResults || availableResults.length === 0 ? (
         <div className="text-sm text-muted text-center py-6">
-          {searchQuery ? "No extensions found matching your search." : "No extensions available in the registry yet."}
+          {searchQuery ? "No uninstalled extensions found matching your search." : "No uninstalled extensions available in the registry yet."}
         </div>
       ) : (
         <div className="space-y-2">
-          {searchResults.items.map((ext) => {
+          {availableResults.map((ext) => {
             const isInstalled = installedIds.has(ext.id);
             const update = updateMap.get(ext.id);
             return (

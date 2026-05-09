@@ -1,9 +1,12 @@
 using Cove.Api.Controllers;
+using Cove.Api.Services;
 using Cove.Core.Auth;
+using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
 using Cove.Data.Repositories;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -452,13 +455,55 @@ public class SceneFilterBehaviorTests
     {
         var repository = new CapturingSceneRepository();
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        var controller = new ScenesController(repository, null!, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService());
+        await using var context = CreateContext();
+        var controller = new ScenesController(repository, context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
 
         await controller.Find(q: null, page: 1, perPage: 25, sort: "random", direction: "desc", seed: 12345, ct: default);
 
         Assert.Equal(12345, repository.LastFindFilter?.Seed);
         Assert.Equal("random", repository.LastFindFilter?.Sort);
         Assert.Equal(Cove.Core.Enums.SortDirection.Desc, repository.LastFindFilter?.Direction);
+    }
+
+    [Fact]
+    public async Task ScenesController_FindDuplicates_ExactFingerprint_UsesMd5AndOshash()
+    {
+        await using var context = CreateContext();
+        context.Scenes.AddRange(
+            CreateSceneWithFile("md5 duplicate a", basename: "a.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "same-md5" }]),
+            CreateSceneWithFile("md5 duplicate b", basename: "b.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "same-md5" }]),
+            CreateSceneWithFile("oshash duplicate a", basename: "c.mp4", fingerprints: [new FileFingerprint { Type = "oshash", Value = "same-oshash" }]),
+            CreateSceneWithFile("oshash duplicate b", basename: "d.mp4", fingerprints: [new FileFingerprint { Type = "oshash", Value = "same-oshash" }]),
+            CreateSceneWithFile("unique", basename: "e.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "unique-md5" }]));
+        await context.SaveChangesAsync();
+
+        var controller = CreateScenesController(context);
+
+        var response = await controller.FindDuplicates(matchType: "fingerprint", ct: default);
+
+        var groups = GetDuplicateGroups(response);
+        Assert.Contains(groups, group => group.Select(scene => scene.Title ?? "").OrderBy(title => title).SequenceEqual(["md5 duplicate a", "md5 duplicate b"]));
+        Assert.Contains(groups, group => group.Select(scene => scene.Title ?? "").OrderBy(title => title).SequenceEqual(["oshash duplicate a", "oshash duplicate b"]));
+        Assert.DoesNotContain(groups.SelectMany(group => group), scene => scene.Title == "unique");
+    }
+
+    [Fact]
+    public async Task ScenesController_FindDuplicates_Phash_UsesDistanceAndDurationTolerance()
+    {
+        await using var context = CreateContext();
+        context.Scenes.AddRange(
+            CreateSceneWithFile("visual duplicate a", basename: "a.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "0000000000000000" }]),
+            CreateSceneWithFile("visual duplicate b", basename: "b.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "0000000000000001" }]),
+            CreateSceneWithFile("different visual", basename: "c.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "ffffffffffffffff" }]));
+        await context.SaveChangesAsync();
+
+        var controller = CreateScenesController(context);
+
+        var response = await controller.FindDuplicates(matchType: "phash", distance: 1, durationDiff: 0, ct: default);
+
+        var groups = GetDuplicateGroups(response);
+        var group = Assert.Single(groups);
+        Assert.Equal(["visual duplicate a", "visual duplicate b"], group.Select(scene => scene.Title ?? "").OrderBy(title => title).ToArray());
     }
 
     [Fact]
@@ -591,19 +636,24 @@ public class SceneFilterBehaviorTests
         return new TestCoveContext(options, principalAccessor);
     }
 
+    private static ScenesController CreateScenesController(CoveContext context)
+    {
+        var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        return new ScenesController(new CapturingSceneRepository(), context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
+    }
+
+    private static List<List<SceneDto>> GetDuplicateGroups(ActionResult<List<List<SceneDto>>> response)
+    {
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        return Assert.IsType<List<List<SceneDto>>>(ok.Value);
+    }
+
     private sealed class TestCoveContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor principalAccessor) : CoveContext(options, principalAccessor)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
         }
     }
 

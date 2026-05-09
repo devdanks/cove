@@ -9,19 +9,20 @@ import { RatingField } from "../components/Rating";
 import { SceneTagger } from "../components/SceneTagger";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from "../components/shared";
+import { CustomFieldsEditor, formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from "../components/shared";
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
-import { EditModal, Field, TextArea, TextInput, SaveButton } from "../components/EditModal";
+import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
 import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Download } from "lucide-react";
 import { useSceneQueue } from "../state/SceneQueueContext";
 import { SceneCard } from "../components/EntityCards";
-import { RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
+import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity, hasAnyPermission } from "../auth/visibility";
 import { StringListEditor } from "../components/StringListEditor";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useWallColumns } from "../hooks/useWallColumns";
+import { useAppConfig } from "../state/AppConfigContext";
 import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
@@ -141,7 +142,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const items = data?.items ?? [];
   const { engagementById } = useEntityEngagementBatch("scene", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount);
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
+  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
   const selectedScene = selectedIds.size === 1 ? items.find((scene) => selectedIds.has(scene.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
@@ -284,6 +285,7 @@ export function ScenesPage({ onNavigate }: Props) {
       selectedIds={selectedIds}
       onSelectAll={selectAll}
       onSelectNone={selectNone}
+      onInvertSelection={invertSelection}
       selectionActions={
         <>
           {canDownloadSelectedScene && (
@@ -385,14 +387,21 @@ export function ScenesPage({ onNavigate }: Props) {
           {wallColumns.map((column, columnIndex) => (
             <div key={columnIndex} className="flex-1 flex flex-col gap-1 min-w-0">
               {column.map((scene) => (
-                <SceneWallCard key={scene.id} scene={scene} onClick={() => navigateToScene(scene.id)} />
+                <SceneWallCard
+                  key={scene.id}
+                  scene={scene}
+                  onClick={() => selecting ? toggle(scene.id) : navigateToScene(scene.id)}
+                  selected={selectedIds.has(scene.id)}
+                  selecting={selecting}
+                  onSelect={() => toggle(scene.id)}
+                />
               ))}
             </div>
           ))}
         </div>
       )}
       {displayMode === "tagger" && (
-        <SceneTagger scenes={items} onNavigate={navigateToScene} />
+        <SceneTagger scenes={items} onNavigate={navigateToScene} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
       )}
       {items.length === 0 && !isLoading && (
         <div className="text-center py-20">
@@ -462,6 +471,8 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   const [organized, setOrganized] = useState(false);
   const [urls, setUrls] = useState<string[]>([""]);
   const [studioId, setStudioId] = useState<number | undefined>(undefined);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
+  const [createAnother, setCreateAnother] = useState(false);
 
   const [tagSearch, setTagSearch] = useState("");
   const [selectedTags, setSelectedTags] = useState<{ id: number; name: string }[]>([]);
@@ -488,22 +499,31 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     enabled: gallerySearch.length > 0,
   });
 
+  const resetForm = () => {
+    setTitle("");
+    setCode("");
+    setDate("");
+    setDetails("");
+    setDirector("");
+    setRating(undefined);
+    setOrganized(false);
+    setUrls([""]);
+    setStudioId(undefined);
+    setCustomFields({});
+    setSelectedTags([]);
+    setSelectedPerformers([]);
+    setSelectedGalleries([]);
+    setTagSearch("");
+    setPerformerSearch("");
+    setGallerySearch("");
+  };
+
   const createMut = useMutation({
     mutationFn: (data: SceneCreate) => scenes.create(data),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["scenes"] });
-      setTitle("");
-      setCode("");
-      setDate("");
-      setDetails("");
-      setDirector("");
-      setRating(undefined);
-      setOrganized(false);
-      setUrls([""]);
-      setStudioId(undefined);
-      setSelectedTags([]);
-      setSelectedPerformers([]);
-      setSelectedGalleries([]);
+      resetForm();
+      if (createAnother) return;
       onClose();
       if (created?.id) onCreated(created.id);
     },
@@ -524,6 +544,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
       tagIds: selectedTags.map((t) => t.id),
       performerIds: selectedPerformers.map((p) => p.id),
       galleryIds: selectedGalleries.map((g) => g.id),
+      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     });
   };
 
@@ -576,6 +597,10 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         />
         Organized
       </label>
+
+      <Field label="Custom Fields">
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
+      </Field>
 
       <Field label="Tags">
         <div className="flex flex-wrap gap-1.5 mb-2">
@@ -670,10 +695,13 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         )}
       </Field>
 
-      <div className="flex justify-end gap-3 mt-4">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-secondary hover:text-white">Cancel</button>
-        <SaveButton loading={createMut.isPending} onClick={handleSave} />
-      </div>
+      <CreateModalActions
+        loading={createMut.isPending}
+        onCancel={onClose}
+        onSave={handleSave}
+        createAnother={createAnother}
+        onCreateAnotherChange={setCreateAnother}
+      />
     </EditModal>
   );
 }
@@ -741,26 +769,36 @@ function SceneListTable({ scenes, engagementById, onNavigate, selectedIds, onTog
 
 /* ── Scene Wall Card ── */
 
-function SceneWallCard({ scene, onClick }: { scene: Scene; onClick: () => void }) {
+function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scene: Scene; onClick: () => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
+  const previewUrl = scenes.previewUrl(scene.id);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
   const title = scene.title || file?.basename || "Untitled";
+  const { config } = useAppConfig();
+  const wallPreviewType = config?.ui.wallPreviewType ?? "video";
+  const showTitle = config?.ui.wallShowTitle ?? true;
 
   return (
     <WallMediaCard
       title={title}
       imageSrc={screenshotUrl}
+      videoSrc={previewUrl}
+      videoStatusSrc={`${previewUrl}/status`}
+      useVideo={wallPreviewType === "video" || wallPreviewType === "webp"}
+      // Browsers generally block autoplay with audio, so wall previews stay muted to animate reliably.
+      muted
       aspectRatio={aspectRatio}
       className="group"
     >
-      <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={onClick} label={`Open scene ${title}`} />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-      <div className="absolute bottom-0 left-0 right-0 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+      <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={onClick} label={`Open scene ${title}`} selectionSafeZone />
+      <div className={`absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent transition-opacity ${showTitle ? "opacity-0 group-hover:opacity-100" : "opacity-0"}`} />
+      {showTitle ? <div className="absolute bottom-0 left-0 right-0 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <p className="text-xs text-white font-medium truncate">
             {title}
           </p>
-      </div>
+      </div> : null}
       {file && file.duration > 0 && (
         <span className="absolute top-1 right-1 text-xs text-white bg-black/70 px-1 rounded">
           {formatDuration(file.duration)}

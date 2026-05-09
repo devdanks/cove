@@ -110,6 +110,7 @@ try
     builder.Services.AddScoped<StashMigrationService>();
     builder.Services.AddScoped<ITagProvenanceService, TagProvenanceService>();
     builder.Services.AddScoped<TagApplicationService>();
+    builder.Services.AddScoped<CustomFieldService>();
     builder.Services.AddScoped<AiDataPurgeService>();
     builder.Services.AddHttpClient("scraper", client =>
     {
@@ -312,6 +313,7 @@ try
 
     // Middleware pipeline
     // UseSerilogRequestLogging removed â€” adds 3-5ms per request overhead
+    app.UseMiddleware<Cove.Api.Middleware.DatabaseUnavailableMiddleware>();
 
     if (app.Environment.IsDevelopment())
     {

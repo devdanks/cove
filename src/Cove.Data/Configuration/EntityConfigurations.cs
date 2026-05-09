@@ -10,7 +10,6 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
     {
         builder.ToTable("scenes");
         builder.HasKey(s => s.Id);
-        builder.Property(s => s.CustomFields).HasColumnType("jsonb");
 
         builder.HasOne(s => s.Studio)
             .WithMany(st => st.Scenes)
@@ -130,6 +129,49 @@ public class GroupItemConfiguration : IEntityTypeConfiguration<GroupItem>
     }
 }
 
+public class CustomFieldDefinitionConfiguration : IEntityTypeConfiguration<CustomFieldDefinition>
+{
+    public void Configure(EntityTypeBuilder<CustomFieldDefinition> builder)
+    {
+        builder.ToTable("custom_field_definitions");
+        builder.HasKey(definition => definition.Id);
+        builder.Property(definition => definition.Key).IsRequired().HasMaxLength(100);
+        builder.Property(definition => definition.Label).IsRequired().HasMaxLength(200);
+        builder.Property(definition => definition.Type).IsRequired().HasMaxLength(50);
+        builder.Property(definition => definition.EntityTypes).HasColumnType("text[]");
+        builder.Property(definition => definition.Options).HasColumnType("text[]");
+
+        builder.HasMany(definition => definition.Values)
+            .WithOne(value => value.Definition)
+            .HasForeignKey(value => value.DefinitionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(definition => definition.Key).IsUnique();
+        builder.HasIndex(definition => definition.DisplayOrder);
+    }
+}
+
+public class CustomFieldValueConfiguration : IEntityTypeConfiguration<CustomFieldValue>
+{
+    public void Configure(EntityTypeBuilder<CustomFieldValue> builder)
+    {
+        builder.ToTable("custom_field_values");
+        builder.HasKey(value => value.Id);
+        builder.Property(value => value.EntityType).IsRequired().HasMaxLength(50);
+        builder.Property(value => value.TextValue).HasMaxLength(4000);
+        builder.Property(value => value.NumberValue).HasPrecision(18, 6);
+
+        builder.HasIndex(value => new { value.DefinitionId, value.EntityType, value.EntityId, value.Position }).IsUnique();
+        builder.HasIndex(value => new { value.EntityType, value.EntityId });
+        builder.HasIndex(value => new { value.DefinitionId, value.EntityType, value.TextValue });
+        builder.HasIndex(value => new { value.DefinitionId, value.EntityType, value.NumberValue });
+        builder.HasIndex(value => new { value.DefinitionId, value.EntityType, value.BoolValue });
+        builder.HasIndex(value => new { value.DefinitionId, value.EntityType, value.DateValue });
+        builder.HasIndex(value => new { value.DefinitionId, value.EntityType, value.TimestampValue });
+        builder.HasIndex(value => new { value.DefinitionId, value.EntityType, value.IntegerValue });
+    }
+}
+
 public class PerformerConfiguration : IEntityTypeConfiguration<Performer>
 {
     public void Configure(EntityTypeBuilder<Performer> builder)
@@ -137,7 +179,6 @@ public class PerformerConfiguration : IEntityTypeConfiguration<Performer>
         builder.ToTable("performers");
         builder.HasKey(p => p.Id);
         builder.Property(p => p.Name).IsRequired().HasMaxLength(500);
-        builder.Property(p => p.CustomFields).HasColumnType("jsonb");
         builder.Property(p => p.SceneCount).HasDefaultValue(0);
         builder.Property(p => p.ImageCount).HasDefaultValue(0);
         builder.Property(p => p.GalleryCount).HasDefaultValue(0);
@@ -188,7 +229,6 @@ public class TagConfiguration : IEntityTypeConfiguration<Tag>
         builder.HasKey(t => t.Id);
         builder.Property(t => t.Name).IsRequired().HasMaxLength(500);
         builder.Property(t => t.Color).HasMaxLength(9);
-        builder.Property(t => t.CustomFields).HasColumnType("jsonb");
         builder.Property(t => t.SceneCount).HasDefaultValue(0);
         builder.Property(t => t.SceneMarkerCount).HasDefaultValue(0);
         builder.Property(t => t.ImageCount).HasDefaultValue(0);
@@ -244,7 +284,6 @@ public class StudioConfiguration : IEntityTypeConfiguration<Studio>
         builder.ToTable("studios");
         builder.HasKey(s => s.Id);
         builder.Property(s => s.Name).IsRequired().HasMaxLength(500);
-        builder.Property(s => s.CustomFields).HasColumnType("jsonb");
         builder.Property(s => s.SceneCount).HasDefaultValue(0);
         builder.Property(s => s.ImageCount).HasDefaultValue(0);
         builder.Property(s => s.GalleryCount).HasDefaultValue(0);
@@ -301,7 +340,6 @@ public class GalleryConfiguration : IEntityTypeConfiguration<Gallery>
     {
         builder.ToTable("galleries");
         builder.HasKey(g => g.Id);
-        builder.Property(g => g.CustomFields).HasColumnType("jsonb");
         builder.Property(g => g.ImageCount).HasDefaultValue(0);
         builder.Property(g => g.SceneCount).HasDefaultValue(0);
         builder.Property(g => g.PerformerCount).HasDefaultValue(0);
@@ -361,7 +399,6 @@ public class ImageConfiguration : IEntityTypeConfiguration<Image>
     {
         builder.ToTable("images");
         builder.HasKey(i => i.Id);
-        builder.Property(i => i.CustomFields).HasColumnType("jsonb");
 
         builder.HasOne(i => i.Studio).WithMany(s => s.Images).HasForeignKey(i => i.StudioId).OnDelete(DeleteBehavior.SetNull);
         builder.HasMany(i => i.Urls).WithOne(u => u.Image).HasForeignKey(u => u.ImageId).OnDelete(DeleteBehavior.Cascade);
@@ -446,7 +483,6 @@ public class GroupConfiguration : IEntityTypeConfiguration<Group>
         builder.ToTable("groups");
         builder.HasKey(g => g.Id);
         builder.Property(g => g.Name).IsRequired().HasMaxLength(500);
-        builder.Property(g => g.CustomFields).HasColumnType("jsonb");
 
         builder.HasOne(g => g.Studio).WithMany(s => s.Groups).HasForeignKey(g => g.StudioId).OnDelete(DeleteBehavior.SetNull);
         builder.HasMany(g => g.Urls).WithOne(u => u.Group).HasForeignKey(u => u.GroupId).OnDelete(DeleteBehavior.Cascade);
@@ -596,7 +632,6 @@ public class FaceConfiguration : IEntityTypeConfiguration<Face>
         builder.HasKey(face => face.Id);
         builder.Property(face => face.Label).HasMaxLength(500);
         builder.Property(face => face.PrimarySourceKey).HasMaxLength(200);
-        builder.Property(face => face.CustomFields).HasColumnType("jsonb");
         builder.Property(face => face.DetectionCount).HasDefaultValue(0);
         builder.Property(face => face.AppearanceCount).HasDefaultValue(0);
         builder.Property(face => face.FrameSampleCount).HasDefaultValue(0);

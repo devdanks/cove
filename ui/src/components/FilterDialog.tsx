@@ -49,6 +49,8 @@ export interface CriterionDefinition<TFilterKey extends string = string> {
   hierarchyToggleLabel?: string;
   auxiliaryToggleKey?: TFilterKey;
   auxiliaryToggleLabel?: string;
+  supported?: boolean;
+  unsupportedReason?: string;
 }
 
 type CriteriaDefinitionList<TFilterCriteria> = CriterionDefinition<Extract<keyof TFilterCriteria, string>>[];
@@ -84,7 +86,7 @@ const TYPE_MODIFIERS: Record<CriterionType, CriterionModifier[]> = {
   careerLength: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"],
   rating: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN", "IS_NULL", "NOT_NULL"],
   resolution: ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN"],
-  multiId: ["INCLUDES", "INCLUDES_ALL", "EXCLUDES", "EXCLUDES_ALL"],
+  multiId: ["INCLUDES", "INCLUDES_ALL", "EXCLUDES", "EXCLUDES_ALL", "IS_NULL", "NOT_NULL"],
   enum: ["EQUALS", "NOT_EQUALS", "IS_NULL", "NOT_NULL"],
 };
 
@@ -172,6 +174,9 @@ function isCriterionValueValid(value: unknown, criterion: CriterionDefinition) {
       return typeof (value as BoolCriterion).value === "boolean";
     case "multiId": {
       const criterionValue = value as MultiIdCriterion;
+      if (NULL_VALUE_MODIFIERS.has(criterionValue.modifier ?? "INCLUDES")) {
+        return true;
+      }
       const ids = criterionValue.value;
       const excludes = criterionValue.excludes;
       return (Array.isArray(ids) && ids.length > 0) || (Array.isArray(excludes) && excludes.length > 0);
@@ -227,6 +232,8 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
   { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
   { id: "hash", label: "Hash", type: "hash", filterKey: "fingerprintCriterion", options: [...SCENE_HASH_OPTIONS] },
   { id: "duplicatedPhash", label: "Duplicated (pHash)", type: "bool", filterKey: "duplicatedPhashCriterion" },
+  { id: "duplicatedTitle", label: "Duplicated Title", type: "bool", filterKey: "duplicatedTitleCriterion" },
+  { id: "duplicatedRemoteId", label: "Duplicated Remote ID", type: "bool", filterKey: "duplicatedRemoteIdCriterion" },
   { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "likeCounter", label: "Likes", type: "number", filterKey: "likeCounterCriterion" },
   { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
@@ -243,6 +250,7 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
   { id: "galleries", label: "Galleries", type: "multiId", entityType: "galleries", filterKey: "galleriesCriterion" },
   { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
   { id: "remoteId", label: "Remote ID", type: "string", filterKey: "remoteIdCriterion" },
+  { id: "remoteIdCount", label: "Remote ID Count", type: "number", filterKey: "remoteIdCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
   { id: "videoCodec", label: "Video Codec", type: "string", filterKey: "videoCodecCriterion" },
   { id: "audioCodec", label: "Audio Codec", type: "string", filterKey: "audioCodecCriterion" },
@@ -291,6 +299,7 @@ export const PERFORMER_CRITERIA: CriteriaDefinitionList<PerformerFilterCriteria>
   { id: "weight", label: "Weight", type: "number", filterKey: "weightCriterion" },
   { id: "remoteId", label: "Remote ID", type: "string", filterKey: "remoteIdValueCriterion" },
   { id: "remoteIdProvider", label: "Remote ID Provider", type: "string", filterKey: "remoteIdCriterion" },
+  { id: "remoteIdCount", label: "Remote ID Count", type: "number", filterKey: "remoteIdCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
   { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion", modifiers: NON_NULL_TIMESTAMP_MODIFIERS },
   { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion", modifiers: NON_NULL_TIMESTAMP_MODIFIERS },
@@ -332,6 +341,7 @@ export const TAG_CRITERIA: CriteriaDefinitionList<TagFilterCriteria> = [
   { id: "sortName", label: "Sort Name", type: "string", filterKey: "sortNameCriterion" },
   { id: "remoteId", label: "Remote ID", type: "string", filterKey: "remoteIdValueCriterion" },
   { id: "remoteIdProvider", label: "Remote ID Provider", type: "string", filterKey: "remoteIdCriterion" },
+  { id: "remoteIdCount", label: "Remote ID Count", type: "number", filterKey: "remoteIdCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "aliases", label: "Aliases", type: "string", filterKey: "aliasesCriterion" },
   { id: "description", label: "Description", type: "string", filterKey: "descriptionCriterion" },
   { id: "imageCount", label: "Image Count", type: "number", filterKey: "imageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS, auxiliaryToggleKey: "imageCountIncludesChildren", auxiliaryToggleLabel: "Count images from child tags" },
@@ -351,6 +361,7 @@ export const STUDIO_CRITERIA: CriteriaDefinitionList<StudioFilterCriteria> = [
   { id: "sceneCount", label: "Scene Count", type: "number", filterKey: "sceneCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
   { id: "remoteId", label: "Remote ID", type: "string", filterKey: "remoteIdCriterion" },
+  { id: "remoteIdCount", label: "Remote ID Count", type: "number", filterKey: "remoteIdCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
   { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
   { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
@@ -459,6 +470,8 @@ export interface FilterDialogCustomSection {
   filterKey: string;
   defaultValue: unknown;
   isActive: (value: unknown) => boolean;
+  shouldKeepDraft?: (value: unknown) => boolean;
+  sanitize?: (value: unknown) => unknown;
   renderEditor: (value: unknown, onChange: (value: unknown) => void) => ReactNode;
   summarize?: (value: unknown) => string;
 }
@@ -582,7 +595,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
   const handleApply = () => {
     const nextFilter = sanitizeFilterCriteria(editFilter, criteria);
     for (const section of customSections ?? []) {
-      const value = editFilter[section.filterKey];
+      const value = section.sanitize ? section.sanitize(editFilter[section.filterKey]) : editFilter[section.filterKey];
       if (section.isActive(value)) {
         nextFilter[section.filterKey] = value;
       }
@@ -613,7 +626,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
       }}
     >
       <div
-        className="bg-surface border border-border sm:rounded-lg shadow-xl w-full sm:max-w-lg h-[85vh] sm:h-auto sm:max-h-[80vh] flex flex-col rounded-t-lg"
+        className="bg-surface border border-border sm:rounded-lg shadow-xl w-full sm:w-[min(92vw,56rem)] h-[85vh] sm:h-auto sm:max-h-[80vh] flex flex-col rounded-t-lg"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -691,7 +704,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
         )}
 
         {/* Criterion list */}
-        <div className="flex-1 overflow-y-auto px-2 py-1">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
           {(customSections ?? []).map((section) => {
             const value = editFilter[section.filterKey] ?? section.defaultValue;
             const isActive = section.isActive(editFilter[section.filterKey]);
@@ -733,7 +746,8 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
                     {section.renderEditor(value, (nextValue) => {
                       setEditFilter((current) => {
                         const next = { ...current };
-                        if (section.isActive(nextValue)) {
+                        const shouldKeepDraft = section.shouldKeepDraft ?? section.isActive;
+                        if (shouldKeepDraft(nextValue)) {
                           next[section.filterKey] = nextValue;
                         } else {
                           delete next[section.filterKey];
@@ -839,13 +853,15 @@ function CriterionRow({
   onTogglePin: () => void;
 }) {
   const hasDraftValue = value !== undefined;
+  const isSupported = criterion.supported !== false;
   const isActive = isCriterionValueValid(value, criterion);
 
   return (
     <div className={`rounded mb-0.5 ${isActive ? "bg-accent/5 border border-accent/20" : ""}`}>
       <div
-        className="flex items-center gap-1 px-2 py-1.5 cursor-pointer hover:bg-card/50 rounded"
-        onClick={onToggleExpand}
+        className={`flex items-center gap-1 px-2 py-1.5 rounded ${isSupported ? "cursor-pointer hover:bg-card/50" : "cursor-not-allowed opacity-60"}`}
+        onClick={isSupported ? onToggleExpand : undefined}
+        title={isSupported ? undefined : criterion.unsupportedReason ?? "This criterion is not supported yet"}
       >
         {expanded ? (
           <ChevronDown className="w-3 h-3 text-muted flex-shrink-0" />
@@ -855,6 +871,7 @@ function CriterionRow({
         <span className={`text-xs flex-1 ${isActive ? "text-accent font-medium" : "text-foreground"}`}>
           {criterion.label}
         </span>
+        {!isSupported && <span className="rounded border border-border px-1 py-0.5 text-[10px] uppercase tracking-wide text-muted">Unsupported</span>}
         <button
           onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
           className={`p-0.5 rounded hover:bg-card ${pinned ? "text-accent" : "text-muted opacity-0 group-hover:opacity-100"}`}
@@ -873,7 +890,7 @@ function CriterionRow({
           </button>
         )}
       </div>
-      {expanded && (
+      {expanded && isSupported && (
         <div className="px-3 pb-2">
           <CriterionEditor
             criterion={criterion}
@@ -1155,7 +1172,7 @@ function TagDurationClauseEditor({
   const unit = clause.unit ?? "seconds";
   const isBetween = modifier === "BETWEEN" || modifier === "NOT_BETWEEN";
   const selectedTag = tags.find((tag) => tag.id === clause.tagId);
-  const selectedTagName = clause.tagId ? selectedTag?.name ?? existingNames[String(clause.tagId)] ?? `Tag #${clause.tagId}` : null;
+  const selectedTagName = clause.tagId ? selectedTag?.name ?? existingNames[String(clause.tagId)] ?? "Unavailable tag" : null;
   const tagResults = useMemo(
     () => filterTagsForSelector(tags, tagSearch, excludedTagIds).slice(0, 50),
     [excludedTagIds, tagSearch, tags]
@@ -1659,6 +1676,8 @@ function TimestampEditor({ value, onChange, modifiers }: { value?: TimestampCrit
 function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggleLabel }: { value?: MultiIdCriterion; onChange: (v: unknown) => void; entityType: EntityType; modifiers: CriterionModifier[]; hierarchyToggleLabel?: string }) {
   const includeModifiers = modifiers.filter((modifier) => modifier === "INCLUDES" || modifier === "INCLUDES_ALL");
   const modifier = value?.modifier ?? (includeModifiers.includes("INCLUDES_ALL") ? "INCLUDES_ALL" : "INCLUDES");
+  const nullModifiers = modifiers.filter((item) => NULL_VALUE_MODIFIERS.has(item));
+  const isNullModifier = NULL_VALUE_MODIFIERS.has(modifier);
   const includedIds = value?.value ?? [];
   const excludedIds = value?.excludes ?? [];
   const includeHierarchy = (value as any)?.depth === -1;
@@ -1686,7 +1705,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
   // Build a name lookup from available entities
   const nameMap = useMemo(() => {
     const map: Record<string, string> = { ...existingNames };
-    if (entities) for (const e of entities as any[]) map[String(e.id)] = e.name || e.title || `#${e.id}`;
+    if (entities) for (const e of entities as any[]) map[String(e.id)] = e.name || e.title || "Untitled item";
     return map;
   }, [entities, existingNames]);
 
@@ -1729,7 +1748,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
     onChange(buildCriterion(nextInc, nextExc, modifier, includeHierarchy));
   };
 
-  const getName = (e: any) => e.name || e.title || `#${e.id}`;
+  const getName = (e: any) => e.name || e.title || "Untitled item";
 
   return (
     <div className="space-y-2">
@@ -1748,7 +1767,26 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
             {MODIFIER_LABELS[m]}
           </button>
         ))}
+        {nullModifiers.map((m) => (
+          <button
+            key={m}
+            onClick={() => onChange({ modifier: m })}
+            className={`px-2 py-0.5 rounded text-[10px] border ${
+              m === modifier
+                ? "bg-accent text-white border-accent"
+                : "border-border text-secondary hover:text-foreground hover:border-accent/50"
+            }`}
+          >
+            {MODIFIER_LABELS[m]}
+          </button>
+        ))}
       </div>
+      {isNullModifier ? (
+        <div className="rounded border border-border/70 bg-input px-2 py-2 text-xs text-muted">
+          This criterion will match entities with {modifier === "IS_NULL" ? "no" : "at least one"} linked {entityType} item.
+        </div>
+      ) : (
+        <>
       {/* Sub-tag checkbox (only for tags) */}
       {(entityType === "tags" || hierarchyToggleLabel) && (
         <label className="flex items-center gap-1.5 text-xs text-secondary cursor-pointer select-none">
@@ -1770,7 +1808,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
             const entity = entities?.find((e: any) => e.id === id);
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-green-900/50 text-green-300 border border-green-700">
-                {entity ? getName(entity) : `#${id}`}
+                {entity ? getName(entity) : "Unavailable item"}
                 <button onClick={() => removeId(id)} className="hover:text-red-400">
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -1786,7 +1824,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
             const entity = entities?.find((e: any) => e.id === id);
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-red-900/50 text-red-300 border border-red-700">
-                {entity ? getName(entity) : `#${id}`}
+                {entity ? getName(entity) : "Unavailable item"}
                 <button onClick={() => removeId(id)} className="hover:text-red-400">
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -1865,6 +1903,8 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
           <div className="px-2 py-2 text-xs text-muted text-center">No results</div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

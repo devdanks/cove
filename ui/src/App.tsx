@@ -13,6 +13,8 @@ import { AuthBootstrapPage } from "./pages/AuthBootstrapPage";
 import { RedeemInvitePage } from "./pages/RedeemInvitePage";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { useKeySequence } from "./hooks/useKeySequence";
+import { useResolvedKeybindingOverrides } from "./hooks/useResolvedKeybindingOverrides";
+import { resolveKeybinding } from "./keyboard/keybindings";
 import { LOCATION_CHANGE_EVENT, Route, buildCurrentUrl, buildRoutePath, buildRouteUrl, navigateToUrl, parseCurrentRoute, parseLegacyHashRoute, readStoredRoute, resolveCurrentRoute, syncRouteHistory } from "./router/location";
 
 function normalizeRoute(route: Route): Route {
@@ -46,6 +48,7 @@ const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
   faces: "faces.read",
   sceneparser: "scenes.read",
   logs: "system.read",
+  duplicates: "scenes.read",
   stats: "system.read",
 };
 
@@ -73,6 +76,7 @@ const ImageDetailPage = lazy(() => import("./pages/ImageDetailPage").then(m => (
 const FacesPage = lazy(() => import("./pages/FacesPage").then(m => ({ default: m.FacesPage })));
 const FaceDetailPage = lazy(() => import("./pages/FaceDetailPage").then(m => ({ default: m.FaceDetailPage })));
 const LogsPage = lazy(() => import("./pages/LogsPage").then(m => ({ default: m.LogsPage })));
+const DuplicateFinderPage = lazy(() => import("./pages/DuplicateFinderPage").then(m => ({ default: m.DuplicateFinderPage })));
 
 const SceneFilenameParserPage = lazy(() => import("./pages/SceneFilenameParserPage").then(m => ({ default: m.SceneFilenameParserPage })));
 const HomePage = lazy(() => import("./pages/HomePage").then(m => ({ default: m.HomePage })));
@@ -154,31 +158,13 @@ export default function App() {
 
   const [showShortcuts, setShowShortcuts] = useState(false);
 
-  // Global keyboard navigation shortcuts
-  const globalBindings = useMemo(() => [
-    { keys: "g h", action: () => navigate({ page: "home" }) },
-    { keys: "g s", action: () => navigate({ page: "scenes" }) },
-    { keys: "g m", action: () => navigate({ page: "segments" }) },
-    { keys: "g f", action: () => navigate({ page: "faces" }) },
-    { keys: "g i", action: () => navigate({ page: "images" }) },
-    { keys: "g v", action: () => navigate({ page: "groups" }) },
-    { keys: "g l", action: () => navigate({ page: "galleries" }) },
-    { keys: "g p", action: () => navigate({ page: "performers" }) },
-    { keys: "g u", action: () => navigate({ page: "studios" }) },
-    { keys: "g t", action: () => navigate({ page: "tags" }) },
-    { keys: "g z", action: () => navigate({ page: "settings" }) },
-    { keys: "g d", action: () => navigate({ page: "stats" }) },
-    { keys: "?", action: () => setShowShortcuts(true) },
-  ], [navigate]);
-
-  useKeySequence(globalBindings);
-
   return (
     <RouteRegistryProvider>
       <AppConfigProvider>
         <AuthGate>
           <ExtensionLoaderProvider>
             <SceneQueueProvider>
+              <AppKeyboardShortcuts navigate={navigate} onShowShortcuts={() => setShowShortcuts(true)} />
               <AppShell route={route} navigate={navigate} />
               <KeyboardShortcutsDialog open={showShortcuts} onClose={() => setShowShortcuts(false)} />
             </SceneQueueProvider>
@@ -187,6 +173,29 @@ export default function App() {
       </AppConfigProvider>
     </RouteRegistryProvider>
   );
+}
+
+function AppKeyboardShortcuts({ navigate, onShowShortcuts }: { navigate: (route: Route) => void; onShowShortcuts: () => void }) {
+  const overrides = useResolvedKeybindingOverrides();
+
+  const globalBindings = useMemo(() => [
+    { keys: resolveKeybinding(overrides, "global.home", "g h"), action: () => navigate({ page: "home" }) },
+    { keys: resolveKeybinding(overrides, "global.scenes", "g s"), action: () => navigate({ page: "scenes" }) },
+    { keys: resolveKeybinding(overrides, "global.segments", "g m"), action: () => navigate({ page: "segments" }) },
+    { keys: resolveKeybinding(overrides, "global.faces", "g f"), action: () => navigate({ page: "faces" }) },
+    { keys: resolveKeybinding(overrides, "global.images", "g i"), action: () => navigate({ page: "images" }) },
+    { keys: resolveKeybinding(overrides, "global.groups", "g v"), action: () => navigate({ page: "groups" }) },
+    { keys: resolveKeybinding(overrides, "global.galleries", "g l"), action: () => navigate({ page: "galleries" }) },
+    { keys: resolveKeybinding(overrides, "global.performers", "g p"), action: () => navigate({ page: "performers" }) },
+    { keys: resolveKeybinding(overrides, "global.studios", "g u"), action: () => navigate({ page: "studios" }) },
+    { keys: resolveKeybinding(overrides, "global.tags", "g t"), action: () => navigate({ page: "tags" }) },
+    { keys: resolveKeybinding(overrides, "global.settings", "g z"), action: () => navigate({ page: "settings" }) },
+    { keys: resolveKeybinding(overrides, "global.stats", "g d"), action: () => navigate({ page: "stats" }) },
+    { keys: resolveKeybinding(overrides, "global.shortcuts", "?"), action: onShowShortcuts },
+  ], [navigate, onShowShortcuts, overrides]);
+
+  useKeySequence(globalBindings);
+  return null;
 }
 
 /**
@@ -403,6 +412,7 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
       {route.page === "settings" && <SettingsPage />}
       {route.page === "stats" && <StatsPage onNavigate={navigate} />}
       {route.page === "logs" && <LogsPage />}
+      {route.page === "duplicates" && <DuplicateFinderPage onNavigate={navigate} />}
       {route.page === "sceneparser" && <SceneFilenameParserPage onNavigate={navigate} />}
     </>
   );

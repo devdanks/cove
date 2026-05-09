@@ -117,7 +117,7 @@ function DerivedSpanCard({
       />
       <div className="relative aspect-video w-full overflow-hidden bg-surface/70">
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
-        <SegmentScenePreview hostId={item.sceneId} updatedAt={item.sceneUpdatedAt} title={title} imgClassName="h-full w-full object-cover" fallbackClassName="flex h-full w-full items-center justify-center bg-surface text-muted" iconClassName="h-12 w-12" />
+        <SegmentScenePreview hostId={item.sceneId} updatedAt={item.sceneUpdatedAt} startSec={item.span.startSec} title={title} imgClassName="h-full w-full object-cover" fallbackClassName="flex h-full w-full items-center justify-center bg-surface text-muted" iconClassName="h-12 w-12" />
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-3 text-white">
           <div className="text-xs font-medium uppercase tracking-wide text-white/75">{formatSegmentRange(item.span.startSec, item.span.endSec)}</div>
           <div className="mt-1 line-clamp-2 text-sm font-semibold">{title}</div>
@@ -218,7 +218,7 @@ function DerivedSpanListRow({
           <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onToggle} />
           <div className="flex items-start gap-3">
             <div className="hidden h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-surface sm:block">
-              <SegmentScenePreview hostId={item.sceneId} updatedAt={item.sceneUpdatedAt} title={title} imgClassName="h-full w-full object-cover" fallbackClassName="flex h-full w-full items-center justify-center bg-surface text-muted" iconClassName="h-6 w-6" />
+              <SegmentScenePreview hostId={item.sceneId} updatedAt={item.sceneUpdatedAt} startSec={item.span.startSec} title={title} imgClassName="h-full w-full object-cover" fallbackClassName="flex h-full w-full items-center justify-center bg-surface text-muted" iconClassName="h-6 w-6" />
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>

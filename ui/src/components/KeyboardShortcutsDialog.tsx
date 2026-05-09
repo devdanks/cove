@@ -1,45 +1,14 @@
 import { Keyboard, X } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useResolvedKeybindingOverrides } from "../hooks/useResolvedKeybindingOverrides";
+import { KEYBINDING_GROUPS, resolveKeybinding } from "../keyboard/keybindings";
 
 interface ShortcutSection {
   title: string;
   shortcuts: { keys: string; description: string }[];
 }
 
-const sections: ShortcutSection[] = [
-  {
-    title: "Global Navigation",
-    shortcuts: [
-      { keys: "/", description: "Focus page filter or global search" },
-      { keys: "g s", description: "Go to Scenes" },
-      { keys: "g m", description: "Go to Segments" },
-      { keys: "g i", description: "Go to Images" },
-      { keys: "g v", description: "Go to Groups" },
-      { keys: "g l", description: "Go to Galleries" },
-      { keys: "g p", description: "Go to Performers" },
-      { keys: "g u", description: "Go to Studios" },
-      { keys: "g t", description: "Go to Tags" },
-      { keys: "g z", description: "Go to Settings" },
-      { keys: "g d", description: "Go to Dashboard" },
-      { keys: "?", description: "Show this help" },
-    ],
-  },
-  {
-    title: "List Page",
-    shortcuts: [
-      { keys: "v g", description: "Grid view" },
-      { keys: "v l", description: "List view" },
-      { keys: "v w", description: "Wall view" },
-      { keys: "v t", description: "Tagger view (scenes)" },
-      { keys: "s a", description: "Select all on page" },
-      { keys: "s n", description: "Deselect all" },
-      { keys: "f", description: "Open advanced filters" },
-      { keys: "←", description: "Previous page" },
-      { keys: "→", description: "Next page" },
-      { keys: "Shift + ←/→", description: "Jump 10 pages" },
-      { keys: "Ctrl + Home/End", description: "First / last page" },
-    ],
-  },
+const staticSections: ShortcutSection[] = [
   {
     title: "Scene Detail",
     shortcuts: [
@@ -83,7 +52,20 @@ function formatKeys(keys: string) {
 }
 
 export function KeyboardShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const overrides = useResolvedKeybindingOverrides();
+
   if (!open) return null;
+
+  const sections: ShortcutSection[] = [
+    ...KEYBINDING_GROUPS.map((group) => ({
+      title: group.group,
+      shortcuts: group.definitions.map((definition) => ({
+        keys: resolveKeybinding(overrides, definition.id, definition.keys),
+        description: definition.label,
+      })),
+    })),
+    ...staticSections,
+  ];
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>

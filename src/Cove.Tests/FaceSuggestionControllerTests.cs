@@ -188,14 +188,6 @@ public sealed class FaceSuggestionControllerTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
-            modelBuilder.Entity<Face>().Ignore(face => face.CustomFields);
         }
     }
 

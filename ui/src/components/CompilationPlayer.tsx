@@ -194,7 +194,7 @@ export function CompilationPlayer({
               onClick={() => moveToItem(index)}
               className={`rounded-full border px-3 py-2 text-sm transition-colors ${index === currentItemIndex ? "border-accent bg-accent/10 text-accent" : "border-border bg-card/60 text-secondary hover:border-accent hover:text-foreground"}`}
             >
-              {index + 1}. {manifestItem.title || manifestItem.sceneTitle || `Scene #${manifestItem.sceneId}`}
+              {index + 1}. {manifestItem.title || manifestItem.sceneTitle || "Untitled scene"}
             </button>
           ))}
         </div>
@@ -203,7 +203,7 @@ export function CompilationPlayer({
       <div className="rounded-2xl border border-border bg-surface/50 p-4">
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Current Item</div>
         <div className="space-y-3 text-sm text-secondary">
-          <div>{item.title || item.sceneTitle || `Scene #${item.sceneId}`}</div>
+          <div>{item.title || item.sceneTitle || "Untitled scene"}</div>
           <div>{formatTime(item.startSec)} - {formatTime(clipEnd)}</div>
           <div>{clipDuration > 0 ? `${formatTime(clipDuration)} total clip length` : "Instant clip"}</div>
           <div className="flex flex-wrap gap-2 pt-1">

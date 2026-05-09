@@ -27,6 +27,34 @@ interface IdentifySource {
   enabled: boolean;
 }
 
+type FieldStrategy = "ignore" | "merge" | "overwrite";
+
+const METADATA_FIELD_OPTIONS: { key: string; label: string }[] = [
+  { key: "title", label: "Title" },
+  { key: "code", label: "Code" },
+  { key: "details", label: "Details" },
+  { key: "director", label: "Director" },
+  { key: "date", label: "Date" },
+  { key: "urls", label: "URLs" },
+  { key: "studio", label: "Studio" },
+  { key: "performers", label: "Performers" },
+  { key: "tags", label: "Tags" },
+];
+
+const PERFORMER_GENDER_OPTIONS = [
+  "Female",
+  "Male",
+  "Transgender Female",
+  "Transgender Male",
+  "Intersex",
+  "Non-Binary",
+  "Unknown",
+];
+
+function buildDefaultFieldStrategies(): Record<string, FieldStrategy> {
+  return Object.fromEntries(METADATA_FIELD_OPTIONS.map((field) => [field.key, "merge"])) as Record<string, FieldStrategy>;
+}
+
 const DEFAULT_IDENTIFY_DEFAULTS = {
   createTags: true,
   createPerformers: true,
@@ -69,6 +97,8 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
   const [createTags, setCreateTags] = useState(identifyDefaults.createTags);
   const [createPerformers, setCreatePerformers] = useState(identifyDefaults.createPerformers);
   const [createStudios, setCreateStudios] = useState(identifyDefaults.createStudios);
+  const [fieldStrategies, setFieldStrategies] = useState<Record<string, FieldStrategy>>(() => buildDefaultFieldStrategies());
+  const [performerGenders, setPerformerGenders] = useState<string[]>(() => [...PERFORMER_GENDER_OPTIONS]);
 
   useEffect(() => {
     if (!open) {
@@ -79,6 +109,8 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
     setCreateTags(identifyDefaults.createTags);
     setCreatePerformers(identifyDefaults.createPerformers);
     setCreateStudios(identifyDefaults.createStudios);
+    setFieldStrategies(buildDefaultFieldStrategies());
+    setPerformerGenders([...PERFORMER_GENDER_OPTIONS]);
   }, [open, metadataServers, identifyDefaults.createTags, identifyDefaults.createPerformers, identifyDefaults.createStudios]);
 
   const identifyMut = useMutation({
@@ -94,6 +126,8 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
         createTags,
         createPerformers,
         createStudios,
+        fieldStrategies,
+        performerGenders,
       });
     },
     onSuccess: () => {
@@ -114,11 +148,21 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
     setSources(newSources);
   };
 
+  const setFieldStrategy = (key: string, strategy: FieldStrategy) => {
+    setFieldStrategies((current) => ({ ...current, [key]: strategy }));
+  };
+
+  const togglePerformerGender = (gender: string) => {
+    setPerformerGenders((current) =>
+      current.includes(gender) ? current.filter((item) => item !== gender) : [...current, gender]
+    );
+  };
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="bg-surface border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
+      <div className="bg-surface border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
@@ -237,6 +281,43 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
                   />
                   Skip single-name performers
                 </label>
+
+                <div className="border-t border-border my-2 pt-2">
+                  <span className="text-xs font-medium text-muted uppercase tracking-wide">Field Handling</span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {METADATA_FIELD_OPTIONS.map((field) => (
+                    <label key={field.key} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm">
+                      <span className="text-secondary">{field.label}</span>
+                      <select
+                        value={fieldStrategies[field.key] ?? "merge"}
+                        onChange={(e) => setFieldStrategy(field.key, e.target.value as FieldStrategy)}
+                        className="rounded border border-border bg-surface px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+                      >
+                        <option value="ignore">Ignore</option>
+                        <option value="merge">Merge</option>
+                        <option value="overwrite">Overwrite</option>
+                      </select>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="border-t border-border my-2 pt-2">
+                  <span className="text-xs font-medium text-muted uppercase tracking-wide">Performer Genders</span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {PERFORMER_GENDER_OPTIONS.map((gender) => (
+                    <label key={gender} className="flex items-center gap-2 text-sm text-secondary">
+                      <input
+                        type="checkbox"
+                        checked={performerGenders.includes(gender)}
+                        onChange={() => togglePerformerGender(gender)}
+                        className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
+                      />
+                      {gender}
+                    </label>
+                  ))}
+                </div>
 
                 <div className="border-t border-border my-2 pt-2">
                   <span className="text-xs font-medium text-muted uppercase tracking-wide">Entity Creation</span>

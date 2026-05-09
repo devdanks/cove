@@ -36,9 +36,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   );
   const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(scene));
   const [contextTagSearchByPerformer, setContextTagSearchByPerformer] = useState<Record<number, string>>({});
-  const [customFields, setCustomFields] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(scene.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")]))
-  );
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(scene.customFields ?? {}) });
 
   // Tag search
   const [tagSearch, setTagSearch] = useState("");
@@ -83,7 +81,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
     setContextTagIdsByPerformer(buildPerformerContextTagIds(scene));
     setContextTagSearchByPerformer({});
-    setCustomFields(Object.fromEntries(Object.entries(scene.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")])));
+    setCustomFields({ ...(scene.customFields ?? {}) });
   }, [scene]);
 
   const mutation = useMutation({
@@ -115,7 +113,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       performerIds: selectedPerformerIds,
       galleryIds: selectedGalleryIds,
       groups: selectedGroups,
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      customFields,
     });
   };
 
@@ -351,7 +349,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
             return (
               <div key={sg.groupId} className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-900 text-orange-300">
-                  {group?.name || `Group #${sg.groupId}`}
+                  {group?.name || "Untitled group"}
                   <button onClick={() => setSelectedGroups(selectedGroups.filter((g) => g.groupId !== sg.groupId))} className="hover:text-white">×</button>
                 </span>
                 <label className="flex items-center gap-1 text-xs text-secondary">
@@ -391,7 +389,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       </Field>
 
       <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} />
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
       </Field>
 
       {mutation.error && (

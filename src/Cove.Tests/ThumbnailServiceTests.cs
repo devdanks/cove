@@ -176,6 +176,8 @@ public class ThumbnailServiceTests
 
         public bool Cancel(string jobId) => false;
 
+        public bool ReorderQueued(string jobId, string? beforeJobId) => false;
+
         public JobInfo? GetJob(string jobId) => null;
 
         public IReadOnlyList<JobInfo> GetAllJobs() => [];
@@ -201,13 +203,6 @@ public class ThumbnailServiceTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Cove.Core.Entities.Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
         }
     }
 }

@@ -190,7 +190,7 @@ export function FacesPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
+  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
   const selectedFaceIds = useMemo(() => Array.from(selectedIds).map((value) => Number(value)), [selectedIds]);
 
@@ -300,6 +300,7 @@ export function FacesPage({ onNavigate }: Props) {
         selectedIds={selectedIds}
         onSelectAll={selectAll}
         onSelectNone={selectNone}
+        onInvertSelection={invertSelection}
         selectionActions={(
           <div className="flex flex-wrap items-center gap-2">
             {canWriteFaces ? (

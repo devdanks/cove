@@ -39,7 +39,6 @@ public class Image : BaseEntity
     public ICollection<ImageTag> ImageTags { get; set; } = [];
     public ICollection<ImagePerformer> ImagePerformers { get; set; } = [];
     public ICollection<ImageGallery> ImageGalleries { get; set; } = [];
-    public Dictionary<string, object>? CustomFields { get; set; }
 }
 
 public class ImageUrl

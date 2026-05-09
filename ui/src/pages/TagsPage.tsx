@@ -7,7 +7,7 @@ import type { EntityEngagement, FindFilter, Tag, TagCreate, TagFilterCriteria } 
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useMultiSelect } from "../hooks/useMultiSelect";
-import { EditModal, Field, NumberInput, SelectInput, TextInput, TextArea, SaveButton } from "../components/EditModal";
+import { CreateModalActions, EditModal, Field, NumberInput, SelectInput, TextInput, TextArea } from "../components/EditModal";
 import { Tag as TagIcon, Film, Trash2, Loader2, Edit, Merge, Heart, Image, LayoutGrid, Layers, Users, Building2 } from "lucide-react";
 import { MergeDialog } from "../components/MergeDialog";
 import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
@@ -24,6 +24,9 @@ import { StringListEditor } from "../components/StringListEditor";
 import { TagGraphView } from "../components/TagGraphView";
 import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
 import { TagGroupsManager } from "../components/TagGroupsManager";
+import { useWallColumns } from "../hooks/useWallColumns";
+import { WallMediaCard } from "../components/WallMediaCard";
+import { CustomFieldsEditor } from "../components/shared";
 
 const GRAPH_VIEW_LIMIT = 5000;
 
@@ -36,6 +39,8 @@ const SORT_OPTIONS = [
   { value: "image_count", label: "Image Count" },
   { value: "performer_count", label: "Performer Count" },
   { value: "studio_count", label: "Studio Count" },
+  { value: "latest_scene_date", label: "Latest Scene Date" },
+  { value: "total_file_size", label: "Total File Size" },
   { value: "random", label: "Random" },
   { value: "created_at", label: "Created At" },
   { value: "updated_at", label: "Updated At" },
@@ -59,8 +64,9 @@ export function TagsPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list", "graph"] as const,
+    allowedDisplayModes: ["grid", "list", "wall", "graph"] as const,
   });
+  const [wallColumnCount, setWallColumnCount] = useState(6);
   const [showCreate, setShowCreate] = useState(false);
   const [showTagGroups, setShowTagGroups] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
@@ -92,9 +98,10 @@ export function TagsPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const wallColumns = useWallColumns(items, wallColumnCount);
   const { engagementById } = useEntityEngagementBatch("tag", items.map((item) => item.id));
   const selectionItems: Array<Pick<Tag, "id" | "name" | "imagePath">> = displayMode === "graph" ? graphData?.items ?? [] : items;
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(selectionItems);
+  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(selectionItems);
   const selecting = selectedIds.size > 0;
 
   const bulkDeleteMut = useMutation({
@@ -144,7 +151,9 @@ export function TagsPage({ onNavigate }: Props) {
       sortOptions={SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
-      availableDisplayModes={["grid", "list", "graph"]}
+      availableDisplayModes={["grid", "list", "wall", "graph"]}
+      wallColumnCount={wallColumnCount}
+      onWallColumnCountChange={setWallColumnCount}
       showPagingControls={displayMode !== "graph"}
       criteriaDefinitions={TAG_CRITERIA}
       objectFilter={objectFilter}
@@ -163,6 +172,7 @@ export function TagsPage({ onNavigate }: Props) {
       selectedIds={selectedIds}
       onSelectAll={selectAll}
       onSelectNone={selectNone}
+      onInvertSelection={invertSelection}
       selectionActions={(
         <>
           {canMetadataBatch && (
@@ -223,6 +233,25 @@ export function TagsPage({ onNavigate }: Props) {
             deleteTagMut.mutate(id);
           } : undefined}
         />
+      ) : displayMode === "wall" ? (
+        <div className="flex gap-1 px-2">
+          {wallColumns.map((column, columnIndex) => (
+            <div key={columnIndex} className="flex min-w-0 flex-1 flex-col gap-1">
+              {column.map((tag) => (
+                <EntityWallCard
+                  key={tag.id}
+                  title={tag.name}
+                  imageSrc={tag.imagePath}
+                  route={{ page: "tag", id: tag.id }}
+                  selected={selectedIds.has(tag.id)}
+                  selecting={selecting}
+                  onSelect={() => toggle(tag.id)}
+                  onClick={() => selecting ? toggle(tag.id) : onNavigate({ page: "tag", id: tag.id })}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
       ) : displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {items.map((tag) => (
@@ -284,12 +313,19 @@ function TagGroupManagerDialog({ open, onClose }: { open: boolean; onClose: () =
 function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: number) => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({ name: "", description: "", aliases: [] as string[], color: "", tagGroupId: undefined as number | undefined, minOccurrenceSec: undefined as number | undefined, minOccurrencePercent: undefined as number | undefined });
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
+  const [createAnother, setCreateAnother] = useState(false);
   const { data: groups = [] } = useQuery({ queryKey: ["tag-groups"], queryFn: tagGroups.list });
+  const resetForm = () => {
+    setForm({ name: "", description: "", aliases: [], color: "", tagGroupId: undefined, minOccurrenceSec: undefined, minOccurrencePercent: undefined });
+    setCustomFields({});
+  };
   const mutation = useMutation({
     mutationFn: (data: TagCreate) => tags.create(data),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["tags"] });
-      setForm({ name: "", description: "", aliases: [], color: "", tagGroupId: undefined, minOccurrenceSec: undefined, minOccurrencePercent: undefined });
+      resetForm();
+      if (createAnother) return;
       onClose();
       if (created?.id) onCreated(created.id);
     },
@@ -338,8 +374,10 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
           addLabel="Add Alias"
         />
       </Field>
-      <div className="flex justify-end mt-4">
-        <SaveButton loading={mutation.isPending} onClick={() => mutation.mutate({
+      <Field label="Custom Fields">
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="tag" />
+      </Field>
+      <CreateModalActions loading={mutation.isPending} createAnother={createAnother} onCreateAnotherChange={setCreateAnother} onSave={() => mutation.mutate({
           name: form.name,
           description: form.description || undefined,
           color: form.color.trim() || null,
@@ -347,9 +385,21 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
           minOccurrenceSec: form.minOccurrenceSec ?? null,
           minOccurrencePercent: form.minOccurrencePercent ?? null,
           aliases: form.aliases.map((alias) => alias.trim()).filter(Boolean),
+          customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
         })} />
-      </div>
     </EditModal>
+  );
+}
+
+function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect, onClick }: { title: string; imageSrc?: string | null; route: any; selected: boolean; selecting: boolean; onSelect: () => void; onClick: () => void }) {
+  return (
+    <WallMediaCard title={title} imageSrc={imageSrc} aspectRatio="1 / 1" onClick={onClick} className={selected ? "ring-2 ring-accent" : ""}>
+      <RouteCardLinkOverlay route={route} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone />
+      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+      <div className="selection-safe-zone absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 text-xs font-medium text-white">
+        {title}
+      </div>
+    </WallMediaCard>
   );
 }
 

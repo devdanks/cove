@@ -18,11 +18,15 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (inputKind is not ("url" or "name" or "fragment"))
             throw new ArgumentException($"Unsupported scrape input kind '{dto.InputKind}'.", nameof(dto));
 
+        var fragmentInput = inputKind == "fragment"
+            ? await BuildFragmentInputAsync(dto, ct)
+            : dto.Fragment;
+
         var inputJson = inputKind switch
         {
             "url" => JsonSerializer.Serialize(new Dictionary<string, object?> { ["url"] = dto.Url }, JsonOptions),
             "name" => JsonSerializer.Serialize(new Dictionary<string, object?> { ["name"] = dto.Name }, JsonOptions),
-            _ => JsonSerializer.Serialize(dto.Fragment ?? new Dictionary<string, object>(), JsonOptions),
+            _ => JsonSerializer.Serialize(fragmentInput ?? new Dictionary<string, object>(), JsonOptions),
         };
 
         var attempt = new ScrapeAttempt
@@ -55,9 +59,9 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                     result = SelectPrimaryCandidate(candidateResults, dto.Name);
                     break;
                 default:
-                    result = dto.Fragment == null
+                    result = fragmentInput == null
                         ? null
-                        : await scraperService.ScrapeFragmentAsync(dto.ScraperId, dto.EntityType, dto.Fragment, ct);
+                        : await scraperService.ScrapeFragmentAsync(dto.ScraperId, dto.EntityType, fragmentInput, ct);
                     break;
             }
 
@@ -85,6 +89,36 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         db.ScrapeAttempts.Add(attempt);
         await db.SaveChangesAsync(ct);
         return MapAttempt(attempt);
+    }
+
+    private async Task<Dictionary<string, object>?> BuildFragmentInputAsync(CreateScrapeAttemptDto dto, CancellationToken ct)
+    {
+        if (dto.Fragment == null)
+            return null;
+
+        var fragment = new Dictionary<string, object>(dto.Fragment, StringComparer.OrdinalIgnoreCase);
+        if (!string.Equals(dto.EntityType, "scene", StringComparison.OrdinalIgnoreCase) || dto.EntityId == null)
+            return fragment;
+
+        var fingerprints = await db.VideoFiles
+            .Where(file => file.SceneId == dto.EntityId.Value)
+            .SelectMany(file => file.Fingerprints.Select(fingerprint => new { fingerprint.Type, fingerprint.Value }))
+            .ToListAsync(ct);
+
+        foreach (var type in new[] { "phash", "oshash", "md5" })
+        {
+            if (fragment.ContainsKey(type))
+                continue;
+
+            var value = fingerprints
+                .Where(fingerprint => string.Equals(fingerprint.Type, type, StringComparison.OrdinalIgnoreCase))
+                .Select(fingerprint => fingerprint.Value)
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+            if (!string.IsNullOrWhiteSpace(value))
+                fragment[type] = value;
+        }
+
+        return fragment;
     }
 
     public async Task<IReadOnlyList<ScrapeAttemptDto>> ListAttemptsAsync(string? entityType, int? entityId, int limit = 20, CancellationToken ct = default)
@@ -336,6 +370,79 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                 await tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, "scraper", cancellationToken: ct);
             }
         }
+
+        await ApplyTagHierarchyAsync(root, tagLookup, createMissing, ct);
+    }
+
+    private async Task ApplyTagHierarchyAsync(JsonElement root, Dictionary<string, Tag> tagLookup, bool createMissing, CancellationToken ct)
+    {
+        var tagItems = GetObjectItems(root, "Tags", "Tag", "TagNames");
+        if (tagItems.Count == 0)
+            return;
+
+        var relationKeys = new HashSet<(int ParentId, int ChildId)>();
+
+        foreach (var tagItem in tagItems)
+        {
+            var tagName = GetString(tagItem, "Name", "name", "Title", "title");
+            if (string.IsNullOrWhiteSpace(tagName))
+                continue;
+
+            var tag = await ResolveHierarchyTagAsync(tagName, tagLookup, createMissing, ct);
+            if (tag == null)
+                continue;
+
+            foreach (var parentName in GetNamedItems(tagItem, "Parents", "ParentTags", "ParentTag", "Parent"))
+            {
+                var parent = await ResolveHierarchyTagAsync(parentName, tagLookup, createMissing, ct);
+                if (parent == null || parent.Id == tag.Id)
+                    continue;
+                await AddTagRelationAsync(parent.Id, tag.Id, relationKeys, ct);
+            }
+
+            foreach (var childName in GetNamedItems(tagItem, "Children", "ChildTags", "ChildTag", "Child"))
+            {
+                var child = await ResolveHierarchyTagAsync(childName, tagLookup, createMissing, ct);
+                if (child == null || child.Id == tag.Id)
+                    continue;
+                await AddTagRelationAsync(tag.Id, child.Id, relationKeys, ct);
+            }
+        }
+    }
+
+    private async Task<Tag?> ResolveHierarchyTagAsync(string name, Dictionary<string, Tag> tagLookup, bool createMissing, CancellationToken ct)
+    {
+        var normalizedName = name.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedName))
+            return null;
+
+        if (tagLookup.TryGetValue(normalizedName, out var existingTag))
+            return existingTag;
+
+        var normalizedKey = normalizedName.ToLowerInvariant();
+        var tag = await db.Tags.FirstOrDefaultAsync(item => item.Name.ToLower() == normalizedKey, ct);
+        if (tag == null)
+        {
+            if (!createMissing)
+                return null;
+
+            tag = new Tag { Name = normalizedName };
+            db.Tags.Add(tag);
+            await db.SaveChangesAsync(ct);
+        }
+
+        tagLookup[normalizedName] = tag;
+        return tag;
+    }
+
+    private async Task AddTagRelationAsync(int parentId, int childId, HashSet<(int ParentId, int ChildId)> relationKeys, CancellationToken ct)
+    {
+        if (!relationKeys.Add((parentId, childId)))
+            return;
+
+        var exists = await db.Set<TagParent>().AnyAsync(relation => relation.ParentId == parentId && relation.ChildId == childId, ct);
+        if (!exists)
+            db.Set<TagParent>().Add(new TagParent { ParentId = parentId, ChildId = childId });
     }
 
     private async Task ApplyPerformersAsync(Scene scene, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, CancellationToken ct)
@@ -606,6 +713,12 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
+            }
+
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                var candidate = GetString(value, "Name", "name", "Title", "title");
+                return string.IsNullOrWhiteSpace(candidate) ? [] : [candidate];
             }
 
             if (value.ValueKind != JsonValueKind.Array)

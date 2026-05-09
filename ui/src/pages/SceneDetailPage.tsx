@@ -1,6 +1,6 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, scenes, segmentDisplayProfiles, tags, tagApplications, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata } from "../api/client";
-import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay } from "../components/shared";
+import { faces, scenes, segmentDisplayProfiles, tags, tagApplications, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata, fileOps } from "../api/client";
+import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay, CustomFieldsEditor } from "../components/shared";
 import { 
   Pencil, Plus, Trash2, Search, Eye, EyeOff, Heart, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
@@ -918,7 +918,7 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
           </dl>
         </div>
       )}
-      <CustomFieldsDisplay customFields={scene.customFields} />
+      <CustomFieldsDisplay customFields={scene.customFields} entityType="scene" />
     </div>
   );
 }
@@ -1084,6 +1084,9 @@ function toTagProvenance(application: TagApplication) {
 
 // File Info Tab — show every underlying scene file rather than only the first one.
 export function FileInfoTab({ files }: { files: Scene["files"] }) {
+  const revealMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
+  const canReveal = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+
   return (
     <div className="space-y-4 text-sm">
       {files.map((file, index) => {
@@ -1092,11 +1095,36 @@ export function FileInfoTab({ files }: { files: Scene["files"] }) {
         return (
           <section key={file.id ?? `${file.path}-${index}`} className="rounded-xl border border-border bg-card p-4 space-y-3">
             {files.length > 1 && (
-              <div>
-                <h6 className="text-sm font-semibold text-foreground">{sectionLabel}</h6>
-                <p className="text-xs text-muted">File {index + 1} of {files.length}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h6 className="text-sm font-semibold text-foreground">{sectionLabel}</h6>
+                  <p className="text-xs text-muted">File {index + 1} of {files.length}</p>
+                </div>
+                {canReveal && file.id ? (
+                  <button
+                    type="button"
+                    onClick={() => revealMutation.mutate(file.id)}
+                    className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-secondary hover:border-accent hover:text-foreground"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Reveal
+                  </button>
+                ) : null}
               </div>
             )}
+
+            {files.length <= 1 && canReveal && file.id ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => revealMutation.mutate(file.id)}
+                  className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-secondary hover:border-accent hover:text-foreground"
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  Reveal
+                </button>
+              </div>
+            ) : null}
 
             <dl className="grid gap-y-1.5" style={{ gridTemplateColumns: "minmax(100px, auto) 1fr" }}>
               <dt className="text-muted">Path</dt>
@@ -2187,6 +2215,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   const [rating, setRating] = useState<number | undefined>(undefined);
   const [urls, setUrls] = useState(scene.urls.length > 0 ? scene.urls : [""]);
   const [studioId, setStudioId] = useState<number | undefined>(scene.studioId ?? undefined);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(scene.customFields ?? {}) });
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(scene.tags.map((t) => t.id));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(scene.performers.map((p) => p.id));
   const [selectedGalleryIds, setSelectedGalleryIds] = useState<number[]>(scene.galleries.map((g) => g.id));
@@ -2209,6 +2238,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     setTitle(scene.title || ""); setCode(scene.code || ""); setDetails(scene.details || "");
     setDirector(scene.director || ""); setDate(scene.date || ""); setRating(undefined);
     setUrls(scene.urls.length > 0 ? scene.urls : [""]); setStudioId(scene.studioId ?? undefined);
+    setCustomFields({ ...(scene.customFields ?? {}) });
     setSelectedTagIds(scene.tags.map((t) => t.id)); setSelectedPerformerIds(scene.performers.map((p) => p.id));
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
@@ -2229,7 +2259,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     const urlList = urls.map((url) => url.trim()).filter(Boolean);
     mutation.mutate({ title: title || undefined, code: code || undefined, details: details || undefined,
       director: director || undefined, date: date || undefined, rating, studioId,
-      urls: urlList, tagIds: selectedTagIds, performerIds: selectedPerformerIds, galleryIds: selectedGalleryIds, groups: selectedGroups });
+      urls: urlList, customFields, tagIds: selectedTagIds, performerIds: selectedPerformerIds, galleryIds: selectedGalleryIds, groups: selectedGroups });
   };
 
   const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, selectedTagIds);
@@ -2271,6 +2301,11 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
         <StudioSelector value={studioId} onChange={setStudioId} placeholder="Search studios..." />
       </div>
       <div className="space-y-1"><span className="text-xs text-secondary">URLs</span><StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" /></div>
+
+      <div className="space-y-1">
+        <span className="text-xs text-secondary">Custom Fields</span>
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
+      </div>
 
       {/* Tags */}
       <div className="space-y-1">

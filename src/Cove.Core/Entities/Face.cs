@@ -13,7 +13,6 @@ public class Face : BaseEntity
     public int SceneCount { get; set; }
     public int ImageCount { get; set; }
     public string? PrimarySourceKey { get; set; }
-    public Dictionary<string, object>? CustomFields { get; set; }
 
     public Performer? Performer { get; set; }
     public Face? MergedIntoFace { get; set; }

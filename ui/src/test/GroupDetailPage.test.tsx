@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GroupDetailPage } from "../pages/GroupDetailPage";
 
@@ -9,6 +9,9 @@ const { mockGroups, mockScenes, mockGoBack } = vi.hoisted(() => ({
     find: vi.fn(),
     delete: vi.fn(),
     subGroups: vi.fn(),
+    addSubGroup: vi.fn(),
+    removeSubGroup: vi.fn(),
+    reorderSubGroups: vi.fn(),
     containingGroups: vi.fn(),
     items: {
       list: vi.fn(),
@@ -208,5 +211,24 @@ describe("GroupDetailPage", () => {
 
     fireEvent.click(within(tabs).getByRole("tab", { name: /^edit$/i }));
     expect(await screen.findByRole("heading", { name: "Edit Group" })).toBeInTheDocument();
+  });
+
+  it("adds a subgroup from the search results", async () => {
+    mockGroups.get.mockResolvedValue(buildGroup({ subGroupCount: 0 }));
+    mockGroups.items.list.mockResolvedValue([]);
+    mockGroups.items.playbackManifest.mockResolvedValue({ items: [] });
+    mockScenes.find.mockResolvedValue({ items: [], totalCount: 0 });
+    mockGroups.subGroups.mockResolvedValue([]);
+    mockGroups.containingGroups.mockResolvedValue([]);
+    mockGroups.find.mockResolvedValue({ items: [buildGroup({ id: 8, name: "Nested Group" })], totalCount: 1, page: 1, perPage: 20 });
+    mockGroups.addSubGroup.mockResolvedValue(undefined);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /add sub-group/i }));
+    fireEvent.change(screen.getByPlaceholderText("Search groups to add..."), { target: { value: "Nested" } });
+    fireEvent.click(await screen.findByRole("button", { name: /nested group/i }));
+
+    await waitFor(() => expect(mockGroups.addSubGroup).toHaveBeenCalledWith(4, 8));
   });
 });

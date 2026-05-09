@@ -18,6 +18,8 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
     previews: false,
     sprites: false,
     markers: false,
+    segmentThumbnails: false,
+    segmentPreviews: false,
     phashes: false,
     md5: false,
     overwrite: false,
@@ -34,7 +36,16 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
   if (!open) return null;
 
   const toggle = (key: keyof GenerateOptions) =>
-    setOpts((o) => ({ ...o, [key]: !o[key] }));
+    setOpts((o) => {
+      const nextValue = !o[key];
+      if (key === "segmentThumbnails") {
+        return { ...o, segmentThumbnails: nextValue, segmentPreviews: nextValue ? o.segmentPreviews : false, markers: false };
+      }
+      if (key === "segmentPreviews") {
+        return { ...o, segmentThumbnails: nextValue ? true : o.segmentThumbnails, segmentPreviews: nextValue, markers: false };
+      }
+      return { ...o, [key]: nextValue };
+    });
 
   const label = sceneIds?.length
     ? `Generate for ${sceneIds.length} scene${sceneIds.length !== 1 ? "s" : ""}`
@@ -66,7 +77,8 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
             ["thumbnails", "Thumbnails / Screenshots"],
             ["previews", "Video Previews"],
             ["sprites", "Sprite Sheets"],
-            ["markers", "Segment Screenshots"],
+            ["segmentThumbnails", "Segment Thumbnails"],
+            ["segmentPreviews", "Animated Segment Previews"],
             ["phashes", "Perceptual Hashes"],
             ["md5", "MD5 Checksums"],
           ] as const).map(([key, labelText]) => (

@@ -131,25 +131,25 @@ public partial class CoveContext
             AuthorizationFiltersBypassed || CanReadAiRuns);
 
         modelBuilder.Entity<UserEntityAffinity>().HasQueryFilter(affinity =>
-            AuthorizationFiltersBypassed || (CurrentUserId != null && affinity.UserId == CurrentUserId.Value));
+            AuthorizationFiltersBypassed || (CurrentUserId != null && affinity.UserId == CurrentUserId));
 
         modelBuilder.Entity<Interaction>().HasQueryFilter(interaction =>
-            AuthorizationFiltersBypassed || (CurrentUserId != null && interaction.UserId == CurrentUserId.Value));
+            AuthorizationFiltersBypassed || (CurrentUserId != null && interaction.UserId == CurrentUserId));
 
         modelBuilder.Entity<PlaybackSession>().HasQueryFilter(session =>
-            AuthorizationFiltersBypassed || (CurrentUserId != null && session.UserId == CurrentUserId.Value));
+            AuthorizationFiltersBypassed || (CurrentUserId != null && session.UserId == CurrentUserId));
 
         modelBuilder.Entity<PlaybackInterval>().HasQueryFilter(interval =>
-            AuthorizationFiltersBypassed || (CurrentUserId != null && interval.UserId == CurrentUserId.Value));
+            AuthorizationFiltersBypassed || (CurrentUserId != null && interval.UserId == CurrentUserId));
 
         modelBuilder.Entity<Rating>().HasQueryFilter(rating =>
-            AuthorizationFiltersBypassed || (CurrentUserId != null && rating.UserId == CurrentUserId.Value));
+            AuthorizationFiltersBypassed || (CurrentUserId != null && rating.UserId == CurrentUserId));
 
         modelBuilder.Entity<SegmentDisplayProfile>().HasQueryFilter(profile =>
-            AuthorizationFiltersBypassed || profile.UserId == null || (CurrentUserId != null && profile.UserId == CurrentUserId.Value));
+            AuthorizationFiltersBypassed || profile.UserId == null || (CurrentUserId != null && profile.UserId == CurrentUserId));
 
         modelBuilder.Entity<SegmentDisplayRule>().HasQueryFilter(rule =>
-            AuthorizationFiltersBypassed || rule.UserId == null || (CurrentUserId != null && rule.UserId == CurrentUserId.Value));
+            AuthorizationFiltersBypassed || rule.UserId == null || (CurrentUserId != null && rule.UserId == CurrentUserId));
 
         modelBuilder.Entity<SceneMarker>().HasQueryFilter(marker =>
             AuthorizationFiltersBypassed

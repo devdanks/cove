@@ -44,7 +44,6 @@ public class Performer : BaseEntity
     public ICollection<ImagePerformer> ImagePerformers { get; set; } = [];
     public ICollection<GalleryPerformer> GalleryPerformers { get; set; } = [];
     public ICollection<PerformerRemoteId> RemoteIds { get; set; } = [];
-    public Dictionary<string, object>? CustomFields { get; set; }
 }
 
 public class PerformerUrl

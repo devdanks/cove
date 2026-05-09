@@ -60,6 +60,7 @@ public interface IJobService
     /// </summary>
     string Enqueue(string type, string description, Func<IJobProgress, CancellationToken, Task> work, bool exclusive = true);
     bool Cancel(string jobId);
+    bool ReorderQueued(string jobId, string? beforeJobId);
     JobInfo? GetJob(string jobId);
     IReadOnlyList<JobInfo> GetAllJobs();
     IReadOnlyList<JobInfo> GetJobHistory();
@@ -226,4 +227,5 @@ public interface IStreamService
 {
     Task<(Stream stream, string contentType, long? fileSize)?> GetSceneStream(int sceneId, CancellationToken ct = default);
     Task<(Stream stream, string contentType, bool useLongCache)?> GetSceneScreenshot(int sceneId, double? seconds, CancellationToken ct = default);
+    Task<(Stream stream, string contentType, bool useLongCache)?> GetSegmentAnimatedPreview(int sceneId, double seconds, CancellationToken ct = default);
 }

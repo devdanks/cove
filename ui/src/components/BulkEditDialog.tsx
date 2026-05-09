@@ -57,13 +57,23 @@ export function BulkEditDialog({ open, onClose, title, selectedCount, fields, on
 
   const handleApply = () => {
     const result: Record<string, unknown> = {};
+    const clearFields: string[] = [];
     for (const f of fields) {
       if (enabledFields.has(f.key)) {
-        result[f.key] = serializeBulkFieldValue(f, values[f.key]);
+        const serializedValue = serializeBulkFieldValue(f, values[f.key]);
+        if (f.nullable && (serializedValue == null || serializedValue === "")) {
+          result[f.key] = null;
+          clearFields.push(f.key);
+        } else {
+          result[f.key] = serializedValue;
+        }
         if (f.type === "multiId") {
           result[getModeKey(f)] = values[getModeKey(f)] ?? "ADD";
         }
       }
+    }
+    if (clearFields.length > 0) {
+      result.clearFields = clearFields;
     }
     onApply(result);
   };
@@ -192,7 +202,19 @@ function BulkFieldEditor({
             />
           )}
           {field.type === "select" && field.entityType === "studios" && (
-            <StudioSelector value={value as number | undefined} onChange={(nextValue) => onValueChange(nextValue)} />
+            <div className="space-y-2">
+              <StudioSelector value={value as number | undefined} onChange={(nextValue) => onValueChange(nextValue)} />
+              {field.nullable && (
+                <button
+                  type="button"
+                  onClick={() => onValueChange(undefined)}
+                  className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-xs ${value == null ? "border-accent bg-accent/10 text-accent" : "border-border text-secondary hover:text-foreground"}`}
+                >
+                  <X className="h-3 w-3" />
+                  Clear value
+                </button>
+              )}
+            </div>
           )}
           {field.type === "select" && field.entityType !== "studios" && (
             <select
@@ -259,7 +281,7 @@ function MultiIdBulkEditor({
     staleTime: 60000,
   });
 
-  const getName = (e: any) => e.name || e.title || `#${e.id}`;
+  const getName = (e: any) => e.name || e.title || "Untitled item";
 
   const filteredEntities = useMemo(() => {
     if (!entities) return [];
@@ -296,7 +318,7 @@ function MultiIdBulkEditor({
             const entity = entities?.find((e: any) => e.id === id);
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-card text-foreground border border-border">
-                {entity ? getName(entity) : `#${id}`}
+                {entity ? getName(entity) : "Unavailable item"}
                 <button onClick={() => toggleId(id)} className="hover:text-red-400">
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -383,6 +405,14 @@ export const SCENE_BULK_FIELDS: BulkEditField[] = [
 export const PERFORMER_BULK_FIELDS: BulkEditField[] = [
   { key: "rating", label: "Rating", type: "rating" },
   { key: "favorite", label: "Favorite", type: "bool" },
+  {
+    key: "gender",
+    label: "Gender",
+    type: "select",
+    options: ["Female", "Male", "TransgenderFemale", "TransgenderMale", "Intersex", "NonBinary"].map((value) => ({ value, label: value.replace(/([a-z])([A-Z])/g, "$1 $2") })),
+  },
+  { key: "details", label: "Details", type: "string" },
+  { key: "ignoreAutoTag", label: "Ignore Auto-Tag", type: "bool" },
   { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
 ];
 
@@ -390,6 +420,10 @@ export const GALLERY_BULK_FIELDS: BulkEditField[] = [
   { key: "rating", label: "Rating", type: "rating" },
   { key: "organized", label: "Organized", type: "bool" },
   { key: "studioId", label: "Studio", type: "select", entityType: "studios", nullable: true },
+  { key: "date", label: "Date", type: "date" },
+  { key: "code", label: "Studio Code", type: "string" },
+  { key: "photographer", label: "Photographer", type: "string" },
+  { key: "details", label: "Details", type: "string" },
   { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
   { key: "performerIds", label: "Performers", type: "multiId", entityType: "performers", modeKey: "performerMode" },
 ];
@@ -398,6 +432,10 @@ export const IMAGE_BULK_FIELDS: BulkEditField[] = [
   { key: "rating", label: "Rating", type: "rating" },
   { key: "organized", label: "Organized", type: "bool" },
   { key: "studioId", label: "Studio", type: "select", entityType: "studios", nullable: true },
+  { key: "date", label: "Date", type: "date" },
+  { key: "code", label: "Studio Code", type: "string" },
+  { key: "photographer", label: "Photographer", type: "string" },
+  { key: "details", label: "Details", type: "string" },
   { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
   { key: "performerIds", label: "Performers", type: "multiId", entityType: "performers", modeKey: "performerMode" },
   { key: "galleryIds", label: "Galleries", type: "multiId", entityType: "galleries", modeKey: "galleryMode" },
@@ -405,6 +443,10 @@ export const IMAGE_BULK_FIELDS: BulkEditField[] = [
 
 export const TAG_BULK_FIELDS: BulkEditField[] = [
   { key: "description", label: "Description", type: "string" },
+  { key: "color", label: "Badge Color", type: "string" },
+  { key: "tagGroupId", label: "Tag Group ID", type: "number" },
+  { key: "minOccurrenceSec", label: "Min Seconds", type: "number" },
+  { key: "minOccurrencePercent", label: "Min Percent", type: "number" },
   { key: "favorite", label: "Favorite", type: "bool" },
   { key: "ignoreAutoTag", label: "Ignore Auto-Tag", type: "bool" },
   { key: "parentIds", label: "Parent Tags", type: "multiId", entityType: "tags", modeKey: "parentMode" },
@@ -414,11 +456,17 @@ export const TAG_BULK_FIELDS: BulkEditField[] = [
 export const STUDIO_BULK_FIELDS: BulkEditField[] = [
   { key: "rating", label: "Rating", type: "rating" },
   { key: "favorite", label: "Favorite", type: "bool" },
+  { key: "details", label: "Details", type: "string" },
+  { key: "ignoreAutoTag", label: "Ignore Auto-Tag", type: "bool" },
+  { key: "organized", label: "Organized", type: "bool" },
   { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
 ];
 
 export const GROUP_BULK_FIELDS: BulkEditField[] = [
   { key: "rating", label: "Rating", type: "rating" },
   { key: "studioId", label: "Studio", type: "select", entityType: "studios", nullable: true },
+  { key: "date", label: "Date", type: "date" },
+  { key: "director", label: "Director", type: "string" },
+  { key: "synopsis", label: "Synopsis", type: "string" },
   { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
 ];

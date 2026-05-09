@@ -5,7 +5,7 @@ import type { EntityEngagement, FindFilter, Performer, PerformerCreate, Performe
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
-import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
+import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
@@ -23,6 +23,9 @@ import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
 import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
+import { CustomFieldsEditor } from "../components/shared";
+import { useWallColumns } from "../hooks/useWallColumns";
+import { WallMediaCard } from "../components/WallMediaCard";
 
 /** Convert 2-letter ISO country code to flag emoji */
 function countryToFlag(code: string): string {
@@ -51,8 +54,9 @@ export function PerformersPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list", "tagger"] as const,
+    allowedDisplayModes: ["grid", "list", "wall", "tagger"] as const,
   });
+  const [wallColumnCount, setWallColumnCount] = useState(6);
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
@@ -74,8 +78,9 @@ export function PerformersPage({ onNavigate }: Props) {
   });
 
   const items = data?.items ?? [];
+  const wallColumns = useWallColumns(items, wallColumnCount);
   const { engagementById } = useEntityEngagementBatch("performer", items.map((item) => item.id));
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
+  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
 
   const bulkDeleteMut = useMutation({
@@ -114,7 +119,9 @@ export function PerformersPage({ onNavigate }: Props) {
         sortOptions={SORT_OPTIONS}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
-        availableDisplayModes={["grid", "list", "tagger"]}
+        availableDisplayModes={["grid", "list", "wall", "tagger"]}
+        wallColumnCount={wallColumnCount}
+        onWallColumnCountChange={setWallColumnCount}
         onNew={canWritePerformer ? () => setShowCreate(true) : undefined}
         criteriaDefinitions={PERFORMER_CRITERIA}
         objectFilter={objectFilter}
@@ -122,6 +129,7 @@ export function PerformersPage({ onNavigate }: Props) {
         selectedIds={selectedIds}
         onSelectAll={selectAll}
         onSelectNone={selectNone}
+        onInvertSelection={invertSelection}
         selectionActions={
           <>
             {canMetadataBatch && (
@@ -165,7 +173,26 @@ export function PerformersPage({ onNavigate }: Props) {
         }
       >
       {displayMode === "tagger" ? (
-        <PerformerTagger performers={items} />
+        <PerformerTagger performers={items} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
+      ) : displayMode === "wall" ? (
+        <div className="flex gap-1 px-2">
+          {wallColumns.map((column, columnIndex) => (
+            <div key={columnIndex} className="flex min-w-0 flex-1 flex-col gap-1">
+              {column.map((performer) => (
+                <EntityWallCard
+                  key={performer.id}
+                  title={performer.name}
+                  imageSrc={entityImages.performerImageUrl(performer.id, performer.updatedAt)}
+                  route={{ page: "performer", id: performer.id }}
+                  selected={selectedIds.has(performer.id)}
+                  selecting={selecting}
+                  onSelect={() => toggle(performer.id)}
+                  onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
       ) : displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 160px)">
           {items.map((p) => (
@@ -211,6 +238,18 @@ export function PerformersPage({ onNavigate }: Props) {
         queryKey="performers"
       />
     </>
+  );
+}
+
+function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect, onClick }: { title: string; imageSrc: string; route: any; selected: boolean; selecting: boolean; onSelect: () => void; onClick: () => void }) {
+  return (
+    <WallMediaCard title={title} imageSrc={imageSrc} aspectRatio="2 / 3" onClick={onClick} className={selected ? "ring-2 ring-accent" : ""}>
+      <RouteCardLinkOverlay route={route} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone />
+      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+      <div className="selection-safe-zone absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 text-xs font-medium text-white">
+        {title}
+      </div>
+    </WallMediaCard>
   );
 }
 
@@ -417,12 +456,20 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
     ignoreAutoTag: false,
     rating: undefined as number | undefined,
   });
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
+  const [createAnother, setCreateAnother] = useState(false);
+
+  const resetForm = () => {
+    setForm({ name: "", disambiguation: "", gender: "", details: "", favorite: false, ignoreAutoTag: false, rating: undefined });
+    setCustomFields({});
+  };
 
   const mutation = useMutation({
     mutationFn: (data: PerformerCreate) => performers.create(data),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["performers"] });
-      setForm({ name: "", disambiguation: "", gender: "", details: "", favorite: false, ignoreAutoTag: false, rating: undefined });
+      resetForm();
+      if (createAnother) return;
       onClose();
       if (created?.id) onCreated(created.id);
     },
@@ -439,6 +486,7 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
       favorite: form.favorite || undefined,
       ignoreAutoTag: form.ignoreAutoTag || undefined,
       rating: form.rating,
+      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     });
   };
 
@@ -477,9 +525,10 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
           Ignore Auto Tag
         </label>
       </div>
-      <div className="flex justify-end mt-4">
-        <SaveButton loading={mutation.isPending} onClick={save} />
-      </div>
+      <Field label="Custom Fields">
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="performer" />
+      </Field>
+      <CreateModalActions loading={mutation.isPending} onSave={save} createAnother={createAnother} onCreateAnotherChange={setCreateAnother} />
     </EditModal>
   );
 }

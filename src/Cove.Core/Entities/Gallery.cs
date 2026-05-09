@@ -33,7 +33,6 @@ public class Gallery : BaseEntity
     public ICollection<GalleryPerformer> GalleryPerformers { get; set; } = [];
     public ICollection<SceneGallery> SceneGalleries { get; set; } = [];
     public ICollection<ImageGallery> ImageGalleries { get; set; } = [];
-    public Dictionary<string, object>? CustomFields { get; set; }
 }
 
 public class GalleryUrl

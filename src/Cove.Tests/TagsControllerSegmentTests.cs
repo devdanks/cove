@@ -1,4 +1,5 @@
 using Cove.Api.Controllers;
+using Cove.Api.Services;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
@@ -64,7 +65,7 @@ public class TagsControllerSegmentTests
             });
         await context.SaveChangesAsync();
 
-        var controller = new TagsController(null!, context, null!);
+        var controller = new TagsController(null!, context, null!, new CustomFieldService(context));
 
         var detailResult = await controller.GetById(tag.Id, CancellationToken.None);
         var detail = Assert.IsType<OkObjectResult>(detailResult.Result).Value as TagDetailDto;
@@ -129,7 +130,7 @@ public class TagsControllerSegmentTests
         context.Tags.Add(tag);
         await context.SaveChangesAsync();
 
-        var controller = new TagsController(null!, context, null!);
+        var controller = new TagsController(null!, context, null!, new CustomFieldService(context));
 
         var detailResult = await controller.GetById(tag.Id, CancellationToken.None);
         var detailOk = Assert.IsType<OkObjectResult>(detailResult.Result);
@@ -205,7 +206,7 @@ public class TagsControllerSegmentTests
             });
         await context.SaveChangesAsync();
 
-        var controller = new TagsController(null!, context, null!);
+        var controller = new TagsController(null!, context, null!, new CustomFieldService(context));
 
         var alphabeticalResult = await controller.GetMarkerStrings(null, null, CancellationToken.None);
         var alphabetical = Assert.IsType<OkObjectResult>(alphabeticalResult.Result).Value as List<string>;
@@ -239,14 +240,6 @@ public class TagsControllerSegmentTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
-            modelBuilder.Entity<Face>().Ignore(face => face.CustomFields);
         }
     }
 }

@@ -65,9 +65,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(performer.tags.map((t) => t.id));
   const [selectedTagsById, setSelectedTagsById] = useState<Record<number, SelectedTagOption>>(() => buildSelectedTagLookup(performer.tags));
   const [tagSearch, setTagSearch] = useState("");
-  const [customFields, setCustomFields] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(performer.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")]))
-  );
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(performer.customFields ?? {}) });
   const trimmedTagSearch = tagSearch.trim();
 
   const { data: tagResults, isLoading: tagResultsLoading } = useQuery({
@@ -105,7 +103,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
     setSelectedTagIds(performer.tags.map((t) => t.id));
     setSelectedTagsById(buildSelectedTagLookup(performer.tags));
     setTagSearch("");
-    setCustomFields(Object.fromEntries(Object.entries(performer.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")])));
+    setCustomFields({ ...(performer.customFields ?? {}) });
   }, [performer]);
 
   const mutation = useMutation({
@@ -146,7 +144,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
       urls: urlList,
       aliases: aliasList,
       tagIds: selectedTagIds,
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      customFields,
     });
   };
 
@@ -335,7 +333,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
       </div>
 
       <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} />
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="performer" />
       </Field>
         </div>{/* end right column */}
       </div>{/* end grid */}

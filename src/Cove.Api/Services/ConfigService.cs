@@ -82,17 +82,50 @@ public class ConfigService
             {
                 Language = cfg.Interface.Language,
                 MenuItems = NormalizeMenuItems(cfg.Interface.MenuItems),
+                HandyConnectionEnabled = cfg.Interface.HandyConnectionEnabled,
+                HandyKey = cfg.Interface.HandyKey,
+                DefaultDurationForImages = cfg.Interface.DefaultDurationForImages,
+                DisableDropdownCreatePerformer = cfg.Interface.DisableDropdownCreatePerformer,
+                DisableDropdownCreateStudio = cfg.Interface.DisableDropdownCreateStudio,
+                DisableDropdownCreateTag = cfg.Interface.DisableDropdownCreateTag,
             },
             Ui = new UiConfigDto
             {
                 Title = cfg.Ui.Title,
+                FaviconPath = cfg.Ui.FaviconPath,
+                TroubleshootingModeEnabled = cfg.Ui.TroubleshootingModeEnabled,
                 AbbreviateCounters = cfg.Ui.AbbreviateCounters,
                 RatingSystemOptions = new RatingSystemOptionsDto
                 {
                     Type = cfg.Ui.RatingSystemOptions.Type,
                     StarPrecision = cfg.Ui.RatingSystemOptions.StarPrecision,
                 },
+                ShowStudioAsText = cfg.Ui.ShowStudioAsText,
+                CustomCss = cfg.Ui.CustomCss,
+                CustomJs = cfg.Ui.CustomJs,
+                EnableCSSCustomization = cfg.Ui.EnableCSSCustomization,
+                EnableJSCustomization = cfg.Ui.EnableJSCustomization,
+                CustomLocalesPath = cfg.Ui.CustomLocalesPath,
+                AutostartVideo = cfg.Ui.AutostartVideo,
+                AutostartVideoOnPlaySelected = cfg.Ui.AutostartVideoOnPlaySelected,
+                AutoplayOnListClick = cfg.Ui.AutoplayOnListClick,
+                MaxLoopDuration = cfg.Ui.MaxLoopDuration,
+                AlwaysResumeOnPlayback = cfg.Ui.AlwaysResumeOnPlayback,
+                ContinuePlaylistDefault = cfg.Ui.ContinuePlaylistDefault,
+                ShowAbLoopControls = cfg.Ui.ShowAbLoopControls,
+                SoundOnPreview = cfg.Ui.SoundOnPreview,
+                PreviewSegmentDuration = cfg.Ui.PreviewSegmentDuration,
+                PreviewSegments = cfg.Ui.PreviewSegments,
+                PreviewExcludeStart = cfg.Ui.PreviewExcludeStart,
+                PreviewExcludeEnd = cfg.Ui.PreviewExcludeEnd,
+                WallShowTitle = cfg.Ui.WallShowTitle,
+                WallPlayback = cfg.Ui.WallPlayback,
+                WallPreviewType = cfg.Ui.WallPreviewType,
                 DeleteFileDefault = cfg.Ui.DeleteFileDefault,
+                SlideshowDelay = cfg.Ui.SlideshowDelay,
+                NoBrowser = cfg.Ui.NoBrowser,
+                NotificationsEnabled = cfg.Ui.NotificationsEnabled,
+                KeybindingOverrides = new Dictionary<string, string>(cfg.Ui.KeybindingOverrides, StringComparer.OrdinalIgnoreCase),
             },
             Security = new SecurityConfigDto
             {
@@ -256,15 +289,50 @@ public class ConfigService
 
         cfg.Interface.Language = dto.Interface.Language;
         cfg.Interface.MenuItems = NormalizeMenuItems(dto.Interface.MenuItems);
+        cfg.Interface.HandyConnectionEnabled = dto.Interface.HandyConnectionEnabled;
+        cfg.Interface.HandyKey = string.IsNullOrWhiteSpace(dto.Interface.HandyKey) ? null : dto.Interface.HandyKey.Trim();
+        cfg.Interface.DefaultDurationForImages = dto.Interface.DefaultDurationForImages;
+        cfg.Interface.DisableDropdownCreatePerformer = dto.Interface.DisableDropdownCreatePerformer;
+        cfg.Interface.DisableDropdownCreateStudio = dto.Interface.DisableDropdownCreateStudio;
+        cfg.Interface.DisableDropdownCreateTag = dto.Interface.DisableDropdownCreateTag;
 
         cfg.Ui.Title = string.IsNullOrWhiteSpace(dto.Ui.Title) ? null : dto.Ui.Title.Trim();
+        cfg.Ui.FaviconPath = string.IsNullOrWhiteSpace(dto.Ui.FaviconPath) ? null : dto.Ui.FaviconPath.Trim();
+        cfg.Ui.TroubleshootingModeEnabled = dto.Ui.TroubleshootingModeEnabled;
         cfg.Ui.AbbreviateCounters = dto.Ui.AbbreviateCounters;
         cfg.Ui.RatingSystemOptions = new RatingSystemOptions
         {
             Type = dto.Ui.RatingSystemOptions.Type,
             StarPrecision = dto.Ui.RatingSystemOptions.StarPrecision,
         };
+        cfg.Ui.ShowStudioAsText = dto.Ui.ShowStudioAsText;
+        cfg.Ui.CustomCss = dto.Ui.CustomCss;
+        cfg.Ui.CustomJs = dto.Ui.CustomJs;
+        cfg.Ui.EnableCSSCustomization = dto.Ui.EnableCSSCustomization;
+        cfg.Ui.EnableJSCustomization = dto.Ui.EnableJSCustomization;
+        cfg.Ui.CustomLocalesPath = string.IsNullOrWhiteSpace(dto.Ui.CustomLocalesPath) ? null : dto.Ui.CustomLocalesPath.Trim();
+        cfg.Ui.AutostartVideo = dto.Ui.AutostartVideo;
+        cfg.Ui.AutostartVideoOnPlaySelected = dto.Ui.AutostartVideoOnPlaySelected;
+        cfg.Ui.AutoplayOnListClick = dto.Ui.AutoplayOnListClick;
+        cfg.Ui.MaxLoopDuration = dto.Ui.MaxLoopDuration;
+        cfg.Ui.AlwaysResumeOnPlayback = dto.Ui.AlwaysResumeOnPlayback;
+        cfg.Ui.ContinuePlaylistDefault = dto.Ui.ContinuePlaylistDefault;
+        cfg.Ui.ShowAbLoopControls = dto.Ui.ShowAbLoopControls;
+        cfg.Ui.SoundOnPreview = dto.Ui.SoundOnPreview;
+        cfg.Ui.PreviewSegmentDuration = dto.Ui.PreviewSegmentDuration;
+        cfg.Ui.PreviewSegments = dto.Ui.PreviewSegments;
+        cfg.Ui.PreviewExcludeStart = string.IsNullOrWhiteSpace(dto.Ui.PreviewExcludeStart) ? "0" : dto.Ui.PreviewExcludeStart.Trim();
+        cfg.Ui.PreviewExcludeEnd = string.IsNullOrWhiteSpace(dto.Ui.PreviewExcludeEnd) ? "0" : dto.Ui.PreviewExcludeEnd.Trim();
+        cfg.Ui.WallShowTitle = dto.Ui.WallShowTitle;
+        cfg.Ui.WallPlayback = dto.Ui.WallPlayback;
+        cfg.Ui.WallPreviewType = string.IsNullOrWhiteSpace(dto.Ui.WallPreviewType) ? "video" : dto.Ui.WallPreviewType.Trim();
         cfg.Ui.DeleteFileDefault = dto.Ui.DeleteFileDefault;
+        cfg.Ui.SlideshowDelay = dto.Ui.SlideshowDelay;
+        cfg.Ui.NoBrowser = dto.Ui.NoBrowser;
+        cfg.Ui.NotificationsEnabled = dto.Ui.NotificationsEnabled;
+        cfg.Ui.KeybindingOverrides = dto.Ui.KeybindingOverrides
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+            .ToDictionary(pair => pair.Key.Trim(), pair => pair.Value.Trim(), StringComparer.OrdinalIgnoreCase);
 
         cfg.Auth.Enabled = dto.Security.Enabled;
         cfg.Auth.Username = string.IsNullOrWhiteSpace(dto.Security.Username) ? null : dto.Security.Username.Trim();

@@ -441,14 +441,6 @@ public class AiCoreControllerTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
-            modelBuilder.Entity<Face>().Ignore(face => face.CustomFields);
         }
     }
 
@@ -507,6 +499,9 @@ public class AiCoreControllerTests
         public Task GenerateScenePreviewAsync(int sceneId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
+        public Task GenerateSegmentAnimatedPreviewAsync(int sceneId, double startSec, double? endSec = null, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
         public Task GenerateSceneSpriteAsync(int sceneId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
@@ -514,6 +509,9 @@ public class AiCoreControllerTests
             => throw new NotSupportedException();
 
         public string GetTimestampedThumbnailPath(int sceneId, double seconds)
+            => throw new NotSupportedException();
+
+        public string GetSegmentAnimatedPreviewPath(int sceneId, double seconds)
             => throw new NotSupportedException();
 
         public string GetPreviewPath(int sceneId)

@@ -117,7 +117,7 @@ export function FaceSuggestionsPanel({
                               onClick={() => onNavigate({ page: "face", id: evidence.faceId })}
                               className="group relative h-11 w-11 overflow-hidden rounded-full border border-border bg-surface/80"
                               aria-label={`Open evidence face ${evidence.faceId}`}
-                              title={`Face #${evidence.faceId} - ${formatPercent(evidence.similarity)}% similar`}
+                              title={`${formatPercent(evidence.similarity)}% similar`}
                             >
                               {evidence.thumbnailUrl ? (
                                 <img src={evidence.thumbnailUrl} alt={`Face ${evidence.faceId}`} className="h-full w-full object-cover" loading="lazy" />

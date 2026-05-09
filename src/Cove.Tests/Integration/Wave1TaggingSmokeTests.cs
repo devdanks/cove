@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +9,109 @@ namespace Cove.Tests.Integration;
 
 public sealed class Wave1TaggingSmokeTests
 {
+    [Fact]
+    public async Task TagSearch_WithQuery_ReturnsMatchingItems()
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.Tags.AddRange(
+                new Tag { Name = "Searchable Squirting" },
+                new Tag { Name = "Unrelated Tag", Description = "Does not match" });
+            await db.SaveChangesAsync();
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+        var response = await client.GetAsync("/api/tags?q=squirt&perPage=10&sort=name&direction=asc");
+        response.EnsureSuccessStatusCode();
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = payload.RootElement.GetProperty("items").EnumerateArray().ToArray();
+
+        Assert.Contains(items, item => item.GetProperty("name").GetString() == "Searchable Squirting");
+    }
+
+    [Fact]
+    public async Task SceneSearch_WithQuery_ReturnsMatchingItems()
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.Scenes.AddRange(
+                new Scene { Title = "Searchable Squirt Scene", Details = "Contains the search term" },
+                new Scene { Title = "Other Scene", Details = "Different content" });
+            await db.SaveChangesAsync();
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+        var response = await client.GetAsync("/api/scenes?q=squirt&perPage=10&sort=title&direction=asc");
+        response.EnsureSuccessStatusCode();
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = payload.RootElement.GetProperty("items").EnumerateArray().ToArray();
+
+        Assert.Contains(items, item => item.GetProperty("title").GetString() == "Searchable Squirt Scene");
+    }
+
+    [Fact]
+    public async Task TagCreate_WithCustomFields_RoundTripsThroughApi()
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var textFieldResponse = await client.PostAsJsonAsync("/api/custom-fields", new
+        {
+            key = "source_id",
+            label = "Source ID",
+            type = "text",
+            entityTypes = new[] { CustomFieldEntityTypes.Tag },
+            filterable = true,
+            sortable = true,
+        }, IntegrationHttpJson.Options);
+        textFieldResponse.EnsureSuccessStatusCode();
+
+        var dateFieldResponse = await client.PostAsJsonAsync("/api/custom-fields", new
+        {
+            key = "reviewed_on",
+            label = "Reviewed On",
+            type = "date",
+            entityTypes = new[] { CustomFieldEntityTypes.Tag },
+            filterable = true,
+            sortable = true,
+        }, IntegrationHttpJson.Options);
+        dateFieldResponse.EnsureSuccessStatusCode();
+
+        var createResponse = await client.PostAsJsonAsync("/api/tags", new
+        {
+            name = "Tag with custom fields",
+            customFields = new Dictionary<string, object?>
+            {
+                ["source_id"] = "cf-ui",
+                ["reviewed_on"] = "2026-05-09",
+            },
+        }, IntegrationHttpJson.Options);
+        createResponse.EnsureSuccessStatusCode();
+
+        var created = await createResponse.Content.ReadApiJsonAsync<TagDetailDto>();
+        Assert.NotNull(created);
+        Assert.NotNull(created!.CustomFields);
+        Assert.Equal("cf-ui", Assert.IsType<JsonElement>(created.CustomFields!["source_id"]).GetString());
+        Assert.Equal("2026-05-09", Assert.IsType<JsonElement>(created.CustomFields!["reviewed_on"]).GetString());
+
+        var detailResponse = await client.GetAsync($"/api/tags/{created.Id}");
+        detailResponse.EnsureSuccessStatusCode();
+        var detail = await detailResponse.Content.ReadApiJsonAsync<TagDetailDto>();
+        Assert.NotNull(detail);
+        Assert.NotNull(detail!.CustomFields);
+        Assert.Equal("cf-ui", Assert.IsType<JsonElement>(detail.CustomFields!["source_id"]).GetString());
+        Assert.Equal("2026-05-09", Assert.IsType<JsonElement>(detail.CustomFields!["reviewed_on"]).GetString());
+    }
+
     [Fact]
     public async Task TagGroups_And_TagMetadata_RoundTripThroughApi()
     {

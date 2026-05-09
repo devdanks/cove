@@ -118,6 +118,7 @@ public sealed class TagProvenanceServiceTests
             null!,
             null!,
             new NoOpUserEngagementService(),
+            new CustomFieldService(context),
             new TagProvenanceService(context));
 
         var createResult = await controller.Create(
@@ -253,14 +254,6 @@ public sealed class TagProvenanceServiceTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
-            modelBuilder.Entity<Face>().Ignore(face => face.CustomFields);
         }
     }
 

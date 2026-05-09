@@ -33,5 +33,17 @@ export function useMultiSelect<T extends { id: string | number }>(items: T[]) {
     setSelectedIds(new Set<T["id"]>());
   }, []);
 
-  return { selectedIds, toggle, selectAll, selectNone };
+  const invertSelection = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set<T["id"]>();
+      for (const item of items) {
+        if (!prev.has(item.id)) {
+          next.add(item.id);
+        }
+      }
+      return next;
+    });
+  }, [items]);
+
+  return { selectedIds, toggle, selectAll, selectNone, invertSelection };
 }

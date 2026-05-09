@@ -129,6 +129,8 @@ public class BackupServiceIntegrationTests
 
         public bool Cancel(string jobId) => false;
 
+        public bool ReorderQueued(string jobId, string? beforeJobId) => false;
+
         public JobInfo? GetJob(string jobId) => null;
 
         public IReadOnlyList<JobInfo> GetAllJobs() => [];

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Numerics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +16,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.ScenesRead)]
-public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, MetadataServerService metadataServerService, IThumbnailService thumbnailService, IScanService scanService, IMemoryCache memoryCache, IBlobService blobService, IStreamService streamService, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService customFields, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
 {
     private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
     private bool HasUserScopedEngagement => principalAccessor?.Current?.UserId != null;
@@ -46,7 +47,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
         var (items, totalCount) = await sceneRepo.FindAsync(filter, findFilter, ct);
         var engagement = await engagementService.GetSceneSnapshotsAsync(items.Select(scene => scene.Id), ct);
-        var dtos = items.Select(scene => MapListToDto(scene, engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList();
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, items.Select(scene => scene.Id), ct);
+        var dtos = items.Select(scene => MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList();
         return Ok(new PaginatedResponse<SceneDto>(dtos, totalCount, page, perPage));
     }
 
@@ -64,7 +66,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var filter = req.ObjectFilter ?? new SceneFilter();
         var (items, totalCount) = await sceneRepo.FindAsync(filter, findFilter, ct);
         var engagement = await engagementService.GetSceneSnapshotsAsync(items.Select(scene => scene.Id), ct);
-        var dtos = items.Select(scene => MapListToDto(scene, engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList();
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, items.Select(scene => scene.Id), ct);
+        var dtos = items.Select(scene => MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList();
         var result = new PaginatedResponse<SceneDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage);
 
         memoryCache.Set(cacheKey, result, TimeSpan.FromSeconds(1));
@@ -89,7 +92,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         {
             Title = dto.Title, Code = dto.Code, Details = dto.Details, Director = dto.Director,
             Date = ParseDate(dto.Date), Organized = dto.Organized, StudioId = dto.StudioId,
-            Captions = dto.Captions, InteractiveSpeed = dto.InteractiveSpeed
+            Captions = dto.Captions, InteractiveSpeed = dto.InteractiveSpeed,
         };
         if (dto.Urls?.Count > 0)
             scene.Urls = dto.Urls.Select(u => new SceneUrl { Url = u }).ToList();
@@ -108,6 +111,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             }).ToList();
 
         scene = await sceneRepo.AddAsync(scene, ct);
+        if (dto.CustomFields != null)
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Scene, scene.Id, dto.CustomFields, ct);
         if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
         {
             await tagProvenanceService.SyncTagSetAsync(AffinityHostType.Scene, scene.Id, [], dto.TagIds, cancellationToken: ct);
@@ -166,8 +171,6 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         {
             ReplaceWholeSceneGroupItems(scene, dto.Groups);
         }
-        if (dto.CustomFields != null) scene.CustomFields = dto.CustomFields;
-
         if (dto.TagIds != null && tagProvenanceService != null)
         {
             await tagProvenanceService.SyncTagSetAsync(
@@ -179,6 +182,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         }
 
         await sceneRepo.UpdateAsync(scene, ct);
+        if (dto.CustomFields != null)
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Scene, id, dto.CustomFields, ct);
         if (dto.Urls != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Scene, id, IdentifierSchemes.Url, dto.Urls, null, ct);
         if (dto.Rating.HasValue)
@@ -206,6 +211,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         }
         if (tagProvenanceService != null)
             await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Scene, id, ct);
+        await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Scene, id, ct);
         await sceneRepo.DeleteAsync(id, ct);
         return NoContent();
     }
@@ -216,13 +222,31 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     public async Task<IActionResult> DestroyBatch([FromBody] BatchDeleteDto dto, CancellationToken ct)
     {
         var deletedCount = 0;
+        var idsToDelete = dto.Ids.ToHashSet();
+        var deletedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var id in dto.Ids)
         {
-            var scene = await sceneRepo.GetByIdAsync(id, ct);
+            var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
             if (scene != null)
             {
+                if (dto.DeleteFiles)
+                {
+                    foreach (var file in scene.Files)
+                    {
+                        var path = file.Path;
+                        if (string.IsNullOrWhiteSpace(path) || !deletedPaths.Add(path))
+                            continue;
+
+                        var referencedByKeptScene = await db.Set<VideoFile>()
+                            .AnyAsync(videoFile => videoFile.Path == path && videoFile.SceneId.HasValue && !idsToDelete.Contains(videoFile.SceneId.Value), ct);
+                        if (!referencedByKeptScene && System.IO.File.Exists(path))
+                            System.IO.File.Delete(path);
+                    }
+                }
+
                 if (tagProvenanceService != null)
                     await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Scene, id, ct);
+                await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Scene, id, ct);
                 await sceneRepo.DeleteAsync(id, ct);
                 deletedCount++;
             }
@@ -313,10 +337,11 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             : await tagProvenanceService.GetLookupAsync(AffinityHostType.Scene, scene.Id, tagIds, cancellationToken);
         var contextTagApplications = await LoadContextTagApplicationsAsync(scene.Id, cancellationToken);
 
-        return MapToDto(scene, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, scene.Id, cancellationToken);
+        return MapToDto(scene, customFieldValues, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications);
     }
 
-    private SceneDto MapToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null) => new(
+    private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
         s.Organized, s.StudioId, s.Studio?.Name,
@@ -342,12 +367,12 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         MapWholeSceneGroups(s),
         s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
         s.RemoteIds.Select(remoteId => new SceneRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
-        s.CustomFields,
+        customFieldValues,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o"),
         contextTagApplications
     );
 
-    private SceneDto MapListToDto(Scene s, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
+    private SceneDto MapListToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
         s.Organized, s.StudioId, s.Studio?.Name,
@@ -373,9 +398,12 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         MapWholeSceneGroups(s),
         s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
         [],
-        null,
+        customFieldValues,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
+
+    private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
+        => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;
 
     private async Task<List<TagApplicationDto>> LoadContextTagApplicationsAsync(int sceneId, CancellationToken ct)
     {
@@ -543,42 +571,187 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
         var scenes = await query.OrderBy(_ => EF.Functions.Random()).Take(count).ToListAsync(ct);
         var engagement = await engagementService.GetSceneSnapshotsAsync(scenes.Select(scene => scene.Id), ct);
-        return Ok(scenes.Select(scene => MapToDto(scene, engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList());
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, scenes.Select(scene => scene.Id), ct);
+        return Ok(scenes.Select(scene => MapToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList());
     }
 
     [HttpGet("duplicates")]
-    public async Task<ActionResult<List<List<SceneDto>>>> FindDuplicates([FromQuery] int distance = 0, [FromQuery] double? durationDiff = null, CancellationToken ct = default)
+    public async Task<ActionResult<List<List<SceneDto>>>> FindDuplicates(
+        [FromQuery] string? matchType = "fingerprint",
+        [FromQuery] int distance = 0,
+        [FromQuery] double? durationDiff = null,
+        CancellationToken ct = default)
     {
-        // Group by oshash fingerprint to find exact duplicates
-        var fingerprints = await db.Set<FileFingerprint>()
-            .Where(f => f.Type == "oshash")
-            .GroupBy(f => f.Value)
-            .Where(g => g.Count() > 1)
-            .Select(g => g.Key)
-            .ToListAsync(ct);
+        var groups = (matchType ?? "fingerprint").Trim().ToLowerInvariant() switch
+        {
+            "phash" or "visual" => await FindPhashDuplicateSceneIdsAsync(Math.Max(0, distance), durationDiff, ct),
+            "title" => await FindTitleDuplicateSceneIdsAsync(ct),
+            "remoteid" or "remote-id" or "remote_id" => await FindRemoteIdDuplicateSceneIdsAsync(ct),
+            _ => await FindExactFingerprintDuplicateSceneIdsAsync(ct),
+        };
 
         var result = new List<List<SceneDto>>();
-        foreach (var hash in fingerprints)
+        foreach (var sceneIds in groups)
         {
-            var fileIds = await db.Set<FileFingerprint>()
-                .Where(f => f.Type == "oshash" && f.Value == hash)
-                .Select(f => f.FileId)
-                .ToListAsync(ct);
-
             var scenes = await db.Scenes
                 .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
                 .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
                 .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
                 .Include(s => s.Studio)
-                .Where(s => s.Files.Any(f => fileIds.Contains(f.Id)))
+                .Include(s => s.RemoteIds)
+                .Where(s => sceneIds.Contains(s.Id))
                 .AsNoTracking()
                 .ToListAsync(ct);
 
             if (scenes.Count > 1)
-                result.Add(scenes.Select(scene => MapToDto(scene)).ToList());
+            {
+                var orderedScenes = scenes.OrderBy(scene => scene.Title ?? scene.Files.Select(file => file.Basename).FirstOrDefault() ?? string.Empty).ThenBy(scene => scene.Id).ToList();
+                var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, orderedScenes.Select(scene => scene.Id), ct);
+                result.Add(orderedScenes.Select(scene => MapToDto(scene, GetCustomFields(customFieldValues, scene.Id))).ToList());
+            }
         }
+
         return Ok(result);
     }
+
+    private async Task<List<List<int>>> FindExactFingerprintDuplicateSceneIdsAsync(CancellationToken ct)
+    {
+        var fingerprintRows = await db.Set<FileFingerprint>()
+            .Where(fingerprint => (fingerprint.Type == "oshash" || fingerprint.Type == "md5") && fingerprint.Value != "")
+            .Select(fingerprint => new { fingerprint.Type, fingerprint.Value, fingerprint.FileId })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var keys = fingerprintRows
+            .GroupBy(fingerprint => new { fingerprint.Type, fingerprint.Value })
+            .Where(group => group.Select(fingerprint => fingerprint.FileId).Distinct().Count() > 1)
+            .Select(group => new { group.Key.Type, group.Key.Value })
+            .ToList();
+
+        var result = new List<List<int>>();
+        var seenGroups = new HashSet<string>();
+        foreach (var key in keys)
+        {
+            var sceneIds = await db.VideoFiles
+                .Where(file => file.SceneId.HasValue && file.Fingerprints.Any(fingerprint => fingerprint.Type == key.Type && fingerprint.Value == key.Value))
+                .Select(file => file.SceneId!.Value)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToListAsync(ct);
+
+            AddSceneGroup(result, seenGroups, sceneIds);
+        }
+
+        return result;
+    }
+
+    private async Task<List<List<int>>> FindPhashDuplicateSceneIdsAsync(int maxDistance, double? durationDiff, CancellationToken ct)
+    {
+        var files = await db.VideoFiles
+            .Include(file => file.Fingerprints)
+            .Where(file => file.SceneId.HasValue)
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var candidates = files
+            .SelectMany(file => file.Fingerprints
+                .Where(fingerprint => fingerprint.Type == "phash" && fingerprint.Value != "")
+                .Select(fingerprint => TryParsePHash(fingerprint.Value, out var parsedHash)
+                    ? new DuplicatePHashCandidate(file.SceneId!.Value, file.Duration, parsedHash)
+                    : (DuplicatePHashCandidate?)null))
+            .Where(candidate => candidate.HasValue)
+            .Select(candidate => candidate!.Value)
+            .ToList();
+
+        var sceneIds = candidates.Select(candidate => candidate.SceneId).Distinct().ToArray();
+        var parent = sceneIds.ToDictionary(id => id, id => id);
+
+        for (var leftIndex = 0; leftIndex < candidates.Count; leftIndex++)
+        {
+            var left = candidates[leftIndex];
+            for (var rightIndex = leftIndex + 1; rightIndex < candidates.Count; rightIndex++)
+            {
+                var right = candidates[rightIndex];
+                if (left.SceneId == right.SceneId) continue;
+                if (durationDiff.HasValue && Math.Abs(left.Duration - right.Duration) > durationDiff.Value) continue;
+                if (BitOperations.PopCount(left.Hash ^ right.Hash) <= maxDistance)
+                    Union(parent, left.SceneId, right.SceneId);
+            }
+        }
+
+        return parent.Keys
+            .GroupBy(id => Find(parent, id))
+            .Select(group => group.OrderBy(id => id).ToList())
+            .Where(group => group.Count > 1)
+            .OrderBy(group => group[0])
+            .ToList();
+    }
+
+    private async Task<List<List<int>>> FindTitleDuplicateSceneIdsAsync(CancellationToken ct)
+    {
+        var rows = await db.Scenes
+            .Where(scene => scene.Title != null && scene.Title != "")
+            .Select(scene => new { scene.Id, scene.Title })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(row => row.Title!.Trim().ToLowerInvariant())
+            .Select(group => group.Select(row => row.Id).OrderBy(id => id).ToList())
+            .Where(group => group.Count > 1)
+            .OrderBy(group => group[0])
+            .ToList();
+    }
+
+    private async Task<List<List<int>>> FindRemoteIdDuplicateSceneIdsAsync(CancellationToken ct)
+    {
+        var rows = await db.Set<SceneRemoteId>()
+            .Where(remoteId => remoteId.RemoteId != "")
+            .Select(remoteId => new { remoteId.SceneId, remoteId.Endpoint, remoteId.RemoteId })
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(row => $"{row.Endpoint.Trim().ToLowerInvariant()}\n{row.RemoteId.Trim().ToLowerInvariant()}")
+            .Select(group => group.Select(row => row.SceneId).Distinct().OrderBy(id => id).ToList())
+            .Where(group => group.Count > 1)
+            .OrderBy(group => group[0])
+            .ToList();
+    }
+
+    private static void AddSceneGroup(List<List<int>> result, HashSet<string> seenGroups, List<int> sceneIds)
+    {
+        if (sceneIds.Count <= 1) return;
+        var key = string.Join(',', sceneIds);
+        if (seenGroups.Add(key)) result.Add(sceneIds);
+    }
+
+    private static bool TryParsePHash(string value, out ulong hash)
+    {
+        hash = 0;
+        var normalized = value.Trim();
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized[2..];
+        if (normalized.Length is 0 or > 16) return false;
+        if (normalized.Any(character => !Uri.IsHexDigit(character))) return false;
+        return ulong.TryParse(normalized, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out hash);
+    }
+
+    private static int Find(Dictionary<int, int> parent, int id)
+    {
+        if (parent[id] == id) return id;
+        parent[id] = Find(parent, parent[id]);
+        return parent[id];
+    }
+
+    private static void Union(Dictionary<int, int> parent, int left, int right)
+    {
+        var leftRoot = Find(parent, left);
+        var rightRoot = Find(parent, right);
+        if (leftRoot != rightRoot) parent[rightRoot] = leftRoot;
+    }
+
+    private readonly record struct DuplicatePHashCandidate(int SceneId, double Duration, ulong Hash);
 
     // ===== Bulk Operations =====
 
@@ -593,11 +766,16 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             .Include(s => s.GroupItems)
             .Where(s => dto.Ids.Contains(s.Id))
             .ToListAsync(ct);
+        var clearFields = dto.ClearFields?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
 
         foreach (var scene in scenes)
         {
             var previousTagIds = dto.TagIds != null ? scene.SceneTags.Select(sceneTag => sceneTag.TagId).ToArray() : [];
 
+            if (clearFields.Contains("studioId")) scene.StudioId = null;
+            if (clearFields.Contains("date")) scene.Date = null;
+            if (clearFields.Contains("code")) scene.Code = null;
+            if (clearFields.Contains("director")) scene.Director = null;
             if (dto.Organized.HasValue) scene.Organized = dto.Organized.Value;
             if (dto.StudioId.HasValue) scene.StudioId = dto.StudioId;
             if (dto.Date != null) scene.Date = ParseDate(dto.Date);

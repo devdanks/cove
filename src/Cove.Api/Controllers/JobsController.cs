@@ -29,6 +29,12 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
         return jobService.Cancel(jobId) ? Ok() : NotFound();
     }
 
+    [HttpPut("{jobId}/reorder")]
+    public IActionResult ReorderJob(string jobId, [FromBody] ReorderJobRequest request)
+    {
+        return jobService.ReorderQueued(jobId, request.BeforeJobId) ? Ok() : NotFound();
+    }
+
     [HttpPost("scan")]
     public ActionResult<object> StartScan([FromQuery] bool generatePreviews = false)
     {
@@ -95,4 +101,9 @@ public class AutoTagRequest
     public IEnumerable<string>? PerformerIds { get; set; }
     public IEnumerable<string>? StudioIds { get; set; }
     public IEnumerable<string>? TagIds { get; set; }
+}
+
+public class ReorderJobRequest
+{
+    public string? BeforeJobId { get; set; }
 }

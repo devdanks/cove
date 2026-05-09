@@ -221,13 +221,6 @@ public class UserServiceTests
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-            modelBuilder.Entity<Cove.Core.Entities.Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Cove.Core.Entities.Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Cove.Core.Entities.Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Cove.Core.Entities.Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Cove.Core.Entities.Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Cove.Core.Entities.Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Cove.Core.Entities.Group>().Ignore(group => group.CustomFields);
         }
     }
 

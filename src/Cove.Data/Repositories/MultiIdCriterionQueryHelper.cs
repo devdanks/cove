@@ -11,6 +11,11 @@ internal static class MultiIdCriterionQueryHelper
         Expression<Func<TEntity, IEnumerable<int>>> idsSelector,
         IReadOnlyList<int[]>? valueGroups = null)
     {
+        if (criterion?.Modifier == CriterionModifier.IsNull || criterion?.Modifier == CriterionModifier.NotNull)
+        {
+            return ApplyNullPresence(query, criterion.Modifier, idsSelector);
+        }
+
         if (criterion == null || (criterion.Value.Count == 0 && (criterion.Excludes == null || criterion.Excludes.Count == 0)))
         {
             return query;
@@ -58,6 +63,21 @@ internal static class MultiIdCriterionQueryHelper
             _ => anySelectedInEntity,
         };
 
+        return query.Where(Expression.Lambda<Func<TEntity, bool>>(body, entityParam));
+    }
+
+    private static IQueryable<TEntity> ApplyNullPresence<TEntity>(
+        IQueryable<TEntity> query,
+        CriterionModifier modifier,
+        Expression<Func<TEntity, IEnumerable<int>>> idsSelector)
+    {
+        var entityParam = idsSelector.Parameters[0];
+        var hasAny = Expression.Call(
+            typeof(Enumerable),
+            nameof(Enumerable.Any),
+            [typeof(int)],
+            idsSelector.Body);
+        Expression body = modifier == CriterionModifier.IsNull ? Expression.Not(hasAny) : hasAny;
         return query.Where(Expression.Lambda<Func<TEntity, bool>>(body, entityParam));
     }
 

@@ -31,6 +31,12 @@ public class MetadataController(
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
     };
 
+    private const double SegmentPreviewDefaultDuration = 3.0;
+    private const double SegmentPreviewMaxDuration = 5.0;
+    private const double SegmentPreviewReuseOverlapRatio = 0.8;
+
+    private readonly record struct SegmentPreviewClip(double StartSec, double EndSec, string Path);
+
     [HttpPost("scan")]
     [RequiresPermission(Permissions.LibraryScan)]
     public ActionResult<object> StartScan([FromBody] ScanOptionsDto? opts)
@@ -111,6 +117,33 @@ public class MetadataController(
             var processed = 0;
             var maxParallel = config.MaxParallelTasks;
             var parallelism = maxParallel <= 0 ? Environment.ProcessorCount : Math.Max(1, maxParallel);
+            var segmentPreviewsBySceneId = new Dictionary<int, List<(double StartSec, double? EndSec)>>();
+            var generateSegmentThumbnails = opts?.SegmentThumbnails == true || opts?.SegmentPreviews == true || opts?.Markers == true;
+            var generateSegmentPreviews = opts?.SegmentPreviews == true || opts?.Markers == true;
+
+            if (generateSegmentThumbnails && workItems.Count > 0)
+            {
+                var workItemSceneIds = workItems.Select(item => item.Scene.Id).ToList();
+                segmentPreviewsBySceneId = (await dbCtx.Segments
+                    .AsNoTracking()
+                    .Where(segment => segment.HostType == SegmentHostType.Scene && workItemSceneIds.Contains(segment.HostId))
+                    .Select(segment => new { segment.HostId, segment.StartSec, segment.EndSec })
+                    .ToListAsync(ct))
+                    .GroupBy(segment => segment.HostId)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group
+                            .GroupBy(segment => segment.StartSec)
+                            .Select(segmentGroup => (
+                                StartSec: segmentGroup.Key,
+                                EndSec: segmentGroup
+                                    .Select(segment => segment.EndSec)
+                                    .Where(endSec => endSec.HasValue)
+                                    .OrderBy(endSec => endSec)
+                                    .FirstOrDefault()))
+                            .OrderBy(segment => segment.StartSec)
+                            .ToList());
+            }
 
             await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = ct }, async (item, token) =>
             {
@@ -151,6 +184,59 @@ public class MetadataController(
                         if (System.IO.File.Exists(vttPath)) System.IO.File.Delete(vttPath);
                     }
                     await thumbnailService.GenerateSceneSpriteAsync(item.Scene.Id, token);
+                }
+
+                if (generateSegmentThumbnails && segmentPreviewsBySceneId.TryGetValue(item.Scene.Id, out var segmentPreviews))
+                {
+                    var duration = item.File!.Duration;
+                    var generatedSegmentPreviewClips = new List<SegmentPreviewClip>();
+                    foreach (var segmentPreview in segmentPreviews)
+                    {
+                        var screenshotSecond = Math.Max(0, segmentPreview.StartSec);
+                        if (duration > 0)
+                            screenshotSecond = Math.Min(screenshotSecond, Math.Max(0, duration - 0.1));
+
+                        var segmentThumbnailPath = thumbnailService.GetTimestampedThumbnailPath(item.Scene.Id, screenshotSecond);
+                        if (opts?.Overwrite == true && System.IO.File.Exists(segmentThumbnailPath))
+                            System.IO.File.Delete(segmentThumbnailPath);
+
+                        var segmentPreviewPath = generateSegmentPreviews
+                            ? thumbnailService.GetSegmentAnimatedPreviewPath(item.Scene.Id, screenshotSecond)
+                            : null;
+
+                        if (segmentPreviewPath != null && opts?.Overwrite == true && System.IO.File.Exists(segmentPreviewPath))
+                        {
+                            System.IO.File.Delete(segmentPreviewPath);
+                        }
+
+                        if (!System.IO.File.Exists(segmentThumbnailPath))
+                            await thumbnailService.GenerateSceneThumbnailAsync(item.Scene.Id, screenshotSecond, token);
+
+                        if (generateSegmentPreviews && segmentPreviewPath != null)
+                        {
+                            var (clipStart, clipEnd) = ResolveSegmentPreviewClip(screenshotSecond, segmentPreview.EndSec, duration);
+                            if (System.IO.File.Exists(segmentPreviewPath))
+                            {
+                                AddSegmentPreviewClip(generatedSegmentPreviewClips, new SegmentPreviewClip(clipStart, clipEnd, segmentPreviewPath));
+                                continue;
+                            }
+
+                            var reusableClip = FindReusableSegmentPreviewClip(generatedSegmentPreviewClips, clipStart, clipEnd);
+                            if (reusableClip.HasValue)
+                            {
+                                CopySegmentPreviewAlias(reusableClip.Value.Path, segmentPreviewPath);
+                                if (System.IO.File.Exists(segmentPreviewPath))
+                                {
+                                    AddSegmentPreviewClip(generatedSegmentPreviewClips, new SegmentPreviewClip(clipStart, clipEnd, segmentPreviewPath));
+                                    continue;
+                                }
+                            }
+
+                            await thumbnailService.GenerateSegmentAnimatedPreviewAsync(item.Scene.Id, screenshotSecond, segmentPreview.EndSec, token);
+                            if (System.IO.File.Exists(segmentPreviewPath))
+                                AddSegmentPreviewClip(generatedSegmentPreviewClips, new SegmentPreviewClip(clipStart, clipEnd, segmentPreviewPath));
+                        }
+                    }
                 }
 
                 if (opts?.Phashes == true && (opts?.Overwrite == true || !item.HasPhash))
@@ -227,6 +313,72 @@ public class MetadataController(
         });
 
         return Ok(new { jobId });
+    }
+
+    private static (double StartSec, double EndSec) ResolveSegmentPreviewClip(double startSec, double? endSec, double sceneDuration)
+    {
+        if (sceneDuration <= 0)
+            return (Math.Max(0, startSec), Math.Max(0, startSec) + SegmentPreviewDefaultDuration);
+
+        var clampedStart = Math.Max(0, Math.Min(startSec, Math.Max(0, sceneDuration - 0.1)));
+        var requestedDuration = endSec.HasValue && endSec.Value > clampedStart
+            ? endSec.Value - clampedStart
+            : SegmentPreviewDefaultDuration;
+        var previewDuration = Math.Min(SegmentPreviewMaxDuration, Math.Max(0.5, requestedDuration));
+        previewDuration = Math.Min(previewDuration, Math.Max(0.5, sceneDuration - clampedStart));
+        return (clampedStart, clampedStart + previewDuration);
+    }
+
+    private static SegmentPreviewClip? FindReusableSegmentPreviewClip(IEnumerable<SegmentPreviewClip> clips, double startSec, double endSec)
+    {
+        foreach (var clip in clips)
+        {
+            if (IsReusableSegmentPreviewClip(clip, startSec, endSec))
+                return clip;
+        }
+
+        return null;
+    }
+
+    private static bool IsReusableSegmentPreviewClip(SegmentPreviewClip clip, double startSec, double endSec)
+    {
+        var overlap = Math.Min(clip.EndSec, endSec) - Math.Max(clip.StartSec, startSec);
+        if (overlap <= 0)
+            return false;
+
+        var clipDuration = Math.Max(0.001, clip.EndSec - clip.StartSec);
+        var requestedDuration = Math.Max(0.001, endSec - startSec);
+        return overlap / Math.Min(clipDuration, requestedDuration) >= SegmentPreviewReuseOverlapRatio;
+    }
+
+    private static void AddSegmentPreviewClip(List<SegmentPreviewClip> clips, SegmentPreviewClip clip)
+    {
+        if (!clips.Any(existing => string.Equals(existing.Path, clip.Path, StringComparison.OrdinalIgnoreCase)))
+            clips.Add(clip);
+    }
+
+    private static void CopySegmentPreviewAlias(string sourcePath, string targetPath)
+    {
+        if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(sourcePath))
+            return;
+
+        var targetDirectory = Path.GetDirectoryName(targetPath);
+        if (!string.IsNullOrWhiteSpace(targetDirectory))
+            Directory.CreateDirectory(targetDirectory);
+
+        var tempPath = targetPath + ".tmp";
+        try
+        {
+            System.IO.File.Copy(sourcePath, tempPath, overwrite: true);
+            System.IO.File.Move(tempPath, targetPath, overwrite: true);
+        }
+        finally
+        {
+            if (System.IO.File.Exists(tempPath))
+            {
+                try { System.IO.File.Delete(tempPath); } catch { }
+            }
+        }
     }
 
     [HttpPost("auto-tag")]
@@ -548,6 +700,10 @@ public class MetadataController(
                     .AsSplitQuery().ToListAsync(ct);
 
             var identifyDefaults = config.Scraping.IdentifyDefaults;
+            var sourceEndpoints = ResolveIdentifyMetadataServerEndpoints(opts?.Sources, config.Scraping.MetadataServers);
+            var sourceOrder = sourceEndpoints?
+                .Select((endpoint, index) => new { endpoint, index })
+                .ToDictionary(item => item.endpoint, item => item.index, StringComparer.OrdinalIgnoreCase);
 
             // Build import config from identify options
             var importConfig = new MetadataServerSceneImportRequestDto
@@ -560,6 +716,9 @@ public class MetadataController(
                 OnlyExistingPerformers = !(opts?.CreatePerformers ?? identifyDefaults.CreatePerformers),
                 OnlyExistingStudio = !(opts?.CreateStudios ?? identifyDefaults.CreateStudios),
                 MarkOrganized = opts?.MarkOrganized ?? false,
+                FieldStrategies = opts?.FieldStrategies,
+                PerformerGenders = opts?.PerformerGenders,
+                SkipSingleNamePerformers = opts?.SkipSingleNamePerformers ?? true,
             };
 
             var total = scenes.Count;
@@ -573,11 +732,25 @@ public class MetadataController(
                 if (fingerprints.Count == 0) continue;
 
                 // Attempt MetadataServer identification
-                if (metadataServerSvc != null)
+                if (metadataServerSvc != null && (sourceEndpoints == null || sourceEndpoints.Count > 0))
                 {
                     try
                     {
-                        var matches = await metadataServerSvc.SearchScenesAsync(scene, null, null, ct);
+                        IReadOnlyList<MetadataServerSceneMatchDto> matches;
+                        if (sourceEndpoints == null)
+                        {
+                            matches = await metadataServerSvc.SearchScenesAsync(scene, null, null, ct);
+                        }
+                        else
+                        {
+                            var orderedMatches = new List<MetadataServerSceneMatchDto>();
+                            foreach (var endpoint in sourceEndpoints)
+                            {
+                                orderedMatches.AddRange(await metadataServerSvc.SearchScenesAsync(scene, null, endpoint, ct));
+                            }
+                            matches = orderedMatches;
+                        }
+
                         if (matches.Count > 0)
                         {
                             var rankedMatches = matches
@@ -588,7 +761,8 @@ public class MetadataController(
                                     PhashDistance = GetBestPhashDistance(scene, match),
                                 })
                                 .Where(candidate => MeetsIdentifyAutoApplyThresholds(candidate.DurationDifferenceSeconds, candidate.PhashDistance, identifyDefaults))
-                                .OrderByDescending(candidate => candidate.Match.MatchCount)
+                                .OrderBy(candidate => sourceOrder != null && sourceOrder.TryGetValue(candidate.Match.Endpoint, out var index) ? index : int.MaxValue)
+                                .ThenByDescending(candidate => candidate.Match.MatchCount)
                                 .ThenBy(candidate => candidate.PhashDistance ?? int.MaxValue)
                                 .ThenBy(candidate => candidate.DurationDifferenceSeconds ?? double.MaxValue)
                                 .Select(candidate => candidate.Match)
@@ -618,6 +792,28 @@ public class MetadataController(
         }, exclusive: false);
 
         return Ok(new { jobId });
+    }
+
+    private static List<string>? ResolveIdentifyMetadataServerEndpoints(List<string>? sources, IReadOnlyList<MetadataServerInstance> metadataServers)
+    {
+        if (sources == null || sources.Count == 0)
+            return null;
+
+        var endpoints = new List<string>();
+        foreach (var source in sources.Select(source => source.Trim()).Where(source => source.Length > 0))
+        {
+            var server = metadataServers.FirstOrDefault(candidate =>
+                string.Equals(candidate.Endpoint, source, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(candidate.Name, source, StringComparison.OrdinalIgnoreCase));
+
+            if (server == null)
+                continue;
+
+            if (!endpoints.Contains(server.Endpoint, StringComparer.OrdinalIgnoreCase))
+                endpoints.Add(server.Endpoint);
+        }
+
+        return endpoints;
     }
 
     private static bool MeetsIdentifyAutoApplyThresholds(double? durationDifferenceSeconds, int? phashDistance, IdentifyDefaultsConfig identifyDefaults)

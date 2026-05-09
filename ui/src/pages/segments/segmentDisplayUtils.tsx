@@ -17,6 +17,7 @@ export function Pill({ children }: { children: ReactNode }) {
 export function SegmentScenePreview({
   hostId,
   updatedAt,
+  startSec,
   title,
   imgClassName,
   fallbackClassName,
@@ -24,14 +25,17 @@ export function SegmentScenePreview({
 }: {
   hostId: number;
   updatedAt?: string;
+  startSec?: number;
   title: string;
   imgClassName: string;
   fallbackClassName: string;
   iconClassName: string;
 }) {
-  const [failed, setFailed] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [animatedFailed, setAnimatedFailed] = useState(false);
+  const [staticFailed, setStaticFailed] = useState(false);
 
-  if (failed) {
+  if (staticFailed) {
     return (
       <div className={fallbackClassName}>
         <Film className={iconClassName} />
@@ -39,13 +43,26 @@ export function SegmentScenePreview({
     );
   }
 
+  const useAnimated = hovered && startSec != null && !animatedFailed;
+
   return (
     <img
-      src={scenes.screenshotUrl(hostId, updatedAt)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      src={useAnimated
+        ? scenes.segmentPreviewUrl(hostId, startSec, updatedAt)
+        : scenes.screenshotUrl(hostId, updatedAt, startSec)}
       alt={title}
       className={imgClassName}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => {
+        if (useAnimated) {
+          setAnimatedFailed(true);
+          setHovered(false);
+        } else {
+          setStaticFailed(true);
+        }
+      }}
     />
   );
 }

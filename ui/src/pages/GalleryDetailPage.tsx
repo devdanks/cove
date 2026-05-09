@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, images, scenes, entityImages } from "../api/client";
+import { galleries, images, scenes, entityImages, fileOps } from "../api/client";
 import type { FindFilter } from "../api/types";
 import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Download, Film, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, UserRound, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
+import { Download, Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, UserRound, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GalleryEditModal } from "./GalleryEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -354,7 +354,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
                 ))}
               </div>
             ) : null}
-            <CustomFieldsDisplay customFields={gallery.customFields} />
+            <CustomFieldsDisplay customFields={gallery.customFields} entityType="gallery" />
           </div>
         ) : null}
 
@@ -678,6 +678,8 @@ function EmptyPanel({ icon, message }: { icon: React.ReactNode; message: string 
 function GalleryFileInfo({ gallery }: { gallery: { folderPath?: string; files: { id: number; path: string; size: number; modTime: string; fingerprints: { type: string; value: string }[] }[] } }) {
   const hasFolder = !!gallery.folderPath;
   const hasFiles = gallery.files.length > 0;
+  const revealMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
+  const canReveal = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 
   if (!hasFolder && !hasFiles) {
     return <EmptyPanel icon={<HardDrive className="h-8 w-8" />} message="No file information available" />;
@@ -698,7 +700,19 @@ function GalleryFileInfo({ gallery }: { gallery: { folderPath?: string; files: {
       )}
       {gallery.files.map((file) => (
         <div key={file.id} className="rounded-xl border border-border bg-card p-4">
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">File</h3>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">File</h3>
+            {canReveal ? (
+              <button
+                type="button"
+                onClick={() => revealMutation.mutate(file.id)}
+                className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-secondary hover:border-accent hover:text-foreground"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                Reveal
+              </button>
+            ) : null}
+          </div>
           <dl className="space-y-2 text-sm">
             <div>
               <dt className="text-muted">Path</dt>

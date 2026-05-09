@@ -32,9 +32,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
 
   // Tag search
   const [tagSearch, setTagSearch] = useState("");
-  const [customFields, setCustomFields] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(group.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")]))
-  );
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(group.customFields ?? {}) });
   const { data: allTags } = useQuery({
     queryKey: ["tags-all"],
     queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
@@ -51,7 +49,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
     setSynopsis(group.synopsis ?? "");
     setUrls(group.urls.length > 0 ? group.urls : [""]);
     setSelectedTagIds(group.tags.map((t) => t.id));
-    setCustomFields(Object.fromEntries(Object.entries(group.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")])));
+    setCustomFields({ ...(group.customFields ?? {}) });
   }, [group]);
 
   const mutation = useMutation({
@@ -76,7 +74,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
       synopsis: synopsis || undefined,
       urls: urlList,
       tagIds: selectedTagIds,
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      customFields,
     });
   };
 
@@ -160,7 +158,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
       </Field>
 
       <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} />
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="group" />
       </Field>
 
       <div className="flex justify-end gap-3 mt-4">

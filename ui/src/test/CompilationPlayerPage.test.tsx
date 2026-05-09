@@ -2,6 +2,10 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { VideoPlayer } from "../components/VideoPlayer";
 
+vi.mock("../state/AppConfigContext", () => ({
+  useAppConfig: () => ({ config: { ui: {} } }),
+}));
+
 const playMock = vi.fn(() => Promise.resolve());
 const pauseMock = vi.fn();
 const loadMock = vi.fn();
@@ -94,5 +98,34 @@ describe("Compilation player autoplay token wiring", () => {
     await waitFor(() => {
       expect(playMock).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("restarts a non-looping clip at the clip start when replayed after the clip end", () => {
+    const { container } = render(
+      <VideoPlayer
+        streamUrl="/api/scenes/1/stream"
+        format="mp4"
+        duration={120}
+        resumeTime={5}
+        sceneId={1}
+        detections={[]}
+        trackingEnabled={false}
+        clip={{ start: 5, end: 15, loop: false }}
+      />,
+    );
+
+    const video = container.querySelector("video") as HTMLVideoElement;
+    expect(video).toBeInstanceOf(HTMLVideoElement);
+
+    video.currentTime = 15;
+    fireEvent(video, new Event("timeupdate"));
+
+    expect(pauseMock).toHaveBeenCalledTimes(1);
+    expect(video.currentTime).toBe(15);
+
+    fireEvent.click(video);
+
+    expect(video.currentTime).toBe(5);
+    expect(playMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -54,6 +54,7 @@ public sealed class Phase10TagProvenanceTests
             null!,
             null!,
             new NoOpUserEngagementService(),
+            new CustomFieldService(context),
             new TagProvenanceService(context));
 
         var result = await controller.GetById(scene.Id, CancellationToken.None);
@@ -96,6 +97,7 @@ public sealed class Phase10TagProvenanceTests
             new GalleryRepository(context),
             context,
             new NoOpUserEngagementService(),
+            new CustomFieldService(context),
             new TagProvenanceService(context));
 
         var result = await controller.GetById(gallery.Id, CancellationToken.None);
@@ -194,14 +196,6 @@ public sealed class Phase10TagProvenanceTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
-            modelBuilder.Entity<Face>().Ignore(face => face.CustomFields);
         }
     }
 
@@ -211,13 +205,6 @@ public sealed class Phase10TagProvenanceTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
         }
     }
 
@@ -244,6 +231,8 @@ public sealed class Phase10TagProvenanceTests
         }
 
         public bool Cancel(string jobId) => false;
+
+        public bool ReorderQueued(string jobId, string? beforeJobId) => false;
 
         public Cove.Core.Interfaces.JobInfo? GetJob(string jobId) => null;
 

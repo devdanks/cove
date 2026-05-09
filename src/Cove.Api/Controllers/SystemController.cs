@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using Cove.Api.Middleware;
 using Cove.Api.Services;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
@@ -27,6 +28,15 @@ public class SystemController(
     IAuditService auditService,
     IHostApplicationLifetime applicationLifetime) : ControllerBase
 {
+    private static readonly Dictionary<string, string> UiAssetContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".ico"] = "image/x-icon",
+        [".png"] = "image/png",
+        [".jpg"] = "image/jpeg",
+        [".jpeg"] = "image/jpeg",
+        [".webp"] = "image/webp",
+    };
+
     [HttpGet("status")]
     [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public async Task<ActionResult<SystemStatusDto>> GetStatus()
@@ -34,7 +44,18 @@ public class SystemController(
         string[] pending;
         try
         {
+            if (!await db.Database.CanConnectAsync(HttpContext.RequestAborted))
+            {
+                Response.Headers.RetryAfter = DatabaseUnavailableMiddleware.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, DatabaseUnavailableMiddleware.CreateResponse());
+            }
+
             pending = (await db.Database.GetPendingMigrationsAsync()).ToArray();
+        }
+        catch (Exception ex) when (DatabaseUnavailableExceptionClassifier.IsTransientDatabaseConnectionFailure(ex))
+        {
+            Response.Headers.RetryAfter = DatabaseUnavailableMiddleware.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, DatabaseUnavailableMiddleware.CreateResponse());
         }
         catch
         {
@@ -105,6 +126,48 @@ public class SystemController(
     {
         await configService.SaveConfigAsync(config);
         return Ok(configService.GetConfig());
+    }
+
+    [HttpPost("ui/favicon")]
+    [RequiresPermission(Permissions.SystemSettingsWrite)]
+    public async Task<ActionResult<object>> UploadFavicon([FromForm] IFormFile file, CancellationToken ct)
+    {
+        if (file.Length == 0)
+            return BadRequest(new { error = "Favicon file is empty." });
+
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!UiAssetContentTypes.ContainsKey(extension))
+            return BadRequest(new { error = "Favicon must be an ico, png, jpg, or webp file." });
+
+        var assetDir = CoveDefaultPaths.GetDataSubdirectory("ui-assets");
+        Directory.CreateDirectory(assetDir);
+
+        var fileName = $"favicon-{DateTime.UtcNow:yyyyMMddHHmmssfff}{extension}";
+        var filePath = Path.Combine(assetDir, fileName);
+        await using (var output = System.IO.File.Create(filePath))
+            await file.CopyToAsync(output, ct);
+
+        return Ok(new { path = $"/api/system/ui-assets/{fileName}", fileName });
+    }
+
+    [HttpGet("ui-assets/{fileName}")]
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+    public IActionResult GetUiAsset(string fileName)
+    {
+        var safeName = Path.GetFileName(fileName);
+        if (!string.Equals(safeName, fileName, StringComparison.Ordinal))
+            return BadRequest();
+
+        var extension = Path.GetExtension(safeName).ToLowerInvariant();
+        if (!UiAssetContentTypes.TryGetValue(extension, out var contentType))
+            return NotFound();
+
+        var filePath = Path.Combine(CoveDefaultPaths.GetDataSubdirectory("ui-assets"), safeName);
+        if (!System.IO.File.Exists(filePath))
+            return NotFound();
+
+        Response.Headers["Cache-Control"] = "public, max-age=86400";
+        return PhysicalFile(filePath, contentType);
     }
 
     [HttpGet("scrapers")]

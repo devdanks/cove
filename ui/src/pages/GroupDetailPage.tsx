@@ -180,7 +180,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         </section>
       ) : null}
 
-      <CustomFieldsDisplay customFields={group.customFields} />
+      <CustomFieldsDisplay customFields={group.customFields} entityType="group" />
       <ExtensionSlot slot="group-detail-sidebar-bottom" context={{ group, onNavigate }} />
     </div>
   );
@@ -563,7 +563,14 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
 
   const addMut = useMutation({
     mutationFn: (subGroupId: number) => groups.addSubGroup(groupId, subGroupId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["group-subgroups", groupId] }),
+    onSuccess: (_result, subGroupId) => {
+      setShowAddDialog(false);
+      setSearchTerm("");
+      queryClient.invalidateQueries({ queryKey: ["group-subgroups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["group-containinggroups", subGroupId] });
+      queryClient.invalidateQueries({ queryKey: ["group", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+    },
   });
 
   const removeMut = useMutation({
@@ -645,6 +652,9 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
           ) : (
             <p className="text-sm text-muted text-center py-4">Type to search for groups</p>
           )}
+          {addMut.isError ? (
+            <p className="mt-3 text-xs text-red-300">{addMut.error instanceof Error ? addMut.error.message : "Could not add sub-group"}</p>
+          ) : null}
         </div>
       )}
 

@@ -1324,6 +1324,7 @@ export interface UserUiPreferences {
   theme?: UserThemePreferences | null;
   ratingSystemOptions?: RatingSystemOptions | null;
   tracking?: UserTrackingPreferences | null;
+  keybindingOverrides?: Record<string, string> | null;
 }
 
 export interface UserTrackingPreferences {
@@ -1358,8 +1359,69 @@ export interface InterfaceConfig {
   disableDropdownCreateTag: boolean;
 }
 
+export type CustomFieldEntityType = "scene" | "performer" | "tag" | "studio" | "gallery" | "image" | "group" | "face";
+export type CustomFieldType =
+  | "text"
+  | "longText"
+  | "number"
+  | "boolean"
+  | "date"
+  | "timestamp"
+  | "url"
+  | "enum"
+  | "duration"
+  | "percent"
+  | "tag"
+  | "performer"
+  | "studio"
+  | "scene"
+  | "gallery"
+  | "image"
+  | "group";
+
+export interface CustomFieldDefinition {
+  id: number;
+  key: string;
+  label: string;
+  type: CustomFieldType;
+  entityTypes: CustomFieldEntityType[];
+  options: string[];
+  filterable: boolean;
+  sortable: boolean;
+  isMultiValue: boolean;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomFieldDefinitionCreate {
+  key?: string;
+  label: string;
+  type: CustomFieldType;
+  entityTypes: CustomFieldEntityType[];
+  options: string[];
+  filterable: boolean;
+  sortable: boolean;
+  isMultiValue: boolean;
+  displayOrder?: number;
+}
+
+export interface CustomFieldDefinitionUpdate {
+  key?: string;
+  label?: string;
+  type?: CustomFieldType;
+  entityTypes?: CustomFieldEntityType[];
+  options?: string[];
+  filterable?: boolean;
+  sortable?: boolean;
+  isMultiValue?: boolean;
+  displayOrder?: number;
+}
+
 export interface UiConfig {
   title?: string;
+  faviconPath?: string;
+  troubleshootingModeEnabled: boolean;
   abbreviateCounters: boolean;
   ratingSystemOptions: RatingSystemOptions;
   showStudioAsText: boolean;
@@ -1370,6 +1432,9 @@ export interface UiConfig {
   customLocalesPath?: string;
   autostartVideo: boolean;
   autostartVideoOnPlaySelected: boolean;
+  autoplayOnListClick: boolean;
+  maxLoopDuration: number;
+  alwaysResumeOnPlayback: boolean;
   continuePlaylistDefault: boolean;
   showAbLoopControls: boolean;
   soundOnPreview: boolean;
@@ -1379,10 +1444,12 @@ export interface UiConfig {
   previewExcludeEnd: string;
   wallShowTitle: boolean;
   wallPlayback: number;
+  wallPreviewType: string;
   deleteFileDefault: boolean;
   slideshowDelay: number;
   noBrowser: boolean;
   notificationsEnabled: boolean;
+  keybindingOverrides: Record<string, string>;
 }
 
 export interface SecurityConfig {
@@ -1653,6 +1720,8 @@ export interface DownloaderBatchGenerateOptions {
   previews?: boolean;
   sprites?: boolean;
   markers?: boolean;
+  segmentThumbnails?: boolean;
+  segmentPreviews?: boolean;
   phashes?: boolean;
   md5?: boolean;
   imageThumbnails?: boolean;
@@ -1860,6 +1929,14 @@ export interface StringCriterion {
   modifier: CriterionModifier;
 }
 
+export interface CustomFieldCriterion extends StringCriterion {
+  key: string;
+  type?: CustomFieldType;
+  value2?: string;
+  displayValue?: string;
+  displayValue2?: string;
+}
+
 export interface BoolCriterion {
   value: boolean;
 }
@@ -1933,6 +2010,8 @@ export interface SceneFilterCriteria {
   hashCriterion?: StringCriterion;
   checksumCriterion?: StringCriterion;
   duplicatedPhashCriterion?: BoolCriterion;
+  duplicatedTitleCriterion?: BoolCriterion;
+  duplicatedRemoteIdCriterion?: BoolCriterion;
   urlCriterion?: StringCriterion;
   dateCriterion?: DateCriterion;
   createdAtCriterion?: TimestampCriterion;
@@ -1944,6 +2023,7 @@ export interface SceneFilterCriteria {
   bitrateInterval?: IntCriterion;
   fileCountCriterion?: IntCriterion;
   remoteIdCriterion?: StringCriterion;
+  remoteIdCountCriterion?: IntCriterion;
   isMissingCriterion?: BoolCriterion;
   duplicatedCriterion?: StringCriterion;
   titleCriterion?: StringCriterion;
@@ -1960,6 +2040,8 @@ export interface SceneFilterCriteria {
   captionsCriterion?: StringCriterion;
   interactiveSpeedCriterion?: IntCriterion;
   orientationCriterion?: StringCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
 }
 
 export interface PerformerFilterCriteria {
@@ -1990,6 +2072,7 @@ export interface PerformerFilterCriteria {
   isMissingCriterion?: BoolCriterion;
   remoteIdCriterion?: StringCriterion;
   remoteIdValueCriterion?: StringCriterion;
+  remoteIdCountCriterion?: IntCriterion;
   disambiguationCriterion?: StringCriterion;
   detailsCriterion?: StringCriterion;
   eyeColorCriterion?: StringCriterion;
@@ -2010,6 +2093,8 @@ export interface PerformerFilterCriteria {
   groupsCriterion?: MultiIdCriterion;
   ignoreAutoTagCriterion?: BoolCriterion;
   tagCountCriterion?: IntCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
 }
 
 export interface TagFilterCriteria {
@@ -2030,6 +2115,7 @@ export interface TagFilterCriteria {
   sortNameCriterion?: StringCriterion;
   remoteIdCriterion?: StringCriterion;
   remoteIdValueCriterion?: StringCriterion;
+  remoteIdCountCriterion?: IntCriterion;
   aliasesCriterion?: StringCriterion;
   descriptionCriterion?: StringCriterion;
   imageCountCriterion?: IntCriterion;
@@ -2043,6 +2129,8 @@ export interface TagFilterCriteria {
   parentCountCriterion?: IntCriterion;
   childCountCriterion?: IntCriterion;
   ignoreAutoTagCriterion?: BoolCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
 }
 
 export interface StudioFilterCriteria {
@@ -2056,6 +2144,7 @@ export interface StudioFilterCriteria {
   sceneCountCriterion?: IntCriterion;
   urlCriterion?: StringCriterion;
   remoteIdCriterion?: StringCriterion;
+  remoteIdCountCriterion?: IntCriterion;
   isMissingCriterion?: BoolCriterion;
   createdAtCriterion?: TimestampCriterion;
   updatedAtCriterion?: TimestampCriterion;
@@ -2070,6 +2159,8 @@ export interface StudioFilterCriteria {
   organizedCriterion?: BoolCriterion;
   galleryCountCriterion?: IntCriterion;
   imageCountCriterion?: IntCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
 }
 
 export interface GalleryFilterCriteria {
@@ -2104,6 +2195,8 @@ export interface GalleryFilterCriteria {
   typicalResolutionCriterion?: IntCriterion;
   scenesCriterion?: MultiIdCriterion;
   performerTagsCriterion?: MultiIdCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
 }
 
 export interface ImageFilterCriteria {
@@ -2140,6 +2233,8 @@ export interface ImageFilterCriteria {
   performerAgeCriterion?: IntCriterion;
   orientationCriterion?: StringCriterion;
   performerTagsCriterion?: MultiIdCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
 }
 
 export interface GroupFilterCriteria {
@@ -2160,6 +2255,8 @@ export interface GroupFilterCriteria {
   performersCriterion?: MultiIdCriterion;
   sceneCountCriterion?: IntCriterion;
   tagCountCriterion?: IntCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
 }
 
 export interface FilteredQueryRequest<T = Record<string, unknown>> {
@@ -2178,6 +2275,8 @@ export interface SceneGroupInput {
 
 export interface BulkSceneUpdate {
   ids: number[];
+  clearFields?: string[];
+  rating?: number;
   organized?: boolean;
   studioId?: number | null;
   date?: string;
@@ -2193,14 +2292,24 @@ export interface BulkSceneUpdate {
 
 export interface BulkPerformerUpdate {
   ids: number[];
+  clearFields?: string[];
+  rating?: number;
   favorite?: boolean;
+  gender?: string;
+  details?: string;
+  ignoreAutoTag?: boolean;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;
 }
 
 export interface BulkTagUpdate {
   ids: number[];
+  clearFields?: string[];
   description?: string;
+  color?: string;
+  tagGroupId?: number | null;
+  minOccurrenceSec?: number;
+  minOccurrencePercent?: number;
   favorite?: boolean;
   ignoreAutoTag?: boolean;
   parentIds?: number[];
@@ -2211,15 +2320,26 @@ export interface BulkTagUpdate {
 
 export interface BulkStudioUpdate {
   ids: number[];
+  clearFields?: string[];
+  rating?: number;
   favorite?: boolean;
+  details?: string;
+  ignoreAutoTag?: boolean;
+  organized?: boolean;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;
 }
 
 export interface BulkGalleryUpdate {
   ids: number[];
+  clearFields?: string[];
+  rating?: number;
   organized?: boolean;
   studioId?: number | null;
+  date?: string;
+  code?: string;
+  details?: string;
+  photographer?: string;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;
   performerIds?: number[];
@@ -2228,8 +2348,14 @@ export interface BulkGalleryUpdate {
 
 export interface BulkImageUpdate {
   ids: number[];
+  clearFields?: string[];
+  rating?: number;
   organized?: boolean;
   studioId?: number | null;
+  date?: string;
+  code?: string;
+  details?: string;
+  photographer?: string;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;
   performerIds?: number[];
@@ -2240,7 +2366,12 @@ export interface BulkImageUpdate {
 
 export interface BulkGroupUpdate {
   ids: number[];
+  clearFields?: string[];
+  rating?: number;
   studioId?: number | null;
+  date?: string;
+  director?: string;
+  synopsis?: string;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;
 }

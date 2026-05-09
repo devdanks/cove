@@ -1,8 +1,13 @@
+import { useEffect, useRef, useState } from "react";
 import type { HTMLAttributes, ReactNode } from "react";
 
 interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   title: string;
   imageSrc?: string | null;
+  videoSrc?: string | null;
+  videoStatusSrc?: string | null;
+  useVideo?: boolean;
+  muted?: boolean;
   aspectRatio?: string;
   fallback?: ReactNode;
   imageClassName?: string;
@@ -11,6 +16,10 @@ interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
 export function WallMediaCard({
   title,
   imageSrc,
+  videoSrc,
+  videoStatusSrc,
+  useVideo = false,
+  muted = true,
   aspectRatio = "1 / 1",
   fallback,
   imageClassName = "object-cover",
@@ -18,6 +27,56 @@ export function WallMediaCard({
   children,
   ...props
 }: WallMediaCardProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [videoAvailable, setVideoAvailable] = useState(false);
+
+  useEffect(() => {
+    setVideoFailed(false);
+  }, [videoSrc]);
+
+  useEffect(() => {
+    if (!useVideo || !videoSrc) {
+      setVideoAvailable(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setVideoAvailable(false);
+    fetch(videoStatusSrc ?? videoSrc, { method: videoStatusSrc ? "GET" : "HEAD", signal: controller.signal })
+      .then((response) => {
+        if (videoStatusSrc) {
+          return response.ok ? response.json() as Promise<{ available?: boolean }> : { available: false };
+        }
+
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+        return { available: response.ok && contentType.startsWith("video/") };
+      })
+      .then((status) => {
+        if (!controller.signal.aborted) setVideoAvailable(status.available === true);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setVideoAvailable(false);
+      });
+
+    return () => controller.abort();
+  }, [useVideo, videoSrc, videoStatusSrc]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !useVideo || !videoSrc || !videoAvailable || videoFailed) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) video.play().catch(() => {});
+        else video.pause();
+      }
+    }, { threshold: 0.15 });
+
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, [useVideo, videoSrc, videoAvailable, videoFailed]);
+
   return (
     <div
       {...props}
@@ -25,7 +84,19 @@ export function WallMediaCard({
       title={title}
     >
       <div className="relative w-full bg-surface" style={{ aspectRatio }}>
-        {imageSrc ? (
+        {useVideo && videoSrc && videoAvailable && !videoFailed ? (
+          <video
+            ref={videoRef}
+            src={videoSrc}
+            poster={imageSrc ?? undefined}
+            className={`absolute inset-0 h-full w-full ${imageClassName}`}
+            muted={muted}
+            playsInline
+            loop
+            preload="metadata"
+            onError={() => setVideoFailed(true)}
+          />
+        ) : imageSrc ? (
           <img
             src={imageSrc}
             alt={title}

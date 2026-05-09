@@ -22,9 +22,11 @@ public interface IThumbnailService
     Task GenerateSceneThumbnailAsync(int sceneId, double? atSeconds = null, CancellationToken ct = default);
     Task GenerateImageThumbnailAsync(int imageId, int maxDimension = 640, bool overwrite = false, CancellationToken ct = default);
     Task GenerateScenePreviewAsync(int sceneId, CancellationToken ct = default);
+    Task GenerateSegmentAnimatedPreviewAsync(int sceneId, double startSec, double? endSec = null, CancellationToken ct = default);
     Task GenerateSceneSpriteAsync(int sceneId, CancellationToken ct = default);
     string GetThumbnailPathForScene(int sceneId);
     string GetTimestampedThumbnailPath(int sceneId, double seconds);
+    string GetSegmentAnimatedPreviewPath(int sceneId, double seconds);
     string GetPreviewPath(int sceneId);
     string GetSpritePath(int sceneId);
     string GetSpriteVttPath(int sceneId);
@@ -42,6 +44,7 @@ public class ThumbnailService(
     private string ThumbnailDir => Path.Combine(config.GeneratedPath, "screenshots");
     private string ImageThumbnailDir => Path.Combine(config.GeneratedPath, "thumbnails");
     private string PreviewDir => Path.Combine(config.GeneratedPath, "previews");
+    private string SegmentPreviewDir => Path.Combine(config.GeneratedPath, "segment-previews");
     private string VttDir => Path.Combine(config.GeneratedPath, "vtt");
     private SemaphoreSlim? _ffmpegSemaphore;
     private int _semaphoreCapacity;
@@ -118,6 +121,10 @@ public class ThumbnailService(
     private const int PreviewWidth = 640;
     private const string PreviewPreset = "fast";
     private const int PreviewCrf = 21;
+    private const double SegmentPreviewDefaultDuration = 3.0;
+    private const double SegmentPreviewMaxDuration = 5.0;
+    private const int SegmentPreviewWidth = 360;
+    private const int SegmentPreviewFps = 12;
     private const int DefaultImageThumbnailMaxDimension = 640;
     private const int MinImageThumbnailMaxDimension = 64;
     private const int MaxImageThumbnailMaxDimension = 4096;
@@ -866,6 +873,14 @@ public class ThumbnailService(
         return Path.Combine(ThumbnailDir, subDir, $"{sceneId}_t{secKey}.jpg");
     }
 
+    public string GetSegmentAnimatedPreviewPath(int sceneId, double seconds)
+    {
+        var hash = Convert.ToHexStringLower(SHA256.HashData(BitConverter.GetBytes(sceneId)));
+        var subDir = hash[..2];
+        var secKey = ((int)seconds).ToString();
+        return Path.Combine(SegmentPreviewDir, subDir, $"{sceneId}_t{secKey}.webp");
+    }
+
     public string GetThumbnailPathForScene(int sceneId) => GetThumbnailPath(sceneId);
 
     public string GetPreviewPath(int sceneId)
@@ -884,6 +899,65 @@ public class ThumbnailService(
     {
         var hash = Convert.ToHexStringLower(SHA256.HashData(BitConverter.GetBytes(sceneId)));
         return Path.Combine(VttDir, hash[..2], $"{sceneId}_thumbs.vtt");
+    }
+
+    public async Task GenerateSegmentAnimatedPreviewAsync(int sceneId, double startSec, double? endSec, CancellationToken ct)
+    {
+        var previewPath = GetSegmentAnimatedPreviewPath(sceneId, startSec);
+        if (File.Exists(previewPath)) return;
+
+        var (filePath, duration) = await GetSceneFileInfoAsync(sceneId, ct);
+        if (filePath == null || duration <= 0) return;
+
+        var ffmpegPath = GetCachedFfmpegPath();
+        if (ffmpegPath == null)
+        {
+            logger.LogWarning("FFmpeg not found, cannot generate segment preview for scene {SceneId}", sceneId);
+            return;
+        }
+
+        var clampedStart = Math.Max(0, Math.Min(startSec, Math.Max(0, duration - 0.1)));
+        var requestedDuration = endSec.HasValue && endSec.Value > clampedStart
+            ? endSec.Value - clampedStart
+            : SegmentPreviewDefaultDuration;
+        var previewDuration = Math.Min(SegmentPreviewMaxDuration, Math.Max(0.5, requestedDuration));
+        previewDuration = Math.Min(previewDuration, Math.Max(0.5, duration - clampedStart));
+
+        var previewDir = Path.GetDirectoryName(previewPath)!;
+        Directory.CreateDirectory(previewDir);
+
+        var sem = GetFfmpegSemaphore();
+        await sem.WaitAsync(ct);
+        try
+        {
+            if (File.Exists(previewPath)) return;
+
+            var tempPath = previewPath + ".tmp.webp";
+            try
+            {
+                var decodeArgs = GetFfmpegDecodeArgs();
+                var args = $"{decodeArgs} -v error -y -ss {clampedStart:F2} -i \"{filePath}\" -t {previewDuration:F2} -vf \"fps={SegmentPreviewFps},scale={SegmentPreviewWidth}:-2:flags=lanczos\" -loop 0 -an -quality 75 -compression_level 4 \"{tempPath}\"";
+                await RunFfmpegAsync(ffmpegPath, args, TimeSpan.FromSeconds(60), ct);
+
+                if (File.Exists(tempPath))
+                    File.Move(tempPath, previewPath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Error generating segment preview for scene {SceneId} at {StartSec}", sceneId, startSec);
+        }
+        finally
+        {
+            sem.Release();
+        }
     }
 
     /// <summary>Generate a multi-segment video preview clip (mp4) for a scene.</summary>

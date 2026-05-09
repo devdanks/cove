@@ -171,13 +171,6 @@ public class AutoTagServiceTests
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
-            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
-            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
-            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
-            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
-            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
-            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
         }
     }
 
@@ -192,6 +185,8 @@ public class AutoTagServiceTests
         }
 
         public bool Cancel(string jobId) => false;
+
+        public bool ReorderQueued(string jobId, string? beforeJobId) => false;
 
         public JobInfo? GetJob(string jobId) => null;
 

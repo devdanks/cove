@@ -37,6 +37,43 @@ public partial class StashMigrationService
     private sealed record SceneGeneratedData(string? Oshash, string? Md5, string? CoverBlobId);
     private sealed record ImportedRatingSeed(int StashId, int? Value);
     private sealed record ImportedAffinitySeed(int StashId, int LikeCount = 0, int ViewCount = 0, double? LastPositionSec = null, double TotalConsumedSec = 0, DateTime? LastConsumedAt = null);
+    private sealed class ImportedAffinityAggregate
+    {
+        private DateTime? _lastPositionConsumedAt;
+
+        public int HostId { get; init; }
+        public int LikeCount { get; private set; }
+        public int ViewCount { get; private set; }
+        public double TotalConsumedSec { get; private set; }
+        public double? LastPositionSec { get; private set; }
+        public DateTime? LastConsumedAt { get; private set; }
+
+        public void Add(ImportedAffinitySeed seed)
+        {
+            LikeCount += Math.Max(0, seed.LikeCount);
+            ViewCount += Math.Max(0, seed.ViewCount);
+            TotalConsumedSec += Math.Max(0, seed.TotalConsumedSec);
+
+            if (!LastConsumedAt.HasValue || (seed.LastConsumedAt.HasValue && seed.LastConsumedAt.Value > LastConsumedAt.Value))
+                LastConsumedAt = seed.LastConsumedAt;
+
+            if (seed.LastPositionSec is not { } lastPositionSec)
+                return;
+
+            if (seed.LastConsumedAt.HasValue)
+            {
+                if (!_lastPositionConsumedAt.HasValue || seed.LastConsumedAt.Value >= _lastPositionConsumedAt.Value)
+                {
+                    LastPositionSec = lastPositionSec;
+                    _lastPositionConsumedAt = seed.LastConsumedAt;
+                }
+            }
+            else if (!_lastPositionConsumedAt.HasValue)
+            {
+                LastPositionSec = lastPositionSec;
+            }
+        }
+    }
     private sealed record StashConfigData(
         List<(string Path, bool ExcludeImage, bool ExcludeVideo)> Paths,
         string? GeneratedPath,
@@ -115,31 +152,46 @@ public partial class StashMigrationService
         if (userId is null)
             return;
 
-        var pending = 0;
+        var engagementUserId = userId.Value;
+
+        var ratingsByHostId = new Dictionary<int, int>();
         foreach (var seed in seeds)
         {
             if (!seed.Value.HasValue || !idMap.TryGetValue(seed.StashId, out var hostId))
                 continue;
 
-            _db.Ratings.Add(new Rating
-            {
-                UserId = userId.Value,
-                HostType = hostType,
-                HostId = hostId,
-                Aspect = "overall",
-                Value = seed.Value.Value,
-            });
-
-            pending++;
-            if (pending % 500 == 0)
-            {
-                await _db.SaveChangesAsync(ct);
-                _db.ChangeTracker.Clear();
-            }
+            ratingsByHostId[hostId] = seed.Value.Value;
         }
 
-        if (pending % 500 != 0)
+        foreach (var hostIdChunk in ratingsByHostId.Keys.Chunk(500))
         {
+            var existingByHostId = await _db.ReadSet<Rating>()
+                .Where(rating => rating.UserId == engagementUserId
+                    && rating.HostType == hostType
+                    && rating.Aspect == "overall"
+                    && hostIdChunk.Contains(rating.HostId))
+                .ToDictionaryAsync(rating => rating.HostId, ct);
+
+            foreach (var hostId in hostIdChunk)
+            {
+                var value = ratingsByHostId[hostId];
+                if (existingByHostId.TryGetValue(hostId, out var existingRating))
+                {
+                    existingRating.Value = value;
+                    _db.Entry(existingRating).State = EntityState.Modified;
+                    continue;
+                }
+
+                _db.Ratings.Add(new Rating
+                {
+                    UserId = engagementUserId,
+                    HostType = hostType,
+                    HostId = hostId,
+                    Aspect = "overall",
+                    Value = value,
+                });
+            }
+
             await _db.SaveChangesAsync(ct);
             _db.ChangeTracker.Clear();
         }
@@ -155,7 +207,9 @@ public partial class StashMigrationService
         if (userId is null)
             return;
 
-        var pending = 0;
+        var engagementUserId = userId.Value;
+
+        var affinitiesByHostId = new Dictionary<int, ImportedAffinityAggregate>();
         foreach (var seed in seeds)
         {
             if (!idMap.TryGetValue(seed.StashId, out var hostId))
@@ -163,28 +217,57 @@ public partial class StashMigrationService
             if (seed.LikeCount <= 0 && seed.ViewCount <= 0 && seed.TotalConsumedSec <= 0 && seed.LastPositionSec is null && seed.LastConsumedAt is null)
                 continue;
 
-            _db.UserEntityAffinities.Add(new UserEntityAffinity
+            if (!affinitiesByHostId.TryGetValue(hostId, out var aggregate))
             {
-                UserId = userId.Value,
-                HostType = hostType,
-                HostId = hostId,
-                LikeCount = Math.Max(0, seed.LikeCount),
-                ViewCount = Math.Max(0, seed.ViewCount),
-                TotalConsumedSec = Math.Max(0, seed.TotalConsumedSec),
-                LastPositionSec = seed.LastPositionSec,
-                LastConsumedAt = seed.LastConsumedAt,
-            });
-
-            pending++;
-            if (pending % 500 == 0)
-            {
-                await _db.SaveChangesAsync(ct);
-                _db.ChangeTracker.Clear();
+                aggregate = new ImportedAffinityAggregate { HostId = hostId };
+                affinitiesByHostId[hostId] = aggregate;
             }
+
+            aggregate.Add(seed);
         }
 
-        if (pending % 500 != 0)
+        foreach (var hostIdChunk in affinitiesByHostId.Keys.Chunk(500))
         {
+            var existingByHostId = await _db.ReadSet<UserEntityAffinity>()
+                .Where(affinity => affinity.UserId == engagementUserId
+                    && affinity.HostType == hostType
+                    && hostIdChunk.Contains(affinity.HostId))
+                .ToDictionaryAsync(affinity => affinity.HostId, ct);
+
+            foreach (var hostId in hostIdChunk)
+            {
+                var aggregate = affinitiesByHostId[hostId];
+                if (existingByHostId.TryGetValue(hostId, out var existingAffinity))
+                {
+                    var existingLastConsumedAt = existingAffinity.LastConsumedAt;
+                    existingAffinity.LikeCount = Math.Max(existingAffinity.LikeCount, aggregate.LikeCount);
+                    existingAffinity.ViewCount = Math.Max(existingAffinity.ViewCount, aggregate.ViewCount);
+                    existingAffinity.TotalConsumedSec = Math.Max(existingAffinity.TotalConsumedSec, aggregate.TotalConsumedSec);
+                    if (!existingAffinity.LastConsumedAt.HasValue || (aggregate.LastConsumedAt.HasValue && aggregate.LastConsumedAt.Value > existingAffinity.LastConsumedAt.Value))
+                        existingAffinity.LastConsumedAt = aggregate.LastConsumedAt;
+                    if (aggregate.LastPositionSec.HasValue
+                        && (!existingLastConsumedAt.HasValue || !aggregate.LastConsumedAt.HasValue || aggregate.LastConsumedAt.Value >= existingLastConsumedAt.Value))
+                    {
+                        existingAffinity.LastPositionSec = aggregate.LastPositionSec;
+                    }
+
+                    _db.Entry(existingAffinity).State = EntityState.Modified;
+                    continue;
+                }
+
+                _db.UserEntityAffinities.Add(new UserEntityAffinity
+                {
+                    UserId = engagementUserId,
+                    HostType = hostType,
+                    HostId = hostId,
+                    LikeCount = aggregate.LikeCount,
+                    ViewCount = aggregate.ViewCount,
+                    TotalConsumedSec = aggregate.TotalConsumedSec,
+                    LastPositionSec = aggregate.LastPositionSec,
+                    LastConsumedAt = aggregate.LastConsumedAt,
+                });
+            }
+
             await _db.SaveChangesAsync(ct);
             _db.ChangeTracker.Clear();
         }

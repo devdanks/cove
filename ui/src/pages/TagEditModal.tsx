@@ -38,9 +38,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
   const [parentSearch, setParentSearch] = useState("");
   // Tag search for children
   const [childSearch, setChildSearch] = useState("");
-  const [customFields, setCustomFields] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(tag.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")]))
-  );
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(tag.customFields ?? {}) });
 
   const { data: allTags } = useQuery({
     queryKey: ["tags-all"],
@@ -67,7 +65,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
     setAliases(tag.aliases);
     setSelectedParentIds(tag.parents.map((t) => t.id));
     setSelectedChildIds(tag.children.map((t) => t.id));
-    setCustomFields(Object.fromEntries(Object.entries(tag.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")])));
+    setCustomFields({ ...(tag.customFields ?? {}) });
   }, [tag]);
 
   const mutation = useMutation({
@@ -96,7 +94,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       aliases: aliasList,
       parentIds: selectedParentIds,
       childIds: selectedChildIds,
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      customFields,
     });
   };
 
@@ -207,7 +205,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       </Field>
 
       <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} />
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="tag" />
       </Field>
 
       {/* Parent Tags */}

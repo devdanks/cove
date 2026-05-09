@@ -14,7 +14,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.TagsRead)]
-public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntityIdentifierService entityIdentifiers) : ControllerBase
+public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, CustomFieldService customFields) : ControllerBase
 {
     private sealed record TagUsageCounts(
         int SceneCount,
@@ -215,6 +215,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (dto.ChildIds?.Count > 0) tag.ChildRelations = dto.ChildIds.Select(cid => new TagParent { ChildId = cid }).ToList();
 
         tag = await tagRepo.AddAsync(tag, ct);
+        if (dto.CustomFields != null)
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Tag, tag.Id, dto.CustomFields, ct);
         if (dto.Aliases?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Tag, tag.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await tagRepo.GetByIdWithRelationsAsync(tag.Id, ct);
@@ -267,8 +269,6 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             tag.ChildRelations.Clear();
             tag.ChildRelations = dto.ChildIds.Select(cid => new TagParent { ParentId = id, ChildId = cid }).ToList();
         }
-        if (dto.CustomFields != null) tag.CustomFields = dto.CustomFields;
-
         if (tagRepo != null)
         {
             await tagRepo.UpdateAsync(tag, ct);
@@ -277,6 +277,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         {
             await db.SaveChangesAsync(ct);
         }
+        if (dto.CustomFields != null)
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Tag, id, dto.CustomFields, ct);
         if (dto.Aliases != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Tag, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = tagRepo != null
@@ -415,6 +417,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     {
         var tag = await tagRepo.GetByIdAsync(id, ct);
         if (tag == null) return NotFound();
+        await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Tag, id, ct);
         await tagRepo.DeleteAsync(id, ct);
         return NoContent();
     }
@@ -477,7 +480,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             t.StudioCount,
             t.GroupCount,
             segmentCount,
-            t.CustomFields,
+            await customFields.GetValuesAsync(CustomFieldEntityTypes.Tag, t.Id, ct),
             t.CreatedAt.ToString("o"),
             t.UpdatedAt.ToString("o"),
             t.ShowAsSegment,
@@ -613,6 +616,10 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         foreach (var tag in tags)
         {
             if (dto.Description != null) tag.Description = dto.Description;
+            if (dto.Color != null) tag.Color = string.IsNullOrWhiteSpace(dto.Color) ? null : dto.Color.Trim();
+            if (dto.TagGroupId.HasValue) tag.TagGroupId = dto.TagGroupId;
+            if (dto.MinOccurrenceSec.HasValue) tag.MinOccurrenceSec = dto.MinOccurrenceSec;
+            if (dto.MinOccurrencePercent.HasValue) tag.MinOccurrencePercent = dto.MinOccurrencePercent;
             if (dto.Favorite.HasValue) tag.Favorite = dto.Favorite.Value;
             if (dto.IgnoreAutoTag.HasValue) tag.IgnoreAutoTag = dto.IgnoreAutoTag.Value;
 
@@ -678,6 +685,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             return Ok(new { deleted = 0 });
 
         db.Tags.RemoveRange(tags);
+        foreach (var tag in tags)
+            await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Tag, tag.Id, ct);
         await db.SaveChangesAsync(ct);
         return Ok(new { deleted = tags.Count });
     }
@@ -719,6 +728,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             if (!target.Aliases.Any(a => a.Alias == source.Name))
                 target.Aliases.Add(new TagAlias { Alias = source.Name, TagId = target.Id });
             // Delete source
+            await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Tag, source.Id, ct);
             db.Tags.Remove(source);
         }
 

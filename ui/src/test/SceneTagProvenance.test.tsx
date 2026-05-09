@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
 import { DetailsTab } from "../pages/SceneDetailPage";
@@ -42,7 +43,12 @@ describe("Scene tag provenance", () => {
       ],
     };
 
-    render(<DetailsTab scene={scene as any} onNavigate={vi.fn()} />);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DetailsTab scene={scene as any} onNavigate={vi.fn()} />
+      </QueryClientProvider>
+    );
 
     expect(screen.getByText("AI")).toBeInTheDocument();
     expect(screen.getByText("Ai.Tagging")).toBeInTheDocument();

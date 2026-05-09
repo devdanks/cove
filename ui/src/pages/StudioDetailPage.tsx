@@ -269,7 +269,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
                 ))}
               </div>
             ) : null}
-            <CustomFieldsDisplay customFields={studio.customFields} />
+            <CustomFieldsDisplay customFields={studio.customFields} entityType="studio" />
             <StudioMetadataServerPanel studio={studio} metadataServers={metadataServers} onNavigate={onNavigate} />
             {autoTagMut.isSuccess ? <p className="mt-3 text-sm text-emerald-300">Auto-tag job queued.</p> : null}
           </>

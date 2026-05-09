@@ -12,6 +12,7 @@ interface Props {
 
 const RECIPES = [
   "{title}.{ext}",
+  "{title}{d}{i}.{ext}",
   "{performer} - {title}.{ext}",
   "{studio} - {title}.{ext}",
   "{date}.{title}.{ext}",
@@ -19,7 +20,7 @@ const RECIPES = [
   "{studio}.{date}.{performer}.{title}.{ext}",
 ];
 
-type TokenKind = "title" | "date" | "performer" | "tag" | "studio" | "ext" | "ignore";
+type TokenKind = "title" | "date" | "performer" | "tag" | "studio" | "ext" | "ignore" | "delimiter";
 
 interface PatternToken {
   kind: TokenKind;
@@ -34,6 +35,7 @@ const TOKEN_REGEX_MAP: Record<TokenKind, { regex: string; capturing: boolean }> 
   studio: { regex: "(.+?)", capturing: true },
   ext: { regex: String.raw`\w+`, capturing: false },
   ignore: { regex: ".+?", capturing: false },
+  delimiter: { regex: "", capturing: false },
 };
 
 interface ParseResult {
@@ -44,7 +46,47 @@ interface ParseResult {
   studio?: string;
 }
 
-function compilePattern(pattern: string): { regex: RegExp; tokens: PatternToken[] } | null {
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function escapeCharClass(value: string) {
+  return value.replace(/[\\\]\-^]/g, "\\$&");
+}
+
+function buildSeparatorPattern(whitespaceReplacement: string) {
+  const chars = new Set([".", "-", "_", " "]);
+  if (whitespaceReplacement.trim()) chars.add(whitespaceReplacement.trim()[0]);
+  return `[${[...chars].map(escapeCharClass).join("")}]+`;
+}
+
+function isSeparatorChar(value: string, whitespaceReplacement: string) {
+  return value === "." || value === "-" || value === "_" || value === " " || (!!whitespaceReplacement.trim() && value === whitespaceReplacement.trim()[0]);
+}
+
+function literalToRegex(value: string, whitespaceReplacement: string) {
+  const separatorPattern = buildSeparatorPattern(whitespaceReplacement);
+  let output = "";
+  let inSeparatorRun = false;
+
+  for (const char of value) {
+    if (isSeparatorChar(char, whitespaceReplacement)) {
+      if (!inSeparatorRun) output += separatorPattern;
+      inSeparatorRun = true;
+    } else {
+      output += escapeRegex(char);
+      inSeparatorRun = false;
+    }
+  }
+
+  return output;
+}
+
+function cleanParsedValue(value: string, whitespaceReplacement: string) {
+  return value.replace(new RegExp(buildSeparatorPattern(whitespaceReplacement), "g"), " ").trim();
+}
+
+function compilePattern(pattern: string, whitespaceReplacement: string): { regex: RegExp; tokens: PatternToken[] } | null {
   if (!pattern.trim()) return null;
 
   const tokens: PatternToken[] = [];
@@ -61,14 +103,18 @@ function compilePattern(pattern: string): { regex: RegExp; tokens: PatternToken[
     if (tokenMatch) {
       const raw = tokenMatch[1].toLowerCase();
       let kind: TokenKind;
-      if (raw === "" || raw === "ignore") {
+      if (raw === "" || raw === "ignore" || raw === "i") {
         kind = "ignore";
+      } else if (raw === "d") {
+        kind = "delimiter";
       } else if (raw in TOKEN_REGEX_MAP) {
         kind = raw as TokenKind;
       } else {
         kind = "ignore";
       }
-      const spec = TOKEN_REGEX_MAP[kind];
+      const spec = kind === "delimiter"
+        ? { regex: buildSeparatorPattern(whitespaceReplacement), capturing: false }
+        : TOKEN_REGEX_MAP[kind];
       regexStr += spec.regex;
       if (spec.capturing) {
         groupIdx++;
@@ -78,8 +124,7 @@ function compilePattern(pattern: string): { regex: RegExp; tokens: PatternToken[
       }
     } else {
       // Literal text – treat separator chars as flexible separators
-      const escaped = part.replace(/[\.\-_ ]+/g, String.raw`[\.\-_ ]+`);
-      regexStr += escaped;
+      regexStr += literalToRegex(part, whitespaceReplacement);
     }
   }
 
@@ -96,7 +141,8 @@ function applyPattern(
   basename: string,
   compiled: { regex: RegExp; tokens: PatternToken[] },
   ignoredWords: string[],
-  capitalizeTitle: boolean
+  capitalizeTitle: boolean,
+  whitespaceReplacement: string
 ): ParseResult | null {
   const match = basename.match(compiled.regex);
   if (!match) return null;
@@ -109,7 +155,7 @@ function applyPattern(
     if (value === undefined) continue;
 
     // Clean up separators for readability
-    value = value.replace(/[\.\-_]+/g, " ").trim();
+    value = cleanParsedValue(value, whitespaceReplacement);
 
     if (token.kind === "title") {
       // Strip ignored words
@@ -129,7 +175,7 @@ function applyPattern(
       result.title = value;
     } else if (token.kind === "date") {
       // Normalise date separators to dashes
-      result.date = value.replace(/[\.\- ]+/g, "-");
+      result.date = value.replace(new RegExp(buildSeparatorPattern(whitespaceReplacement), "g"), "-");
     } else if (token.kind === "performer") {
       result.performer = value;
     } else if (token.kind === "tag") {
@@ -159,6 +205,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
   // Pattern config
   const [pattern, setPattern] = useState("{title}.{ext}");
   const [ignoredWordsStr, setIgnoredWordsStr] = useState("");
+  const [whitespaceReplacement, setWhitespaceReplacement] = useState("_");
   const [capitalizeTitle, setCapitalizeTitle] = useState(false);
   const [ignoreOrganized, setIgnoreOrganized] = useState(false);
   const [perPage, setPerPage] = useState(40);
@@ -169,6 +216,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
   const [appliedConfig, setAppliedConfig] = useState<{
     pattern: string;
     ignoredWords: string[];
+    whitespaceReplacement: string;
     capitalizeTitle: boolean;
     ignoreOrganized: boolean;
     perPage: number;
@@ -194,7 +242,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
   useMemo(() => {
     if (!data?.items || !appliedConfig) return;
 
-    const compiled = compilePattern(appliedConfig.pattern);
+    const compiled = compilePattern(appliedConfig.pattern, appliedConfig.whitespaceReplacement);
     if (!compiled) {
       setRows([]);
       return;
@@ -207,7 +255,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
     const newRows: RowState[] = items.map((scene) => {
       const file = scene.files[0];
       const basename = file?.basename ?? "";
-      const parsed = compiled ? applyPattern(basename, compiled, appliedConfig.ignoredWords, appliedConfig.capitalizeTitle) : null;
+      const parsed = compiled ? applyPattern(basename, compiled, appliedConfig.ignoredWords, appliedConfig.capitalizeTitle, appliedConfig.whitespaceReplacement) : null;
       return {
         sceneId: scene.id,
         basename,
@@ -229,12 +277,13 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
     setAppliedConfig({
       pattern,
       ignoredWords: words,
+      whitespaceReplacement,
       capitalizeTitle,
       ignoreOrganized,
       perPage,
     });
     setQueryEnabled(true);
-  }, [pattern, ignoredWordsStr, capitalizeTitle, ignoreOrganized, perPage]);
+  }, [pattern, ignoredWordsStr, whitespaceReplacement, capitalizeTitle, ignoreOrganized, perPage]);
 
   const handleSelectAll = useCallback(
     (checked: boolean) => {
@@ -344,6 +393,8 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
               <code className="text-secondary">{"{tag}"}</code>{" "}
               <code className="text-secondary">{"{studio}"}</code>{" "}
               <code className="text-secondary">{"{ext}"}</code>{" "}
+              <code className="text-secondary">{"{d}"}</code> (delimiter){" "}
+              <code className="text-secondary">{"{i}"}</code> (ignored){" "}
               <code className="text-secondary">{"{}"}</code> (ignored)
             </p>
           </div>
@@ -360,6 +411,19 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
               value={ignoredWordsStr}
               onChange={(e) => setIgnoredWordsStr(e.target.value)}
               placeholder="e.g. 720p 1080p bluray"
+              className="w-full bg-card border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          <div className="w-32">
+            <label className="block text-sm font-medium text-secondary mb-1">
+              Space Char
+            </label>
+            <input
+              type="text"
+              value={whitespaceReplacement}
+              onChange={(e) => setWhitespaceReplacement(e.target.value.slice(0, 1))}
+              placeholder="_"
               className="w-full bg-card border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
             />
           </div>

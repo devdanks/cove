@@ -33,6 +33,7 @@ public static class DataServiceExtensions
                 npgsqlOptions.UseVector();
                 npgsqlOptions.MigrationsAssembly(typeof(CoveContext).Assembly.FullName);
                 npgsqlOptions.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
+                npgsqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(2), null);
             });
             // Disable thread safety checks in production for ~5% faster context operations
             options.EnableThreadSafetyChecks(false);

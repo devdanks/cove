@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../components/Rating", () => ({
@@ -43,6 +44,11 @@ const baseScene = {
   date: null,
   playCount: 0,
 };
+
+function renderWithQueryClient(ui: React.ReactElement) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -140,7 +146,7 @@ describe("SceneCard navigation", () => {
 
 describe("FileInfoTab", () => {
   it("renders every underlying scene file", () => {
-    render(
+    renderWithQueryClient(
       <FileInfoTab
         files={[
           sceneFile,
@@ -175,7 +181,7 @@ describe("DetailsTab performers", () => {
       ],
     };
 
-    render(<DetailsTab scene={scene as any} onNavigate={vi.fn()} />);
+    renderWithQueryClient(<DetailsTab scene={scene as any} onNavigate={vi.fn()} />);
 
     expect(screen.getByText("24 yrs old")).toBeInTheDocument();
 

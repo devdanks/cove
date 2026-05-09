@@ -92,7 +92,8 @@ public sealed record UserTrackingPreferencesDto(
 public sealed record UserUiPreferencesDto(
     UserThemePreferencesDto? Theme,
     UserRatingSystemOptionsDto? RatingSystemOptions,
-    UserTrackingPreferencesDto? Tracking);
+    UserTrackingPreferencesDto? Tracking,
+    Dictionary<string, string>? KeybindingOverrides);
 
 public sealed record CreateUserRequest(
     string Username,

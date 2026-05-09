@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, images, playback } from "../api/client";
+import { faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Eye, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, FolderOpen, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -84,6 +84,8 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       queryClient.invalidateQueries({ queryKey: ["engagement", "image", id] });
     },
   });
+  const revealFileMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
+  const canRevealFiles = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
   const imageLikeCount = imageEngagement?.likeCount ?? 0;
   const imageDerivedLikeCount = imageEngagement?.derivedLikeCount ?? 0;
   const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
@@ -291,7 +293,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         </section>
       ) : null}
 
-      <CustomFieldsDisplay customFields={image.customFields} />
+      <CustomFieldsDisplay customFields={image.customFields} entityType="image" />
       <ExtensionSlot slot="image-detail-sidebar-bottom" context={{ image, onNavigate }} />
     </div>
   );
@@ -302,12 +304,26 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">File Info</h2>
         <div className="mt-3 space-y-3">
           {image.files.map((file) => (
-            <dl key={file.id} className="grid gap-2 md:grid-cols-2">
-              <DetailField label="Path" value={<span className="break-all font-mono text-[11px]">{file.path}</span>} />
-              <DetailField label="Dimensions" value={`${file.width} x ${file.height}`} />
-              <DetailField label="Format" value={file.format} />
-              <DetailField label="Size" value={`${(file.size / 1024 / 1024).toFixed(2)} MB`} />
-            </dl>
+            <div key={file.id} className="space-y-2 rounded-xl border border-border/60 bg-card/60 p-3">
+              {canRevealFiles && file.id ? (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => revealFileMutation.mutate(file.id)}
+                    className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-secondary hover:border-accent hover:text-foreground"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Reveal
+                  </button>
+                </div>
+              ) : null}
+              <dl className="grid gap-2 md:grid-cols-2">
+                <DetailField label="Path" value={<span className="break-all font-mono text-[11px]">{file.path}</span>} />
+                <DetailField label="Dimensions" value={`${file.width} x ${file.height}`} />
+                <DetailField label="Format" value={file.format} />
+                <DetailField label="Size" value={`${(file.size / 1024 / 1024).toFixed(2)} MB`} />
+              </dl>
+            </div>
           ))}
         </div>
       </section>

@@ -51,7 +51,7 @@ export function FaceCompareDialog({
     return null;
   }
 
-  const faceTitle = face.label?.trim() || face.performerName || `Face #${face.id}`;
+  const faceTitle = face.label?.trim() || face.performerName || "Unidentified face";
   const localPerformerId = readLocalPerformerId(suggestion);
   const referenceOnly = localPerformerId == null && suggestion.performerId < 0;
   const evidence = readEvidence(suggestion).slice(0, 5);
@@ -77,7 +77,7 @@ export function FaceCompareDialog({
             eyebrow="Face in question"
             title={faceTitle}
             imageUrl={face.coverImageUrl}
-            fallbackLabel={`Face #${face.id}`}
+            fallbackLabel="Unidentified face"
             footer={(
               <div className="space-y-2 text-xs text-secondary">
                 <div>{face.appearanceCount ?? 0} appearance{(face.appearanceCount ?? 0) === 1 ? "" : "s"}</div>

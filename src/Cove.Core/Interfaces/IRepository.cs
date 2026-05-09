@@ -82,6 +82,7 @@ public enum CriterionModifier
 
 public class IntCriterion { public int Value { get; set; } public int? Value2 { get; set; } public CriterionModifier Modifier { get; set; } = CriterionModifier.Equals; }
 public class StringCriterion { public string Value { get; set; } = ""; public CriterionModifier Modifier { get; set; } = CriterionModifier.Equals; }
+public class CustomFieldCriterion : StringCriterion { public string Key { get; set; } = ""; public string Type { get; set; } = "text"; public string? Value2 { get; set; } }
 public class FingerprintCriterion { public string Type { get; set; } = "md5"; public string Value { get; set; } = ""; public CriterionModifier Modifier { get; set; } = CriterionModifier.Equals; }
 public class BoolCriterion { public bool Value { get; set; } }
 public class MultiIdCriterion { public List<int> Value { get; set; } = []; public CriterionModifier Modifier { get; set; } = CriterionModifier.Includes; public List<int>? Excludes { get; set; } public int? Depth { get; set; } }
@@ -134,6 +135,8 @@ public class SceneFilter
     public StringCriterion? HashCriterion { get; set; }
     public StringCriterion? ChecksumCriterion { get; set; }
     public BoolCriterion? DuplicatedPhashCriterion { get; set; }
+    public BoolCriterion? DuplicatedTitleCriterion { get; set; }
+    public BoolCriterion? DuplicatedRemoteIdCriterion { get; set; }
     public StringCriterion? UrlCriterion { get; set; }
     public DateCriterion? DateCriterion { get; set; }
     public TimestampCriterion? CreatedAtCriterion { get; set; }
@@ -145,6 +148,7 @@ public class SceneFilter
     public IntCriterion? BitrateInterval { get; set; }
     public IntCriterion? FileCountCriterion { get; set; }
     public StringCriterion? RemoteIdCriterion { get; set; }
+    public IntCriterion? RemoteIdCountCriterion { get; set; }
     public BoolCriterion? IsMissingCriterion { get; set; }
     public StringCriterion? DuplicatedCriterion { get; set; }
     public StringCriterion? OrientationCriterion { get; set; }
@@ -161,6 +165,8 @@ public class SceneFilter
     public IntCriterion? PerformerAgeCriterion { get; set; }
     public StringCriterion? CaptionsCriterion { get; set; }
     public IntCriterion? InteractiveSpeedCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }
 
 public class PerformerFilter
@@ -194,6 +200,7 @@ public class PerformerFilter
     public BoolCriterion? IsMissingCriterion { get; set; }
     public StringCriterion? RemoteIdCriterion { get; set; }
     public StringCriterion? RemoteIdValueCriterion { get; set; }
+    public IntCriterion? RemoteIdCountCriterion { get; set; }
     public StringCriterion? DisambiguationCriterion { get; set; }
     public StringCriterion? DetailsCriterion { get; set; }
     public StringCriterion? EyeColorCriterion { get; set; }
@@ -214,6 +221,8 @@ public class PerformerFilter
     public MultiIdCriterion? GroupsCriterion { get; set; }
     public BoolCriterion? IgnoreAutoTagCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }
 
 public class TagFilter
@@ -236,6 +245,7 @@ public class TagFilter
     public StringCriterion? SortNameCriterion { get; set; }
     public StringCriterion? RemoteIdCriterion { get; set; }
     public StringCriterion? RemoteIdValueCriterion { get; set; }
+    public IntCriterion? RemoteIdCountCriterion { get; set; }
     public StringCriterion? AliasesCriterion { get; set; }
     public StringCriterion? DescriptionCriterion { get; set; }
     public IntCriterion? ImageCountCriterion { get; set; }
@@ -249,6 +259,8 @@ public class TagFilter
     public IntCriterion? ParentCountCriterion { get; set; }
     public IntCriterion? ChildCountCriterion { get; set; }
     public BoolCriterion? IgnoreAutoTagCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }
 
 public class StudioFilter
@@ -266,6 +278,7 @@ public class StudioFilter
     public IntCriterion? ImageCountCriterion { get; set; }
     public StringCriterion? UrlCriterion { get; set; }
     public StringCriterion? RemoteIdCriterion { get; set; }
+    public IntCriterion? RemoteIdCountCriterion { get; set; }
     public BoolCriterion? IsMissingCriterion { get; set; }
     public TimestampCriterion? CreatedAtCriterion { get; set; }
     public TimestampCriterion? UpdatedAtCriterion { get; set; }
@@ -278,6 +291,8 @@ public class StudioFilter
     public IntCriterion? GroupCountCriterion { get; set; }
     public BoolCriterion? IgnoreAutoTagCriterion { get; set; }
     public BoolCriterion? OrganizedCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }
 
 public class GalleryFilter
@@ -316,6 +331,8 @@ public class GalleryFilter
     public IntCriterion? TypicalResolutionCriterion { get; set; }
     public MultiIdCriterion? ScenesCriterion { get; set; }
     public MultiIdCriterion? PerformerTagsCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }
 
 public class ImageFilter
@@ -355,6 +372,8 @@ public class ImageFilter
     public IntCriterion? PerformerAgeCriterion { get; set; }
     public StringCriterion? OrientationCriterion { get; set; }
     public MultiIdCriterion? PerformerTagsCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }
 
 public class GroupFilter
@@ -379,4 +398,6 @@ public class GroupFilter
     public MultiIdCriterion? PerformersCriterion { get; set; }
     public IntCriterion? SceneCountCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }

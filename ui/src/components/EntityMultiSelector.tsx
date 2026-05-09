@@ -177,7 +177,7 @@ function toPerformerOption(performer: Performer): SearchOption {
 }
 
 function toFaceOption(face: Face): SearchOption {
-  const label = face.label?.trim() || face.performerName?.trim() || `Face #${face.id}`;
+  const label = face.label?.trim() || face.performerName?.trim() || "Unidentified face";
   const secondaryLabel = face.performerName && face.performerName !== label
     ? `Linked to ${face.performerName}`
     : face.primarySourceKey

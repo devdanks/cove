@@ -10,6 +10,9 @@ import {
 
 interface StudioTaggerProps {
   studios: Studio[];
+  selectedIds?: Set<number>;
+  selecting?: boolean;
+  onSelect?: (studioId: number) => void;
 }
 
 interface TaggerConfig {
@@ -38,7 +41,7 @@ async function runWithConcurrency<T>(items: T[], fn: (item: T) => Promise<void>,
   await Promise.all(workers);
 }
 
-export function StudioTagger({ studios: studioList }: StudioTaggerProps) {
+export function StudioTagger({ studios: studioList, selectedIds, selecting = false, onSelect }: StudioTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
 
@@ -179,6 +182,9 @@ export function StudioTagger({ studios: studioList }: StudioTaggerProps) {
             onSearch={() => searchStudio(studio)}
             onUpdateState={(update) => updateSearchState(studio.id, update)}
             endpoint={taggerConfig.selectedEndpoint}
+            selected={selectedIds?.has(studio.id) ?? false}
+            selecting={selecting}
+            onSelect={onSelect}
           />
         ))}
       </div>
@@ -194,6 +200,9 @@ function StudioTaggerRow({
   onSearch,
   onUpdateState,
   endpoint,
+  selected,
+  selecting,
+  onSelect,
 }: {
   studio: Studio;
   state?: StudioSearchState;
@@ -202,6 +211,9 @@ function StudioTaggerRow({
   onSearch: () => void;
   onUpdateState: (update: Partial<StudioSearchState>) => void;
   endpoint: string;
+  selected: boolean;
+  selecting: boolean;
+  onSelect?: (studioId: number) => void;
 }) {
   const imageUrl = studio.imagePath;
 
@@ -221,8 +233,19 @@ function StudioTaggerRow({
   });
 
   return (
-    <div className={`px-4 py-3 ${state?.saved ? "opacity-50" : ""}`}>
+    <div className={`px-4 py-3 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
       <div className="flex gap-4">
+        {onSelect && (
+          <button
+            type="button"
+            onClick={() => onSelect(studio.id)}
+            className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[10px] ${selected ? "border-accent bg-accent text-white" : selecting ? "border-accent/60 text-accent" : "border-border text-transparent hover:border-accent hover:text-accent"}`}
+            aria-label={selected ? "Deselect studio" : "Select studio"}
+            title={selected ? "Deselect" : "Select"}
+          >
+            <Check className="h-3 w-3" />
+          </button>
+        )}
         {/* Studio image */}
         <div className="flex-shrink-0 w-24">
           <div className="relative aspect-video bg-card rounded overflow-hidden">

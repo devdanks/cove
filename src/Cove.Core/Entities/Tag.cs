@@ -41,7 +41,6 @@ public class Tag : BaseEntity
     public ICollection<GalleryTag> GalleryTags { get; set; } = [];
     public ICollection<StudioTag> StudioTags { get; set; } = [];
     public ICollection<GroupTag> GroupTags { get; set; } = [];
-    public Dictionary<string, object>? CustomFields { get; set; }
 }
 
 public class TagGroup : BaseEntity

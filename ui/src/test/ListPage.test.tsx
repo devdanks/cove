@@ -4,7 +4,16 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ListPage } from "../components/ListPage";
 import { SCENE_CRITERIA } from "../components/FilterDialog";
+import { customFieldDefinitionsQueryKey } from "../hooks/useCustomFieldDefinitions";
 import { RouteRegistryProvider } from "../router/RouteRegistry";
+
+vi.mock("../state/AppConfigContext", () => ({
+  useAppConfig: () => ({ config: { ui: { keybindingOverrides: {} } } }),
+}));
+
+vi.mock("../auth/AuthContext", () => ({
+  useAuth: () => ({ user: null }),
+}));
 
 const storage = new Map<string, string>();
 
@@ -211,5 +220,63 @@ describe("ListPage active filter chips", () => {
     await user.click(screen.getByTitle("Sort descending"));
 
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sort: "random", direction: "asc", seed: 12345 }));
+  });
+
+  it("uses the wide filter dialog layout for custom reference field filters", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+    queryClient.setQueryData(customFieldDefinitionsQueryKey("scene"), [
+      {
+        id: 1,
+        key: "testlabel",
+        label: "testlabel",
+        type: "tag",
+        entityTypes: ["scene"],
+        options: [],
+        filterable: true,
+        sortable: false,
+        isMultiValue: false,
+        displayOrder: 0,
+        createdAt: "2026-05-09T00:00:00Z",
+        updatedAt: "2026-05-09T00:00:00Z",
+      },
+    ]);
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <RouteRegistryProvider>
+          <ListPage
+            title="Scenes"
+            filter={{ page: 1, perPage: 40 }}
+            onFilterChange={vi.fn()}
+            totalCount={0}
+            isLoading={false}
+            filterMode="scenes"
+            criteriaDefinitions={SCENE_CRITERIA}
+            objectFilter={{}}
+            onObjectFilterChange={vi.fn()}
+          >
+            <div>content</div>
+          </ListPage>
+        </RouteRegistryProvider>
+      </QueryClientProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    const dialogShell = Array.from(container.querySelectorAll("div"))
+      .find((element) => element.className.includes("sm:w-[min(92vw,56rem)]"));
+    expect(dialogShell).toBeTruthy();
+
+    await user.click(screen.getByText("Custom Fields"));
+    await user.click(screen.getByRole("button", { name: /add custom field filter/i }));
+
+    expect(screen.getByPlaceholderText("Search tags...").closest("label")?.className).toContain("min-w-0");
+    expect(container.querySelector('[aria-label="Remove custom field filter"]')?.parentElement?.className).toContain("xl:grid-cols");
   });
 });

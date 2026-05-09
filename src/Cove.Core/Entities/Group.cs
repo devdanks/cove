@@ -21,7 +21,6 @@ public class Group : BaseEntity
     public ICollection<GroupItem> GroupItems { get; set; } = [];
     public ICollection<GroupRelation> ContainingGroupRelations { get; set; } = [];
     public ICollection<GroupRelation> SubGroupRelations { get; set; } = [];
-    public Dictionary<string, object>? CustomFields { get; set; }
 }
 
 public enum GroupItemKind

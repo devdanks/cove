@@ -84,13 +84,11 @@ public class SceneRepository : ISceneRepository
         // Apply text search
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
         {
-            var q = findFilter.Q;
-            var pattern = $"%{q}%";
-            filterQuery = filterQuery.Where(s =>
-                (s.Title != null && EF.Functions.ILike(s.Title, pattern)) ||
-                (s.Details != null && EF.Functions.ILike(s.Details, pattern)) ||
-                (s.Code != null && EF.Functions.ILike(s.Code, pattern)) ||
-                (s.FileSearchText != null && EF.Functions.ILike(s.FileSearchText, pattern)));
+            filterQuery = FilterHelpers.ApplyBooleanKeywordSearch(filterQuery, findFilter.Q,
+                s => s.Title,
+                s => s.Details,
+                s => s.Code,
+                s => s.FileSearchText);
         }
 
         // COUNT runs on the lightweight query â€” no JOINs from Includes
@@ -194,8 +192,11 @@ public class SceneRepository : ISceneRepository
                 var ids = filter.StudiosCriterion.Value;
                 query = filter.StudiosCriterion.Modifier switch
                 {
+                    CriterionModifier.IsNull => query.Where(s => !s.StudioId.HasValue),
+                    CriterionModifier.NotNull => query.Where(s => s.StudioId.HasValue),
                     CriterionModifier.Includes => query.Where(s => s.StudioId.HasValue && ids.Contains(s.StudioId.Value)),
                     CriterionModifier.Excludes => query.Where(s => !s.StudioId.HasValue || !ids.Contains(s.StudioId.Value)),
+                    _ when ids.Count == 0 => query,
                     _ => query.Where(s => s.StudioId.HasValue && ids.Contains(s.StudioId.Value)),
                 };
             }
@@ -216,6 +217,12 @@ public class SceneRepository : ISceneRepository
 
             if (filter.DuplicatedPhashCriterion != null)
                 query = ApplyDuplicatedPhashCriterion(query, filter.DuplicatedPhashCriterion);
+
+            if (filter.DuplicatedTitleCriterion != null)
+                query = ApplyDuplicatedTitleCriterion(query, filter.DuplicatedTitleCriterion);
+
+            if (filter.DuplicatedRemoteIdCriterion != null)
+                query = ApplyDuplicatedRemoteIdCriterion(query, filter.DuplicatedRemoteIdCriterion);
 
             query = ApplyPathCriterion(query, filter.PathCriterion);
 
@@ -258,6 +265,8 @@ public class SceneRepository : ISceneRepository
                     _ => query.Where(s => s.RemoteIds.Any(sid => EF.Functions.ILike(sid.Endpoint, $"%{filter.RemoteIdCriterion.Value}%"))),
                 };
             }
+
+            query = ApplyIntCriterion(query, filter.RemoteIdCountCriterion, s => s.RemoteIds.Count);
 
             query = FilterHelpers.ApplyString(query, filter.TitleCriterion, s => s.Title);
 
@@ -314,6 +323,8 @@ public class SceneRepository : ISceneRepository
             if (filter.InteractiveSpeedCriterion != null)
                 query = ApplyIntCriterion(query, filter.InteractiveSpeedCriterion, s => s.InteractiveSpeed ?? 0);
 
+            query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Scene, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
+
             // Orientation criterion: landscape, portrait, or square based on file dimensions
             if (filter.OrientationCriterion != null)
             {
@@ -338,43 +349,49 @@ public class SceneRepository : ISceneRepository
         return ApplySortingSwitch(query, sort, desc);
     }
 
-    private IQueryable<Scene> ApplySortingSwitch(IQueryable<Scene> query, string sort, bool desc) => sort switch
+    private IQueryable<Scene> ApplySortingSwitch(IQueryable<Scene> query, string sort, bool desc)
     {
-        "title" => desc ? query.OrderByDescending(s => s.Title) : query.OrderBy(s => s.Title),
-        // Null dates sort to bottom: treat null as MinValue so they come last when desc
-        "date" => desc ? query.OrderByDescending(s => s.Date ?? DateOnly.MinValue) : query.OrderBy(s => s.Date ?? DateOnly.MinValue),
-        "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Scene, desc),
-        "play_count" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.ViewCount), desc),
-        "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LikeCount), desc),
-        "last_like_at" => ApplyLastFavoriteSort(query, desc),
-        "organized" => desc ? query.OrderByDescending(s => s.Organized) : query.OrderBy(s => s.Organized),
-        "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastConsumedAt), desc),
-        "play_duration" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.TotalConsumedSec), desc),
-        "resume_time" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastPositionSec), desc),
-        "random" => query.OrderBy(s => s.Id),
-        "duration" => desc ? query.OrderByDescending(s => s.MaxDuration) : query.OrderBy(s => s.MaxDuration),
-        "file_size" => desc ? query.OrderByDescending(s => s.MaxFileSize) : query.OrderBy(s => s.MaxFileSize),
-        "file_mod_time" => ApplyFileModTimeSort(query, desc),
-        "file_count" => desc ? query.OrderByDescending(s => s.FileCount) : query.OrderBy(s => s.FileCount),
-        "path" => ApplyPathSort(query, desc),
-        "resolution" => desc ? query.OrderByDescending(s => s.MaxHeight) : query.OrderBy(s => s.MaxHeight),
-        "framerate" => desc ? query.OrderByDescending(s => s.MaxFrameRate) : query.OrderBy(s => s.MaxFrameRate),
-        "bitrate" => desc ? query.OrderByDescending(s => s.MaxBitRate) : query.OrderBy(s => s.MaxBitRate),
-        "phash" => ApplyPhashSort(query, desc),
-        "perceptual_similarity" => ApplyPhashSort(query, desc),
-        "tag_count" => desc
-            ? query.OrderByDescending(s => s.SceneTags.Count)
-            : query.OrderBy(s => s.SceneTags.Count),
-        "performer_count" => desc
-            ? query.OrderByDescending(s => s.ScenePerformers.Count)
-            : query.OrderBy(s => s.ScenePerformers.Count),
-        "performer_age" => ApplyPerformerAgeSort(query, desc),
-        "studio" => ApplyStudioSort(query, desc),
-        "code" => ApplyStudioCodeSort(query, desc),
-        "studio_code" => ApplyStudioCodeSort(query, desc),
-        "created_at" => desc ? query.OrderByDescending(s => s.CreatedAt) : query.OrderBy(s => s.CreatedAt),
-        _ => desc ? query.OrderByDescending(s => s.UpdatedAt) : query.OrderBy(s => s.UpdatedAt),
-    };
+        if (FilterHelpers.TryParseCustomFieldSort(sort, out _, out _))
+            return query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Scene, sort, desc);
+
+        return sort switch
+        {
+            "title" => desc ? query.OrderByDescending(s => s.Title) : query.OrderBy(s => s.Title),
+            // Null dates sort to bottom: treat null as MinValue so they come last when desc
+            "date" => desc ? query.OrderByDescending(s => s.Date ?? DateOnly.MinValue) : query.OrderBy(s => s.Date ?? DateOnly.MinValue),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Scene, desc),
+            "play_count" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.ViewCount), desc),
+            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LikeCount), desc),
+            "last_like_at" => ApplyLastFavoriteSort(query, desc),
+            "organized" => desc ? query.OrderByDescending(s => s.Organized) : query.OrderBy(s => s.Organized),
+            "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastConsumedAt), desc),
+            "play_duration" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.TotalConsumedSec), desc),
+            "resume_time" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastPositionSec), desc),
+            "random" => query.OrderBy(s => s.Id),
+            "duration" => desc ? query.OrderByDescending(s => s.MaxDuration) : query.OrderBy(s => s.MaxDuration),
+            "file_size" => desc ? query.OrderByDescending(s => s.MaxFileSize) : query.OrderBy(s => s.MaxFileSize),
+            "file_mod_time" => ApplyFileModTimeSort(query, desc),
+            "file_count" => desc ? query.OrderByDescending(s => s.FileCount) : query.OrderBy(s => s.FileCount),
+            "path" => ApplyPathSort(query, desc),
+            "resolution" => desc ? query.OrderByDescending(s => s.MaxHeight) : query.OrderBy(s => s.MaxHeight),
+            "framerate" => desc ? query.OrderByDescending(s => s.MaxFrameRate) : query.OrderBy(s => s.MaxFrameRate),
+            "bitrate" => desc ? query.OrderByDescending(s => s.MaxBitRate) : query.OrderBy(s => s.MaxBitRate),
+            "phash" => ApplyPhashSort(query, desc),
+            "perceptual_similarity" => ApplyPhashSort(query, desc),
+            "tag_count" => desc
+                ? query.OrderByDescending(s => s.SceneTags.Count)
+                : query.OrderBy(s => s.SceneTags.Count),
+            "performer_count" => desc
+                ? query.OrderByDescending(s => s.ScenePerformers.Count)
+                : query.OrderBy(s => s.ScenePerformers.Count),
+            "performer_age" => ApplyPerformerAgeSort(query, desc),
+            "studio" => ApplyStudioSort(query, desc),
+            "code" => ApplyStudioCodeSort(query, desc),
+            "studio_code" => ApplyStudioCodeSort(query, desc),
+            "created_at" => desc ? query.OrderByDescending(s => s.CreatedAt) : query.OrderBy(s => s.CreatedAt),
+            _ => desc ? query.OrderByDescending(s => s.UpdatedAt) : query.OrderBy(s => s.UpdatedAt),
+        };
+    }
 
     private static IQueryable<Scene> ApplyLastFavoriteSort(IQueryable<Scene> query, bool desc)
     {
@@ -586,6 +603,27 @@ public class SceneRepository : ISceneRepository
         return criterion.Value ? duplicatedQuery : query.Where(scene => !duplicatedQuery.Select(item => item.Id).Contains(scene.Id));
     }
 
+    private IQueryable<Scene> ApplyDuplicatedTitleCriterion(IQueryable<Scene> query, BoolCriterion criterion)
+    {
+        var duplicatedQuery = query.Where(scene => scene.Title != null && scene.Title != ""
+            && _db.Scenes.Any(other => other.Id != scene.Id
+                && other.Title != null
+                && other.Title.ToLower() == scene.Title.ToLower()));
+
+        return criterion.Value ? duplicatedQuery : query.Where(scene => !duplicatedQuery.Select(item => item.Id).Contains(scene.Id));
+    }
+
+    private IQueryable<Scene> ApplyDuplicatedRemoteIdCriterion(IQueryable<Scene> query, BoolCriterion criterion)
+    {
+        var duplicatedQuery = query.Where(scene => scene.RemoteIds.Any(remoteId =>
+            remoteId.RemoteId != ""
+            && _db.Set<SceneRemoteId>().Any(other => other.Id != remoteId.Id
+                && other.Endpoint == remoteId.Endpoint
+                && other.RemoteId == remoteId.RemoteId)));
+
+        return criterion.Value ? duplicatedQuery : query.Where(scene => !duplicatedQuery.Select(item => item.Id).Contains(scene.Id));
+    }
+
     private static IQueryable<Scene> ApplyVideoCodecCriterion(IQueryable<Scene> query, StringCriterion? criterion)
     {
         if (criterion == null) return query;
@@ -773,6 +811,12 @@ public class SceneRepository : ISceneRepository
     {
         if (criterion == null)
             return query;
+
+        if (criterion.Modifier == CriterionModifier.IsNull)
+            return query.Where(s => !s.SceneTags.Any());
+
+        if (criterion.Modifier == CriterionModifier.NotNull)
+            return query.Where(s => s.SceneTags.Any());
 
         var groups = valueGroups?.Where(group => group.Length > 0).ToArray()
             ?? criterion.Value.Where(tagId => tagId > 0).Select(tagId => new[] { tagId }).ToArray();

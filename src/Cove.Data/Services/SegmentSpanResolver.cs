@@ -266,7 +266,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
             return cached;
 
         var segments = await db.Segments.AsNoTracking()
-            .Include(segment => segment.Tag)
+            .Include(segment => segment.Tag).ThenInclude(tag => tag!.TagGroup)
             .Where(segment => segment.HostType == SegmentHostType.Scene && segment.HostId == sceneId)
             .OrderBy(segment => segment.StartSec)
             .ThenBy(segment => segment.Id)
@@ -530,19 +530,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
     private static string? GetTagCategory(Tag? tag)
     {
-        if (tag?.CustomFields is null)
-            return null;
-
-        if (tag.CustomFields.TryGetValue("category", out var category) && category is string categoryText)
-            return categoryText;
-        if (tag.CustomFields.TryGetValue("Category", out category) && category is string categoryTextUpper)
-            return categoryTextUpper;
-        if (tag.CustomFields.TryGetValue("tagCategory", out category) && category is string tagCategoryText)
-            return tagCategoryText;
-        if (tag.CustomFields.TryGetValue("TagCategory", out category) && category is string tagCategoryTextUpper)
-            return tagCategoryTextUpper;
-
-        return null;
+        return tag?.TagGroup?.Name;
     }
 
     private static OperandMatch MatchOperand(IReadOnlyList<Segment> segments, SegmentSpanOperandDto operand)

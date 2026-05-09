@@ -253,7 +253,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
             ) : null}
 
             {performer.details ? <p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{performer.details}</p> : null}
-            <CustomFieldsDisplay customFields={performer.customFields} />
+            <CustomFieldsDisplay customFields={performer.customFields} entityType="performer" />
             <PerformerFaceSimilarityPanel performerId={id} canReadFaces={canReadFaces} onNavigate={onNavigate} />
             <PerformerMetadataServerPanel performer={performer} metadataServers={metadataServers} onNavigate={onNavigate} />
           </>

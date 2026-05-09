@@ -18,6 +18,7 @@ import {
 import { scenes } from "../api/client";
 import type { Detection, Face, Segment } from "../api/types";
 import { createPlaybackTracker, type PlaybackTrackingTarget } from "../utils/interactionTracking";
+import { useAppConfig } from "../state/AppConfigContext";
 
 type FaceOverlayInfo = Pick<Face, "id" | "label" | "performerName" | "performerId">;
 type DetectionOverlay = Detection & { overlayKey?: string };
@@ -118,6 +119,10 @@ export function VideoPlayer({
   onPrev?: () => void;
   onNext?: () => void;
 }) {
+  const { config } = useAppConfig();
+  const maxLoopDuration = config?.ui.maxLoopDuration ?? 0;
+  const effectiveShowAbLoop = showAbLoop ?? config?.ui.showAbLoopControls ?? true;
+  const effectiveResumeTime = config?.ui.alwaysResumeOnPlayback === false ? undefined : resumeTime;
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -182,6 +187,9 @@ export function VideoPlayer({
 
   useEffect(() => {
     clipEndedHandled.current = false;
+    if (clip) {
+      setLoop(!!clip.loop);
+    }
   }, [clip?.end, clip?.loop, clip?.start, sceneId, streamUrl]);
 
   useEffect(() => {
@@ -384,8 +392,8 @@ export function VideoPlayer({
   useEffect(() => {
     const v = videoRef.current;
     const nextTime = clip
-      ? Math.min(Math.max(resumeTime ?? clip.start, clip.start), clip.end ?? duration)
-      : resumeTime;
+      ? Math.min(Math.max(effectiveResumeTime ?? clip.start, clip.start), clip.end ?? duration)
+      : effectiveResumeTime;
     if (v && nextTime != null) {
       v.currentTime = nextTime;
       setCurTime(roundPlaybackTime(nextTime));
@@ -396,7 +404,7 @@ export function VideoPlayer({
     } else if (clip) {
       setAbLoop({ a: null, b: null });
     }
-  }, [clip?.end, clip?.loop, clip?.start, resumeTime, sceneId, streamUrl]);
+  }, [clip?.end, clip?.loop, clip?.start, effectiveResumeTime, sceneId, streamUrl]);
 
   useEffect(() => {
     if (!autostart) {
@@ -506,12 +514,14 @@ export function VideoPlayer({
         return;
       }
 
-      if (clip.loop) {
+      if (loop) {
+        if (intervalStart.current !== null) {
+          flushInterval("active");
+        }
         video.currentTime = clipStart;
         setCurTime(roundPlaybackTime(clipStart));
         lastSeenTime.current = roundPlaybackTime(clipStart);
         if (intervalStart.current !== null) {
-          flushInterval("active");
           startTrackedInterval(clipStart);
         }
         return;
@@ -536,7 +546,7 @@ export function VideoPlayer({
     return () => {
       video.removeEventListener("timeupdate", handleClipBoundary);
     };
-  }, [clip, clipEnd, clipStart, flushInterval, onEndedProp, startTrackedInterval]);
+  }, [clip, clipEnd, clipStart, flushInterval, loop, onEndedProp, startTrackedInterval]);
 
   useEffect(() => {
     if (!playbackTrackingTarget) {
@@ -585,6 +595,33 @@ export function VideoPlayer({
     scenes.getResolutions(sceneId).then((res) => setAvailableQualities(res ?? [])).catch(() => {});
   }, [sceneId]);
 
+  const prepareClipForPlayback = useCallback(() => {
+    const video = videoRef.current;
+    const currentPosition = roundPlaybackTime(video?.currentTime ?? currentTime);
+
+    if (!video || !clip || loop) {
+      return currentPosition;
+    }
+
+    if (clipEndedHandled.current || currentPosition >= clipEnd - 0.05 || currentPosition < clipStart) {
+      const startPosition = roundPlaybackTime(clipStart);
+      clipEndedHandled.current = false;
+      video.currentTime = clipStart;
+      lastSeenTime.current = startPosition;
+      setCurTime(startPosition);
+      return startPosition;
+    }
+
+    return currentPosition;
+  }, [clip, clipEnd, clipStart, currentTime, loop]);
+
+  const playVideo = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    prepareClipForPlayback();
+    video.play().catch(() => {});
+  }, [prepareClipForPlayback]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const v = videoRef.current;
@@ -596,7 +633,7 @@ export function VideoPlayer({
         case " ":
         case "k":
           event.preventDefault();
-          v.paused ? v.play() : v.pause();
+          v.paused ? playVideo() : v.pause();
           break;
         case "ArrowLeft":
           event.preventDefault();
@@ -637,12 +674,12 @@ export function VideoPlayer({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [resetHideTimer]);
+  }, [playVideo, resetHideTimer]);
 
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    v.paused ? v.play() : v.pause();
+    v.paused ? playVideo() : v.pause();
   };
 
   const seekTo = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -704,7 +741,7 @@ export function VideoPlayer({
     const shouldAutoplayAfterLoad = pendingRestore?.shouldPlay || pendingAutostartRef.current;
 
     const handleLoadedMetadata = () => {
-      const targetTime = pendingRestore?.time ?? (clip ? clip.start : resumeTime);
+      const targetTime = pendingRestore?.time ?? (clip ? clip.start : effectiveResumeTime);
       if (targetTime != null && Number.isFinite(targetTime)) {
         video.currentTime = targetTime;
         setCurTime(roundPlaybackTime(targetTime));
@@ -721,7 +758,7 @@ export function VideoPlayer({
     return () => {
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
     };
-  }, [clip, effectiveStreamUrl, format, resumeTime]);
+  }, [clip, effectiveResumeTime, effectiveStreamUrl, format]);
 
   const togglePip = async () => {
     const v = videoRef.current;
@@ -743,7 +780,11 @@ export function VideoPlayer({
     if (abLoop.a == null) {
       setAbLoop({ a: v.currentTime, b: null });
     } else if (abLoop.b == null) {
-      setAbLoop({ a: abLoop.a, b: v.currentTime });
+      const rawEnd = v.currentTime;
+      const cappedEnd = maxLoopDuration > 0 && rawEnd > abLoop.a
+        ? Math.min(rawEnd, abLoop.a + maxLoopDuration)
+        : rawEnd;
+      setAbLoop({ a: abLoop.a, b: cappedEnd });
     } else {
       setAbLoop({ a: null, b: null });
     }
@@ -777,7 +818,7 @@ export function VideoPlayer({
         onPlay={() => {
           setPlaying(true);
           pendingAutostartRef.current = false;
-          const currentPos = roundPlaybackTime(videoRef.current?.currentTime ?? currentTime);
+          const currentPos = prepareClipForPlayback();
           startTrackedInterval(currentPos);
           if (!playTriggered.current) { playTriggered.current = true; onPlay?.(); }
         }}
@@ -974,7 +1015,7 @@ export function VideoPlayer({
               )}
             </div>
 
-            {showAbLoop && (
+            {effectiveShowAbLoop && (
               <button
                 onClick={cycleAbLoop}
                 className={`hover:text-accent p-1 text-xs font-medium flex items-center gap-1 ${abLoop.a != null ? "text-accent" : ""}`}
@@ -1348,7 +1389,7 @@ function formatDetectionBadge(detection: Detection, faceLabelsById?: Map<number,
   }
 
   const refText = detection.refKind && detection.refId != null
-    ? ` · ${detection.refKind} #${detection.refId}`
+    ? ` · ${detection.refKind}`
     : "";
   return `${detection.class} ${confidence}%${refText}`;
 }

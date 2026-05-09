@@ -337,6 +337,7 @@ public class PerformerRepository : IPerformerRepository
 
             query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, p => p.ImageCount);
             query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, p => p.GalleryCount);
+            query = FilterHelpers.ApplyInt(query, filter.RemoteIdCountCriterion, p => p.RemoteIds.Count);
 
             // Age criterion â€” computed from Birthdate
             if (filter.AgeCriterion != null && filter.AgeCriterion.Value > 0)
@@ -497,8 +498,11 @@ public class PerformerRepository : IPerformerRepository
                 var gIds = filter.GroupsCriterion.Value;
                 query = filter.GroupsCriterion.Modifier switch
                 {
+                    CriterionModifier.IsNull => query.Where(p => !p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any())),
+                    CriterionModifier.NotNull => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any())),
                     CriterionModifier.Includes => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
                     CriterionModifier.Excludes => query.Where(p => !p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
+                    _ when gIds.Count == 0 => query,
                     _ => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
                 };
             }
@@ -527,22 +531,24 @@ public class PerformerRepository : IPerformerRepository
                     _ => query,
                 };
             }
+
+            query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Performer, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
 
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
         {
-            var q = findFilter.Q;
-            query = query.Where(p =>
-                EF.Functions.ILike(p.Name, $"%{q}%") ||
-                (p.Disambiguation != null && EF.Functions.ILike(p.Disambiguation, $"%{q}%")) ||
-                p.Aliases.Any(a => EF.Functions.ILike(a.Alias, $"%{q}%")));
+            query = FilterHelpers.ApplyBooleanKeywordSearch(query, findFilter.Q,
+                p => p.Name,
+                p => p.Disambiguation);
         }
 
         var totalCount = await query.AsNoTracking().CountAsync(ct);
 
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Performer, sort, desc)
+            : sort switch
         {
             "name" => desc ? query.OrderByDescending(p => p.Name) : query.OrderBy(p => p.Name),
             "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Performer, desc),
@@ -551,6 +557,8 @@ public class PerformerRepository : IPerformerRepository
             "scene_count" => desc ? query.OrderByDescending(p => p.SceneCount) : query.OrderBy(p => p.SceneCount),
             "image_count" => desc ? query.OrderByDescending(p => p.ImageCount) : query.OrderBy(p => p.ImageCount),
             "gallery_count" => desc ? query.OrderByDescending(p => p.GalleryCount) : query.OrderBy(p => p.GalleryCount),
+            "latest_scene_date" => desc ? query.OrderByDescending(p => p.ScenePerformers.Max(sp => sp.Scene!.Date)) : query.OrderBy(p => p.ScenePerformers.Max(sp => sp.Scene!.Date)),
+            "total_file_size" => desc ? query.OrderByDescending(p => p.ScenePerformers.Sum(sp => (long?)sp.Scene!.MaxFileSize) ?? 0L) : query.OrderBy(p => p.ScenePerformers.Sum(sp => (long?)sp.Scene!.MaxFileSize) ?? 0L),
             "career_length" => ApplyCareerLengthSort(query, desc),
             "height" => ApplyHeightSort(query, desc),
             "weight" => desc ? query.OrderByDescending(p => p.Weight) : query.OrderBy(p => p.Weight),
@@ -776,6 +784,8 @@ public class TagRepository : ITagRepository
                 };
             }
 
+            query = FilterHelpers.ApplyInt(query, filter.RemoteIdCountCriterion, t => t.RemoteIds.Count);
+
             // Aliases criterion
             if (filter.AliasesCriterion != null)
             {
@@ -793,15 +803,15 @@ public class TagRepository : ITagRepository
             // IgnoreAutoTag criterion
             if (filter.IgnoreAutoTagCriterion != null)
                 query = query.Where(t => t.IgnoreAutoTag == filter.IgnoreAutoTagCriterion.Value);
+
+            query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Tag, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
 
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
         {
-            var q = findFilter.Q;
-            query = query.Where(t =>
-                EF.Functions.ILike(t.Name, $"%{q}%") ||
-                (t.Description != null && EF.Functions.ILike(t.Description, $"%{q}%")) ||
-                t.Aliases.Any(a => EF.Functions.ILike(a.Alias, $"%{q}%")));
+            query = FilterHelpers.ApplyBooleanKeywordSearch(query, findFilter.Q,
+                t => t.Name,
+                t => t.Description);
         }
 
         if (filter != null)
@@ -820,7 +830,9 @@ public class TagRepository : ITagRepository
 
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Tag, sort, desc)
+            : sort switch
         {
             "name" => desc ? query.OrderByDescending(t => t.Name) : query.OrderBy(t => t.Name),
             "tag_group" => ApplyTagGroupSort(query, desc),
@@ -830,6 +842,8 @@ public class TagRepository : ITagRepository
             "image_count" => desc ? query.OrderByDescending(t => t.ImageCount) : query.OrderBy(t => t.ImageCount),
             "performer_count" => desc ? query.OrderByDescending(t => t.PerformerCount) : query.OrderBy(t => t.PerformerCount),
             "studio_count" => desc ? query.OrderByDescending(t => t.StudioCount) : query.OrderBy(t => t.StudioCount),
+            "latest_scene_date" => desc ? query.OrderByDescending(t => t.SceneTags.Max(st => st.Scene!.Date)) : query.OrderBy(t => t.SceneTags.Max(st => st.Scene!.Date)),
+            "total_file_size" => desc ? query.OrderByDescending(t => t.SceneTags.Sum(st => (long?)st.Scene!.MaxFileSize) ?? 0L) : query.OrderBy(t => t.SceneTags.Sum(st => (long?)st.Scene!.MaxFileSize) ?? 0L),
             "created_at" => desc ? query.OrderByDescending(t => t.CreatedAt) : query.OrderBy(t => t.CreatedAt),
             "updated_at" => desc ? query.OrderByDescending(t => t.UpdatedAt) : query.OrderBy(t => t.UpdatedAt),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, t => t.Id, desc),
@@ -1224,6 +1238,8 @@ public class StudioRepository : IStudioRepository
                 };
             }
 
+            query = FilterHelpers.ApplyInt(query, filter.RemoteIdCountCriterion, s => s.RemoteIds.Count);
+
             // Timestamp criteria
             query = FilterHelpers.ApplyTimestamp(query, filter.CreatedAtCriterion, s => s.CreatedAt);
             query = FilterHelpers.ApplyTimestamp(query, filter.UpdatedAtCriterion, s => s.UpdatedAt);
@@ -1252,8 +1268,11 @@ public class StudioRepository : IStudioRepository
                 var pIds = filter.ParentsCriterion.Value;
                 query = filter.ParentsCriterion.Modifier switch
                 {
+                    CriterionModifier.IsNull => query.Where(s => !s.ParentId.HasValue),
+                    CriterionModifier.NotNull => query.Where(s => s.ParentId.HasValue),
                     CriterionModifier.Includes => query.Where(s => s.ParentId.HasValue && pIds.Contains(s.ParentId.Value)),
                     CriterionModifier.Excludes => query.Where(s => !s.ParentId.HasValue || !pIds.Contains(s.ParentId.Value)),
+                    _ when pIds.Count == 0 => query,
                     _ => query.Where(s => s.ParentId.HasValue && pIds.Contains(s.ParentId.Value)),
                 };
             }
@@ -1268,9 +1287,11 @@ public class StudioRepository : IStudioRepository
                 query = query.Where(s => s.IgnoreAutoTag == filter.IgnoreAutoTagCriterion.Value);
             if (filter.OrganizedCriterion != null)
                 query = query.Where(s => s.Organized == filter.OrganizedCriterion.Value);
+
+            query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Studio, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
-            query = query.Where(s => EF.Functions.ILike(s.Name, $"%{findFilter.Q}%"));
+            query = FilterHelpers.ApplyBooleanKeywordSearch(query, findFilter.Q, s => s.Name);
 
         if (filter == null || !filter.ParentId.HasValue)
             query = query.Where(s => s.ParentId == null);
@@ -1285,12 +1306,16 @@ public class StudioRepository : IStudioRepository
         var totalCount = await query.AsNoTracking().CountAsync(ct);
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Studio, sort, desc)
+            : sort switch
         {
             "name" => desc ? query.OrderByDescending(s => s.Name) : query.OrderBy(s => s.Name),
             "scene_count" => desc ? query.OrderByDescending(s => s.SceneCount) : query.OrderBy(s => s.SceneCount),
             "gallery_count" => desc ? query.OrderByDescending(s => s.GalleryCount) : query.OrderBy(s => s.GalleryCount),
             "image_count" => desc ? query.OrderByDescending(s => s.ImageCount) : query.OrderBy(s => s.ImageCount),
+            "latest_scene_date" => desc ? query.OrderByDescending(s => s.Scenes.Max(scene => scene.Date)) : query.OrderBy(s => s.Scenes.Max(scene => scene.Date)),
+            "total_file_size" => desc ? query.OrderByDescending(s => s.Scenes.Sum(scene => (long?)scene.MaxFileSize) ?? 0L) : query.OrderBy(s => s.Scenes.Sum(scene => (long?)scene.MaxFileSize) ?? 0L),
             "rating" => ApplyStudioRatingSort(query, desc),
             "child_count" => desc ? query.OrderByDescending(s => s.ChildStudioCount) : query.OrderBy(s => s.ChildStudioCount),
             "tag_count" => desc ? query.OrderByDescending(s => s.TagCount) : query.OrderBy(s => s.TagCount),
@@ -1449,20 +1474,27 @@ public class GalleryRepository : IGalleryRepository
                 var ptIds = filter.PerformerTagsCriterion.Value;
                 query = filter.PerformerTagsCriterion.Modifier switch
                 {
+                    CriterionModifier.IsNull => query.Where(g => !g.GalleryPerformers.Any(gp => gp.Performer!.PerformerTags.Any())),
+                    CriterionModifier.NotNull => query.Where(g => g.GalleryPerformers.Any(gp => gp.Performer!.PerformerTags.Any())),
                     CriterionModifier.Includes => query.Where(g => g.GalleryPerformers.Any(gp => gp.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
                     CriterionModifier.Excludes => query.Where(g => !g.GalleryPerformers.Any(gp => gp.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
                     CriterionModifier.IncludesAll => query.Where(g => ptIds.All(tid => g.GalleryPerformers.Any(gp => gp.Performer!.PerformerTags.Any(pt => pt.TagId == tid)))),
+                    _ when ptIds.Count == 0 => query,
                     _ => query.Where(g => g.GalleryPerformers.Any(gp => gp.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
                 };
             }
+
+            query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Gallery, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
-            query = query.Where(g => (g.Title != null && EF.Functions.ILike(g.Title, $"%{findFilter.Q}%")));
+            query = FilterHelpers.ApplyBooleanKeywordSearch(query, findFilter.Q, g => g.Title);
 
         var totalCount = await query.CountAsync(ct);
         var sort = findFilter?.Sort ?? "updated_at";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Gallery, sort, desc)
+            : sort switch
         {
             "updated_at" => desc ? query.OrderByDescending(g => g.UpdatedAt) : query.OrderBy(g => g.UpdatedAt),
             "date" => desc ? query.OrderByDescending(g => g.Date ?? DateOnly.MinValue) : query.OrderBy(g => g.Date ?? DateOnly.MinValue),
@@ -1791,13 +1823,12 @@ public class ImageRepository : IImageRepository
         filterQuery = ApplyImageFilters(filterQuery, filter, expandedTags?.ValueGroups);
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
         {
-            var searchTerm = findFilter.Q.ToLowerInvariant();
-            filterQuery = filterQuery.Where(i =>
-                (i.Title != null && i.Title.ToLower().Contains(searchTerm)) ||
-                (i.Details != null && i.Details.ToLower().Contains(searchTerm)) ||
-                (i.Code != null && i.Code.ToLower().Contains(searchTerm)) ||
-                (i.Photographer != null && i.Photographer.ToLower().Contains(searchTerm)) ||
-                (i.FileSearchText != null && i.FileSearchText.ToLower().Contains(searchTerm)));
+            filterQuery = FilterHelpers.ApplyBooleanKeywordSearch(filterQuery, findFilter.Q,
+                i => i.Title,
+                i => i.Details,
+                i => i.Code,
+                i => i.Photographer,
+                i => i.FileSearchText);
         }
 
         var perPage = findFilter?.PerPage ?? 25;
@@ -1925,9 +1956,12 @@ public class ImageRepository : IImageRepository
             var ptIds = filter.PerformerTagsCriterion.Value;
             query = filter.PerformerTagsCriterion.Modifier switch
             {
+                CriterionModifier.IsNull => query.Where(i => !i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any())),
+                CriterionModifier.NotNull => query.Where(i => i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any())),
                 CriterionModifier.Includes => query.Where(i => i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
                 CriterionModifier.Excludes => query.Where(i => !i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
                 CriterionModifier.IncludesAll => query.Where(i => ptIds.All(tid => i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any(pt => pt.TagId == tid)))),
+                _ when ptIds.Count == 0 => query,
                 _ => query.Where(i => i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
             };
         }
@@ -1936,6 +1970,8 @@ public class ImageRepository : IImageRepository
 
         if (filter.OrientationCriterion != null)
             query = ApplyOrientationCriterion(query, filter.OrientationCriterion);
+
+        query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Image, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
 
         return query;
     }
@@ -1948,21 +1984,28 @@ public class ImageRepository : IImageRepository
         return ApplySortingSwitch(query, sort, desc);
     }
 
-    private IQueryable<Image> ApplySortingSwitch(IQueryable<Image> query, string sort, bool desc) => sort switch
+    private IQueryable<Image> ApplySortingSwitch(IQueryable<Image> query, string sort, bool desc)
     {
-        "title" => ApplyDisplayTitleSort(query, desc),
-        "date" => desc ? query.OrderByDescending(i => i.Date ?? DateOnly.MinValue) : query.OrderBy(i => i.Date ?? DateOnly.MinValue),
-        "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Image, desc),
-        "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Image, nameof(UserEntityAffinity.LikeCount), desc),
-        "random" => query.OrderBy(i => i.Id),
-        "file_mod_time" => ApplyFileModTimeSort(query, desc),
-        "file_size" => desc ? query.OrderByDescending(i => i.MaxFileSize) : query.OrderBy(i => i.MaxFileSize),
-        "path" => ApplyPathSort(query, desc),
-        "tag_count" => desc ? query.OrderByDescending(i => i.TagCount) : query.OrderBy(i => i.TagCount),
-        "performer_count" => desc ? query.OrderByDescending(i => i.PerformerCount) : query.OrderBy(i => i.PerformerCount),
-        "created_at" => desc ? query.OrderByDescending(i => i.CreatedAt) : query.OrderBy(i => i.CreatedAt),
-        _ => desc ? query.OrderByDescending(i => i.UpdatedAt) : query.OrderBy(i => i.UpdatedAt),
-    };
+        if (FilterHelpers.TryParseCustomFieldSort(sort, out _, out _))
+            return query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Image, sort, desc);
+
+        return sort switch
+        {
+            "title" => ApplyDisplayTitleSort(query, desc),
+            "date" => desc ? query.OrderByDescending(i => i.Date ?? DateOnly.MinValue) : query.OrderBy(i => i.Date ?? DateOnly.MinValue),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Image, desc),
+            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Image, nameof(UserEntityAffinity.LikeCount), desc),
+            "random" => query.OrderBy(i => i.Id),
+            "file_mod_time" => ApplyFileModTimeSort(query, desc),
+            "file_size" => desc ? query.OrderByDescending(i => i.MaxFileSize) : query.OrderBy(i => i.MaxFileSize),
+            "resolution" => desc ? query.OrderByDescending(i => i.MaxResolution) : query.OrderBy(i => i.MaxResolution),
+            "path" => ApplyPathSort(query, desc),
+            "tag_count" => desc ? query.OrderByDescending(i => i.TagCount) : query.OrderBy(i => i.TagCount),
+            "performer_count" => desc ? query.OrderByDescending(i => i.PerformerCount) : query.OrderBy(i => i.PerformerCount),
+            "created_at" => desc ? query.OrderByDescending(i => i.CreatedAt) : query.OrderBy(i => i.CreatedAt),
+            _ => desc ? query.OrderByDescending(i => i.UpdatedAt) : query.OrderBy(i => i.UpdatedAt),
+        };
+    }
 
     private static IQueryable<Image> ApplyDisplayTitleSort(IQueryable<Image> query, bool desc)
     {
@@ -2307,20 +2350,27 @@ public class GroupRepository : IGroupRepository
                 var pIds = filter.PerformersCriterion.Value;
                 query = filter.PerformersCriterion.Modifier switch
                 {
+                    CriterionModifier.IsNull => query.Where(g => !g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any())),
+                    CriterionModifier.NotNull => query.Where(g => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any())),
                     CriterionModifier.Includes => query.Where(g => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
                     CriterionModifier.Excludes => query.Where(g => !g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
                     CriterionModifier.IncludesAll => query.Where(g => pIds.All(pid => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => sp.PerformerId == pid)))),
+                    _ when pIds.Count == 0 => query,
                     _ => query.Where(g => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
                 };
             }
+
+            query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Group, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
         if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
-            query = query.Where(g => EF.Functions.ILike(g.Name, $"%{findFilter.Q}%"));
+            query = FilterHelpers.ApplyBooleanKeywordSearch(query, findFilter.Q, g => g.Name);
 
         var totalCount = await query.CountAsync(ct);
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Group, sort, desc)
+            : sort switch
         {
             "name" => desc ? query.OrderByDescending(g => g.Name) : query.OrderBy(g => g.Name),
             "date" => desc ? query.OrderByDescending(g => g.Date ?? DateOnly.MinValue) : query.OrderBy(g => g.Date ?? DateOnly.MinValue),

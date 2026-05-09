@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.StudiosRead)]
-public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
+public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService customFields) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -36,7 +36,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         };
 
         var (items, totalCount) = await studioRepo.FindAsync(filter, findFilter, ct);
-        var dtos = MapListToDtos(items);
+        var dtos = await MapListToDtosAsync(items, ct);
         return Ok(new PaginatedResponse<StudioDto>(dtos, totalCount, page, perPage));
     }
 
@@ -46,7 +46,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new StudioFilter();
         var (items, totalCount) = await studioRepo.FindAsync(filter, findFilter, ct);
-        var dtos = MapListToDtos(items);
+        var dtos = await MapListToDtosAsync(items, ct);
         return Ok(new PaginatedResponse<StudioDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -56,7 +56,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     {
         var studio = await studioRepo.GetByIdWithRelationsAsync(id, ct);
         if (studio == null) return NotFound();
-        return Ok(MapToDto(studio));
+        return Ok(MapToDto(studio, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, id, ct)));
     }
 
     [HttpPost]
@@ -67,13 +67,15 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         {
             Name = dto.Name, ParentId = dto.ParentId,
             Favorite = dto.Favorite, Details = dto.Details,
-            IgnoreAutoTag = dto.IgnoreAutoTag, Organized = dto.Organized
+            IgnoreAutoTag = dto.IgnoreAutoTag, Organized = dto.Organized,
         };
         if (dto.Urls?.Count > 0) studio.Urls = dto.Urls.Select(u => new StudioUrl { Url = u }).ToList();
         if (dto.Aliases?.Count > 0) studio.Aliases = dto.Aliases.Select(a => new StudioAlias { Alias = a }).ToList();
         if (dto.TagIds?.Count > 0) studio.StudioTags = dto.TagIds.Select(id => new StudioTag { TagId = id }).ToList();
 
         studio = await studioRepo.AddAsync(studio, ct);
+        if (dto.CustomFields != null)
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Studio, studio.Id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Studio, studio.Id, dto.Rating, cancellationToken: ct);
         if (dto.Urls?.Count > 0)
@@ -81,7 +83,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (dto.Aliases?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Studio, studio.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await studioRepo.GetByIdWithRelationsAsync(studio.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = studio.Id }, MapToDto(result!));
+        return CreatedAtAction(nameof(GetById), new { id = studio.Id }, MapToDto(result!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, studio.Id, ct)));
     }
 
     [HttpPut("{id:int}")]
@@ -114,9 +116,9 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             studio.StudioTags.Clear();
             studio.StudioTags = dto.TagIds.Select(tid => new StudioTag { TagId = tid, StudioId = id }).ToList();
         }
-        if (dto.CustomFields != null) studio.CustomFields = dto.CustomFields;
-
         await studioRepo.UpdateAsync(studio, ct);
+        if (dto.CustomFields != null)
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Studio, id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Studio, id, dto.Rating, cancellationToken: ct);
         if (dto.Urls != null)
@@ -124,7 +126,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (dto.Aliases != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Studio, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = await studioRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(MapToDto(updated!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, id, ct)));
     }
 
     [HttpDelete("{id:int}")]
@@ -134,6 +136,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     {
         var s = await studioRepo.GetByIdAsync(id, ct);
         if (s == null) return NotFound();
+        await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Studio, id, ct);
         await studioRepo.DeleteAsync(id, ct);
         return NoContent();
     }
@@ -153,6 +156,9 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         foreach (var s in studios)
         {
             if (dto.Favorite.HasValue) s.Favorite = dto.Favorite.Value;
+            if (dto.Details != null) s.Details = dto.Details;
+            if (dto.IgnoreAutoTag.HasValue) s.IgnoreAutoTag = dto.IgnoreAutoTag.Value;
+            if (dto.Organized.HasValue) s.Organized = dto.Organized.Value;
 
             if (dto.TagIds != null && dto.TagMode == BulkUpdateMode.Set)
             {
@@ -182,7 +188,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
     // ===== Merge =====
 
-    private StudioDto MapToDto(Studio s, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null, int? performerCount = null, int? childStudioCount = null) => new(
+    private StudioDto MapToDto(Studio s, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null, int? performerCount = null, int? childStudioCount = null, Dictionary<string, object>? customFieldValues = null) => new(
         s.Id, s.Name, s.ParentId, s.Parent?.Name, s.Favorite, s.Details, s.IgnoreAutoTag, s.Organized,
         s.Urls.Select(u => u.Url).ToList(),
         s.Aliases.Select(a => a.Alias).ToList(),
@@ -195,14 +201,19 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         performerCount ?? s.PerformerCount,
         childStudioCount ?? s.ChildStudioCount,
         s.ImageBlobId != null ? EntityImageUrls.Studio(ControllerContext.HttpContext, s.Id, s.UpdatedAt) : null,
-        s.CustomFields,
+        customFieldValues,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
 
-    private List<StudioDto> MapListToDtos(IReadOnlyList<Studio> items)
+    private async Task<List<StudioDto>> MapListToDtosAsync(IReadOnlyList<Studio> items, CancellationToken ct)
     {
-        return items.Count == 0 ? [] : items.Select(studio => MapToDto(studio)).ToList();
+        if (items.Count == 0) return [];
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, items.Select(studio => studio.Id), ct);
+        return items.Select(studio => MapToDto(studio, customFieldValues: GetCustomFields(customFieldValues, studio.Id))).ToList();
     }
+
+    private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
+        => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;
 
     // ===== Merge =====
 
@@ -247,12 +258,13 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             if (!target.Aliases.Any(a => a.Alias == source.Name))
                 target.Aliases.Add(new StudioAlias { Alias = source.Name, StudioId = target.Id });
             // Delete source
+            await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Studio, source.Id, ct);
             db.Studios.Remove(source);
         }
 
         await db.SaveChangesAsync(ct);
         var result = await studioRepo.GetByIdWithRelationsAsync(target.Id, ct);
-        return Ok(MapToDto(result!));
+        return Ok(MapToDto(result!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, target.Id, ct)));
     }
 
     // ===== Metadata Server =====
@@ -312,7 +324,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
         await db.SaveChangesAsync(ct);
         var updated = await studioRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(MapToDto(updated!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, id, ct)));
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]

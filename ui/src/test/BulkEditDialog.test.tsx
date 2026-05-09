@@ -116,4 +116,25 @@ describe("BulkEditDialog", () => {
 
     expect(onApply).toHaveBeenCalledWith({ studioId: 11 });
   });
+
+  it("posts clearFields when a nullable studio field is enabled without a selection", async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn();
+
+    renderDialog(
+      <BulkEditDialog
+        open
+        onClose={vi.fn()}
+        title="Edit Scenes"
+        selectedCount={2}
+        fields={SCENE_BULK_FIELDS}
+        onApply={onApply}
+      />,
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: "Studio" }));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(onApply).toHaveBeenCalledWith({ studioId: null, clearFields: ["studioId"] });
+  });
 });

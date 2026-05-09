@@ -28,7 +28,23 @@ function normalizeRatingStarPrecision(value: string | undefined) {
   }
 }
 
-function normalizeConfig(config: CoveConfig): CoveConfig {
+function normalizeKeybindingOverrides(overrides: Record<string, string> | null | undefined) {
+  if (!overrides) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(overrides)
+      .map(([key, value]) => [key.trim(), value.trim()] as const)
+      .filter(([key, value]) => key.length > 0 && value.length > 0),
+  );
+}
+
+function normalizeWallPreviewType(value: string | undefined) {
+  return value === "image" ? "image" : "video";
+}
+
+function normalizeConfig(config: CoveConfig, userKeybindingOverrides?: Record<string, string> | null): CoveConfig {
   const interfaceConfig = config.interface;
   const uiConfig = config.ui ?? ({} as CoveConfig["ui"]);
   const ratingOptions = uiConfig.ratingSystemOptions ?? { type: "stars", starPrecision: "full" };
@@ -47,6 +63,12 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
     },
     ui: {
       ...uiConfig,
+      troubleshootingModeEnabled: uiConfig.troubleshootingModeEnabled ?? false,
+      autoplayOnListClick: uiConfig.autoplayOnListClick ?? false,
+      maxLoopDuration: uiConfig.maxLoopDuration ?? 0,
+      alwaysResumeOnPlayback: uiConfig.alwaysResumeOnPlayback ?? true,
+      wallPreviewType: normalizeWallPreviewType(uiConfig.wallPreviewType),
+      keybindingOverrides: normalizeKeybindingOverrides(userKeybindingOverrides),
       ratingSystemOptions: {
         type: normalizeRatingSystemType(ratingOptions.type),
         starPrecision: normalizeRatingStarPrecision(ratingOptions.starPrecision),
@@ -106,15 +128,60 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       return undefined;
     }
 
-    return normalizeConfig(configQuery.data);
-  }, [configQuery.data]);
+    return normalizeConfig(configQuery.data, authUser?.uiPreferences?.keybindingOverrides);
+  }, [authUser?.uiPreferences?.keybindingOverrides, configQuery.data]);
   useEffect(() => {
     document.title = config?.ui.title?.trim() || "Cove";
   }, [config?.ui.title]);
 
   useEffect(() => {
+    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+
+    link.href = config?.ui.faviconPath?.trim() || "/favicon.ico";
+  }, [config?.ui.faviconPath]);
+
+  useEffect(() => {
     document.documentElement.lang = config?.interface.language || "en-US";
   }, [config?.interface.language]);
+
+  useEffect(() => {
+    const existing = document.getElementById("cove-custom-css");
+    if (existing) existing.remove();
+
+    const customCss = config?.ui.customCss?.trim();
+    if (config?.ui.troubleshootingModeEnabled || !customCss) {
+      return;
+    }
+
+    const style = document.createElement("style");
+    style.id = "cove-custom-css";
+    style.textContent = customCss;
+    document.head.appendChild(style);
+
+    return () => { style.remove(); };
+  }, [config?.ui.customCss, config?.ui.troubleshootingModeEnabled]);
+
+  useEffect(() => {
+    const existing = document.getElementById("cove-custom-js");
+    if (existing) existing.remove();
+
+    const customJs = config?.ui.customJs?.trim();
+    if (config?.ui.troubleshootingModeEnabled || !customJs) {
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "cove-custom-js";
+    script.textContent = customJs;
+    document.body.appendChild(script);
+
+    return () => { script.remove(); };
+  }, [config?.ui.customJs, config?.ui.troubleshootingModeEnabled]);
 
   return (
     <AppConfigContext.Provider
@@ -125,6 +192,11 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
         statusLoading: statusQuery.isLoading,
       }}
     >
+      {config?.ui.troubleshootingModeEnabled ? (
+        <div className="sticky top-0 z-[60] border-b border-yellow-500/40 bg-yellow-500/15 px-4 py-2 text-center text-xs font-medium text-yellow-100">
+          Troubleshooting mode is enabled. Extensions and custom UI assets should be treated as disabled while diagnosing issues.
+        </div>
+      ) : null}
       {children}
     </AppConfigContext.Provider>
   );
@@ -137,4 +209,8 @@ export function useAppConfig() {
   }
 
   return context;
+}
+
+export function useOptionalAppConfig() {
+  return useContext(AppConfigContext);
 }

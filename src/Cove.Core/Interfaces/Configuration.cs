@@ -147,6 +147,8 @@ public class InterfaceConfig
 public class UiConfig
 {
     public string? Title { get; set; }
+    public string? FaviconPath { get; set; }
+    public bool TroubleshootingModeEnabled { get; set; }
     public bool AbbreviateCounters { get; set; }
     public RatingSystemOptions RatingSystemOptions { get; set; } = new();
     public bool ShowStudioAsText { get; set; }
@@ -158,6 +160,9 @@ public class UiConfig
     // Scene Player
     public bool AutostartVideo { get; set; } = true;
     public bool AutostartVideoOnPlaySelected { get; set; } = true;
+    public bool AutoplayOnListClick { get; set; }
+    public int MaxLoopDuration { get; set; }
+    public bool AlwaysResumeOnPlayback { get; set; } = true;
     public bool ContinuePlaylistDefault { get; set; }
     public bool ShowAbLoopControls { get; set; } = true;
     // Preview
@@ -169,12 +174,14 @@ public class UiConfig
     // Wall
     public bool WallShowTitle { get; set; } = true;
     public int WallPlayback { get; set; } = 1; // 0=Audio, 1=Silent
+    public string WallPreviewType { get; set; } = "video";
     // Lightbox
     public bool DeleteFileDefault { get; set; }
     public int SlideshowDelay { get; set; } = 5000;
     // Scene list
     public bool NoBrowser { get; set; }
     public bool NotificationsEnabled { get; set; } = true;
+    public Dictionary<string, string> KeybindingOverrides { get; set; } = [];
 }
 
 public enum RatingSystemType

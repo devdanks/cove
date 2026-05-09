@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { images, tags as tagsApi, performers as performersApi, galleries as galleriesApi } from "../api/client";
 import type { Image, ImageCreate } from "../api/types";
-import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
+import { CreateModalActions, EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
@@ -34,7 +34,7 @@ interface ImageFormState {
   selectedTagIds: number[];
   selectedPerformerIds: number[];
   selectedGalleryIds: number[];
-  customFields: Record<string, string>;
+  customFields: Record<string, unknown>;
 }
 
 interface ImageMetadataModalProps {
@@ -46,6 +46,9 @@ interface ImageMetadataModalProps {
   isPending: boolean;
   error: Error | null;
   image?: Image;
+  resetSignal?: number;
+  createAnother?: boolean;
+  onCreateAnotherChange?: (value: boolean) => void;
 }
 
 const EMPTY_FORM_STATE: ImageFormState = {
@@ -86,7 +89,7 @@ function toFormState(image?: Image): ImageFormState {
     selectedTagIds: image.tags.map((tag) => tag.id),
     selectedPerformerIds: image.performers.map((performer) => performer.id),
     selectedGalleryIds: image.galleryIds ?? [],
-    customFields: Object.fromEntries(Object.entries(image.customFields ?? {}).map(([k, v]) => [k, String(v ?? "")])),
+    customFields: { ...(image.customFields ?? {}) },
   };
 }
 
@@ -101,7 +104,7 @@ function cloneFormState(state: ImageFormState): ImageFormState {
   };
 }
 
-function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPending, error, image }: ImageMetadataModalProps) {
+function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPending, error, image, resetSignal, createAnother, onCreateAnotherChange }: ImageMetadataModalProps) {
   const [form, setForm] = useState<ImageFormState>(() => cloneFormState(initialState));
   const [tagSearch, setTagSearch] = useState("");
   const [perfSearch, setPerfSearch] = useState("");
@@ -131,7 +134,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
     setTagSearch("");
     setPerfSearch("");
     setGallerySearch("");
-  }, [initialState, open]);
+  }, [initialState, open, resetSignal]);
 
   const handleSave = () => {
     const urlList = form.urls.map((url) => url.trim()).filter(Boolean);
@@ -148,7 +151,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       tagIds: form.selectedTagIds,
       performerIds: form.selectedPerformerIds,
       galleryIds: form.selectedGalleryIds,
-      customFields: Object.keys(form.customFields).length > 0 ? form.customFields : undefined,
+      customFields: image ? form.customFields : Object.keys(form.customFields).length > 0 ? form.customFields : undefined,
     });
   };
 
@@ -253,7 +256,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
             const g = allGalleries?.items.find((gal) => gal.id === gid);
             return (
               <span key={gid} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-900 text-emerald-300">
-                {g?.title || `Gallery #${gid}`}
+                {g?.title || g?.files?.[0]?.path?.split(/[\\/]/).pop() || "Untitled gallery"}
                 <button onClick={() => setForm({ ...form, selectedGalleryIds: form.selectedGalleryIds.filter((id) => id !== gid) })} className="hover:text-white">×</button>
               </span>
             );
@@ -291,7 +294,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       </label>
 
       <Field label="Custom Fields">
-        <CustomFieldsEditor value={form.customFields} onChange={(v) => setForm({ ...form, customFields: v })} />
+        <CustomFieldsEditor value={form.customFields} onChange={(v) => setForm({ ...form, customFields: v })} entityType="image" />
       </Field>
 
       {error && (
@@ -300,10 +303,20 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
         </div>
       )}
 
-      <div className="flex justify-end gap-3">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-secondary hover:text-white">Cancel</button>
-        <SaveButton loading={isPending} onClick={handleSave} />
-      </div>
+      {onCreateAnotherChange ? (
+        <CreateModalActions
+          loading={isPending}
+          onCancel={onClose}
+          onSave={handleSave}
+          createAnother={createAnother ?? false}
+          onCreateAnotherChange={onCreateAnotherChange}
+        />
+      ) : (
+        <div className="flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-secondary hover:text-white">Cancel</button>
+          <SaveButton loading={isPending} onClick={handleSave} />
+        </div>
+      )}
     </EditModal>
   );
 }
@@ -336,11 +349,17 @@ export function ImageEditModal({ image, open, onClose }: ImageEditProps) {
 
 export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps) {
   const queryClient = useQueryClient();
+  const [createAnother, setCreateAnother] = useState(false);
+  const [resetSignal, setResetSignal] = useState(0);
 
   const mutation = useMutation({
     mutationFn: (data: ImageCreate) => images.create(data),
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["images"] });
+      if (createAnother) {
+        setResetSignal((value) => value + 1);
+        return;
+      }
       onClose();
       if (created?.id) onCreated(created.id);
     },
@@ -355,6 +374,9 @@ export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps)
       onSubmit={(data) => mutation.mutate(data)}
       isPending={mutation.isPending}
       error={mutation.error as Error | null}
+      resetSignal={resetSignal}
+      createAnother={createAnother}
+      onCreateAnotherChange={setCreateAnother}
     />
   );
 }

@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, X } from "lucide-react";
-import type { FindFilter } from "../api/types";
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, Plus, X } from "lucide-react";
+import type { CriterionModifier, CustomFieldCriterion, CustomFieldDefinition, CustomFieldEntityType, CustomFieldType, FindFilter } from "../api/types";
 import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, tagGroups as tagGroupsApi } from "../api/client";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { SavedFilterMenu } from "./SavedFilterMenu";
 import { FilterDialog, FilterButton, type CriterionDefinition, type FilterDialogCustomSection } from "./FilterDialog";
+import { EntityReferenceSelector, getEntityReferenceLabel, isEntityReferenceType, parseEntityReferenceId } from "./EntityReferenceSelector";
+import { useResolvedKeybindingOverrides } from "../hooks/useResolvedKeybindingOverrides";
 import { useKeySequence } from "../hooks/useKeySequence";
+import { resolveKeybinding } from "../keyboard/keybindings";
+import { useAppConfig } from "../state/AppConfigContext";
+import { useCustomFieldDefinitions } from "../hooks/useCustomFieldDefinitions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { trackInteraction } from "../utils/interactionTracking";
 
@@ -27,6 +32,7 @@ interface ListPageProps {
   selectedIds?: Set<string | number>;
   onSelectAll?: () => void;
   onSelectNone?: () => void;
+  onInvertSelection?: () => void;
   selectionActions?: ReactNode;
   metadataByline?: ReactNode;
   onNew?: () => void;
@@ -52,8 +58,342 @@ const DEFAULT_ZOOM_LEVEL = 1;
 const MIN_ZOOM_LEVEL = 0;
 const MAX_ZOOM_LEVEL = 5;
 
+const CUSTOM_FIELD_ENTITY_BY_FILTER_MODE: Record<string, CustomFieldEntityType> = {
+  scenes: "scene",
+  performers: "performer",
+  tags: "tag",
+  studios: "studio",
+  galleries: "gallery",
+  images: "image",
+  groups: "group",
+};
+
+const CUSTOM_FIELD_MODIFIER_LABELS: Record<CriterionModifier, string> = {
+  EQUALS: "Equals",
+  NOT_EQUALS: "Does Not Equal",
+  GREATER_THAN: ">",
+  LESS_THAN: "<",
+  INCLUDES: "Includes",
+  EXCLUDES: "Excludes",
+  INCLUDES_ALL: "Includes All",
+  EXCLUDES_ALL: "Excludes All",
+  IS_NULL: "Is Null",
+  NOT_NULL: "Not Null",
+  BETWEEN: "Between",
+  NOT_BETWEEN: "Not Between",
+  MATCHES_REGEX: "Regex",
+  NOT_MATCHES_REGEX: "Not Regex",
+};
+
+const TEXT_CUSTOM_FIELD_MODIFIERS: CriterionModifier[] = ["EQUALS", "NOT_EQUALS", "INCLUDES", "EXCLUDES", "IS_NULL", "NOT_NULL"];
+const ORDERED_CUSTOM_FIELD_MODIFIERS: CriterionModifier[] = ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN", "IS_NULL", "NOT_NULL"];
+const BOOLEAN_CUSTOM_FIELD_MODIFIERS: CriterionModifier[] = ["EQUALS", "NOT_EQUALS", "IS_NULL", "NOT_NULL"];
+const REFERENCE_CUSTOM_FIELD_MODIFIERS: CriterionModifier[] = ["INCLUDES", "EXCLUDES", "IS_NULL", "NOT_NULL"];
+
+function getDefaultCustomFieldModifier(type: CustomFieldType): CriterionModifier {
+  return isEntityReferenceType(type) ? "INCLUDES" : "EQUALS";
+}
+
 function clampZoomLevel(value: number) {
   return Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, value));
+}
+
+function normalizeCustomFieldCriteria(value: unknown): CustomFieldCriterion[] {
+  return Array.isArray(value) ? value.filter((item): item is CustomFieldCriterion => Boolean(item && typeof item === "object")) : [];
+}
+
+function isCustomFieldCriterionActive(value: CustomFieldCriterion | undefined) {
+  if (!value?.key) return false;
+  const modifier = value.modifier ?? "EQUALS";
+  if (modifier === "IS_NULL" || modifier === "NOT_NULL") return true;
+  if (modifier === "BETWEEN" || modifier === "NOT_BETWEEN") {
+    return String(value.value ?? "").trim() !== "" && String(value.value2 ?? "").trim() !== "";
+  }
+  return String(value.value ?? "").trim() !== "";
+}
+
+function getCustomFieldModifiers(type: CustomFieldType) {
+  switch (type) {
+    case "number":
+    case "date":
+    case "timestamp":
+    case "duration":
+    case "percent":
+      return ORDERED_CUSTOM_FIELD_MODIFIERS;
+    case "boolean":
+      return BOOLEAN_CUSTOM_FIELD_MODIFIERS;
+    case "tag":
+    case "performer":
+    case "studio":
+    case "scene":
+    case "gallery":
+    case "image":
+    case "group":
+      return REFERENCE_CUSTOM_FIELD_MODIFIERS;
+    default:
+      return TEXT_CUSTOM_FIELD_MODIFIERS;
+  }
+}
+
+function formatCustomFieldCriterionValue(
+  definition: CustomFieldDefinition | undefined,
+  criterion: CustomFieldCriterion,
+  valueKey: "value" | "value2",
+) {
+  const rawValue = criterion[valueKey];
+  if (String(rawValue ?? "").trim() === "") {
+    return "";
+  }
+
+  if (definition && isEntityReferenceType(definition.type)) {
+    const displayValue = valueKey === "value2" ? criterion.displayValue2 : criterion.displayValue;
+    return displayValue || `Selected ${getEntityReferenceLabel(definition.type).singular}`;
+  }
+
+  return String(rawValue);
+}
+
+function createCustomFieldFilterSection(definitions: CustomFieldDefinition[]): FilterDialogCustomSection {
+  const normalizeCriterion = (criterion: CustomFieldCriterion): CustomFieldCriterion => {
+    const definition = definitions.find((candidate) => candidate.key === criterion.key);
+    if (!definition) return criterion;
+    const availableModifiers = getCustomFieldModifiers(definition.type);
+    const defaultModifier = getDefaultCustomFieldModifier(definition.type);
+    const modifier = availableModifiers.includes(criterion.modifier ?? defaultModifier) ? (criterion.modifier ?? defaultModifier) : defaultModifier;
+    return { ...criterion, type: definition.type, modifier };
+  };
+
+  return {
+    id: "custom-fields",
+    label: "Custom Fields",
+    filterKey: "customFieldCriteria",
+    defaultValue: [] satisfies CustomFieldCriterion[],
+    isActive: (value) => normalizeCustomFieldCriteria(value).map(normalizeCriterion).some(isCustomFieldCriterionActive),
+    shouldKeepDraft: (value) => normalizeCustomFieldCriteria(value).some((criterion) => Boolean(criterion.key)),
+    sanitize: (value) => normalizeCustomFieldCriteria(value).map(normalizeCriterion).filter(isCustomFieldCriterionActive),
+    summarize: (value) => {
+      const activeCriteria = normalizeCustomFieldCriteria(value).map(normalizeCriterion).filter(isCustomFieldCriterionActive);
+      if (activeCriteria.length === 0) return "";
+      return activeCriteria.map((criterion) => {
+        const definition = definitions.find((candidate) => candidate.key === criterion.key);
+        const label = definition?.label || criterion.key;
+        const modifier = CUSTOM_FIELD_MODIFIER_LABELS[criterion.modifier ?? "EQUALS"];
+        if (criterion.modifier === "IS_NULL" || criterion.modifier === "NOT_NULL") {
+          return `${label} ${modifier}`;
+        }
+
+        if (criterion.modifier === "BETWEEN" || criterion.modifier === "NOT_BETWEEN") {
+          return `${label} ${modifier} ${formatCustomFieldCriterionValue(definition, criterion, "value")} and ${formatCustomFieldCriterionValue(definition, criterion, "value2")}`;
+        }
+
+        return `${label} ${modifier} ${formatCustomFieldCriterionValue(definition, criterion, "value")}`;
+      }).join(", ");
+    },
+    renderEditor: (value, onChange) => (
+      <CustomFieldCriteriaEditor
+        definitions={definitions}
+        value={normalizeCustomFieldCriteria(value)}
+        onChange={onChange}
+      />
+    ),
+  };
+}
+
+function CustomFieldCriteriaEditor({
+  definitions,
+  value,
+  onChange,
+}: {
+  definitions: CustomFieldDefinition[];
+  value: CustomFieldCriterion[];
+  onChange: (value: CustomFieldCriterion[]) => void;
+}) {
+  const firstDefinition = definitions[0];
+  const rows = value.length > 0 ? value : [];
+  const setRow = (index: number, nextCriterion: CustomFieldCriterion) => {
+    onChange(rows.map((criterion, candidateIndex) => candidateIndex === index ? nextCriterion : criterion));
+  };
+  const removeRow = (index: number) => onChange(rows.filter((_, candidateIndex) => candidateIndex !== index));
+  const addRow = () => {
+    if (!firstDefinition) return;
+    onChange([...rows, { key: firstDefinition.key, type: firstDefinition.type, value: "", modifier: getDefaultCustomFieldModifier(firstDefinition.type) }]);
+  };
+
+  return (
+    <div className="space-y-2">
+      {rows.map((criterion, index) => {
+        const definition = definitions.find((candidate) => candidate.key === criterion.key) ?? firstDefinition;
+        if (!definition) return null;
+        const availableModifiers = getCustomFieldModifiers(definition.type);
+        const defaultModifier = getDefaultCustomFieldModifier(definition.type);
+        const modifier = availableModifiers.includes(criterion.modifier ?? defaultModifier) ? (criterion.modifier ?? defaultModifier) : defaultModifier;
+        const valueDisabled = modifier === "IS_NULL" || modifier === "NOT_NULL";
+
+        return (
+          <div key={`${criterion.key}-${index}`} className="min-w-0 rounded border border-border bg-background p-3">
+            <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(10rem,1fr)_minmax(9rem,0.75fr)] xl:grid-cols-[minmax(12rem,1.1fr)_minmax(9rem,0.6fr)_minmax(18rem,2fr)_auto] xl:items-start">
+              <label className="block min-w-0 text-xs text-muted">
+                Field
+                <select
+                  value={criterion.key}
+                  onChange={(event) => {
+                    const nextDefinition = definitions.find((candidate) => candidate.key === event.target.value) ?? definition;
+                    setRow(index, { key: nextDefinition.key, type: nextDefinition.type, value: "", modifier: getDefaultCustomFieldModifier(nextDefinition.type) });
+                  }}
+                  className="mt-1 w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                >
+                  {definitions.map((option) => (
+                    <option key={option.key} value={option.key}>{option.label || option.key}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block min-w-0 text-xs text-muted">
+                Match
+                <select
+                  value={modifier}
+                  onChange={(event) => setRow(index, { ...criterion, modifier: event.target.value as CriterionModifier })}
+                  className="mt-1 w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+                >
+                  {availableModifiers.map((option) => (
+                    <option key={option} value={option}>{CUSTOM_FIELD_MODIFIER_LABELS[option]}</option>
+                  ))}
+                </select>
+              </label>
+              <div className={`min-w-0 ${modifier === "BETWEEN" || modifier === "NOT_BETWEEN" ? "grid gap-2 sm:grid-cols-2" : ""}`}>
+                <CustomFieldValueInput
+                  definition={definition}
+                  disabled={valueDisabled}
+                  value={criterion.value ?? ""}
+                  onChange={(nextValue, displayValue) => setRow(index, { ...criterion, modifier, type: definition.type, value: nextValue, displayValue })}
+                />
+                {modifier === "BETWEEN" || modifier === "NOT_BETWEEN" ? (
+                  <CustomFieldValueInput
+                    definition={definition}
+                    disabled={valueDisabled}
+                    label="And"
+                    value={criterion.value2 ?? ""}
+                    onChange={(nextValue, displayValue) => setRow(index, { ...criterion, modifier, type: definition.type, value2: nextValue, displayValue2: displayValue })}
+                  />
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => removeRow(index)}
+                aria-label="Remove custom field filter"
+                className="justify-self-start rounded border border-border p-2 text-muted hover:border-red-400 hover:text-red-300 xl:mt-6"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        onClick={addRow}
+        className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-secondary hover:border-accent hover:text-foreground"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Add custom field filter
+      </button>
+    </div>
+  );
+}
+
+function CustomFieldValueInput({
+  definition,
+  disabled,
+  label = "Value",
+  value,
+  onChange,
+}: {
+  definition: CustomFieldDefinition;
+  disabled: boolean;
+  label?: string;
+  value: string;
+  onChange: (value: string, displayValue?: string) => void;
+}) {
+  if (isEntityReferenceType(definition.type)) {
+    const selectedId = parseEntityReferenceId(value);
+    const labels = getEntityReferenceLabel(definition.type);
+    return (
+      <label className="block min-w-0 text-xs text-muted">
+        {label}
+        <div className="mt-1 min-w-0">
+          <EntityReferenceSelector
+            entityType={definition.type}
+            value={selectedId}
+            disabled={disabled}
+            placeholder={`Search ${labels.plural}...`}
+            inputClassName="w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-muted disabled:opacity-50 focus:border-accent focus:outline-none"
+            onChange={(nextId, option) => onChange(nextId == null ? "" : String(nextId), option?.label)}
+          />
+        </div>
+      </label>
+    );
+  }
+
+  if (definition.type === "boolean") {
+    return (
+      <label className="block text-xs text-muted">
+        {label}
+        <select
+          disabled={disabled}
+          value={value || "true"}
+          onChange={(event) => onChange(event.target.value)}
+          className="mt-1 w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground disabled:opacity-50 focus:border-accent focus:outline-none"
+        >
+          <option value="true">True</option>
+          <option value="false">False</option>
+        </select>
+      </label>
+    );
+  }
+
+  if (definition.type === "enum" && definition.options.length > 0) {
+    return (
+      <label className="block text-xs text-muted">
+        {label}
+        <select
+          disabled={disabled}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="mt-1 w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground disabled:opacity-50 focus:border-accent focus:outline-none"
+        >
+          <option value="">Select</option>
+          {definition.options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  const inputType: Partial<Record<CustomFieldType, string>> = {
+    text: "text",
+    longText: "text",
+    number: "number",
+    boolean: "text",
+    date: "date",
+    timestamp: "datetime-local",
+    url: "url",
+    enum: "text",
+    duration: "number",
+    percent: "number",
+  };
+
+  return (
+    <label className="block text-xs text-muted">
+      {label}
+      <input
+        type={inputType[definition.type] ?? "text"}
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground disabled:opacity-50 focus:border-accent focus:outline-none"
+      />
+    </label>
+  );
 }
 
 const CHIP_MODIFIER_LABELS: Record<string, string> = {
@@ -92,7 +432,7 @@ function formatChipScalar(value: unknown): string {
 
 function formatChipEntityId(value: unknown, nameMap?: Map<number, string>): string {
   if (typeof value === "number") {
-    return nameMap?.get(value) ?? `#${value}`;
+    return nameMap?.get(value) ?? "Unavailable item";
   }
 
   if (value && typeof value === "object") {
@@ -101,9 +441,9 @@ function formatChipEntityId(value: unknown, nameMap?: Map<number, string>): stri
       return (candidate.label ?? candidate.name ?? candidate.title)!;
     }
     if (candidate.id != null && typeof candidate.id === "number") {
-      return nameMap?.get(candidate.id) ?? `#${candidate.id}`;
+      return nameMap?.get(candidate.id) ?? "Unavailable item";
     }
-    return candidate.id != null ? `#${candidate.id}` : "";
+    return candidate.id != null ? "Unavailable item" : "";
   }
 
   return String(value ?? "");
@@ -156,7 +496,7 @@ function formatFilterChipValue(def: CriterionDefinition | undefined, value: unkn
     if (typeof id === "number") {
       // First check embedded names (always available), then nameMap (from queries)
       const name = embeddedNames?.[String(id)] ?? nameMap?.get(id);
-      return name ?? `#${id}`;
+      return name ?? "Unavailable item";
     }
     return formatChipEntityId(id, nameMap);
   };
@@ -234,6 +574,7 @@ export function ListPage({
   selectedIds,
   onSelectAll,
   onSelectNone,
+  onInvertSelection,
   selectionActions,
   metadataByline,
   onNew,
@@ -257,6 +598,19 @@ export function ListPage({
   const [filterDialogPreselect, setFilterDialogPreselect] = useState<string | undefined>();
   const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM_LEVEL); // 0-5 range: 0=smallest (240px), 5=largest (540px)
   const restoredPrefsRef = useRef(false);
+  const { config } = useAppConfig();
+  const keybindingOverrides = useResolvedKeybindingOverrides();
+  const customFieldEntityType = filterMode ? CUSTOM_FIELD_ENTITY_BY_FILTER_MODE[filterMode] : undefined;
+  const { data: customFieldDefinitions = [] } = useCustomFieldDefinitions(customFieldEntityType, Boolean(customFieldEntityType));
+  const generatedCustomFieldSection = useMemo(() => {
+    const definitions = customFieldDefinitions.filter((definition) => definition.filterable);
+
+    return definitions.length > 0 ? createCustomFieldFilterSection(definitions) : undefined;
+  }, [customFieldDefinitions]);
+  const mergedCustomFilterSections = useMemo(
+    () => generatedCustomFieldSection ? [...(customFilterSections ?? []), generatedCustomFieldSection] : customFilterSections,
+    [customFilterSections, generatedCustomFieldSection]
+  );
 
   // Determine which entity types are used in active filters for name resolution
   const activeEntityTypes = useMemo(() => {
@@ -306,7 +660,7 @@ export function ListPage({
     const maps: Record<string, Map<number, string>> = {};
     const buildMap = (entities: any[] | undefined) => {
       const m = new Map<number, string>();
-      if (entities) for (const e of entities) m.set(e.id, e.name || e.title || `#${e.id}`);
+      if (entities) for (const e of entities) m.set(e.id, e.name || e.title || "Untitled item");
       return m;
     };
     if (tagEntities) maps.tags = buildMap(tagEntities);
@@ -328,10 +682,13 @@ export function ListPage({
   const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
   const start = (page - 1) * perPage + 1;
   const end = Math.min(page * perPage, totalCount);
-  const sortedSortOptions = useMemo(
-    () => (sortOptions ? [...sortOptions].sort((left, right) => left.label.localeCompare(right.label)) : undefined),
-    [sortOptions]
-  );
+  const sortedSortOptions = useMemo(() => {
+    const customSortOptions = customFieldDefinitions
+      .filter((definition) => definition.sortable)
+      .map((definition) => ({ value: `custom:${definition.type}:${definition.key}`, label: `Custom: ${definition.label || definition.key}` }));
+    const mergedOptions = [...(sortOptions ?? []), ...customSortOptions];
+    return mergedOptions.length > 0 ? mergedOptions.sort((left, right) => left.label.localeCompare(right.label)) : undefined;
+  }, [customFieldDefinitions, sortOptions]);
   const slotContext = { pageKey, title, filter, onFilterChange, totalCount, isLoading };
   const selecting = selectedIds && selectedIds.size > 0;
   const toolbarSegmentClass = "flex items-center gap-1 rounded-lg border border-border bg-card/70 px-1.5 py-1 shadow-sm";
@@ -408,34 +765,35 @@ export function ListPage({
   // List-page keyboard shortcuts
   const listBindings = useMemo(() => [
     // "/" focuses search
-    { keys: "/", action: () => { document.querySelector<HTMLInputElement>("input[data-list-search='true']")?.focus(); } },
+    { keys: resolveKeybinding(keybindingOverrides, "list.search", "/"), action: () => { document.querySelector<HTMLInputElement>("input[data-list-search='true']")?.focus(); } },
     // View switching
     ...(onDisplayModeChange && availableDisplayModes ? [
-      ...(availableDisplayModes.includes("grid") ? [{ keys: "v g", action: () => onDisplayModeChange("grid") }] : []),
-      ...(availableDisplayModes.includes("list") ? [{ keys: "v l", action: () => onDisplayModeChange("list") }] : []),
-      ...(availableDisplayModes.includes("wall") ? [{ keys: "v w", action: () => onDisplayModeChange("wall") }] : []),
-      ...(availableDisplayModes.includes("tagger") ? [{ keys: "v t", action: () => onDisplayModeChange("tagger") }] : []),
-      ...(availableDisplayModes.includes("graph") ? [{ keys: "v h", action: () => onDisplayModeChange("graph") }] : []),
-      ...(availableDisplayModes.includes("byGroup") ? [{ keys: "v b", action: () => onDisplayModeChange("byGroup") }] : []),
+      ...(availableDisplayModes.includes("grid") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.grid", "v g"), action: () => onDisplayModeChange("grid") }] : []),
+      ...(availableDisplayModes.includes("list") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.list", "v l"), action: () => onDisplayModeChange("list") }] : []),
+      ...(availableDisplayModes.includes("wall") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.wall", "v w"), action: () => onDisplayModeChange("wall") }] : []),
+      ...(availableDisplayModes.includes("tagger") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.tagger", "v t"), action: () => onDisplayModeChange("tagger") }] : []),
+      ...(availableDisplayModes.includes("graph") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.graph", "v h"), action: () => onDisplayModeChange("graph") }] : []),
+      ...(availableDisplayModes.includes("byGroup") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.group", "v b"), action: () => onDisplayModeChange("byGroup") }] : []),
     ] : []),
     // Selection
-    ...(onSelectAll ? [{ keys: "s a", action: onSelectAll }] : []),
-    ...(onSelectNone ? [{ keys: "s n", action: onSelectNone }] : []),
+    ...(onSelectAll ? [{ keys: resolveKeybinding(keybindingOverrides, "list.select.all", "s a"), action: onSelectAll }] : []),
+    ...(onSelectNone ? [{ keys: resolveKeybinding(keybindingOverrides, "list.select.none", "s n"), action: onSelectNone }] : []),
+    ...(onInvertSelection ? [{ keys: resolveKeybinding(keybindingOverrides, "list.select.invert", "s i"), action: onInvertSelection }] : []),
     // Pagination
     ...(showPagingControls ? [
-      { keys: "ArrowLeft", action: () => goTo(page - 1) },
-      { keys: "ArrowRight", action: () => goTo(page + 1) },
-      { keys: "Shift+ArrowLeft", action: () => goTo(page - 10) },
-      { keys: "Shift+ArrowRight", action: () => goTo(page + 10) },
-      { keys: "Ctrl+Home", action: () => goTo(1) },
-      { keys: "Ctrl+End", action: () => goTo(totalPages) },
+      { keys: resolveKeybinding(keybindingOverrides, "list.page.previous", "ArrowLeft"), action: () => goTo(page - 1) },
+      { keys: resolveKeybinding(keybindingOverrides, "list.page.next", "ArrowRight"), action: () => goTo(page + 1) },
+      { keys: resolveKeybinding(keybindingOverrides, "list.page.back10", "Shift+ArrowLeft"), action: () => goTo(page - 10) },
+      { keys: resolveKeybinding(keybindingOverrides, "list.page.forward10", "Shift+ArrowRight"), action: () => goTo(page + 10) },
+      { keys: resolveKeybinding(keybindingOverrides, "list.page.first", "Ctrl+Home"), action: () => goTo(1) },
+      { keys: resolveKeybinding(keybindingOverrides, "list.page.last", "Ctrl+End"), action: () => goTo(totalPages) },
     ] : []),
     // Filter dialog
-    ...(criteriaDefinitions && onObjectFilterChange ? [{ keys: "f", action: () => setFilterDialogOpen(true) }] : []),
+    ...(criteriaDefinitions && onObjectFilterChange ? [{ keys: resolveKeybinding(keybindingOverrides, "list.filters", "f"), action: () => setFilterDialogOpen(true) }] : []),
     // Zoom
-    { keys: "+", action: () => setZoomLevel((v) => Math.min(5, v + 0.25)) },
-    { keys: "-", action: () => setZoomLevel((v) => Math.max(0, v - 0.25)) },
-  ], [showPagingControls, onDisplayModeChange, availableDisplayModes, onSelectAll, onSelectNone, goTo, page, totalPages, criteriaDefinitions, onObjectFilterChange]);
+    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.in", "+"), action: () => setZoomLevel((v) => Math.min(5, v + 0.25)) },
+    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.out", "-"), action: () => setZoomLevel((v) => Math.max(0, v - 0.25)) },
+  ], [showPagingControls, onDisplayModeChange, availableDisplayModes, onSelectAll, onSelectNone, onInvertSelection, goTo, page, totalPages, criteriaDefinitions, onObjectFilterChange, keybindingOverrides]);
 
   useKeySequence(listBindings);
 
@@ -670,7 +1028,7 @@ export function ListPage({
       {objectFilter && onObjectFilterChange && criteriaDefinitions && Object.keys(objectFilter).length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 bg-surface/50 border border-border rounded-lg px-3 py-1.5 mx-1 mt-1">
           {Object.entries(objectFilter).map(([key, value]) => {
-            const customSection = customFilterSections?.find((section) => section.filterKey === key);
+            const customSection = mergedCustomFilterSections?.find((section) => section.filterKey === key);
             const def = criteriaDefinitions.find((d) => d.id === key || d.filterKey === key);
             const label = customSection?.label ?? def?.label ?? key;
             const nameMap = def?.entityType ? entityNameMaps[def.entityType] : undefined;
@@ -736,6 +1094,7 @@ export function ListPage({
             {selectedIds!.size} selected
           </span>
           <button onClick={onSelectAll} className="text-xs text-accent hover:underline">Select all</button>
+          {onInvertSelection && <button onClick={onInvertSelection} className="text-xs text-secondary hover:text-foreground">Invert</button>}
           <button onClick={onSelectNone} className="text-xs text-secondary hover:text-foreground">Deselect all</button>
           {selectionActions}
         </div>
@@ -773,7 +1132,7 @@ export function ListPage({
           onClose={() => { setFilterDialogOpen(false); setFilterDialogPreselect(undefined); }}
           criteria={criteriaDefinitions}
           activeFilter={objectFilter ?? {}}
-          customSections={customFilterSections}
+          customSections={mergedCustomFilterSections}
           onApply={(f) => {
             if (pageKey) {
               trackInteraction({

@@ -5,7 +5,7 @@ import type { EntityEngagement, FindFilter, Group, GroupCreate, GroupFilterCrite
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
-import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
+import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { formatDate } from "../components/shared";
@@ -21,6 +21,7 @@ import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
+import { CustomFieldsEditor } from "../components/shared";
 
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
@@ -68,7 +69,7 @@ export function GroupsPage({ onNavigate }: Props) {
 
   const items = data?.items ?? [];
   const { engagementById } = useEntityEngagementBatch("group", items.map((item) => item.id));
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(items);
+  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
 
   const bulkDeleteMut = useMutation({
@@ -108,6 +109,7 @@ export function GroupsPage({ onNavigate }: Props) {
         selectedIds={selectedIds}
         onSelectAll={selectAll}
         onSelectNone={selectNone}
+        onInvertSelection={invertSelection}
         selectionActions={
           <>
             {canWriteGroup && (
@@ -282,12 +284,20 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     synopsis: "",
     rating: undefined as number | undefined,
   });
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
+  const [createAnother, setCreateAnother] = useState(false);
+
+  const resetForm = () => {
+    setForm({ name: "", date: "", director: "", synopsis: "", rating: undefined });
+    setCustomFields({});
+  };
 
   const mutation = useMutation({
     mutationFn: (data: GroupCreate) => groups.create(data),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["groups"] });
-      setForm({ name: "", date: "", director: "", synopsis: "", rating: undefined });
+      resetForm();
+      if (createAnother) return;
       onClose();
       if (created?.id) onCreated(created.id);
     },
@@ -302,6 +312,7 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
       director: form.director || undefined,
       synopsis: form.synopsis || undefined,
       rating: form.rating,
+      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     });
   };
 
@@ -320,9 +331,10 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         <TextArea value={form.synopsis} onChange={(v) => setForm({ ...form, synopsis: v })} rows={3} />
       </Field>
       <RatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} />
-      <div className="flex justify-end mt-4">
-        <SaveButton loading={mutation.isPending} onClick={save} />
-      </div>
+      <Field label="Custom Fields">
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="group" />
+      </Field>
+      <CreateModalActions loading={mutation.isPending} onSave={save} createAnother={createAnother} onCreateAnotherChange={setCreateAnother} />
     </EditModal>
   );
 }

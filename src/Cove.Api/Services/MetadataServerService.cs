@@ -1082,17 +1082,28 @@ query Me {
         var studioOverride = MatchSceneEntityOverride(importConfig?.StudioOverride, remote.Studio?.Id, remote.Studio?.Name);
         var performerOverrides = importConfig?.PerformerOverrides;
         var tagOverrides = importConfig?.TagOverrides;
+        var fieldStrategies = importConfig?.FieldStrategies;
+        var defaultScalarStrategy = fieldStrategies == null ? MetadataFieldStrategy.Overwrite : MetadataFieldStrategy.Merge;
+        var allowedPerformerGenders = BuildAllowedPerformerGenderSet(importConfig?.PerformerGenders);
+        var skipSingleNamePerformers = importConfig?.SkipSingleNamePerformers ?? false;
 
-        scene.Title = Coalesce(scene.Title, remote.Title) ?? scene.Title;
-        scene.Code = Coalesce(scene.Code, remote.Code) ?? scene.Code;
-        scene.Details = Coalesce(scene.Details, remote.Details) ?? scene.Details;
-        scene.Director = Coalesce(scene.Director, remote.Director) ?? scene.Director;
-        scene.Date = ParseDate(remote.Date) ?? scene.Date;
+        scene.Title = MergeStringField(scene.Title, remote.Title, GetMetadataFieldStrategy(fieldStrategies, "title", defaultScalarStrategy)) ?? scene.Title;
+        scene.Code = MergeStringField(scene.Code, remote.Code, GetMetadataFieldStrategy(fieldStrategies, "code", defaultScalarStrategy)) ?? scene.Code;
+        scene.Details = MergeStringField(scene.Details, remote.Details, GetMetadataFieldStrategy(fieldStrategies, "details", defaultScalarStrategy)) ?? scene.Details;
+        scene.Director = MergeStringField(scene.Director, remote.Director, GetMetadataFieldStrategy(fieldStrategies, "director", defaultScalarStrategy)) ?? scene.Director;
+        scene.Date = MergeDateField(scene.Date, ParseDate(remote.Date), GetMetadataFieldStrategy(fieldStrategies, "date", defaultScalarStrategy)) ?? scene.Date;
         if (markOrganized) scene.Organized = true;
 
-        MergeSceneUrls(scene, remote.Urls.Select(url => url.Url));
+        var urlsStrategy = GetMetadataFieldStrategy(fieldStrategies, "urls", MetadataFieldStrategy.Merge);
+        if (urlsStrategy != MetadataFieldStrategy.Ignore)
+        {
+            if (urlsStrategy == MetadataFieldStrategy.Overwrite)
+                scene.Urls.Clear();
+            MergeSceneUrls(scene, remote.Urls.Select(url => url.Url));
+        }
 
-        if (setStudio && remote.Studio != null)
+        var studioStrategy = GetMetadataFieldStrategy(fieldStrategies, "studio", fieldStrategies == null ? MetadataFieldStrategy.Overwrite : MetadataFieldStrategy.Merge);
+        if (setStudio && studioStrategy != MetadataFieldStrategy.Ignore && remote.Studio != null && (studioStrategy == MetadataFieldStrategy.Overwrite || scene.StudioId == null))
         {
             var studio = await ResolveSceneStudioAsync(remote.Studio, endpoint, studioOverride, ct, allowCreate: !onlyExistingStudio);
             if (studio != null)
@@ -1102,8 +1113,12 @@ query Me {
             }
         }
 
-        if (setTags)
+        var tagsStrategy = GetMetadataFieldStrategy(fieldStrategies, "tags", MetadataFieldStrategy.Merge);
+        if (setTags && tagsStrategy != MetadataFieldStrategy.Ignore)
         {
+            if (tagsStrategy == MetadataFieldStrategy.Overwrite)
+                scene.SceneTags.Clear();
+
             foreach (var remoteTag in remote.Tags)
             {
                 var tagOverride = MatchSceneEntityOverride(tagOverrides, remoteTag.Id, remoteTag.Name);
@@ -1125,10 +1140,19 @@ query Me {
             }
         }
 
-        if (setPerformers)
+        var performersStrategy = GetMetadataFieldStrategy(fieldStrategies, "performers", MetadataFieldStrategy.Merge);
+        if (setPerformers && performersStrategy != MetadataFieldStrategy.Ignore)
         {
+            if (performersStrategy == MetadataFieldStrategy.Overwrite)
+                scene.ScenePerformers.Clear();
+
             foreach (var remotePerformer in remote.Performers.Select(appearance => appearance.Performer).OfType<MetadataServerRemotePerformer>())
             {
+                if (skipSingleNamePerformers && IsSingleNamePerformer(remotePerformer.Name))
+                    continue;
+                if (!IsPerformerGenderAllowed(remotePerformer.Gender, allowedPerformerGenders))
+                    continue;
+
                 var performerOverride = MatchSceneEntityOverride(performerOverrides, remotePerformer.Id, remotePerformer.Name);
                 if (GetSceneEntityOverrideAction(performerOverride) == SceneEntityOverrideAction.Skip)
                     continue;
@@ -2284,6 +2308,82 @@ query Me {
     private static string? Coalesce(string? currentValue, string? nextValue)
     {
         return string.IsNullOrWhiteSpace(nextValue) ? currentValue : nextValue.Trim();
+    }
+
+    private enum MetadataFieldStrategy
+    {
+        Ignore,
+        Merge,
+        Overwrite,
+    }
+
+    private static MetadataFieldStrategy GetMetadataFieldStrategy(IReadOnlyDictionary<string, string>? strategies, string field, MetadataFieldStrategy fallback)
+    {
+        if (strategies == null || !strategies.TryGetValue(field, out var value))
+            return fallback;
+
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "ignore" or "skip" => MetadataFieldStrategy.Ignore,
+            "overwrite" or "replace" => MetadataFieldStrategy.Overwrite,
+            _ => MetadataFieldStrategy.Merge,
+        };
+    }
+
+    private static string? MergeStringField(string? currentValue, string? nextValue, MetadataFieldStrategy strategy)
+    {
+        if (strategy == MetadataFieldStrategy.Ignore || string.IsNullOrWhiteSpace(nextValue))
+            return currentValue;
+
+        if (strategy == MetadataFieldStrategy.Merge && !string.IsNullOrWhiteSpace(currentValue))
+            return currentValue;
+
+        return nextValue.Trim();
+    }
+
+    private static DateOnly? MergeDateField(DateOnly? currentValue, DateOnly? nextValue, MetadataFieldStrategy strategy)
+    {
+        if (strategy == MetadataFieldStrategy.Ignore || !nextValue.HasValue)
+            return currentValue;
+
+        if (strategy == MetadataFieldStrategy.Merge && currentValue.HasValue)
+            return currentValue;
+
+        return nextValue;
+    }
+
+    private static HashSet<string>? BuildAllowedPerformerGenderSet(IReadOnlyCollection<string>? values)
+    {
+        if (values == null || values.Count == 0)
+            return null;
+
+        return values
+            .Select(NormalizeGenderKey)
+            .Where(value => value.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPerformerGenderAllowed(string? gender, HashSet<string>? allowedGenders)
+    {
+        if (allowedGenders == null)
+            return true;
+
+        var key = string.IsNullOrWhiteSpace(gender) ? "UNKNOWN" : NormalizeGenderKey(gender);
+        return allowedGenders.Contains(key);
+    }
+
+    private static string NormalizeGenderKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        return Regex.Replace(value, "[^A-Za-z0-9]", string.Empty).ToUpperInvariant();
+    }
+
+    private static bool IsSingleNamePerformer(string? value)
+    {
+        var name = value?.Trim();
+        return !string.IsNullOrWhiteSpace(name) && !WhitespaceRegex.IsMatch(name);
     }
 
     private static DateOnly? ParseDate(string? value)
