@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, Loader2, Trash2 } from "lucide-react";
 import { faces, scenes, segmentDisplayProfiles } from "../api/client";
-import type { FindFilter } from "../api/types";
+import type { FindFilter, SegmentDisplayProfile } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { AddToGroupDialog, type AddToGroupEntry } from "../components/AddToGroupDialog";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -42,6 +41,46 @@ import { LOCATION_CHANGE_EVENT, buildCurrentUrl, navigateToUrl } from "../router
 
 interface Props {
   onNavigate: (r: any) => void;
+}
+
+const DERIVED_SPAN_SORT_OPTIONS = [
+  { value: "updated_at", label: "Scene Updated" },
+  { value: "created_at", label: "Scene Created" },
+  { value: "title", label: "Scene Title" },
+];
+
+const RAW_SEGMENT_SORT_OPTIONS = [
+  { value: "updated_at", label: "Updated At" },
+  { value: "created_at", label: "Created At" },
+  { value: "title", label: "Label" },
+  { value: "scene_title", label: "Scene Title" },
+  { value: "start_sec", label: "Start Time" },
+  { value: "end_sec", label: "End Time" },
+  { value: "duration", label: "Duration" },
+  { value: "confidence", label: "Confidence" },
+  { value: "kind", label: "Kind" },
+  { value: "source_key", label: "Source" },
+  { value: "tag_name", label: "Tag" },
+];
+
+function dedupeSegmentDisplayProfiles(profiles: SegmentDisplayProfile[]): SegmentDisplayProfile[] {
+  const byName = new Map<string, SegmentDisplayProfile>();
+  for (const profile of profiles) {
+    const key = profile.name.trim().toLocaleLowerCase();
+    const current = byName.get(key);
+    if (!current || isPreferredSegmentDisplayProfile(profile, current)) {
+      byName.set(key, profile);
+    }
+  }
+
+  return profiles.filter((profile) => byName.get(profile.name.trim().toLocaleLowerCase())?.id === profile.id);
+}
+
+function isPreferredSegmentDisplayProfile(candidate: SegmentDisplayProfile, current: SegmentDisplayProfile): boolean {
+  if (candidate.userId != null && current.userId == null) return true;
+  if (candidate.userId == null && current.userId != null) return false;
+  if (candidate.isDefault !== current.isDefault) return candidate.isDefault;
+  return candidate.id < current.id;
 }
 
 export function SegmentsPage({ onNavigate }: Props) {
@@ -80,6 +119,7 @@ export function SegmentsPage({ onNavigate }: Props) {
   const sort = filter.sort ?? "updated_at";
   const direction = filter.direction ?? "desc";
   const isRawView = contentView === "raw";
+  const sortOptions = isRawView ? RAW_SEGMENT_SORT_OPTIONS : DERIVED_SPAN_SORT_OPTIONS;
 
   useEffect(() => {
     const syncContentView = () => {
@@ -129,7 +169,7 @@ export function SegmentsPage({ onNavigate }: Props) {
   });
 
   const availableProfiles = useMemo(() => {
-    const profiles = profilesQuery.data ?? [];
+    const profiles = dedupeSegmentDisplayProfiles(profilesQuery.data ?? []);
     const nonRawProfiles = profiles.filter((profile) => !(profile.isSystem && profile.name === "Raw"));
     return nonRawProfiles.length > 0 ? nonRawProfiles : profiles;
   }, [profilesQuery.data]);
@@ -288,6 +328,13 @@ export function SegmentsPage({ onNavigate }: Props) {
     selectNone();
   }, [activeProfileId, appliedQuerySelectionKey, contentView, rawSegmentIds.join(","), selectNone]);
 
+  useEffect(() => {
+    const currentSort = filter.sort ?? "updated_at";
+    if (!sortOptions.some((option) => option.value === currentSort)) {
+      setFilter({ ...filter, sort: "updated_at", page: 1 });
+    }
+  }, [filter, setFilter, sortOptions]);
+
   return (
     <>
       <AddToGroupDialog open={showAddToGroup} onClose={() => setShowAddToGroup(false)} items={selectedEntries} onAdded={() => selectNone()} />
@@ -298,7 +345,7 @@ export function SegmentsPage({ onNavigate }: Props) {
         onFilterChange={setFilter}
         totalCount={totalCount}
         isLoading={isLoading}
-        sortOptions={SCENE_SORT_OPTIONS}
+        sortOptions={sortOptions}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
         availableDisplayModes={["grid", "list"]}

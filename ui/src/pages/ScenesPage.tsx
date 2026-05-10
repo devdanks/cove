@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { aiVisual, entityImages, scenes, tags, performers, galleries } from "../api/client";
-import type { EntityEngagement, FindFilter, Scene, SceneCreate, SceneFilterCriteria } from "../api/types";
+import { aiVisual, scenes, tags, performers, galleries } from "../api/client";
+import type { EntityEngagement, FindFilter, Group, Scene, SceneCreate, SceneFilterCriteria, SceneListEntry } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
@@ -13,7 +13,7 @@ import { CustomFieldsEditor, formatDuration, formatFileSize, getResolutionLabel,
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
-import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Download } from "lucide-react";
+import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Download, Layers } from "lucide-react";
 import { useSceneQueue } from "../state/SceneQueueContext";
 import { SceneCard } from "../components/EntityCards";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
@@ -27,6 +27,8 @@ import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
+import { BookmarkButton } from "../components/BookmarkButton";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -88,7 +90,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
   const queryClient = useQueryClient();
   const { setQueue } = useSceneQueue();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canWriteScene = canWriteEntity("scene", hasPermission);
   const canDeleteScene = canDeleteEntity("scene", hasPermission);
   const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
@@ -123,6 +125,9 @@ export function ScenesPage({ onNavigate }: Props) {
     setFilter({ ...filter, page: 1 });
   }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
 
+  const includeCompilationGroups = user?.uiPreferences?.scenes?.includeCompilationGroups ?? false;
+  const canShowCompilationGroups = includeCompilationGroups && searchMode === "text" && !hasObjectFilter && (displayMode === "grid" || displayMode === "list");
+
   const { data, isLoading } = useQuery({
     queryKey: ["scenes", filter, objectFilter, searchMode],
     queryFn: () => {
@@ -137,9 +142,21 @@ export function ScenesPage({ onNavigate }: Props) {
         ? scenes.findFiltered({ findFilter: filter, objectFilter: objectFilter as SceneFilterCriteria })
         : scenes.find(filter);
     },
+    enabled: !canShowCompilationGroups,
   });
 
-  const items = data?.items ?? [];
+  const { data: unifiedData, isLoading: unifiedLoading } = useQuery({
+    queryKey: ["scenes", "with-compilations", filter],
+    queryFn: () => scenes.findWithCompilations(filter),
+    enabled: canShowCompilationGroups,
+  });
+
+  const listEntries: SceneListEntry[] = canShowCompilationGroups
+    ? (unifiedData?.items ?? [])
+    : (data?.items ?? []).map((scene) => ({ kind: "scene" as const, id: scene.id, scene }));
+  const items = listEntries.flatMap((entry) => entry.kind === "scene" && entry.scene ? [entry.scene] : []);
+  const totalCount = canShowCompilationGroups ? unifiedData?.totalCount : data?.totalCount;
+  const loading = canShowCompilationGroups ? unifiedLoading : isLoading;
   const { engagementById } = useEntityEngagementBatch("scene", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
@@ -205,7 +222,6 @@ export function ScenesPage({ onNavigate }: Props) {
 
   // Metadata byline standard layout: (1:23:45 - 2.5 GB)
   const byline = useMemo(() => {
-    const items = data?.items ?? [];
     const totalDur = items.reduce((sum, s) => sum + (s.files[0]?.duration ?? 0), 0);
     const totalSize = items.reduce((sum, s) => sum + (s.files[0]?.size ?? 0), 0);
     if (!totalDur && !totalSize) return null;
@@ -213,7 +229,7 @@ export function ScenesPage({ onNavigate }: Props) {
     if (totalDur) parts.push(formatDuration(totalDur));
     if (totalSize) parts.push(formatFileSize(totalSize));
     return <span className="text-xs text-muted">({parts.join(" — ")})</span>;
-  }, [data?.items]);
+  }, [items]);
 
   return (
     <>
@@ -257,8 +273,8 @@ export function ScenesPage({ onNavigate }: Props) {
       filterMode="scenes"
       filter={filter}
       onFilterChange={handleFilterChange}
-      totalCount={data?.totalCount ?? 0}
-      isLoading={isLoading}
+      totalCount={totalCount ?? 0}
+      isLoading={loading}
       searchMode={searchMode}
       searchModes={SEARCH_MODE_OPTIONS}
       searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Filter..."}
@@ -267,14 +283,30 @@ export function ScenesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall", "tagger"]}
-      renderOperations={canDownloadScene ? () => (
-        <button
-          onClick={() => setDownloadTarget("new")}
-          className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
-        >
-          From URL
-        </button>
-      ) : undefined}
+      renderOperations={() => (
+        <div className="flex items-center gap-2">
+          <label className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground">
+            <input
+              type="checkbox"
+              checked={includeCompilationGroups}
+              onChange={(event) => updateAuthenticatedUserUiPreferences((current) => ({
+                ...(current ?? {}),
+                scenes: { ...(current?.scenes ?? {}), includeCompilationGroups: event.target.checked },
+              }))}
+              className="h-3.5 w-3.5 accent-accent"
+            />
+            Include compilations
+          </label>
+          {canDownloadScene ? (
+            <button
+              onClick={() => setDownloadTarget("new")}
+              className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
+            >
+              From URL
+            </button>
+          ) : null}
+        </div>
+      )}
       metadataByline={byline}
       criteriaDefinitions={SCENE_CRITERIA}
       objectFilter={objectFilter}
@@ -364,23 +396,25 @@ export function ScenesPage({ onNavigate }: Props) {
     >
       {displayMode === "grid" && (
         <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
-          {items.map((scene) => (
+          {listEntries.map((entry) => entry.kind === "compilation" && entry.group ? (
+            <CompilationGroupCard key={`compilation-${entry.group.id}`} group={entry.group} onNavigate={onNavigate} />
+          ) : entry.scene ? (
             <SceneCard
-              key={scene.id}
-              scene={scene}
-              engagement={engagementById.get(scene.id)}
-              onClick={() => selecting ? toggle(scene.id) : navigateToScene(scene.id)}
+              key={`scene-${entry.scene.id}`}
+              scene={entry.scene}
+              engagement={engagementById.get(entry.scene.id)}
+              onClick={() => selecting ? toggle(entry.scene!.id) : navigateToScene(entry.scene!.id)}
               onNavigate={onNavigate}
-              selected={selectedIds.has(scene.id)}
-              onSelect={() => toggle(scene.id)}
+              selected={selectedIds.has(entry.scene.id)}
+              onSelect={() => toggle(entry.scene!.id)}
               selecting={selecting}
-              onQuickView={() => setQuickViewId(scene.id)}
+              onQuickView={() => setQuickViewId(entry.scene!.id)}
             />
-          ))}
+          ) : null)}
         </EntityCardGrid>
       )}
       {displayMode === "list" && (
-        <SceneListTable scenes={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <SceneListTable entries={listEntries} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}
       {displayMode === "wall" && (
         <div className="flex gap-1 px-2">
@@ -403,7 +437,7 @@ export function ScenesPage({ onNavigate }: Props) {
       {displayMode === "tagger" && (
         <SceneTagger scenes={items} onNavigate={navigateToScene} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
       )}
-      {items.length === 0 && !isLoading && (
+      {listEntries.length === 0 && !loading && (
         <div className="text-center py-20">
           <Film className="w-16 h-16 mx-auto mb-4 text-muted opacity-50" />
           <p className="text-secondary text-lg">No scenes found</p>
@@ -706,9 +740,49 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   );
 }
 
+function CompilationGroupCard({ group, onNavigate }: { group: Group; onNavigate: (r: any) => void }) {
+  return (
+    <div className="entity-card relative flex h-full cursor-pointer flex-col overflow-hidden rounded border border-border bg-card transition-colors hover:border-accent/60 group">
+      <RouteCardLinkOverlay route={{ page: "compilation", id: group.id }} onClick={() => onNavigate({ page: "compilation", id: group.id })} label={`Play compilation ${group.name}`} selectionSafeZone />
+      <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
+        <BookmarkButton
+          hostType="group"
+          hostId={group.id}
+          compact
+          deferUntilHover
+          className="absolute left-1 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+        />
+        {group.frontImagePath ? (
+          <img src={group.frontImagePath} alt={group.name} className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <Layers className="h-10 w-10 text-muted opacity-40" />
+        )}
+        <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
+          Compilation
+        </div>
+        <div className="absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">
+          {group.sceneCount} scenes
+        </div>
+      </div>
+      <div className="border-t border-border/50 px-2.5 py-2">
+        <p className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-accent">{group.name}</p>
+        {group.studioName ? <p className="mt-1 truncate text-xs text-muted">{group.studioName}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function getSceneDisplayDuration(scene: Scene) {
+  if (typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number") {
+    return Math.max(0, scene.clipEndSec - scene.clipStartSec);
+  }
+
+  return scene.files[0]?.duration ?? 0;
+}
+
 /* ── Scene List Table ── */
 
-function SceneListTable({ scenes, engagementById, onNavigate, selectedIds, onToggle }: { scenes: Scene[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
+function SceneListTable({ entries, engagementById, onNavigate, selectedIds, onToggle, selecting }: { entries: SceneListEntry[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
   return (
     <div className="overflow-x-auto px-2">
       <table className="w-full text-xs text-foreground">
@@ -725,12 +799,37 @@ function SceneListTable({ scenes, engagementById, onNavigate, selectedIds, onTog
           </tr>
         </thead>
         <tbody>
-          {scenes.map((scene) => {
+          {entries.map((entry) => {
+            if (entry.kind === "compilation" && entry.group) {
+              const group = entry.group;
+              return (
+                <tr
+                  key={`compilation-${group.id}`}
+                  onClick={() => onNavigate({ page: "compilation", id: group.id })}
+                  className="border-b border-border hover:bg-card cursor-pointer"
+                >
+                  {selectedIds && <td className="py-1.5 px-2 text-muted"><Layers className="h-3.5 w-3.5" /></td>}
+                  <td className="py-1.5 px-2">
+                    <span className="text-foreground hover:text-accent">{group.name}</span>
+                    {group.studioName && <span className="text-muted ml-2">— {group.studioName}</span>}
+                  </td>
+                  <td className="py-1.5 px-2 text-muted">{group.date || ""}</td>
+                  <td className="py-1.5 px-2 text-muted">Compilation</td>
+                  <td className="py-1.5 px-2 text-muted">{group.duration ? formatDuration(group.duration) : ""}</td>
+                  <td className="py-1.5 px-2 text-muted"></td>
+                  <td className="py-1.5 px-2 text-muted">{group.sceneCount} scenes</td>
+                  <td className="py-1.5 px-2 text-right text-muted"></td>
+                </tr>
+              );
+            }
+            if (!entry.scene) return null;
+            const scene = entry.scene;
             const file = scene.files[0];
+            const duration = getSceneDisplayDuration(scene);
             return (
               <tr
-                key={scene.id}
-                onClick={() => onNavigate({ page: "scene", id: scene.id })}
+                key={`scene-${scene.id}`}
+                onClick={() => selecting ? onToggle?.(scene.id) : onNavigate({ page: "scene", id: scene.id })}
                 className={`border-b border-border hover:bg-card cursor-pointer ${selectedIds?.has(scene.id) ? "bg-accent/10" : ""}`}
               >
                 {selectedIds && (
@@ -754,7 +853,7 @@ function SceneListTable({ scenes, engagementById, onNavigate, selectedIds, onTog
                 </td>
                 <td className="py-1.5 px-2 text-muted">{scene.date || ""}</td>
                 <td className="py-1.5 px-2"><RatingBadge rating={engagementById.get(scene.id)?.rating} /></td>
-                <td className="py-1.5 px-2 text-muted">{file ? formatDuration(file.duration) : ""}</td>
+                <td className="py-1.5 px-2 text-muted">{duration > 0 ? formatDuration(duration) : ""}</td>
                 <td className="py-1.5 px-2 text-muted">{file ? formatFileSize(file.size) : ""}</td>
                 <td className="py-1.5 px-2 text-muted">{file ? getResolutionLabel(file.width, file.height) : ""}</td>
                 <td className="py-1.5 px-2 text-right text-muted">{engagementById.get(scene.id)?.playCount || ""}</td>
@@ -771,12 +870,13 @@ function SceneListTable({ scenes, engagementById, onNavigate, selectedIds, onTog
 
 function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scene: Scene; onClick: () => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
-  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
+  const coverUrl = scene.imagePath ?? screenshotUrl;
   const previewUrl = scenes.previewUrl(scene.id);
   const previewStatusUrl = scenes.previewStatusUrl(scene.id);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
   const title = scene.title || file?.basename || "Untitled";
+  const duration = getSceneDisplayDuration(scene);
   const { config } = useAppConfig();
   const wallPreviewType = config?.ui.wallPreviewType ?? "video";
   const showTitle = config?.ui.wallShowTitle ?? true;
@@ -802,9 +902,9 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
             {title}
           </p>
       </div> : null}
-      {file && file.duration > 0 && (
+      {duration > 0 && (
         <span className="absolute top-1 right-1 text-xs text-white bg-black/70 px-1 rounded">
-          {formatDuration(file.duration)}
+          {formatDuration(duration)}
         </span>
       )}
     </WallMediaCard>

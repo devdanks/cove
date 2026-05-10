@@ -5,6 +5,7 @@ using System.Text.Json;
 using Cove.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -13,9 +14,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cove.Data.Migrations
 {
     [DbContext(typeof(CoveContext))]
-    partial class CoveContextModelSnapshot : ModelSnapshot
+    [Migration("20260509232750_AddDynamicGroupsAndBookmarks")]
+    partial class AddDynamicGroupsAndBookmarks
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1667,11 +1670,6 @@ namespace Cove.Data.Migrations
                     b.Property<bool>("ShowInSceneLists")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("SortOrder")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
                     b.Property<int?>("StudioId")
                         .HasColumnType("integer");
 
@@ -1684,8 +1682,6 @@ namespace Cove.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Name");
-
-                    b.HasIndex("SortOrder");
 
                     b.HasIndex("StudioId");
 
@@ -2498,12 +2494,6 @@ namespace Cove.Data.Migrations
                     b.Property<string>("Captions")
                         .HasColumnType("text");
 
-                    b.Property<double?>("ClipEndSec")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("ClipStartSec")
-                        .HasColumnType("double precision");
-
                     b.Property<string>("Code")
                         .HasColumnType("text");
 
@@ -2605,9 +2595,6 @@ namespace Cove.Data.Migrations
                     b.Property<bool>("Organized")
                         .HasColumnType("boolean");
 
-                    b.Property<int?>("ParentSceneId")
-                        .HasColumnType("integer");
-
                     b.PrimitiveCollection<int[]>("PerformerIds")
                         .IsRequired()
                         .HasColumnType("integer[]");
@@ -2664,8 +2651,6 @@ namespace Cove.Data.Migrations
                     b.HasIndex("MinPath");
 
                     b.HasIndex("Organized");
-
-                    b.HasIndex("ParentSceneId");
 
                     b.HasIndex("PerformerIds");
 
@@ -4350,17 +4335,10 @@ namespace Cove.Data.Migrations
 
             modelBuilder.Entity("Cove.Core.Entities.Scene", b =>
                 {
-                    b.HasOne("Cove.Core.Entities.Scene", "ParentScene")
-                        .WithMany("ChildScenes")
-                        .HasForeignKey("ParentSceneId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
                     b.HasOne("Cove.Core.Entities.Studio", "Studio")
                         .WithMany("Scenes")
                         .HasForeignKey("StudioId")
                         .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("ParentScene");
 
                     b.Navigation("Studio");
                 });
@@ -4808,8 +4786,6 @@ namespace Cove.Data.Migrations
 
             modelBuilder.Entity("Cove.Core.Entities.Scene", b =>
                 {
-                    b.Navigation("ChildScenes");
-
                     b.Navigation("Files");
 
                     b.Navigation("GroupItems");

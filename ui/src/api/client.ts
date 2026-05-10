@@ -1,6 +1,6 @@
 import type {
   MeResponse,
-  Scene, SceneCreate, SceneUpdate,
+  Scene, SceneCreate, SceneListEntry, SceneUpdate,
   Performer, PerformerCreate, PerformerUpdate,
   Tag, TagDetail, TagCreate, TagUpdate, TagSegmentWall,
   TagApplication, TagApplicationCreate, TagGroup, TagGroupCreate, TagGroupUpdate,
@@ -8,9 +8,15 @@ import type {
   Studio, StudioCreate, StudioUpdate,
   Gallery, GalleryCreate, GalleryUpdate, GalleryChapter, GalleryChapterCreate, GalleryChapterUpdate,
   Image, ImageCreate, ImageUpdate,
-  Group, GroupCreate, GroupUpdate,
+  Group, GroupCreate, GroupReorder, GroupUpdate,
   GroupItem, GroupItemCreate, GroupItemsFromSpans, GroupItemsReorder, GroupItemUpdate,
   GroupPlaybackManifest,
+  BookmarkDto,
+  BookmarkBatchRequest,
+  BookmarkState,
+  BookmarkToggle,
+  DynamicGroupSource,
+  GroupQueryUpdate,
   AiDataPurgeRequest,
   AiDataPurgeResult,
   AiDataSelector,
@@ -319,10 +325,14 @@ function buildMediaUrl(
 export const scenes = {
   find: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
     request<PaginatedResponse<Scene>>(`/scenes${buildQuery(filter, extra)}`),
+  findWithCompilations: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
+    request<PaginatedResponse<SceneListEntry>>(`/scenes/with-compilations${buildQuery(filter, extra)}`),
   findFiltered: (req: FilteredQueryRequest<SceneFilterCriteria>) =>
     request<PaginatedResponse<Scene>>("/scenes/find", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
   get: (id: number) => request<Scene>(`/scenes/${id}`),
   create: (data: SceneCreate) => request<Scene>("/scenes", { method: "POST", body: JSON.stringify(data) }),
+  createSubScene: (parentSceneId: number, data: Omit<SceneCreate, "parentSceneId">) =>
+    request<Scene>("/scenes", { method: "POST", body: JSON.stringify({ ...data, parentSceneId }) }),
   update: (id: number, data: SceneUpdate) => request<Scene>(`/scenes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkSceneUpdate) => request<void>("/scenes/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number, deleteFile?: boolean) => request<void>(`/scenes/${id}${deleteFile ? "?deleteFile=true" : ""}`, { method: "DELETE" }),
@@ -706,9 +716,14 @@ export const groups = {
   get: (id: number) => request<Group>(`/groups/${id}`),
   create: (data: GroupCreate) => request<Group>("/groups", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: GroupUpdate) => request<Group>(`/groups/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  reorder: (data: GroupReorder) => request<void>("/groups/reorder", { method: "PUT", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkGroupUpdate) => request<void>("/groups/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/groups/${id}`, { method: "DELETE" }),
   bulkDelete: (ids: number[]) => request<void>("/groups/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  dynamicSources: () => request<DynamicGroupSource[]>("/groups/dynamic-sources"),
+  updateQuery: (id: number, data: GroupQueryUpdate) =>
+    request<Group>(`/groups/${id}/query`, { method: "PUT", body: JSON.stringify(data) }),
+  snapshot: (id: number) => request<Group>(`/groups/${id}/snapshot`, { method: "POST" }),
   subGroups: (id: number) => request<Group[]>(`/groups/${id}/subgroups`),
   containingGroups: (id: number) => request<Group[]>(`/groups/${id}/containinggroups`),
   addSubGroup: (id: number, subGroupId: number, orderIndex?: number) =>
@@ -719,6 +734,8 @@ export const groups = {
     request<void>(`/groups/${id}/subgroups/reorder`, { method: "PUT", body: JSON.stringify({ subGroupIds }) }),
   items: {
     list: (groupId: number) => request<GroupItem[]>(`/groups/${groupId}/items`),
+    page: (groupId: number, filter?: FindFilter) =>
+      request<PaginatedResponse<GroupItem>>(`/groups/${groupId}/items/page${buildQuery(filter)}`),
     create: (groupId: number, data: GroupItemCreate) =>
       request<GroupItem>(`/groups/${groupId}/items`, { method: "POST", body: JSON.stringify(data) }),
     update: (groupId: number, itemId: number, data: GroupItemUpdate) =>
@@ -732,6 +749,12 @@ export const groups = {
     playbackManifest: (groupId: number) =>
       request<GroupPlaybackManifest>(`/groups/${groupId}/playback-manifest`),
   },
+};
+
+export const bookmarks = {
+  list: () => request<BookmarkDto[]>("/me/bookmarks"),
+  batch: (data: BookmarkBatchRequest) => request<BookmarkState[]>("/me/bookmarks/batch", { method: "POST", body: JSON.stringify(data) }),
+  toggle: (data: BookmarkToggle) => request<BookmarkState>("/me/bookmarks", { method: "POST", body: JSON.stringify(data) }),
 };
 
 export const segmentDisplayProfiles = {

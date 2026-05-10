@@ -169,6 +169,100 @@ public class ThumbnailServiceTests
         }
     }
 
+    [Fact]
+    public async Task GetImageThumbnailStreamAsync_PreservesTransparencyForPngSources()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"cove-thumbnail-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var imagePath = Path.Combine(tempRoot, "transparent.png");
+            using (var sourceImage = new Image<Rgba32>(120, 120))
+            {
+                sourceImage.ProcessPixelRows(accessor =>
+                {
+                    for (var y = 30; y < 90; y++)
+                    {
+                        var row = accessor.GetRowSpan(y);
+                        for (var x = 30; x < 90; x++)
+                            row[x] = new Rgba32(255, 64, 64, 255);
+                    }
+                });
+
+                await sourceImage.SaveAsPngAsync(imagePath);
+            }
+
+            var sourceModTime = DateTime.UtcNow.AddMinutes(-1);
+            File.SetLastWriteTimeUtc(imagePath, sourceModTime);
+
+            var services = new ServiceCollection();
+            var dbOptions = new DbContextOptionsBuilder<CoveContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            services.AddSingleton(dbOptions);
+            services.AddScoped<CoveContext>(_ => new TestCoveContext(dbOptions));
+
+            var config = new CoveConfiguration
+            {
+                GeneratedPath = Path.Combine(tempRoot, "generated"),
+                WriteImageThumbnails = true,
+            };
+
+            await using var provider = services.BuildServiceProvider();
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+
+                var folder = new Folder { Path = tempRoot };
+                var image = new Cove.Core.Entities.Image { Title = "transparent" };
+                image.Files.Add(new ImageFile
+                {
+                    Basename = "transparent.png",
+                    ParentFolder = folder,
+                    Format = "png",
+                    Width = 120,
+                    Height = 120,
+                    Size = new FileInfo(imagePath).Length,
+                    ModTime = sourceModTime,
+                });
+
+                db.Images.Add(image);
+                await db.SaveChangesAsync();
+            }
+
+            var service = new ThumbnailService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                new StubJobService(),
+                config,
+                new ZipFileReader(),
+                new NullBlobService(),
+                NullLogger<ThumbnailService>.Instance);
+
+            var result = await service.GetImageThumbnailStreamAsync(1, 64, CancellationToken.None);
+
+            Assert.NotNull(result);
+            Assert.Equal("image/png", result.Value.contentType);
+            Assert.True(result.Value.supportsRangeRequests);
+
+            await using var stream = result.Value.stream;
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            buffer.Position = 0;
+
+            using var thumbnail = await SixLabors.ImageSharp.Image.LoadAsync<Rgba32>(buffer);
+            Assert.Equal(0, thumbnail[0, 0].A);
+            Assert.True(thumbnail[Math.Min(thumbnail.Width - 1, thumbnail.Width / 2), Math.Min(thumbnail.Height - 1, thumbnail.Height / 2)].A > 0);
+
+            var thumbnailFiles = Directory.GetFiles(Path.Combine(config.GeneratedPath, "thumbnails"), "*.png", SearchOption.AllDirectories);
+            Assert.Single(thumbnailFiles);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
     private sealed class StubJobService : IJobService
     {
         public string Enqueue(string type, string description, Func<IJobProgress, CancellationToken, Task> work, bool exclusive = true)

@@ -84,7 +84,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
 
     private string? GetExistingPreviewPath(int sceneId)
     {
-        var path = thumbnailService.GetPreviewPath(sceneId);
+        var sourceSceneId = db is null ? sceneId : ResolveSourceSceneId(sceneId);
+        if (!sourceSceneId.HasValue) return null;
+
+        var path = thumbnailService.GetPreviewPath(sourceSceneId.Value);
         return System.IO.File.Exists(path) ? path : null;
     }
 
@@ -97,7 +100,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     [HttpGet("scene/{sceneId:int}/sprite")]
     public IActionResult GetSprite(int sceneId)
     {
-        var path = thumbnailService.GetSpritePath(sceneId);
+        var sourceSceneId = db is null ? sceneId : ResolveSourceSceneId(sceneId);
+        if (!sourceSceneId.HasValue) return NotFound();
+
+        var path = thumbnailService.GetSpritePath(sourceSceneId.Value);
         if (!System.IO.File.Exists(path)) return NotFound();
 
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
@@ -108,7 +114,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     [HttpGet("scene/{sceneId:int}/vtt/thumbs")]
     public IActionResult GetSpriteVtt(int sceneId)
     {
-        var path = thumbnailService.GetSpriteVttPath(sceneId);
+        var sourceSceneId = db is null ? sceneId : ResolveSourceSceneId(sceneId);
+        if (!sourceSceneId.HasValue) return NotFound();
+
+        var path = thumbnailService.GetSpriteVttPath(sourceSceneId.Value);
         if (!System.IO.File.Exists(path)) return NotFound();
 
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
@@ -156,10 +165,13 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     [HttpGet("scene/{sceneId:int}/caption/{captionId:int}")]
     public async Task<IActionResult> GetCaption(int sceneId, int captionId, CancellationToken ct)
     {
+        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
+        if (!sourceSceneId.HasValue) return NotFound();
+
         var caption = await db.VideoCaptions
             .Include(c => c.File)
             .FirstOrDefaultAsync(c => c.Id == captionId && c.File != null
-                && db.Scenes.Any(s => s.Id == sceneId && s.Files.Any(f => f.Id == c.FileId)), ct);
+                && db.Scenes.Any(s => s.Id == sourceSceneId.Value && s.Files.Any(f => f.Id == c.FileId)), ct);
 
         if (caption?.File == null) return NotFound();
 
@@ -178,9 +190,12 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     [HttpGet("scene/{sceneId:int}/captions")]
     public async Task<IActionResult> GetCaptions(int sceneId, CancellationToken ct)
     {
+        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
+        if (!sourceSceneId.HasValue) return NotFound();
+
         var scene = await db.Scenes
             .Include(s => s.Files).ThenInclude(f => f.Captions)
-            .FirstOrDefaultAsync(s => s.Id == sceneId, ct);
+            .FirstOrDefaultAsync(s => s.Id == sourceSceneId.Value, ct);
 
         if (scene == null) return NotFound();
 
@@ -210,7 +225,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     [HttpGet("scene/{sceneId:int}/hls/master.m3u8")]
     public async Task<IActionResult> GetHlsMasterPlaylist(int sceneId, CancellationToken ct)
     {
-        var file = await db.VideoFiles.FirstOrDefaultAsync(f => f.SceneId == sceneId, ct);
+        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
+        if (!sourceSceneId.HasValue) return NotFound();
+
+        var file = await db.VideoFiles.FirstOrDefaultAsync(f => f.SceneId == sourceSceneId.Value, ct);
         if (file == null) return NotFound();
 
         var resolutions = transcodeService.GetAvailableResolutions(file.Width, file.Height);
@@ -260,7 +278,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     [HttpGet("scene/{sceneId:int}/resolutions")]
     public async Task<IActionResult> GetAvailableResolutions(int sceneId, CancellationToken ct)
     {
-        var file = await db.VideoFiles.FirstOrDefaultAsync(f => f.SceneId == sceneId, ct);
+        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
+        if (!sourceSceneId.HasValue) return NotFound();
+
+        var file = await db.VideoFiles.FirstOrDefaultAsync(f => f.SceneId == sourceSceneId.Value, ct);
         if (file == null) return NotFound();
 
         return Ok(transcodeService.GetAvailableResolutions(file.Width, file.Height));
@@ -268,9 +289,12 @@ public class StreamController(IStreamService streamService, IThumbnailService th
 
     private async Task<string?> GetSceneFilePathAsync(int sceneId, CancellationToken ct)
     {
+        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
+        if (!sourceSceneId.HasValue) return null;
+
         var videoFile = await db.VideoFiles
             .Include(f => f.ParentFolder)
-            .FirstOrDefaultAsync(f => f.SceneId == sceneId, ct);
+            .FirstOrDefaultAsync(f => f.SceneId == sourceSceneId.Value, ct);
 
         if (videoFile == null) return null;
 
@@ -279,6 +303,22 @@ public class StreamController(IStreamService streamService, IThumbnailService th
             : videoFile.Basename;
 
         return System.IO.File.Exists(filePath) ? filePath : null;
+    }
+
+    private int? ResolveSourceSceneId(int sceneId)
+        => db.Scenes.AsNoTracking()
+            .Where(scene => scene.Id == sceneId)
+            .Select(scene => (int?)(scene.ParentSceneId ?? scene.Id))
+            .FirstOrDefault();
+
+    private async Task<int?> ResolveSourceSceneIdAsync(int sceneId, CancellationToken ct)
+    {
+        var scene = await db.Scenes.AsNoTracking()
+            .Where(item => item.Id == sceneId)
+            .Select(item => new { item.Id, item.ParentSceneId })
+            .FirstOrDefaultAsync(ct);
+
+        return scene?.ParentSceneId ?? scene?.Id;
     }
 
     private static string GetResForLabel(string label) => label switch

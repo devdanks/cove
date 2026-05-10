@@ -22,6 +22,7 @@ import { useWallColumns } from "../hooks/useWallColumns";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { BookmarkButton } from "../components/BookmarkButton";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -391,6 +392,15 @@ function ImageCard({ image, engagement, onPreview, onDetails, onNavigate, select
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
         <RatingBanner rating={rating} />
+        {!selecting && (
+          <BookmarkButton
+            hostType="image"
+            hostId={image.id}
+            compact
+            deferUntilHover
+            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+          />
+        )}
         {onQuickView && (
           <button
             onClick={(e) => { e.stopPropagation(); onQuickView(); }}

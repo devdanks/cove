@@ -91,6 +91,7 @@ export function HomePage({ onNavigate }: Props) {
 
   return (
     <div className="space-y-6">
+      <ContinueWatchingRow onNavigate={onNavigate} />
       {content.map((item, i) => (
         <RecommendationRow key={i} content={item} onNavigate={onNavigate} />
       ))}
@@ -103,6 +104,52 @@ export function HomePage({ onNavigate }: Props) {
         </button>
       </div>
     </div>
+  );
+}
+
+function ContinueWatchingRow({ onNavigate }: { onNavigate: (r: any) => void }) {
+  const { data: groupData } = useQuery({
+    queryKey: ["front-page-continue-watching-group"],
+    queryFn: () => groups.find({ page: 1, perPage: 100, sort: "name", direction: "asc" }),
+  });
+  const continueGroup = groupData?.items.find((group) => group.querySourceKey === "continue-watching");
+  const { data: items = [], isLoading } = useQuery({
+    queryKey: ["front-page-continue-watching", continueGroup?.id],
+    queryFn: () => groups.items.list(continueGroup!.id),
+    enabled: !!continueGroup,
+  });
+  const playableItems = items.filter((item) => item.sceneId).slice(0, 12);
+  if (!isLoading && playableItems.length === 0) return null;
+
+  return (
+    <RecommendationRowShell header="Continue Watching" viewAllPage="groups" onNavigate={onNavigate} loading={isLoading} count={playableItems.length}>
+      {playableItems.map((item) => (
+        <ContinueWatchingCard key={`${item.groupId}-${item.id}`} item={item} onNavigate={onNavigate} />
+      ))}
+    </RecommendationRowShell>
+  );
+}
+
+function ContinueWatchingCard({ item, onNavigate }: { item: { sceneId?: number | null; sceneTitle?: string; title?: string; startSec?: number }; onNavigate: (r: any) => void }) {
+  const sceneId = item.sceneId ?? 0;
+  const title = item.title || item.sceneTitle || "Untitled";
+  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: sceneId, seekTo: item.startSec ?? 0 }, () => onNavigate({ page: "scene", id: sceneId, seekTo: item.startSec ?? 0 }));
+  return (
+    <a
+      {...linkProps}
+      className="flex-shrink-0 w-[220px] cursor-pointer overflow-hidden rounded border border-border bg-card transition-colors hover:border-accent/50"
+      style={{ scrollSnapAlign: "start" }}
+    >
+      <div className="relative aspect-video bg-black">
+        <img src={`/api/stream/scene/${sceneId}/screenshot`} alt={title} className="h-full w-full object-cover" loading="lazy" />
+        <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">
+          Resume
+        </div>
+      </div>
+      <div className="px-2 py-1.5">
+        <p className="truncate text-sm font-medium text-foreground">{title}</p>
+      </div>
+    </a>
   );
 }
 

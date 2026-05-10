@@ -93,6 +93,8 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             image.ImageGalleries = dto.GalleryIds.Select(gid => new ImageGallery { GalleryId = gid }).ToList();
 
         image = await imageRepo.AddAsync(image, ct);
+        if (dto.GroupIds != null)
+            await ReplaceWholeImageGroupItemsAsync(image.Id, dto.GroupIds, ct);
         if (dto.CustomFields != null)
             await customFields.SaveValuesAsync(CustomFieldEntityTypes.Image, image.Id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
@@ -100,6 +102,10 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
         {
             await tagProvenanceService.SyncTagSetAsync(AffinityHostType.Image, image.Id, [], dto.TagIds, cancellationToken: ct);
+            await db.SaveChangesAsync(ct);
+        }
+        else if (dto.GroupIds != null)
+        {
             await db.SaveChangesAsync(ct);
         }
         var result = await imageRepo.GetByIdWithRelationsAsync(image.Id, ct);
@@ -143,6 +149,8 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             image.ImageGalleries.Clear();
             image.ImageGalleries = dto.GalleryIds.Select(gid => new ImageGallery { GalleryId = gid, ImageId = id }).ToList();
         }
+        if (dto.GroupIds != null)
+            await ReplaceWholeImageGroupItemsAsync(id, dto.GroupIds, ct);
         if (dto.TagIds != null && tagProvenanceService != null)
         {
             await tagProvenanceService.SyncTagSetAsync(
@@ -183,15 +191,16 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             .Select(imageTag => imageTag.Tag!.Id)
             .Distinct()
             .ToArray();
+        var groups = await GetImageGroupsAsync(image.Id, cancellationToken);
         var provenanceLookup = tagProvenanceService == null
             ? null
             : await tagProvenanceService.GetLookupAsync(AffinityHostType.Image, image.Id, tagIds, cancellationToken);
 
         var snapshot = (await engagementService.GetSnapshotsAsync(AffinityHostType.Image, [image.Id], cancellationToken)).GetValueOrDefault(image.Id);
-        return MapToDto(image, null, provenanceLookup, snapshot, principalAccessor?.Current?.UserId != null, await customFields.GetValuesAsync(CustomFieldEntityTypes.Image, image.Id, cancellationToken));
+        return MapToDto(image, null, provenanceLookup, snapshot, principalAccessor?.Current?.UserId != null, await customFields.GetValuesAsync(CustomFieldEntityTypes.Image, image.Id, cancellationToken), groups);
     }
 
-    private ImageDto MapToDto(Image i, int? galleryCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, Dictionary<string, object>? customFieldValues = null) => new(
+    private ImageDto MapToDto(Image i, int? galleryCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, Dictionary<string, object>? customFieldValues = null, List<GroupSummaryDto>? groups = null) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
         i.Organized,
         i.StudioId, i.Studio?.Name,
@@ -211,7 +220,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             f.Height,
             f.Size)).ToList() ?? [],
         customFieldValues,
-        i.CreatedAt.ToString("o"), i.UpdatedAt.ToString("o")
+        i.CreatedAt.ToString("o"), i.UpdatedAt.ToString("o"), groups
     );
 
     private async Task<List<ImageDto>> MapListToDtos(IReadOnlyList<Image> items, CancellationToken ct)
@@ -247,6 +256,42 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         customFieldValues,
         i.CreatedAt.ToString("o"), i.UpdatedAt.ToString("o")
     );
+
+    private async Task<List<GroupSummaryDto>> GetImageGroupsAsync(int imageId, CancellationToken ct)
+        => await db.GroupItems.AsNoTracking()
+            .Where(item => item.ImageId == imageId && item.Kind == GroupItemKind.Image)
+            .OrderBy(item => item.OrderIndex)
+            .ThenBy(item => item.Id)
+            .Select(item => new GroupSummaryDto(item.GroupId, item.Group!.Name, 0))
+            .ToListAsync(ct);
+
+    private async Task ReplaceWholeImageGroupItemsAsync(int imageId, IReadOnlyCollection<SceneGroupInputDto> groups, CancellationToken ct)
+    {
+        var existing = await db.GroupItems
+            .Where(item => item.ImageId == imageId && item.Kind == GroupItemKind.Image)
+            .ToListAsync(ct);
+
+        if (existing.Count > 0)
+            db.GroupItems.RemoveRange(existing);
+
+        var normalizedGroups = groups
+            .GroupBy(group => group.GroupId)
+            .Select((group, index) => new { GroupId = group.Key, OrderIndex = index })
+            .ToList();
+
+        if (normalizedGroups.Count == 0)
+            return;
+
+        db.GroupItems.AddRange(normalizedGroups.Select(group => new GroupItem
+        {
+            GroupId = group.GroupId,
+            OrderIndex = group.OrderIndex,
+            Kind = GroupItemKind.Image,
+            HostType = "image",
+            HostId = imageId,
+            ImageId = imageId,
+        }));
+    }
 
     private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
         => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;

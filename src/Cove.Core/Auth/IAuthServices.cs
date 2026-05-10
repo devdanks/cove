@@ -89,10 +89,14 @@ public sealed record UserTrackingPreferencesDto(
     int? MinDerivedLikeSessionSeconds,
     int? SessionIdleTimeoutSec);
 
+public sealed record UserScenesPreferencesDto(
+    bool? IncludeCompilationGroups);
+
 public sealed record UserUiPreferencesDto(
     UserThemePreferencesDto? Theme,
     UserRatingSystemOptionsDto? RatingSystemOptions,
     UserTrackingPreferencesDto? Tracking,
+    UserScenesPreferencesDto? Scenes,
     Dictionary<string, string>? KeybindingOverrides);
 
 public sealed record CreateUserRequest(

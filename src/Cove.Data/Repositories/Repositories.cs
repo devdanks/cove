@@ -2373,6 +2373,7 @@ public class GroupRepository : IGroupRepository
             : sort switch
         {
             "name" => desc ? query.OrderByDescending(g => g.Name) : query.OrderBy(g => g.Name),
+            "sort_order" => desc ? query.OrderByDescending(g => g.SortOrder).ThenByDescending(g => g.Id) : query.OrderBy(g => g.SortOrder).ThenBy(g => g.Name),
             "date" => desc ? query.OrderByDescending(g => g.Date ?? DateOnly.MinValue) : query.OrderBy(g => g.Date ?? DateOnly.MinValue),
             "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Group, desc),
             "created_at" => desc ? query.OrderByDescending(g => g.CreatedAt) : query.OrderBy(g => g.CreatedAt),

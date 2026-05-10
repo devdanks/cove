@@ -133,6 +133,9 @@ public partial class CoveContext
         modelBuilder.Entity<UserEntityAffinity>().HasQueryFilter(affinity =>
             AuthorizationFiltersBypassed || (CurrentUserId != null && affinity.UserId == CurrentUserId));
 
+        modelBuilder.Entity<UserBookmark>().HasQueryFilter(bookmark =>
+            AuthorizationFiltersBypassed || (CurrentUserId != null && bookmark.UserId == CurrentUserId));
+
         modelBuilder.Entity<Interaction>().HasQueryFilter(interaction =>
             AuthorizationFiltersBypassed || (CurrentUserId != null && interaction.UserId == CurrentUserId));
 
@@ -306,9 +309,19 @@ public partial class CoveContext
         modelBuilder.Entity<GroupItem>().HasQueryFilter(item =>
             AuthorizationFiltersBypassed
                 ? true
-                : (!RequiresSceneReadScopeEvaluation
-                    ? CanReadScenes
-                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, item.SceneId))
+                : (item.HostType == "scene"
+                    ? (!RequiresSceneReadScopeEvaluation
+                        ? CanReadScenes
+                        : item.SceneId != null && CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, item.SceneId.Value))
+                    : item.HostType == "image"
+                        ? (!RequiresImageReadScopeEvaluation
+                            ? CanReadImages
+                            : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadImages, CanReadImagesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Image, item.HostId))
+                        : item.HostType == "group"
+                            ? (!RequiresGroupReadScopeEvaluation
+                                ? CanReadGroups
+                                : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGroups, CanReadGroupsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Group, item.HostId))
+                            : false)
                 && (!RequiresGroupReadScopeEvaluation
                     ? CanReadGroups
                     : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGroups, CanReadGroupsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Group, item.GroupId)));

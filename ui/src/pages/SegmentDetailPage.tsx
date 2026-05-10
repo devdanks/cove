@@ -12,6 +12,7 @@ import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLa
 import { formatDate } from "../components/shared";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { SegmentVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { buildSubSceneCreate } from "../utils/subSceneCreation";
 
 interface Props {
   id: number;
@@ -26,6 +27,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
   const canWriteSegments = canWriteEntity("segment", hasPermission);
   const canDeleteSegments = canDeleteEntity("segment", hasPermission);
   const canReadScenes = canReadEntity("scene", hasPermission);
+  const canWriteScenes = canWriteEntity("scene", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
   const { backLabel, goBack } = useBackNavigation({ page: "segments" }, onNavigate);
 
@@ -159,6 +161,35 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
     },
   });
 
+  const createSubSceneMutation = useMutation({
+    mutationFn: async () => {
+      if (!segment || segment.hostType !== "scene" || !playbackScene) {
+        throw new Error("Segment is not scene-backed");
+      }
+
+      const clipEndSec = segment.endSec ?? playbackScene?.files[0]?.duration;
+      if (clipEndSec == null || clipEndSec <= segment.startSec) {
+        throw new Error("Segment needs an end time before it can become a scene");
+      }
+
+      return scenes.createSubScene(
+        segment.hostId,
+        buildSubSceneCreate(playbackScene, {
+          startSec: segment.startSec,
+          endSec: clipEndSec,
+        }, {
+          title: displayTitle,
+          tagIds: segment.tagId ? [segment.tagId] : undefined,
+        }),
+      );
+    },
+    onSuccess: (newScene) => {
+      queryClient.invalidateQueries({ queryKey: ["scenes"] });
+      queryClient.invalidateQueries({ queryKey: ["scene", segment?.hostId] });
+      onNavigate({ page: "scene", id: newScene.id });
+    },
+  });
+
   const payloadText = useMemo(() => formatPayload(segment?.payload), [segment?.payload]);
   const displayTitle = segment?.title?.trim() || segment?.kind || segment?.tagName || `Segment #${id}`;
   const orderedSiblingSegments = useMemo(
@@ -212,6 +243,12 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
   const previousSegment = sceneContext.previous.at(-1);
   const nextSegment = sceneContext.next[0];
   const hasResolvedSpanPreview = segment?.hostType === "scene" && (containingSpansLoading || (containingSpans?.spans.length ?? 0) > 0);
+  const canCreateSubScene = !!segment
+    && segment.hostType === "scene"
+    && !!playbackScene
+    && canReadScenes
+    && canWriteScenes
+    && (segment.endSec != null || (playbackScene?.files[0]?.duration ?? 0) > segment.startSec);
   const tabs = useMemo(() => {
     const baseTabs = [
       { key: "overview", label: "Overview" },
@@ -694,6 +731,17 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
             <Pencil className="h-4 w-4" />
             {canWriteSegments ? "Edit" : "Details"}
           </button>
+          {segment.hostType === "scene" && canReadScenes ? (
+            <button
+              type="button"
+              onClick={() => createSubSceneMutation.mutate()}
+              disabled={!canCreateSubScene || createSubSceneMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Clapperboard className="h-4 w-4" />
+              {createSubSceneMutation.isPending ? "Creating..." : "Make Scene"}
+            </button>
+          ) : null}
           {segment.hostType === "scene" && canReadScenes ? (
             <button
               type="button"

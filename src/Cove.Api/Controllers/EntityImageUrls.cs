@@ -9,6 +9,27 @@ internal static class EntityImageUrls
     public const int DefaultEntityImageMaxDimension = 640;
     public const int DefaultGalleryCoverMaxDimension = 640;
 
+    public static string Scene(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
+        => Build(null, $"/api/scenes/{id}/image", updatedAt, maxDimension);
+
+    public static string Scene(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
+        => Build(context, $"/api/scenes/{id}/image", updatedAt, maxDimension);
+
+    public static string SceneScreenshot(HttpContext? context, int id, DateTime updatedAt, double? seconds = null)
+    {
+        var query = new List<KeyValuePair<string, string?>>
+        {
+            new("v", updatedAt.ToString("o", CultureInfo.InvariantCulture)),
+        };
+        if (seconds.HasValue)
+        {
+            query.Add(new("seconds", seconds.Value.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        AppendAuthQuery(context, query);
+        return $"/api/stream/scene/{id}/screenshot" + QueryString.Create(query);
+    }
+
     public static string Performer(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(null, $"/api/performers/{id}/image", updatedAt, maxDimension);
 

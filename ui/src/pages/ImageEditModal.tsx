@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { images, tags as tagsApi, performers as performersApi, galleries as galleriesApi } from "../api/client";
-import type { Image, ImageCreate } from "../api/types";
+import { images, tags as tagsApi, performers as performersApi, galleries as galleriesApi, groups as groupsApi } from "../api/client";
+import type { Image, ImageCreate, SceneGroupInput } from "../api/types";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
@@ -34,6 +34,7 @@ interface ImageFormState {
   selectedTagIds: number[];
   selectedPerformerIds: number[];
   selectedGalleryIds: number[];
+  selectedGroups: SceneGroupInput[];
   customFields: Record<string, unknown>;
 }
 
@@ -64,6 +65,7 @@ const EMPTY_FORM_STATE: ImageFormState = {
   selectedTagIds: [],
   selectedPerformerIds: [],
   selectedGalleryIds: [],
+  selectedGroups: [],
   customFields: {},
 };
 
@@ -89,6 +91,7 @@ function toFormState(image?: Image): ImageFormState {
     selectedTagIds: image.tags.map((tag) => tag.id),
     selectedPerformerIds: image.performers.map((performer) => performer.id),
     selectedGalleryIds: image.galleryIds ?? [],
+      selectedGroups: (image.groups ?? []).map((group) => ({ groupId: group.id, sceneIndex: group.sceneIndex ?? 0 })),
     customFields: { ...(image.customFields ?? {}) },
   };
 }
@@ -100,6 +103,7 @@ function cloneFormState(state: ImageFormState): ImageFormState {
     selectedTagIds: [...state.selectedTagIds],
     selectedPerformerIds: [...state.selectedPerformerIds],
     selectedGalleryIds: [...state.selectedGalleryIds],
+    selectedGroups: state.selectedGroups.map((group) => ({ ...group })),
     customFields: { ...state.customFields },
   };
 }
@@ -109,6 +113,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
   const [tagSearch, setTagSearch] = useState("");
   const [perfSearch, setPerfSearch] = useState("");
   const [gallerySearch, setGallerySearch] = useState("");
+  const [groupSearch, setGroupSearch] = useState("");
 
   const { data: allTags } = useQuery({
     queryKey: ["tags-all"],
@@ -128,12 +133,19 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
     enabled: open,
   });
 
+  const { data: allGroups } = useQuery({
+    queryKey: ["groups-all"],
+    queryFn: () => groupsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
+    enabled: open,
+  });
+
   useEffect(() => {
     if (!open) return;
     setForm(cloneFormState(initialState));
     setTagSearch("");
     setPerfSearch("");
     setGallerySearch("");
+    setGroupSearch("");
   }, [initialState, open, resetSignal]);
 
   const handleSave = () => {
@@ -151,6 +163,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       tagIds: form.selectedTagIds,
       performerIds: form.selectedPerformerIds,
       galleryIds: form.selectedGalleryIds,
+      groupIds: form.selectedGroups,
       customFields: image ? form.customFields : Object.keys(form.customFields).length > 0 ? form.customFields : undefined,
     });
   };
@@ -159,6 +172,10 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
 
   const filteredPerformers = allPerformers?.items.filter(
     (performer) => !form.selectedPerformerIds.includes(performer.id) && performer.name.toLowerCase().includes(perfSearch.toLowerCase())
+  ) ?? [];
+  const selectedGroupIds = form.selectedGroups.map((group) => group.groupId);
+  const filteredGroups = allGroups?.items.filter(
+    (group) => !selectedGroupIds.includes(group.id) && group.name.toLowerCase().includes(groupSearch.toLowerCase())
   ) ?? [];
 
   const selectedTags = allTags?.items.filter((tag) => form.selectedTagIds.includes(tag.id)) ?? image?.tags ?? [];
@@ -282,6 +299,41 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
                 className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
               >
                 {g.title || "Untitled"}
+              </button>
+            ))}
+          </div>
+        )}
+      </Field>
+
+      <Field label="Groups">
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {form.selectedGroups.map((selectedGroup) => {
+            const group = allGroups?.items.find((item) => item.id === selectedGroup.groupId)
+              ?? image?.groups?.find((item) => item.id === selectedGroup.groupId);
+            return (
+              <span key={selectedGroup.groupId} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-900 text-orange-300">
+                {group?.name || "Untitled group"}
+                <button onClick={() => setForm({ ...form, selectedGroups: form.selectedGroups.filter((item) => item.groupId !== selectedGroup.groupId) })} className="hover:text-white">×</button>
+              </span>
+            );
+          })}
+        </div>
+        <input
+          type="text"
+          value={groupSearch}
+          onChange={(e) => setGroupSearch(e.target.value)}
+          placeholder="Search groups..."
+          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
+        />
+        {groupSearch && filteredGroups.length > 0 && (
+          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
+            {filteredGroups.slice(0, 10).map((group) => (
+              <button
+                key={group.id}
+                onClick={() => { setForm({ ...form, selectedGroups: [...form.selectedGroups, { groupId: group.id, sceneIndex: 0 }] }); setGroupSearch(""); }}
+                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
+              >
+                {group.name}
               </button>
             ))}
           </div>

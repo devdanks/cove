@@ -33,9 +33,12 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
 
+        var sourceSceneId = await ResolveSourceSceneIdAsync(db, sceneId, ct);
+        if (!sourceSceneId.HasValue) return null;
+
         var videoFile = await db.VideoFiles
             .Include(f => f.ParentFolder)
-            .FirstOrDefaultAsync(f => f.SceneId == sceneId, ct);
+            .FirstOrDefaultAsync(f => f.SceneId == sourceSceneId.Value, ct);
 
         if (videoFile == null) return null;
 
@@ -55,31 +58,36 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
 
     public async Task<(Stream stream, string contentType, bool useLongCache)?> GetSceneScreenshot(int sceneId, double? seconds, CancellationToken ct = default)
     {
+        using var scope = scopeFactory?.CreateScope();
+        var db = scope?.ServiceProvider.GetService<CoveContext>();
+        var sceneSource = db is null ? new SceneSource(sceneId, null) : await ResolveSceneSourceAsync(db, sceneId, ct);
+        if (sceneSource is null) return null;
+
+        var sourceSceneId = sceneSource.Value.SourceSceneId;
+        var effectiveSeconds = seconds ?? sceneSource.Value.ClipStartSec;
+
         // For timestamped thumbnails, only serve from cache — never generate on demand.
         // Thumbnail generation is exclusively the job of the generate task.
-        if (seconds.HasValue)
+        if (effectiveSeconds.HasValue)
         {
-            var tsPath = thumbnailService.GetTimestampedThumbnailPath(sceneId, seconds.Value);
+            var tsPath = thumbnailService.GetTimestampedThumbnailPath(sourceSceneId, effectiveSeconds.Value);
             if (File.Exists(tsPath))
             {
                 var stream = new FileStream(tsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
                 return (stream, "image/jpeg", true);
             }
 
-            var spriteFrame = await TryOpenSpriteFrameAsync(sceneId, seconds.Value, ct);
+            var spriteFrame = await TryOpenSpriteFrameAsync(sourceSceneId, effectiveSeconds.Value, ct);
             if (spriteFrame != null) return spriteFrame;
-
-            return null;
         }
 
-        using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
-
-        var customCoverBlobId = await db.Scenes
-            .AsNoTracking()
-            .Where(scene => scene.Id == sceneId)
-            .Select(scene => scene.ImageBlobId)
-            .FirstOrDefaultAsync(ct);
+        var customCoverBlobId = db is null
+            ? null
+            : await db.Scenes
+                .AsNoTracking()
+                .Where(scene => scene.Id == sceneId)
+                .Select(scene => scene.ImageBlobId)
+                .FirstOrDefaultAsync(ct);
 
         if (!string.IsNullOrWhiteSpace(customCoverBlobId))
         {
@@ -91,7 +99,7 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
         }
 
         // Default cover thumbnail (no timestamp) — also only served from cache
-        var thumbPath = await thumbnailService.GetSceneThumbnailPathAsync(sceneId, ct);
+        var thumbPath = await thumbnailService.GetSceneThumbnailPathAsync(sourceSceneId, ct);
         if (thumbPath == null) return null;
 
         var defaultStream = new FileStream(thumbPath, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
@@ -100,13 +108,35 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
 
     public async Task<(Stream stream, string contentType, bool useLongCache)?> GetSegmentAnimatedPreview(int sceneId, double seconds, CancellationToken ct = default)
     {
-        var previewPath = thumbnailService.GetSegmentAnimatedPreviewPath(sceneId, seconds);
+        using var scope = scopeFactory?.CreateScope();
+        var db = scope?.ServiceProvider.GetService<CoveContext>();
+        var sourceSceneId = db is null ? sceneId : await ResolveSourceSceneIdAsync(db, sceneId, ct);
+        if (!sourceSceneId.HasValue) return null;
+
+        var previewPath = thumbnailService.GetSegmentAnimatedPreviewPath(sourceSceneId.Value, seconds);
         if (!File.Exists(previewPath))
-            return await TryOpenSpriteFrameAsync(sceneId, seconds, ct);
+            return await TryOpenSpriteFrameAsync(sourceSceneId.Value, seconds, ct);
 
         Stream stream = new FileStream(previewPath, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
         return (stream, "image/webp", true);
     }
+
+    private static async Task<int?> ResolveSourceSceneIdAsync(CoveContext db, int sceneId, CancellationToken ct)
+        => (await ResolveSceneSourceAsync(db, sceneId, ct))?.SourceSceneId;
+
+    private static async Task<SceneSource?> ResolveSceneSourceAsync(CoveContext db, int sceneId, CancellationToken ct)
+    {
+        var scene = await db.Scenes.AsNoTracking()
+            .Where(item => item.Id == sceneId)
+            .Select(item => new { item.Id, item.ParentSceneId, item.ClipStartSec })
+            .FirstOrDefaultAsync(ct);
+
+        return scene is null
+            ? null
+            : new SceneSource(scene.ParentSceneId ?? scene.Id, scene.ClipStartSec);
+    }
+
+    private readonly record struct SceneSource(int SourceSceneId, double? ClipStartSec);
 
     private async Task<(Stream stream, string contentType, bool useLongCache)?> TryOpenSpriteFrameAsync(int sceneId, double seconds, CancellationToken ct)
     {

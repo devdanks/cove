@@ -24,6 +24,7 @@ import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
+import { BookmarkButton } from "../components/BookmarkButton";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -307,6 +308,15 @@ function GalleryCard({ gallery, engagement, onClick, onNavigate, selected, onSel
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card bg-card rounded overflow-hidden border hover:border-accent/60 transition-all cursor-pointer group relative ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}>
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+      {!selecting && (
+        <BookmarkButton
+          hostType="gallery"
+          hostId={gallery.id}
+          compact
+          deferUntilHover
+          className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+        />
+      )}
       {selecting ? (
         cardContent
       ) : (

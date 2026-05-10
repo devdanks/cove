@@ -16,6 +16,11 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
             .HasForeignKey(s => s.StudioId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.HasOne(s => s.ParentScene)
+            .WithMany(s => s.ChildScenes)
+            .HasForeignKey(s => s.ParentSceneId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.HasMany(s => s.Urls).WithOne(u => u.Scene).HasForeignKey(u => u.SceneId).OnDelete(DeleteBehavior.Cascade);
         builder.HasMany(s => s.Files).WithOne(f => f.Scene).HasForeignKey(f => f.SceneId).OnDelete(DeleteBehavior.SetNull);
         builder.HasMany(s => s.SceneMarkers).WithOne(m => m.Scene).HasForeignKey(m => m.SceneId).OnDelete(DeleteBehavior.Cascade);
@@ -25,6 +30,7 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
 
         builder.HasIndex(s => s.Title);
         builder.HasIndex(s => s.StudioId);
+        builder.HasIndex(s => s.ParentSceneId);
         builder.HasIndex(s => s.Date);
         builder.HasIndex(s => s.CreatedAt);
         builder.HasIndex(s => s.UpdatedAt);
@@ -121,10 +127,16 @@ public class GroupItemConfiguration : IEntityTypeConfiguration<GroupItem>
         builder.ToTable("group_items");
         builder.HasKey(item => item.Id);
         builder.HasOne(item => item.Group).WithMany(group => group.GroupItems).HasForeignKey(item => item.GroupId).OnDelete(DeleteBehavior.Cascade);
+        builder.Property(item => item.HostType).IsRequired().HasMaxLength(50).HasDefaultValue("scene");
         builder.HasOne(item => item.Scene).WithMany(scene => scene.GroupItems).HasForeignKey(item => item.SceneId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(item => item.Image).WithMany().HasForeignKey(item => item.ImageId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(item => item.ChildGroup).WithMany().HasForeignKey(item => item.ChildGroupId).OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(item => new { item.GroupId, item.OrderIndex });
+        builder.HasIndex(item => new { item.HostType, item.HostId });
         builder.HasIndex(item => item.SceneId);
+        builder.HasIndex(item => item.ImageId);
+        builder.HasIndex(item => item.ChildGroupId);
         builder.HasIndex(item => item.SourceProfileId);
     }
 }
@@ -486,9 +498,11 @@ public class GroupConfiguration : IEntityTypeConfiguration<Group>
 
         builder.HasOne(g => g.Studio).WithMany(s => s.Groups).HasForeignKey(g => g.StudioId).OnDelete(DeleteBehavior.SetNull);
         builder.HasMany(g => g.Urls).WithOne(u => u.Group).HasForeignKey(u => u.GroupId).OnDelete(DeleteBehavior.Cascade);
+        builder.Property(g => g.SortOrder).HasDefaultValue(0);
 
         builder.HasIndex(g => g.Name);
         builder.HasIndex(g => g.StudioId);
+        builder.HasIndex(g => g.SortOrder);
     }
 }
 
@@ -794,6 +808,16 @@ public class UserEntityAffinityConfiguration : IEntityTypeConfiguration<UserEnti
         builder.Property(affinity => affinity.LikeCount).HasDefaultValue(0);
         builder.Property(affinity => affinity.DerivedLikeCount).HasDefaultValue(0);
         builder.Property(affinity => affinity.PageVisitCount).HasDefaultValue(0);
+    }
+}
+
+public class UserBookmarkConfiguration : IEntityTypeConfiguration<UserBookmark>
+{
+    public void Configure(EntityTypeBuilder<UserBookmark> builder)
+    {
+        builder.ToTable("user_bookmarks");
+        builder.HasKey(bookmark => new { bookmark.UserId, bookmark.HostType, bookmark.HostId });
+        builder.HasIndex(bookmark => new { bookmark.UserId, bookmark.CreatedAt });
     }
 }
 

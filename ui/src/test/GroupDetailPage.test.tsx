@@ -14,6 +14,7 @@ const { mockGroups, mockScenes, mockGoBack } = vi.hoisted(() => ({
     reorderSubGroups: vi.fn(),
     containingGroups: vi.fn(),
     items: {
+      page: vi.fn(),
       list: vi.fn(),
       delete: vi.fn(),
       reorder: vi.fn(),
@@ -168,6 +169,12 @@ describe("GroupDetailPage", () => {
     mockGroups.items.list.mockResolvedValue([
       { id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 },
     ]);
+    mockGroups.items.page.mockResolvedValue({
+      items: [{ id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 }],
+      totalCount: 1,
+      page: 1,
+      perPage: 40,
+    });
     mockGroups.items.playbackManifest.mockResolvedValue({
       items: [{ groupItemId: 21, sceneId: 10, title: "Clip One", startSec: 1, endSec: 5, durationSec: 4 }],
     });
@@ -194,6 +201,12 @@ describe("GroupDetailPage", () => {
     mockGroups.items.list.mockResolvedValue([
       { id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 },
     ]);
+    mockGroups.items.page.mockResolvedValue({
+      items: [{ id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 }],
+      totalCount: 1,
+      page: 1,
+      perPage: 40,
+    });
     mockGroups.items.playbackManifest.mockResolvedValue({
       items: [{ groupItemId: 21, sceneId: 10, title: "Clip One", startSec: 1, endSec: 5, durationSec: 4 }],
     });
@@ -216,6 +229,7 @@ describe("GroupDetailPage", () => {
   it("adds a subgroup from the search results", async () => {
     mockGroups.get.mockResolvedValue(buildGroup({ subGroupCount: 0 }));
     mockGroups.items.list.mockResolvedValue([]);
+    mockGroups.items.page.mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 40 });
     mockGroups.items.playbackManifest.mockResolvedValue({ items: [] });
     mockScenes.find.mockResolvedValue({ items: [], totalCount: 0 });
     mockGroups.subGroups.mockResolvedValue([]);

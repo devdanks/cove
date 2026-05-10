@@ -29,8 +29,10 @@ import { VideoPlayer } from "../components/VideoPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { trackInteraction } from "../utils/interactionTracking";
+import { buildSubSceneCreate } from "../utils/subSceneCreation";
 import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector, type SelectableTag } from "../components/TagSelector";
+import { BookmarkButton } from "../components/BookmarkButton";
 
 const SceneEditModal = lazy(() => import("./SceneEditModal").then((module) => ({ default: module.SceneEditModal })));
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
@@ -358,6 +360,11 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const file = scene.files[0];
   const streamUrl = scenes.streamUrl(id);
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
+  const sceneClip = typeof scene.clipStartSec === "number"
+    ? { start: scene.clipStartSec, end: scene.clipEndSec, loop: false }
+    : undefined;
+  const playbackResumeTime = sceneClip ? (effectiveResumeTime ?? sceneClip.start) : effectiveResumeTime;
+  const clipDuration = sceneClip && sceneClip.end != null ? Math.max(0, sceneClip.end - sceneClip.start) : null;
 
   const studioImageUrl = scene.studioId ? entityImages.studioImageUrl(scene.studioId) : null;
   const sceneTitle = scene.title || file?.basename || `Scene ${scene.id}`;
@@ -403,6 +410,16 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           ) : null}
           {file && file.frameRate > 0 ? <span>{file.frameRate.toFixed(0)} fps</span> : null}
           {file && resLabel ? <span className="font-semibold text-accent">{resLabel}</span> : null}
+          {clipDuration != null ? <span>{formatDuration(clipDuration)}</span> : null}
+          {scene.parentSceneId ? (
+            <button
+              type="button"
+              onClick={() => onNavigate({ page: "scene", id: scene.parentSceneId })}
+              className="hover:text-foreground"
+            >
+              Source {scene.parentSceneTitle || `Scene ${scene.parentSceneId}`}
+            </button>
+          ) : null}
           {scene.code ? <span>Code {scene.code}</span> : null}
           {scene.director ? (
             <button
@@ -484,6 +501,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       </div>
 
       <ExtensionSlot slot="scene-detail-actions" context={{ scene, onNavigate }} />
+      <BookmarkButton hostType="scene" hostId={scene.id} compact />
     </>
   );
 
@@ -506,11 +524,14 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         onNavigate={onNavigate}
       />
       <SegmentsPanel
+        scene={scene}
         sceneId={scene.id}
         segments={segments}
         loading={segmentsLoading}
         canEdit={canWriteSegments}
+        canCreateSubScenes={canWriteScene}
         onSeek={(time) => seekRef.current?.(time)}
+        onNavigate={onNavigate}
       />
     </div>
   ) : activeTab === "similar" ? (
@@ -550,7 +571,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             posterUrl={scenes.screenshotUrl(id, scene.updatedAt)}
             format={file.format}
             duration={file.duration}
-            resumeTime={effectiveResumeTime}
+            resumeTime={playbackResumeTime}
             sceneId={id}
             detections={detections}
             captions={file.captions}
@@ -559,7 +580,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             autostart={config?.ui.autostartVideo}
             showAbLoop={config?.ui.showAbLoopControls}
             trackingEnabled={trackPlaybackActivity}
-            onEnded={() => { if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
+            clip={sceneClip}
+            onEnded={sceneClip ? undefined : () => { if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
             onPrev={hasPrev && prevId != null ? () => onNavigate({ page: "scene", id: prevId }) : undefined}
             onNext={hasNext && nextId != null ? () => onNavigate({ page: "scene", id: nextId }) : undefined}
           />
@@ -799,6 +821,24 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
               <button onClick={() => onNavigate({ page: "scenes", query: scene.director })} className="text-accent hover:underline">
                 {scene.director}
               </button>
+            </dd>
+          </>
+        )}
+        {scene.parentSceneId && (
+          <>
+            <dt className="text-muted pr-3">Source Scene</dt>
+            <dd>
+              <button onClick={() => onNavigate({ page: "scene", id: scene.parentSceneId })} className="text-accent hover:underline">
+                {scene.parentSceneTitle || `Scene ${scene.parentSceneId}`}
+              </button>
+            </dd>
+          </>
+        )}
+        {typeof scene.clipStartSec === "number" && (
+          <>
+            <dt className="text-muted pr-3">Clip Range</dt>
+            <dd className="text-foreground">
+              {formatDuration(scene.clipStartSec)} - {formatDuration(scene.clipEndSec ?? scene.files[0]?.duration ?? scene.clipStartSec)}
             </dd>
           </>
         )}
@@ -1907,17 +1947,23 @@ function formatTimelineTime(seconds: number) {
 }
 
 function SegmentsPanel({
+  scene,
   sceneId,
   segments,
   loading,
   canEdit,
+  canCreateSubScenes,
   onSeek,
+  onNavigate,
 }: {
+  scene: Scene;
   sceneId: number;
   segments: Segment[];
   loading: boolean;
   canEdit: boolean;
+  canCreateSubScenes: boolean;
   onSeek?: (time: number) => void;
+  onNavigate: (r: any) => void;
 }) {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -1978,6 +2024,27 @@ function SegmentsPanel({
       queryClient.invalidateQueries({ queryKey: ["scene", sceneId, "segments"] });
     },
   });
+  const createSubSceneMutation = useMutation({
+    mutationFn: async (segment: Segment) => {
+      const clipEndSec = segment.endSec ?? scene.files[0]?.duration;
+      if (clipEndSec == null || clipEndSec <= segment.startSec) {
+        throw new Error("Segment needs an end time before it can become a scene");
+      }
+
+      return scenes.createSubScene(scene.id, buildSubSceneCreate(scene, {
+        startSec: segment.startSec,
+        endSec: clipEndSec,
+      }, {
+        title: segment.title?.trim() || segment.kind || segment.tagName || scene.title,
+        tagIds: segment.tagId ? [segment.tagId] : undefined,
+      }));
+    },
+    onSuccess: (newScene) => {
+      queryClient.invalidateQueries({ queryKey: ["scenes"] });
+      queryClient.invalidateQueries({ queryKey: ["scene", scene.id] });
+      onNavigate({ page: "scene", id: newScene.id });
+    },
+  });
 
   const resetForm = () => {
     setAdding(false);
@@ -2018,6 +2085,11 @@ function SegmentsPanel({
       endSec: endSec === "" ? undefined : endSec,
       tagId: selectedTagId ?? undefined,
     });
+  };
+
+  const canCreateSubSceneFromSegment = (segment: Segment) => {
+    const clipEndSec = segment.endSec ?? scene.files[0]?.duration;
+    return canCreateSubScenes && clipEndSec != null && clipEndSec > segment.startSec;
   };
 
   return (
@@ -2124,8 +2196,18 @@ function SegmentsPanel({
               {segment.tagName && <span className="rounded bg-surface px-1.5 py-0.5 text-xs text-secondary">{segment.tagName}</span>}
               {segment.kind && <span className="rounded bg-surface px-1.5 py-0.5 text-xs text-secondary">{segment.kind}</span>}
             </button>
-            {canEdit && (
+            {(canEdit || canCreateSubScenes) && (
               <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                {canCreateSubScenes ? (
+                  <button
+                    onClick={() => createSubSceneMutation.mutate(segment)}
+                    disabled={!canCreateSubSceneFromSegment(segment) || createSubSceneMutation.isPending}
+                    className="text-muted hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Make scene"
+                  >
+                    <Clapperboard className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
                 <button onClick={() => startEdit(segment)} className="text-muted hover:text-accent" title="Edit segment">
                   <Pencil className="h-3.5 w-3.5" />
                 </button>

@@ -2,12 +2,15 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, FolderPlus, Layers } from "lucide-react";
 import { groups } from "../api/client";
-import type { SegmentSpanDerivedQuery } from "../api/types";
+import type { GroupItemKind, SegmentSpanDerivedQuery } from "../api/types";
 import { EditModal } from "./EditModal";
 
 export interface AddToGroupEntry {
   key: string;
-  sceneId: number;
+  sceneId?: number;
+  hostType?: string;
+  hostId?: number;
+  kind?: GroupItemKind;
   spanKey?: string;
   startSec?: number;
   endSec?: number;
@@ -29,7 +32,7 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
 
-  const normalizedItems = useMemo(() => items.filter((item) => item.sceneId > 0), [items]);
+  const normalizedItems = useMemo(() => items.filter((item) => (item.sceneId ?? item.hostId ?? 0) > 0), [items]);
   const existingGroupQuery = useQuery({
     queryKey: ["groups", "picker", groupSearch],
     queryFn: () => groups.find({ page: 1, perPage: 20, sort: "name", direction: "asc", q: groupSearch.trim() || undefined }),
@@ -39,7 +42,7 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
   const addMutation = useMutation({
     mutationFn: async () => {
       if (normalizedItems.length === 0) {
-        throw new Error("No scene-backed segments or spans were selected.");
+        throw new Error("No group-ready items were selected.");
       }
 
       let groupId = selectedGroupId;
@@ -53,8 +56,12 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
         groupId = created.id;
       }
 
-      await groups.items.fromSpans(groupId, {
-        spans: normalizedItems.map((item) => ({
+      const spanItems = normalizedItems.filter((item) => item.sceneId && (item.spanKey || item.startSec != null || item.endSec != null || item.derivedQuery));
+      const directItems = normalizedItems.filter((item) => !spanItems.includes(item));
+
+      if (spanItems.length > 0) {
+        await groups.items.fromSpans(groupId, {
+          spans: spanItems.map((item) => ({
           spanKey: item.spanKey,
           sceneId: item.sceneId,
           startSec: item.startSec,
@@ -62,8 +69,23 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
           title: item.title,
           profileId: item.profileId,
           derivedQuery: item.derivedQuery,
-        })),
-      });
+          })),
+        });
+      }
+
+      for (const item of directItems) {
+        const hostType = item.hostType ?? (item.sceneId ? "scene" : undefined);
+        const hostId = item.hostId ?? item.sceneId;
+        if (!hostType || !hostId) continue;
+        await groups.items.create(groupId, {
+          orderIndex: 1_000_000,
+          kind: item.kind ?? (hostType === "image" ? "image" : hostType === "group" ? "group" : "scene"),
+          hostType,
+          hostId,
+          sceneId: hostType === "scene" ? hostId : undefined,
+          title: item.title,
+        });
+      }
 
       return groupId;
     },

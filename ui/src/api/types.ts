@@ -10,6 +10,7 @@ export interface Scene {
   organized: boolean;
   studioId?: number;
   studioName?: string;
+  imagePath?: string;
   urls: string[];
   tags: Tag[];
   performers: PerformerSummary[];
@@ -21,6 +22,18 @@ export interface Scene {
   createdAt: string;
   updatedAt: string;
   contextTagApplications?: TagApplication[];
+  parentSceneId?: number;
+  parentSceneTitle?: string;
+  clipStartSec?: number;
+  clipEndSec?: number;
+  childSceneCount?: number;
+}
+
+export interface SceneListEntry {
+  kind: "scene" | "compilation";
+  id: number;
+  scene?: Scene;
+  group?: Group;
 }
 
 export interface SceneRemoteId {
@@ -43,6 +56,9 @@ export interface SceneCreate {
   galleryIds?: number[];
   groups?: { groupId: number; sceneIndex: number }[];
   customFields?: Record<string, unknown>;
+  parentSceneId?: number;
+  clipStartSec?: number;
+  clipEndSec?: number;
 }
 
 export interface SceneUpdate extends Partial<SceneCreate> {}
@@ -464,6 +480,7 @@ export interface Image {
   galleryCount: number;
   galleryIds: number[];
   galleries: GallerySummary[];
+  groups?: GroupSummary[];
   files: ImageFile[];
   customFields?: Record<string, unknown>;
   createdAt: string;
@@ -497,6 +514,7 @@ export interface ImageCreate {
   performerIds?: number[];
   galleryIds?: number[];
   customFields?: Record<string, unknown>;
+  groupIds?: SceneGroupInput[];
 }
 
 export interface ImageUpdate {
@@ -513,6 +531,7 @@ export interface ImageUpdate {
   performerIds?: number[];
   galleryIds?: number[];
   customFields?: Record<string, unknown>;
+  groupIds?: SceneGroupInput[];
 }
 
 export interface Group {
@@ -536,6 +555,20 @@ export interface Group {
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  kind?: "static" | "dynamic";
+  querySourceKey?: string | null;
+  queryJson?: string | null;
+  lastResolvedAt?: string | null;
+  cachedItemCount?: number | null;
+  cacheTtlSec?: number;
+  showInSceneLists?: boolean;
+  allowedHostTypes?: string[];
+  sortOrder?: number;
+}
+
+export interface GroupReorder {
+  ids: number[];
+  startIndex?: number;
 }
 
 export interface GroupSummary {
@@ -544,15 +577,21 @@ export interface GroupSummary {
   sceneIndex: number;
 }
 
-export type GroupItemKind = "scene" | "sceneRange";
+export type GroupItemKind = "scene" | "sceneRange" | "image" | "audio" | "text" | "group" | "performer" | "studio" | "tag" | "gallery" | "face" | "segment";
 
 export interface GroupItem {
   id: number;
   groupId: number;
   orderIndex: number;
   kind: GroupItemKind;
-  sceneId: number;
+  sceneId?: number | null;
   sceneTitle?: string;
+  hostType?: string;
+  hostId?: number;
+  imageId?: number | null;
+  imageTitle?: string | null;
+  childGroupId?: number | null;
+  childGroupName?: string | null;
   startSec?: number;
   endSec?: number;
   title?: string;
@@ -568,7 +607,9 @@ export interface GroupItem {
 export interface GroupItemCreate {
   orderIndex: number;
   kind: GroupItemKind;
-  sceneId: number;
+  sceneId?: number;
+  hostType?: string;
+  hostId?: number;
   startSec?: number;
   endSec?: number;
   title?: string;
@@ -589,6 +630,7 @@ export interface GroupItemUpdate {
 
 export interface GroupItemsReorder {
   ids: number[];
+  startIndex?: number;
 }
 
 export interface GroupItemSpanInput {
@@ -639,9 +681,51 @@ export interface GroupCreate {
   urls?: string[];
   tagIds?: number[];
   customFields?: Record<string, unknown>;
+  kind?: "static" | "dynamic";
+  querySourceKey?: string | null;
+  queryJson?: string | null;
+  cacheTtlSec?: number | null;
+  showInSceneLists?: boolean | null;
+  allowedHostTypes?: string[] | null;
+  sortOrder?: number | null;
 }
 
 export interface GroupUpdate extends Partial<GroupCreate> {}
+
+export interface BookmarkDto {
+  hostType: AffinityHostType;
+  hostId: number;
+  createdAt: string;
+}
+
+export interface BookmarkToggle {
+  hostType: AffinityHostType;
+  hostId: number;
+  saved: boolean;
+}
+
+export interface BookmarkState {
+  hostType: AffinityHostType;
+  hostId: number;
+  saved: boolean;
+  createdAt?: string | null;
+}
+
+export interface BookmarkBatchRequest {
+  hostType: AffinityHostType;
+  hostIds: number[];
+}
+
+export interface DynamicGroupSource {
+  key: string;
+  displayName: string;
+}
+
+export interface GroupQueryUpdate {
+  querySourceKey: string;
+  queryJson?: string | null;
+  cacheTtlSec?: number | null;
+}
 
 export interface VideoFile {
   id: number;
@@ -1324,7 +1408,12 @@ export interface UserUiPreferences {
   theme?: UserThemePreferences | null;
   ratingSystemOptions?: RatingSystemOptions | null;
   tracking?: UserTrackingPreferences | null;
+  scenes?: UserScenesPreferences | null;
   keybindingOverrides?: Record<string, string> | null;
+}
+
+export interface UserScenesPreferences {
+  includeCompilationGroups?: boolean | null;
 }
 
 export interface UserTrackingPreferences {

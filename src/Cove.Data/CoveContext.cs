@@ -56,6 +56,7 @@ public partial class CoveContext : DbContext
     public DbSet<PlaybackSession> PlaybackSessions => Set<PlaybackSession>();
     public DbSet<PlaybackInterval> PlaybackIntervals => Set<PlaybackInterval>();
     public DbSet<Rating> Ratings => Set<Rating>();
+    public DbSet<UserBookmark> UserBookmarks => Set<UserBookmark>();
     public DbSet<SavedFilter> SavedFilters => Set<SavedFilter>();
     public DbSet<GalleryChapter> GalleryChapters => Set<GalleryChapter>();
     public DbSet<ScrapeAttempt> ScrapeAttempts => Set<ScrapeAttempt>();
@@ -400,6 +401,25 @@ public partial class CoveContext : DbContext
     {
         var ids = new HashSet<int>();
         CollectChangedNullableIntKey(ids, ChangeTracker.Entries<VideoFile>(), entry => entry.SceneId, nameof(VideoFile.SceneId));
+
+        foreach (var entry in ChangeTracker.Entries<Scene>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Added && entry.Entity.ParentSceneId.HasValue)
+                AddIfPositive(ids, entry.Entity.Id);
+        }
+
+        var sourceSceneIds = ids.ToArray();
+        if (sourceSceneIds.Length > 0)
+        {
+            foreach (var childSceneId in Scenes.AsNoTracking()
+                .Where(scene => scene.ParentSceneId.HasValue && sourceSceneIds.Contains(scene.ParentSceneId.Value))
+                .Select(scene => scene.Id)
+                .ToList())
+            {
+                AddIfPositive(ids, childSceneId);
+            }
+        }
+
         return ids;
     }
 
@@ -851,8 +871,9 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = scenes.Keys.ToArray();
+        var sourceIds = ids.Concat(scenes.Values.Select(scene => scene.ParentSceneId).Where(parentId => parentId.HasValue).Select(parentId => parentId!.Value)).Distinct().ToArray();
         var fileRows = VideoFiles.AsNoTracking()
-            .Where(file => file.SceneId.HasValue && ids.Contains(file.SceneId.Value))
+            .Where(file => file.SceneId.HasValue && sourceIds.Contains(file.SceneId.Value))
             .Select(file => new
             {
                 SceneId = file.SceneId!.Value,
@@ -894,7 +915,8 @@ public partial class CoveContext : DbContext
 
         foreach (var scene in scenes.Values)
         {
-            if (!summaries.TryGetValue(scene.Id, out var summary))
+            var sourceSceneId = scene.ParentSceneId ?? scene.Id;
+            if (!summaries.TryGetValue(sourceSceneId, out var summary))
             {
                 scene.FileCount = 0;
                 scene.MaxDuration = 0;
@@ -917,7 +939,9 @@ public partial class CoveContext : DbContext
             }
 
             scene.FileCount = summary.FileCount;
-            scene.MaxDuration = summary.MaxDuration;
+            scene.MaxDuration = scene.ParentSceneId.HasValue
+                ? Math.Max(0, Math.Min(scene.ClipEndSec ?? summary.MaxDuration, summary.MaxDuration) - Math.Max(0, scene.ClipStartSec ?? 0))
+                : summary.MaxDuration;
             scene.MaxResolution = summary.MaxResolution;
             scene.MaxHeight = summary.MaxHeight;
             scene.MaxFrameRate = summary.MaxFrameRate;
@@ -943,8 +967,9 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = scenes.Keys.ToArray();
+        var sourceIds = ids.Concat(scenes.Values.Select(scene => scene.ParentSceneId).Where(parentId => parentId.HasValue).Select(parentId => parentId!.Value)).Distinct().ToArray();
         var fileRows = await VideoFiles.AsNoTracking()
-            .Where(file => file.SceneId.HasValue && ids.Contains(file.SceneId.Value))
+            .Where(file => file.SceneId.HasValue && sourceIds.Contains(file.SceneId.Value))
             .Select(file => new
             {
                 SceneId = file.SceneId!.Value,
@@ -986,7 +1011,8 @@ public partial class CoveContext : DbContext
 
         foreach (var scene in scenes.Values)
         {
-            if (!summaries.TryGetValue(scene.Id, out var summary))
+            var sourceSceneId = scene.ParentSceneId ?? scene.Id;
+            if (!summaries.TryGetValue(sourceSceneId, out var summary))
             {
                 scene.FileCount = 0;
                 scene.MaxDuration = 0;
@@ -1009,7 +1035,9 @@ public partial class CoveContext : DbContext
             }
 
             scene.FileCount = summary.FileCount;
-            scene.MaxDuration = summary.MaxDuration;
+            scene.MaxDuration = scene.ParentSceneId.HasValue
+                ? Math.Max(0, Math.Min(scene.ClipEndSec ?? summary.MaxDuration, summary.MaxDuration) - Math.Max(0, scene.ClipStartSec ?? 0))
+                : summary.MaxDuration;
             scene.MaxResolution = summary.MaxResolution;
             scene.MaxHeight = summary.MaxHeight;
             scene.MaxFrameRate = summary.MaxFrameRate;

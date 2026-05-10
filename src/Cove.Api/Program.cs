@@ -113,6 +113,11 @@ try
     builder.Services.AddScoped<TagApplicationService>();
     builder.Services.AddScoped<CustomFieldService>();
     builder.Services.AddScoped<AiDataPurgeService>();
+    builder.Services.AddScoped<DynamicGroupResolver>();
+    builder.Services.AddScoped<IDynamicGroupSource, FilterDynamicGroupSource>();
+    builder.Services.AddScoped<IDynamicGroupSource, SaveForLaterDynamicGroupSource>();
+    builder.Services.AddScoped<IDynamicGroupSource, WatchHistoryDynamicGroupSource>();
+    builder.Services.AddScoped<IDynamicGroupSource, ContinueWatchingDynamicGroupSource>();
     builder.Services.AddHttpClient("scraper", client =>
     {
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");

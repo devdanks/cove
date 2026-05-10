@@ -17,6 +17,9 @@ public class SceneRepository : ISceneRepository
     public async Task<Scene?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
         => await _db.Scenes
             .Include(s => s.Studio)
+            .Include(s => s.ParentScene).ThenInclude(parent => parent!.Files).ThenInclude(file => file.Captions)
+            .Include(s => s.ParentScene).ThenInclude(parent => parent!.Files).ThenInclude(file => file.Fingerprints)
+            .Include(s => s.ChildScenes)
             .Include(s => s.Urls)
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
@@ -122,6 +125,8 @@ public class SceneRepository : ISceneRepository
         // Load full entities only for the paged IDs
         var items = await _db.Scenes
             .Include(s => s.Studio)
+            .Include(s => s.ParentScene).ThenInclude(parent => parent!.Files)
+            .Include(s => s.ChildScenes)
             .Include(s => s.Urls)
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)

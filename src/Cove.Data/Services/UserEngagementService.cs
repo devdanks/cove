@@ -4,6 +4,7 @@ using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data.Auth;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using System.Text.Json;
 
 namespace Cove.Data.Services;
@@ -375,6 +376,23 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     /// </summary>
     public async Task<bool> RecordPlaybackIntervalsAsync(PlaybackIntervalsRequestDto dto, CancellationToken cancellationToken = default)
     {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                return await RecordPlaybackIntervalsCoreAsync(dto, cancellationToken);
+            }
+            catch (DbUpdateException ex) when (attempt == 0 && IsDuplicatePlaybackSessionInsert(ex))
+            {
+                db.ChangeTracker.Clear();
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<bool> RecordPlaybackIntervalsCoreAsync(PlaybackIntervalsRequestDto dto, CancellationToken cancellationToken)
+    {
         if (!InteractionValueMapper.TryParseHostType(dto.HostType, out var hostType))
             return false;
         if (!await InteractionHostExistsAsync(hostType, dto.HostId, cancellationToken))
@@ -532,6 +550,11 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         await db.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    private static bool IsDuplicatePlaybackSessionInsert(DbUpdateException exception)
+        => exception.InnerException is PostgresException postgresException
+            && postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+            && string.Equals(postgresException.ConstraintName, "IX_PlaybackSessions_UserId_SessionId", StringComparison.Ordinal);
 
     private static double ComputeMergedWatchedSec(IEnumerable<PlaybackInterval> intervals)
     {

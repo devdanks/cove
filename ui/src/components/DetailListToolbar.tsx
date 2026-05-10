@@ -1,4 +1,4 @@
-import { ArrowUpDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowUpDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Grid3X3, List, Search, ZoomIn, ZoomOut } from "lucide-react";
 import type { FindFilter } from "../api/types";
 import { useMemo, useState } from "react";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
@@ -13,13 +13,16 @@ interface DetailListToolbarProps {
   zoomLevel?: number;
   onZoomChange?: (level: number) => void;
   showSearch?: boolean;
+  showSort?: boolean;
   selectedCount?: number;
   onSelectAll?: () => void;
   onSelectNone?: () => void;
   selectionActions?: React.ReactNode;
+  displayMode?: "grid" | "list";
+  onDisplayModeChange?: (mode: "grid" | "list") => void;
 }
 
-export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOptions, zoomLevel, onZoomChange, showSearch, selectedCount, onSelectAll, onSelectNone, selectionActions }: DetailListToolbarProps) {
+export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOptions, zoomLevel, onZoomChange, showSearch, showSort = true, selectedCount, onSelectAll, onSelectNone, selectionActions, displayMode, onDisplayModeChange }: DetailListToolbarProps) {
   const page = filter.page ?? 1;
   const perPage = filter.perPage ?? 24;
   const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
@@ -65,25 +68,50 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
         </form>
       )}
 
-      {/* Sort */}
-      <select
-        value={filter.sort ?? sortedSortOptions[0]?.value ?? ""}
-        onChange={(e) => onFilterChange(withSeededRandomSort(filter, { ...filter, sort: e.target.value, page: 1 }))}
-        className="rounded border border-border bg-input px-2 py-1 text-xs text-foreground"
-      >
-        {sortedSortOptions.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
+      {showSort && (
+        <>
+          {/* Sort */}
+          <select
+            value={filter.sort ?? sortedSortOptions[0]?.value ?? ""}
+            onChange={(e) => onFilterChange(withSeededRandomSort(filter, { ...filter, sort: e.target.value, page: 1 }))}
+            className="rounded border border-border bg-input px-2 py-1 text-xs text-foreground"
+          >
+            {sortedSortOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
 
-      {/* Direction */}
-      <button
-        onClick={() => onFilterChange(withSeededRandomSort(filter, { ...filter, direction: filter.direction === "asc" ? "desc" : "asc", page: 1 }))}
-        className="rounded border border-border bg-input p-1 text-secondary hover:text-foreground transition-colors"
-        title={filter.direction === "asc" ? "Ascending" : "Descending"}
-      >
-        <ArrowUpDown className="w-3.5 h-3.5" />
-      </button>
+          {/* Direction */}
+          <button
+            onClick={() => onFilterChange(withSeededRandomSort(filter, { ...filter, direction: filter.direction === "asc" ? "desc" : "asc", page: 1 }))}
+            className="rounded border border-border bg-input p-1 text-secondary hover:text-foreground transition-colors"
+            title={filter.direction === "asc" ? "Ascending" : "Descending"}
+          >
+            <ArrowUpDown className="w-3.5 h-3.5" />
+          </button>
+        </>
+      )}
+
+      {displayMode && onDisplayModeChange ? (
+        <div className="inline-flex rounded border border-border bg-input p-0.5">
+          <button
+            type="button"
+            onClick={() => onDisplayModeChange("grid")}
+            className={`rounded p-1 transition-colors ${displayMode === "grid" ? "bg-background text-accent" : "text-secondary hover:text-foreground"}`}
+            title="Grid view"
+          >
+            <Grid3X3 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onDisplayModeChange("list")}
+            className={`rounded p-1 transition-colors ${displayMode === "list" ? "bg-background text-accent" : "text-secondary hover:text-foreground"}`}
+            title="List view"
+          >
+            <List className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
 
       {/* Per page */}
       <select

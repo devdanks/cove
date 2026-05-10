@@ -1,4 +1,4 @@
-import { useCallback, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
 export interface DragHandleProps {
   tabIndex: number;
@@ -23,6 +23,7 @@ interface SortableListProps<T> {
   renderItem: (item: T, state: SortableListRenderState) => ReactNode;
   disabled?: boolean;
   className?: string;
+  style?: CSSProperties;
 }
 
 function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
@@ -43,6 +44,7 @@ export function SortableList<T>({
   renderItem,
   disabled = false,
   className = "space-y-2",
+  style,
 }: SortableListProps<T>) {
   const [dragKey, setDragKey] = useState<string | number | null>(null);
   const [overKey, setOverKey] = useState<string | number | null>(null);
@@ -71,7 +73,7 @@ export function SortableList<T>({
   }, []);
 
   return (
-    <div className={className} role="listbox" aria-disabled={disabled}>
+    <div className={className} style={style} role="listbox">
       {items.map((item, index) => {
         const itemKey = getKey(item);
         const isDragging = dragKey === itemKey;

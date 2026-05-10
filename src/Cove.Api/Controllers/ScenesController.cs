@@ -52,6 +52,160 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         return Ok(new PaginatedResponse<SceneDto>(dtos, totalCount, page, perPage));
     }
 
+    [HttpGet("with-compilations")]
+    [OutputCache(PolicyName = "ShortCache")]
+    public async Task<ActionResult<PaginatedResponse<SceneListEntryDto>>> FindWithCompilations(
+        [FromQuery] string? q, [FromQuery] int page = 1, [FromQuery] int perPage = 25,
+        [FromQuery] string? sort = null, [FromQuery] string? direction = null,
+        [FromQuery] int? seed = null,
+        [FromQuery] string? title = null, [FromQuery] int? rating = null,
+        [FromQuery] bool? organized = null, [FromQuery] int? studioId = null,
+        [FromQuery] int? groupId = null, [FromQuery] int? galleryId = null, [FromQuery] string? tagIds = null, [FromQuery] string? performerIds = null,
+        CancellationToken ct = default)
+    {
+        var safePage = Math.Max(1, page);
+        var safePerPage = Math.Clamp(perPage, 1, 250);
+        var tagIdList = QueryParsing.ParseIntList(tagIds)?.ToList() ?? [];
+        var performerIdList = QueryParsing.ParseIntList(performerIds)?.ToList() ?? [];
+        var userId = principalAccessor?.Current?.UserId;
+
+        var sceneQuery = db.Scenes.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(title))
+            sceneQuery = sceneQuery.Where(scene => scene.Title != null && EF.Functions.ILike(scene.Title, $"%{title.Trim()}%"));
+        if (organized.HasValue)
+            sceneQuery = sceneQuery.Where(scene => scene.Organized == organized.Value);
+        if (studioId.HasValue)
+            sceneQuery = sceneQuery.Where(scene => scene.StudioId == studioId.Value);
+        if (groupId.HasValue)
+            sceneQuery = sceneQuery.Where(scene => scene.GroupItems.Any(item => item.GroupId == groupId.Value));
+        if (galleryId.HasValue)
+            sceneQuery = sceneQuery.Where(scene => scene.SceneGalleries.Any(sceneGallery => sceneGallery.GalleryId == galleryId.Value));
+        if (tagIdList.Count > 0)
+            sceneQuery = sceneQuery.Where(scene => scene.SceneTags.Any(sceneTag => tagIdList.Contains(sceneTag.TagId)));
+        if (performerIdList.Count > 0)
+            sceneQuery = sceneQuery.Where(scene => scene.ScenePerformers.Any(scenePerformer => performerIdList.Contains(scenePerformer.PerformerId)));
+        if (rating.HasValue)
+        {
+            sceneQuery = userId.HasValue
+                ? sceneQuery.Where(scene => db.Ratings.Any(item =>
+                    item.UserId == userId.Value && item.HostType == RatingHostType.Scene && item.HostId == scene.Id && item.Aspect == "overall" && item.Value >= rating.Value))
+                : sceneQuery.Where(_ => false);
+        }
+
+        var compilationQuery = db.Groups.AsNoTracking()
+            .Where(group => group.Kind != GroupKind.Dynamic && group.ShowInSceneLists && group.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange));
+        if (!string.IsNullOrWhiteSpace(title))
+            compilationQuery = compilationQuery.Where(group => EF.Functions.ILike(group.Name, $"%{title.Trim()}%"));
+        if (studioId.HasValue)
+            compilationQuery = compilationQuery.Where(group => group.StudioId == studioId.Value);
+        if (tagIdList.Count > 0)
+            compilationQuery = compilationQuery.Where(group => group.GroupTags.Any(groupTag => tagIdList.Contains(groupTag.TagId)));
+        if (performerIdList.Count > 0)
+            compilationQuery = compilationQuery.Where(group => group.GroupItems.Any(item => item.Scene != null && item.Scene.ScenePerformers.Any(scenePerformer => performerIdList.Contains(scenePerformer.PerformerId))));
+        if (rating.HasValue)
+        {
+            compilationQuery = userId.HasValue
+                ? compilationQuery.Where(group => db.Ratings.Any(item =>
+                    item.UserId == userId.Value && item.HostType == RatingHostType.Group && item.HostId == group.Id && item.Aspect == "overall" && item.Value >= rating.Value))
+                : compilationQuery.Where(_ => false);
+        }
+        if (organized.HasValue || groupId.HasValue || galleryId.HasValue)
+            compilationQuery = compilationQuery.Where(_ => false);
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var query = q.Trim();
+            sceneQuery = sceneQuery.Where(scene =>
+                (scene.Title != null && EF.Functions.ILike(scene.Title, $"%{query}%"))
+                || (scene.Details != null && EF.Functions.ILike(scene.Details, $"%{query}%"))
+                || (scene.Code != null && EF.Functions.ILike(scene.Code, $"%{query}%"))
+                || (scene.FileSearchText != null && EF.Functions.ILike(scene.FileSearchText, $"%{query}%")));
+            compilationQuery = compilationQuery.Where(group =>
+                EF.Functions.ILike(group.Name, $"%{query}%")
+                || (group.Synopsis != null && EF.Functions.ILike(group.Synopsis, $"%{query}%"))
+                || (group.Director != null && EF.Functions.ILike(group.Director, $"%{query}%")));
+        }
+
+        var sceneRows = sceneQuery.Select(scene => new SceneListEntryKey
+        {
+            Kind = "scene",
+            Id = scene.Id,
+            Title = scene.Title ?? scene.FileSearchText ?? string.Empty,
+            Date = scene.Date,
+            CreatedAt = scene.CreatedAt,
+            UpdatedAt = scene.UpdatedAt,
+            Duration = scene.MaxDuration,
+            Rating = userId.HasValue
+                ? db.Ratings.Where(item => item.UserId == userId.Value && item.HostType == RatingHostType.Scene && item.HostId == scene.Id && item.Aspect == "overall").Select(item => item.Value).FirstOrDefault()
+                : 0,
+        });
+        var compilationRows = compilationQuery.Select(group => new SceneListEntryKey
+        {
+            Kind = "compilation",
+            Id = group.Id,
+            Title = group.Name,
+            Date = group.Date,
+            CreatedAt = group.CreatedAt,
+            UpdatedAt = group.UpdatedAt,
+            Duration = group.Duration ?? 0,
+            Rating = userId.HasValue
+                ? db.Ratings.Where(item => item.UserId == userId.Value && item.HostType == RatingHostType.Group && item.HostId == group.Id && item.Aspect == "overall").Select(item => item.Value).FirstOrDefault()
+                : 0,
+        });
+
+        var combinedQuery = sceneRows.Concat(compilationRows);
+        var totalCount = await combinedQuery.CountAsync(ct);
+        var orderedQuery = ApplySceneListEntrySorting(combinedQuery, sort, string.Equals(direction, "desc", StringComparison.OrdinalIgnoreCase), seed);
+        var rows = await orderedQuery.Skip((safePage - 1) * safePerPage).Take(safePerPage).ToListAsync(ct);
+
+        var sceneIds = rows.Where(row => row.Kind == "scene").Select(row => row.Id).ToArray();
+        var groupIds = rows.Where(row => row.Kind == "compilation").Select(row => row.Id).ToArray();
+
+        var sceneLookup = sceneIds.Length == 0
+            ? new Dictionary<int, Scene>()
+            : await db.Scenes
+                .Include(scene => scene.Studio)
+                .Include(scene => scene.ParentScene).ThenInclude(parent => parent!.Files)
+                .Include(scene => scene.ChildScenes)
+                .Include(scene => scene.Urls)
+                .Include(scene => scene.SceneTags).ThenInclude(sceneTag => sceneTag.Tag).ThenInclude(tag => tag!.TagGroup)
+                .Include(scene => scene.ScenePerformers).ThenInclude(scenePerformer => scenePerformer.Performer)
+                .Include(scene => scene.SceneGalleries).ThenInclude(sceneGallery => sceneGallery.Gallery)
+                .Include(scene => scene.Files)
+                .Include(scene => scene.GroupItems).ThenInclude(item => item.Group)
+                .AsSplitQuery()
+                .AsNoTracking()
+                .Where(scene => sceneIds.Contains(scene.Id))
+                .ToDictionaryAsync(scene => scene.Id, ct);
+
+        var groupLookup = groupIds.Length == 0
+            ? new Dictionary<int, Group>()
+            : await db.Groups
+                .Include(group => group.Studio)
+                .Include(group => group.Urls)
+                .Include(group => group.GroupTags).ThenInclude(groupTag => groupTag.Tag).ThenInclude(tag => tag!.TagGroup)
+                .Include(group => group.GroupItems)
+                .Include(group => group.SubGroupRelations)
+                .Include(group => group.ContainingGroupRelations)
+                .AsSplitQuery()
+                .AsNoTracking()
+                .Where(group => groupIds.Contains(group.Id))
+                .ToDictionaryAsync(group => group.Id, ct);
+
+        var engagement = await engagementService.GetSceneSnapshotsAsync(sceneIds, ct);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, sceneIds, ct);
+        var entries = rows.Select(row =>
+        {
+            if (row.Kind == "scene" && sceneLookup.TryGetValue(row.Id, out var scene))
+                return new SceneListEntryDto("scene", scene.Id, MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement));
+            if (row.Kind == "compilation" && groupLookup.TryGetValue(row.Id, out var group))
+                return new SceneListEntryDto("compilation", group.Id, Group: MapCompilationGroupToDto(group));
+            return null;
+        }).Where(entry => entry != null).Cast<SceneListEntryDto>().ToList();
+
+        return Ok(new PaginatedResponse<SceneListEntryDto>(entries, totalCount, safePage, safePerPage));
+    }
+
     /// <summary>POST-based filtered query supporting advanced criteria (JSON body).</summary>
     [HttpPost("find")]
     public async Task<IActionResult> FindPost([FromBody] FilteredQueryRequest<SceneFilter> req, CancellationToken ct)
@@ -88,12 +242,31 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     [RequiresPermission(Permissions.ScenesWrite)]
     public async Task<ActionResult<SceneDto>> Create([FromBody] SceneCreateDto dto, CancellationToken ct)
     {
+        Scene? parentScene = null;
+        if (dto.ParentSceneId.HasValue)
+        {
+            var parentResolution = await ResolveSubSceneParentAsync(dto.ParentSceneId.Value, dto.ClipStartSec, dto.ClipEndSec, ct);
+            if (parentResolution.Error is not null)
+                return BadRequest(parentResolution.Error);
+
+            parentScene = parentResolution.ParentScene;
+            dto = dto with { ClipStartSec = parentResolution.ClipStartSec, ClipEndSec = parentResolution.ClipEndSec };
+        }
+
+        var parsedDate = ParseDate(dto.Date);
         var scene = new Scene
         {
             Title = dto.Title, Code = dto.Code, Details = dto.Details, Director = dto.Director,
-            Date = ParseDate(dto.Date), Organized = dto.Organized, StudioId = dto.StudioId,
+            Date = parsedDate ?? parentScene?.Date, Organized = dto.Organized, StudioId = dto.StudioId ?? parentScene?.StudioId,
             Captions = dto.Captions, InteractiveSpeed = dto.InteractiveSpeed,
+            ParentSceneId = parentScene?.Id, ClipStartSec = dto.ClipStartSec, ClipEndSec = dto.ClipEndSec,
         };
+        if (parentScene is not null)
+        {
+            scene.Captions ??= parentScene.Captions;
+            scene.InteractiveSpeed ??= parentScene.InteractiveSpeed;
+            ApplySubSceneFileMetrics(scene, parentScene);
+        }
         if (dto.Urls?.Count > 0)
             scene.Urls = dto.Urls.Select(u => new SceneUrl { Url = u }).ToList();
         if (dto.TagIds?.Count > 0)
@@ -146,6 +319,20 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         if (dto.StudioId.HasValue) scene.StudioId = dto.StudioId;
         if (dto.Captions != null) scene.Captions = dto.Captions;
         if (dto.InteractiveSpeed.HasValue) scene.InteractiveSpeed = dto.InteractiveSpeed;
+        if (scene.ParentSceneId.HasValue && (dto.ClipStartSec.HasValue || dto.ClipEndSec.HasValue))
+        {
+            var parentResolution = await ResolveSubSceneParentAsync(scene.ParentSceneId.Value, dto.ClipStartSec ?? scene.ClipStartSec, dto.ClipEndSec ?? scene.ClipEndSec, ct);
+            if (parentResolution.Error is not null)
+                return BadRequest(parentResolution.Error);
+
+            scene.ClipStartSec = parentResolution.ClipStartSec;
+            scene.ClipEndSec = parentResolution.ClipEndSec;
+            ApplySubSceneFileMetrics(scene, parentResolution.ParentScene!);
+        }
+        else if (!scene.ParentSceneId.HasValue && (dto.ClipStartSec.HasValue || dto.ClipEndSec.HasValue))
+        {
+            return BadRequest("Clip timing can only be changed on sub-scenes.");
+        }
 
         if (dto.Urls != null)
         {
@@ -344,6 +531,84 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         return MapToDto(scene, customFieldValues, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications, fieldProvenance);
     }
 
+    private sealed class SceneListEntryKey
+    {
+        public string Kind { get; set; } = string.Empty;
+        public int Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public DateOnly? Date { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+        public double Duration { get; set; }
+        public int Rating { get; set; }
+    }
+
+    private static IOrderedQueryable<SceneListEntryKey> ApplySceneListEntrySorting(IQueryable<SceneListEntryKey> query, string? sort, bool desc, int? seed)
+    {
+        var randomSeed = seed ?? 0;
+        return sort switch
+        {
+            "title" or "name" => desc
+                ? query.OrderByDescending(item => item.Title).ThenByDescending(item => item.Kind).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.Title).ThenBy(item => item.Kind).ThenBy(item => item.Id),
+            "date" => desc
+                ? query.OrderByDescending(item => item.Date ?? DateOnly.MinValue).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.Date ?? DateOnly.MinValue).ThenBy(item => item.Id),
+            "rating" => desc
+                ? query.OrderBy(item => item.Rating <= 0 ? 1 : 0).ThenByDescending(item => item.Rating).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.Rating <= 0 ? 0 : 1).ThenBy(item => item.Rating).ThenBy(item => item.Id),
+            "created_at" => desc
+                ? query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
+            "duration" => desc
+                ? query.OrderByDescending(item => item.Duration).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.Duration).ThenBy(item => item.Id),
+            "random" => desc
+                ? query.OrderByDescending(item => ((long)item.Id * 1103515245L + randomSeed + (item.Kind == "compilation" ? 7919 : 0)) % 2147483647L).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => ((long)item.Id * 1103515245L + randomSeed + (item.Kind == "compilation" ? 7919 : 0)) % 2147483647L).ThenBy(item => item.Id),
+            _ => desc
+                ? query.OrderByDescending(item => item.UpdatedAt).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.UpdatedAt).ThenBy(item => item.Id),
+        };
+    }
+
+    private GroupDto MapCompilationGroupToDto(Group group) => new(
+        group.Id, group.Name, group.Aliases, group.Duration, group.Date?.ToString("yyyy-MM-dd"),
+        group.StudioId, group.Studio?.Name, group.Director, group.Synopsis,
+        group.Urls.Select(url => url.Url).ToList(),
+        group.GroupTags.Where(groupTag => groupTag.Tag != null).Select(groupTag => TagDtoMapping.MapTagDto(groupTag.Tag!)).ToList(),
+        group.GroupItems.Where(item => item.SceneId.HasValue).Select(item => item.SceneId!.Value).Distinct().Count(),
+        true,
+        group.SubGroupRelations?.Count ?? 0,
+        group.ContainingGroupRelations?.Count ?? 0,
+        null,
+        group.CreatedAt.ToString("o"), group.UpdatedAt.ToString("o"),
+        group.FrontImageBlobId != null ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt) : GetCompilationPosterPath(group),
+        group.BackImageBlobId != null ? EntityImageUrls.GroupBack(ControllerContext.HttpContext, group.Id, group.UpdatedAt) : null,
+        group.Kind,
+        group.QuerySourceKey,
+        group.QueryJson,
+        group.LastResolvedAt?.ToString("o"),
+        group.CachedItemCount,
+        group.CacheTtlSec,
+        group.ShowInSceneLists,
+        group.AllowedHostTypes,
+        group.SortOrder
+    );
+
+    private string? GetCompilationPosterPath(Group group)
+    {
+        var firstRange = group.GroupItems
+            .Where(item => item.SceneId.HasValue)
+            .OrderBy(item => item.OrderIndex)
+            .ThenBy(item => item.Id)
+            .FirstOrDefault();
+
+        return firstRange?.SceneId is int sceneId
+            ? EntityImageUrls.SceneScreenshot(ControllerContext.HttpContext, sceneId, group.UpdatedAt, firstRange.StartSec)
+            : null;
+    }
+
     private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
@@ -352,7 +617,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!, GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
         s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
-        s.Files.Select(f => new VideoFileDto(
+        EffectiveFiles(s).Select(f => new VideoFileDto(
             f.Id,
             CanReadFiles ? f.Path : string.Empty,
             GetVisibleBasename(f.Path, f.Basename),
@@ -373,7 +638,13 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         customFieldValues,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o"),
         contextTagApplications,
-        fieldProvenance
+        fieldProvenance,
+        s.ParentSceneId,
+        GetSceneDisplayTitle(s.ParentScene),
+        s.ClipStartSec,
+        s.ClipEndSec,
+        s.ChildScenes.Count,
+        ImagePath: s.ImageBlobId != null ? EntityImageUrls.Scene(ControllerContext.HttpContext, s.Id, s.UpdatedAt, 1280) : null
     );
 
     private SceneDto MapListToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
@@ -384,7 +655,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!)).ToList(),
         s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
-        s.Files.Select(f => new VideoFileDto(
+        EffectiveFiles(s).Select(f => new VideoFileDto(
             f.Id,
             CanReadFiles ? f.Path : string.Empty,
             GetVisibleBasename(f.Path, f.Basename),
@@ -403,8 +674,115 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
         [],
         customFieldValues,
-        s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
+        s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o"),
+        ParentSceneId: s.ParentSceneId,
+        ParentSceneTitle: GetSceneDisplayTitle(s.ParentScene),
+        ClipStartSec: s.ClipStartSec,
+        ClipEndSec: s.ClipEndSec,
+        ChildSceneCount: s.ChildScenes.Count,
+        ImagePath: s.ImageBlobId != null ? EntityImageUrls.Scene(ControllerContext.HttpContext, s.Id, s.UpdatedAt, 1280) : null
     );
+
+    private static IEnumerable<VideoFile> EffectiveFiles(Scene scene)
+        => scene.Files.Count > 0 ? scene.Files : scene.ParentScene?.Files ?? Enumerable.Empty<VideoFile>();
+
+    private static string? GetSceneDisplayTitle(Scene? scene)
+        => !string.IsNullOrWhiteSpace(scene?.Title)
+            ? scene.Title
+            : scene?.Files.OrderBy(file => file.Id).FirstOrDefault()?.Basename;
+
+    private async Task<SubSceneParentResolution> ResolveSubSceneParentAsync(int parentSceneId, double? requestedStartSec, double? requestedEndSec, CancellationToken ct)
+    {
+        var requestedScene = await db.Scenes.AsNoTracking()
+            .Include(scene => scene.Files)
+            .FirstOrDefaultAsync(scene => scene.Id == parentSceneId, ct);
+        if (requestedScene is null)
+            return SubSceneParentResolution.Fail("Parent scene was not found.");
+
+        var parentScene = requestedScene;
+        while (parentScene.ParentSceneId.HasValue)
+        {
+            parentScene = await db.Scenes.AsNoTracking()
+                .Include(scene => scene.Files)
+                .FirstOrDefaultAsync(scene => scene.Id == parentScene.ParentSceneId.Value, ct);
+
+            if (parentScene is null)
+                return SubSceneParentResolution.Fail("Parent scene was not found.");
+        }
+
+        var sourceDuration = parentScene.Files.Count > 0
+            ? parentScene.Files.Max(file => file.Duration)
+            : parentScene.MaxDuration;
+        if (sourceDuration <= 0)
+            return SubSceneParentResolution.Fail("Parent scene has no playable duration.");
+
+        var requestedRange = GetSceneEffectiveClipRange(requestedScene, sourceDuration);
+        var startSec = NormalizeRequestedClipBoundary(requestedStartSec, requestedRange.startSec, requestedRange.endSec, isEndBoundary: false);
+        var endSec = NormalizeRequestedClipBoundary(requestedEndSec, requestedRange.startSec, requestedRange.endSec, isEndBoundary: true);
+
+        if (startSec < requestedRange.startSec || startSec >= requestedRange.endSec)
+            return SubSceneParentResolution.Fail("Clip start must be within the selected parent scene range.");
+        if (startSec >= sourceDuration)
+            return SubSceneParentResolution.Fail("Clip start must be before the end of the parent scene.");
+        if (endSec > requestedRange.endSec)
+            return SubSceneParentResolution.Fail("Clip end must be within the selected parent scene range.");
+        if (endSec <= startSec)
+            return SubSceneParentResolution.Fail("Clip end must be greater than clip start.");
+
+        return new SubSceneParentResolution(parentScene, startSec, endSec, null);
+    }
+
+    private static (double startSec, double endSec) GetSceneEffectiveClipRange(Scene scene, double sourceDuration)
+    {
+        var startSec = Math.Max(0, scene.ClipStartSec ?? 0);
+        var endSec = Math.Min(sourceDuration, scene.ClipEndSec ?? sourceDuration);
+        return endSec > startSec ? (startSec, endSec) : (startSec, sourceDuration);
+    }
+
+    private static double NormalizeRequestedClipBoundary(double? requestedSec, double rangeStartSec, double rangeEndSec, bool isEndBoundary)
+    {
+        var defaultValue = isEndBoundary ? rangeEndSec : rangeStartSec;
+        if (!requestedSec.HasValue)
+            return defaultValue;
+
+        var value = requestedSec.Value;
+        if (value >= rangeStartSec && value <= rangeEndSec)
+            return value;
+
+        var relativeRange = Math.Max(0, rangeEndSec - rangeStartSec);
+        if (value >= 0 && value <= relativeRange)
+            return rangeStartSec + value;
+
+        return value;
+    }
+
+    private static void ApplySubSceneFileMetrics(Scene scene, Scene parentScene)
+    {
+        var clipStart = scene.ClipStartSec ?? 0;
+        var clipEnd = scene.ClipEndSec ?? parentScene.MaxDuration;
+        scene.FileCount = parentScene.FileCount > 0 ? parentScene.FileCount : parentScene.Files.Count;
+        scene.MaxDuration = Math.Max(0, clipEnd - clipStart);
+        scene.MaxResolution = parentScene.MaxResolution;
+        scene.MaxHeight = parentScene.MaxHeight;
+        scene.MaxFrameRate = parentScene.MaxFrameRate;
+        scene.MaxBitRate = parentScene.MaxBitRate;
+        scene.MaxFileSize = parentScene.MaxFileSize;
+        scene.MaxFileModTime = parentScene.MaxFileModTime;
+        scene.MinPath = parentScene.MinPath;
+        scene.MaxPath = parentScene.MaxPath;
+        scene.FileSearchText = parentScene.FileSearchText;
+        scene.HasDimensionData = parentScene.HasDimensionData;
+        scene.HasLandscapeFiles = parentScene.HasLandscapeFiles;
+        scene.HasPortraitFiles = parentScene.HasPortraitFiles;
+        scene.HasSquareFiles = parentScene.HasSquareFiles;
+        scene.HasInteractiveFiles = parentScene.HasInteractiveFiles;
+        scene.HasNonInteractiveFiles = parentScene.HasNonInteractiveFiles;
+    }
+
+    private sealed record SubSceneParentResolution(Scene? ParentScene, double ClipStartSec, double ClipEndSec, string? Error)
+    {
+        public static SubSceneParentResolution Fail(string error) => new(null, 0, 0, error);
+    }
 
     private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
         => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;

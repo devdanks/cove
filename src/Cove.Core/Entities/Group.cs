@@ -3,6 +3,15 @@ namespace Cove.Core.Entities;
 public class Group : BaseEntity
 {
     public string Name { get; set; } = string.Empty;
+    public GroupKind Kind { get; set; } = GroupKind.Static;
+    public string? QuerySourceKey { get; set; }
+    public string? QueryJson { get; set; }
+    public DateTime? LastResolvedAt { get; set; }
+    public int? CachedItemCount { get; set; }
+    public int CacheTtlSec { get; set; } = 60;
+    public bool ShowInSceneLists { get; set; } = false;
+    public int SortOrder { get; set; }
+    public List<string> AllowedHostTypes { get; set; } = ["scene"];
     public string? Aliases { get; set; }
     public int? Duration { get; set; } // seconds
     public DateOnly? Date { get; set; }
@@ -23,10 +32,26 @@ public class Group : BaseEntity
     public ICollection<GroupRelation> SubGroupRelations { get; set; } = [];
 }
 
+public enum GroupKind
+{
+    Static = 1,
+    Dynamic = 2,
+}
+
 public enum GroupItemKind
 {
     Scene = 1,
     SceneRange = 2,
+    Image = 3,
+    Audio = 4,
+    Text = 5,
+    Group = 6,
+    Performer = 7,
+    Studio = 8,
+    Tag = 9,
+    Gallery = 10,
+    Face = 11,
+    Segment = 12,
 }
 
 public class GroupItem : BaseEntity
@@ -34,7 +59,11 @@ public class GroupItem : BaseEntity
     public int GroupId { get; set; }
     public int OrderIndex { get; set; }
     public GroupItemKind Kind { get; set; }
-    public int SceneId { get; set; }
+    public string HostType { get; set; } = "scene";
+    public int HostId { get; set; }
+    public int? SceneId { get; set; }
+    public int? ImageId { get; set; }
+    public int? ChildGroupId { get; set; }
     public double? StartSec { get; set; }
     public double? EndSec { get; set; }
     public string? Title { get; set; }
@@ -46,6 +75,8 @@ public class GroupItem : BaseEntity
 
     public Group? Group { get; set; }
     public Scene? Scene { get; set; }
+    public Image? Image { get; set; }
+    public Group? ChildGroup { get; set; }
 }
 
 public class GroupUrl

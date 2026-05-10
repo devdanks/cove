@@ -12,6 +12,9 @@ public class Scene : BaseEntity
     public string? Captions { get; set; }
     public int? InteractiveSpeed { get; set; }
     public string? ImageBlobId { get; set; }
+    public int? ParentSceneId { get; set; }
+    public double? ClipStartSec { get; set; }
+    public double? ClipEndSec { get; set; }
 
     // Denormalized M2M id sets, GIN-indexed. Maintained from SceneTags/ScenePerformers
     // by CoveContext on save. Lets tag/performer combo filters use a single index-only
@@ -40,6 +43,8 @@ public class Scene : BaseEntity
 
     // Navigation properties
     public Studio? Studio { get; set; }
+    public Scene? ParentScene { get; set; }
+    public ICollection<Scene> ChildScenes { get; set; } = [];
     public ICollection<SceneUrl> Urls { get; set; } = [];
     public ICollection<VideoFile> Files { get; set; } = [];
     public ICollection<SceneMarker> SceneMarkers { get; set; } = [];

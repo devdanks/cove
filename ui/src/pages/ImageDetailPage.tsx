@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Eye, FolderOpen, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, FolderOpen, FolderPlus, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -19,6 +19,8 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import type { FaceHostFace } from "../api/types";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 import { ImageVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { BookmarkButton } from "../components/BookmarkButton";
+import { AddToGroupDialog } from "../components/AddToGroupDialog";
 
 const ImageEditModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageEditModal })));
 const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
@@ -41,12 +43,14 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [showAddToGroup, setShowAddToGroup] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<ImageTab>("details");
   const queryClient = useQueryClient();
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const { backLabel, goBack } = useBackNavigation({ page: "images" }, onNavigate);
   const canWriteImage = canWriteEntity("image", hasPermission);
+  const canWriteGroups = canWriteEntity("group", hasPermission);
   const canDeleteImage = canDeleteEntity("image", hasPermission);
   const canDownloadImage = hasPermission("jobs.run") && canWriteImage;
   const canEngageImage = canReadEntity("image", hasPermission) && (user?.kind === "user" || user?.kind === "system");
@@ -456,6 +460,11 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
           />
         ) : null}
       </Suspense>
+      <AddToGroupDialog
+        open={showAddToGroup}
+        onClose={() => setShowAddToGroup(false)}
+        items={[{ key: `image-${image.id}`, kind: "image", hostType: "image", hostId: image.id, title: displayTitle }]}
+      />
       <ConfirmDialog open={confirmDelete} title="Delete Image" message={`Delete "${displayTitle}"? This cannot be undone.`} onConfirm={() => deleteMut.mutate()} onCancel={() => setConfirmDelete(false)} />
 
       {/* Lightbox overlay */}
@@ -562,6 +571,17 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         actions={
           <>
             <ExtensionSlot slot="image-detail-actions" context={{ image, onNavigate }} />
+            <BookmarkButton hostType="image" hostId={image.id} compact />
+            {canWriteGroups ? (
+              <button
+                type="button"
+                onClick={() => setShowAddToGroup(true)}
+                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
+                title="Add to group"
+              >
+                <FolderPlus className="h-4 w-4" />
+              </button>
+            ) : null}
             {canWriteImage ? (
               <button
                 type="button"

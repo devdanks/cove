@@ -128,4 +128,21 @@ describe("Compilation player autoplay token wiring", () => {
     expect(video.currentTime).toBe(5);
     expect(playMock).toHaveBeenCalledTimes(1);
   });
+
+  it("does not declare a misleading MIME type for direct scene streams", () => {
+    const { container } = render(
+      <VideoPlayer
+        streamUrl="/api/stream/scene/8912"
+        format="mpegts"
+        duration={120}
+        sceneId={8912}
+        detections={[]}
+        trackingEnabled={false}
+      />,
+    );
+
+    const source = container.querySelector("source");
+    expect(source).toBeInstanceOf(HTMLSourceElement);
+    expect(source?.getAttribute("type")).toBeNull();
+  });
 });

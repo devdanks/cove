@@ -132,8 +132,11 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     ? (preferences as Record<string, unknown>)[legacyTrackingEnabledKey]
     : undefined;
   const tracking = normalizeTrackingPreferences(preferences?.tracking, legacyTrackingEnabled);
+  const scenes = typeof preferences?.scenes?.includeCompilationGroups === "boolean"
+    ? { includeCompilationGroups: preferences.scenes.includeCompilationGroups }
+    : null;
   const keybindingOverrides = normalizeKeybindingOverrides(preferences?.keybindingOverrides);
-  if (!theme && !ratingSystemOptions && !tracking && !keybindingOverrides) {
+  if (!theme && !ratingSystemOptions && !tracking && !scenes && !keybindingOverrides) {
     return null;
   }
 
@@ -141,6 +144,7 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     theme,
     ratingSystemOptions,
     tracking,
+    scenes,
     keybindingOverrides,
   };
 }

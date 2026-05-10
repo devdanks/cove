@@ -643,7 +643,7 @@ public sealed class UserService : IUserService
             {
                 var tracking = new UserTrackingPreferencesDto(legacyEnabled.GetBoolean(), null, null, null, null, null);
                 parsed = parsed is null
-                    ? new UserUiPreferencesDto(null, null, tracking, null)
+                    ? new UserUiPreferencesDto(null, null, tracking, null, null)
                     : parsed with { Tracking = tracking };
             }
 
@@ -676,13 +676,24 @@ public sealed class UserService : IUserService
         var theme = NormalizeThemePreferences(preferences.Theme);
         var ratingSystemOptions = NormalizeRatingSystemOptions(preferences.RatingSystemOptions);
         var tracking = NormalizeTrackingPreferences(preferences.Tracking);
+        var scenes = NormalizeScenesPreferences(preferences.Scenes);
         var keybindingOverrides = NormalizeKeybindingOverrides(preferences.KeybindingOverrides);
-        if (theme is null && ratingSystemOptions is null && tracking is null && keybindingOverrides is null)
+        if (theme is null && ratingSystemOptions is null && tracking is null && scenes is null && keybindingOverrides is null)
         {
             return null;
         }
 
-        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking, keybindingOverrides);
+        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking, scenes, keybindingOverrides);
+    }
+
+    private static UserScenesPreferencesDto? NormalizeScenesPreferences(UserScenesPreferencesDto? scenes)
+    {
+        if (scenes?.IncludeCompilationGroups is not bool includeCompilationGroups)
+        {
+            return null;
+        }
+
+        return new UserScenesPreferencesDto(includeCompilationGroups);
     }
 
     private static Dictionary<string, string>? NormalizeKeybindingOverrides(Dictionary<string, string>? overrides)

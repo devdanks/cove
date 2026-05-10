@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SegmentDetailPage } from "../pages/SegmentDetailPage";
 
 const { mockScenes, mockSegmentLibrary, mockTags, mockGoBack } = vi.hoisted(() => ({
   mockScenes: {
     get: vi.fn(),
+    createSubScene: vi.fn(),
     streamUrl: vi.fn(() => "/stream/scene.mp4"),
     screenshotUrl: vi.fn(() => "/scene.jpg"),
     segments: {
@@ -71,6 +72,31 @@ function buildSegment(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildScene(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 99,
+    title: "Scene 99",
+    code: "SC-99",
+    details: "Parent scene details",
+    director: "Director Example",
+    date: "2026-05-01",
+    organized: true,
+    studioId: 12,
+    studioName: "Studio 12",
+    urls: ["https://example.test/scene-99"],
+    tags: [
+      { id: 5, name: "Opening" },
+      { id: 6, name: "Action" },
+    ],
+    performers: [{ id: 11, name: "Performer One" }],
+    galleries: [{ id: 15, title: "Gallery Fifteen", date: "2026-04-15" }],
+    groups: [{ id: 17, name: "Highlights", sceneIndex: 3 }],
+    customFields: { mood: "intense" },
+    files: [{ format: "mp4", duration: 120, captions: [] }],
+    ...overrides,
+  };
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -96,11 +122,7 @@ describe("SegmentDetailPage", () => {
 
   it("renders media layout tabs and resolved span preview", async () => {
     mockSegmentLibrary.get.mockResolvedValue(buildSegment());
-    mockScenes.get.mockResolvedValue({
-      id: 99,
-      title: "Scene 99",
-      files: [{ format: "mp4", duration: 120, captions: [] }],
-    });
+    mockScenes.get.mockResolvedValue(buildScene());
     mockScenes.segments.list.mockResolvedValue([
       buildSegment({ id: 6, title: "Cold Open", startSec: 5, endSec: 10, tagName: "Teaser" }),
       buildSegment(),
@@ -142,11 +164,7 @@ describe("SegmentDetailPage", () => {
 
   it("supports keyboard shortcuts for edit and adjacent navigation", async () => {
     mockSegmentLibrary.get.mockResolvedValue(buildSegment());
-    mockScenes.get.mockResolvedValue({
-      id: 99,
-      title: "Scene 99",
-      files: [{ format: "mp4", duration: 120, captions: [] }],
-    });
+    mockScenes.get.mockResolvedValue(buildScene());
     mockScenes.segments.list.mockResolvedValue([
       buildSegment({ id: 6, title: "Cold Open", startSec: 5, endSec: 10 }),
       buildSegment(),
@@ -168,5 +186,46 @@ describe("SegmentDetailPage", () => {
 
     fireEvent.keyDown(window, { key: "s" });
     expect(onNavigate).toHaveBeenCalledWith({ page: "scene", id: 99, seekTo: 12 });
+  });
+
+  it("creates a metadata-preserving sub-scene from the current segment", async () => {
+    mockSegmentLibrary.get.mockResolvedValue(buildSegment());
+    mockScenes.get.mockResolvedValue(buildScene());
+    mockScenes.createSubScene.mockResolvedValue({ id: 1234 });
+    mockScenes.segments.list.mockResolvedValue([buildSegment()]);
+    mockScenes.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
+    mockTags.find.mockResolvedValue({ items: [] });
+
+    const { onNavigate } = renderPage();
+
+    const makeSceneButton = await screen.findByRole("button", { name: "Make Scene" });
+    await waitFor(() => {
+      expect(makeSceneButton).toBeEnabled();
+    });
+    fireEvent.click(makeSceneButton);
+
+    await waitFor(() => {
+      expect(mockScenes.createSubScene).toHaveBeenCalledWith(99, expect.objectContaining({
+        title: "Episode Intro",
+        code: "SC-99",
+        details: "Parent scene details",
+        director: "Director Example",
+        date: "2026-05-01",
+        organized: true,
+        studioId: 12,
+        urls: ["https://example.test/scene-99"],
+        tagIds: [5, 6],
+        performerIds: [11],
+        galleryIds: [15],
+        groups: [{ groupId: 17, sceneIndex: 3 }],
+        customFields: { mood: "intense" },
+        parentSceneId: 99,
+        clipStartSec: 12,
+        clipEndSec: 21,
+      }));
+    });
+    await waitFor(() => {
+      expect(onNavigate).toHaveBeenCalledWith({ page: "scene", id: 1234 });
+    });
   });
 });

@@ -9,6 +9,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
+import { DynamicGroupFilterEditor, FILTER_DYNAMIC_SOURCE_KEY, defaultDynamicGroupFilterQueryJson } from "../components/DynamicGroupFilterEditor";
 
 interface Props {
   group: Group;
@@ -29,6 +30,11 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const [synopsis, setSynopsis] = useState(group.synopsis ?? "");
   const [urls, setUrls] = useState(group.urls.length > 0 ? group.urls : [""]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(group.tags.map((t) => t.id));
+  const [kind, setKind] = useState<"static" | "dynamic">(group.kind ?? "static");
+  const [querySourceKey, setQuerySourceKey] = useState(group.querySourceKey ?? FILTER_DYNAMIC_SOURCE_KEY);
+  const [queryJson, setQueryJson] = useState(group.queryJson ?? defaultDynamicGroupFilterQueryJson());
+  const [cacheTtlSec, setCacheTtlSec] = useState(group.cacheTtlSec ?? 60);
+  const [showInSceneLists, setShowInSceneLists] = useState(group.showInSceneLists ?? false);
 
   // Tag search
   const [tagSearch, setTagSearch] = useState("");
@@ -36,6 +42,11 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const { data: allTags } = useQuery({
     queryKey: ["tags-all"],
     queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
+  });
+  const { data: dynamicSources = [] } = useQuery({
+    queryKey: ["group-dynamic-sources"],
+    queryFn: () => groups.dynamicSources(),
+    enabled: open,
   });
 
   useEffect(() => {
@@ -50,7 +61,12 @@ export function GroupEditModal({ group, open, onClose }: Props) {
     setUrls(group.urls.length > 0 ? group.urls : [""]);
     setSelectedTagIds(group.tags.map((t) => t.id));
     setCustomFields({ ...(group.customFields ?? {}) });
-  }, [group]);
+    setKind(group.kind ?? "static");
+    setQuerySourceKey(group.querySourceKey ?? dynamicSources.find((source) => source.key === FILTER_DYNAMIC_SOURCE_KEY)?.key ?? dynamicSources[0]?.key ?? FILTER_DYNAMIC_SOURCE_KEY);
+    setQueryJson(group.queryJson ?? defaultDynamicGroupFilterQueryJson());
+    setCacheTtlSec(group.cacheTtlSec ?? 60);
+    setShowInSceneLists(group.showInSceneLists ?? false);
+  }, [dynamicSources, group]);
 
   const mutation = useMutation({
     mutationFn: (data: GroupUpdate) => groups.update(group.id, data),
@@ -75,6 +91,11 @@ export function GroupEditModal({ group, open, onClose }: Props) {
       urls: urlList,
       tagIds: selectedTagIds,
       customFields,
+      kind,
+      querySourceKey: kind === "dynamic" ? querySourceKey : undefined,
+      queryJson: kind === "dynamic" && querySourceKey === FILTER_DYNAMIC_SOURCE_KEY ? queryJson : undefined,
+      cacheTtlSec: kind === "dynamic" ? cacheTtlSec : undefined,
+      showInSceneLists,
     });
   };
 
@@ -109,6 +130,63 @@ export function GroupEditModal({ group, open, onClose }: Props) {
           <TextInput value={aliases} onChange={setAliases} placeholder="Alternative names" />
         </Field>
       </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Kind">
+          <div className="inline-flex rounded-lg border border-border bg-card p-1">
+            {(["static", "dynamic"] as const).map((nextKind) => (
+              <button
+                key={nextKind}
+                type="button"
+                onClick={() => setKind(nextKind)}
+                className={`rounded-md px-3 py-1.5 text-sm capitalize transition-colors ${kind === nextKind ? "bg-accent text-white" : "text-secondary hover:text-foreground"}`}
+              >
+                {nextKind}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label="Scenes list">
+          <label className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground">
+            <input type="checkbox" checked={showInSceneLists} onChange={(event) => setShowInSceneLists(event.target.checked)} className="h-4 w-4 accent-accent" />
+            Show in Scenes list
+          </label>
+        </Field>
+      </div>
+
+      {kind === "dynamic" ? (
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Dynamic source">
+            <select
+              value={querySourceKey}
+              onChange={(event) => {
+                setQuerySourceKey(event.target.value);
+                if (event.target.value === FILTER_DYNAMIC_SOURCE_KEY && !queryJson) {
+                  setQueryJson(defaultDynamicGroupFilterQueryJson());
+                }
+              }}
+              className="w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+            >
+              {dynamicSources.map((source) => (
+                <option key={source.key} value={source.key}>{source.displayName}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Cache TTL (seconds)">
+            <input
+              type="number"
+              min={0}
+              value={cacheTtlSec}
+              onChange={(event) => setCacheTtlSec(Math.max(0, Number(event.target.value) || 0))}
+              className="w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+            />
+          </Field>
+        </div>
+      ) : null}
+
+      {kind === "dynamic" && querySourceKey === FILTER_DYNAMIC_SOURCE_KEY ? (
+        <DynamicGroupFilterEditor queryJson={queryJson} onChange={setQueryJson} />
+      ) : null}
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Director">

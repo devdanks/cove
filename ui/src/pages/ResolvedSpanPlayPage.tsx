@@ -1,13 +1,16 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Info, ListVideo, Repeat, RotateCcw, SkipBack, SkipForward, SlidersHorizontal, Sparkles } from "lucide-react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Clapperboard, ExternalLink, Info, ListVideo, Repeat, RotateCcw, SkipBack, SkipForward, SlidersHorizontal, Sparkles } from "lucide-react";
 import { faces, performers, scenes, segmentDisplayProfiles, segmentLibrary, tags } from "../api/client";
 import type { ResolvedSpanDetail, ResolvedSpanInterval, SegmentDerivedQueryDescriptor, SegmentRecord, SegmentSpanOperator } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
+import { canWriteEntity } from "../auth/visibility";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { SegmentVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { buildSubSceneCreate } from "../utils/subSceneCreation";
 
 interface Props {
   sceneId: number;
@@ -74,6 +77,8 @@ function ResolvedSpanPlayerCard({
   onGoBack: () => void;
   onNavigate: (r: any) => void;
 }) {
+  const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
   const [currentAbsoluteTime, setCurrentAbsoluteTime] = useState(detail.intervals[0]?.startSec ?? detail.span.startSec);
   const [loopSpan, setLoopSpan] = useState(false);
   const [activeIntervalIndex, setActiveIntervalIndex] = useState(0);
@@ -277,6 +282,26 @@ function ResolvedSpanPlayerCard({
   const playbackDescription = isDerivedQuery
     ? `Playback follows the resolved ${derivedOperator ? formatOperatorLabel(derivedOperator).toLowerCase() : "derived"} output intervals and automatically skips the gaps between them.`
     : "Playback follows the resolved span intervals and automatically skips the gaps between them.";
+  const canCreateSubScene = canWriteEntity("scene", hasPermission) && !!currentScene && !!currentFile;
+  const createSubSceneMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentScene) {
+        throw new Error("Scene not loaded");
+      }
+
+      return scenes.createSubScene(detail.sceneId, buildSubSceneCreate(currentScene, {
+        startSec: detail.span.startSec,
+        endSec: detail.span.endSec,
+      }, {
+        title: spanTitle,
+      }));
+    },
+    onSuccess: (newScene) => {
+      queryClient.invalidateQueries({ queryKey: ["scenes"] });
+      queryClient.invalidateQueries({ queryKey: ["scene", detail.sceneId] });
+      onNavigate({ page: "scene", id: newScene.id });
+    },
+  });
 
   const playerMedia = (
     <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black">
@@ -469,6 +494,29 @@ function ResolvedSpanPlayerCard({
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={(key) => setActiveTab(key as ResolvedSpanTab)}
+      actions={
+        <>
+          {canCreateSubScene ? (
+            <button
+              type="button"
+              onClick={() => createSubSceneMutation.mutate()}
+              disabled={createSubSceneMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Clapperboard className="h-4 w-4" />
+              {createSubSceneMutation.isPending ? "Creating..." : "Make Scene"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onNavigate({ page: "scene", id: detail.sceneId, seekTo: detail.span.startSec })}
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+          >
+            <ExternalLink className="h-4 w-4" />
+            Open Scene
+          </button>
+        </>
+      }
     >
       <MediaDetailLayout.Content>
         {activeContent}

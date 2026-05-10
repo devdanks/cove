@@ -9,6 +9,7 @@ import { Building2, FolderOpen, Layers, Tag, User, Film, Box, Images as ImagesIc
 import { createRouteLinkProps, createNestedRouteLinkProps } from "./cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "./RouteCardLinkOverlay";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
+import { BookmarkButton } from "./BookmarkButton";
 
 function createNestedEntityNavigationHandlers<T extends HTMLAnchorElement>(route: { page: string; id: number }, onNavigate?: (route: any) => void) {
   return createNestedRouteLinkProps<T>(route, () => onNavigate?.(route));
@@ -425,15 +426,21 @@ function PerformerBadge({
 
 // ===== SceneCard (redesigned - cleaner, performer badges, 2-line title) =====
 
-export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNavigate, selecting, onQuickView }: { scene: Scene; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onNavigate?: (r: any) => void; onQuickView?: () => void }) {
+export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNavigate, selecting, onQuickView, bookmarkInitiallySaved }: { scene: Scene; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onNavigate?: (r: any) => void; onQuickView?: () => void; bookmarkInitiallySaved?: boolean }) {
   const file = scene.files[0];
-  const duration = file?.duration ?? 0;
+  const clipDuration = typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number"
+    ? Math.max(0, scene.clipEndSec - scene.clipStartSec)
+    : undefined;
+  const duration = clipDuration ?? file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
-  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
+  const coverUrl = scene.imagePath ?? screenshotUrl;
   const previewUrl = scenes.previewUrl(scene.id);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const progressPercent = duration > 0 && engagement?.resumeTime ? Math.min(100, (engagement.resumeTime / duration) * 100) : 0;
+  const visibleResumeTime = typeof scene.clipStartSec === "number" && typeof engagement?.resumeTime === "number"
+    ? Math.max(0, engagement.resumeTime - scene.clipStartSec)
+    : engagement?.resumeTime;
+  const progressPercent = duration > 0 && visibleResumeTime ? Math.min(100, (visibleResumeTime / duration) * 100) : 0;
   const cardTitle = scene.title || file?.basename || "Untitled";
 
   useEffect(() => {
@@ -460,7 +467,7 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
           loading="lazy"
           onError={(e) => {
             const target = e.target as HTMLImageElement;
-            if (target.dataset.fallbackApplied !== "true") {
+            if (scene.imagePath && target.dataset.fallbackApplied !== "true") {
               target.dataset.fallbackApplied = "true";
               target.src = screenshotUrl;
               return;
@@ -471,6 +478,16 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
         />
         <video ref={videoRef} disableRemotePlayback playsInline muted loop preload="none" src={previewUrl} className="scene-card-preview-video" />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
+        {!selecting && (
+          <BookmarkButton
+            hostType="scene"
+            hostId={scene.id}
+            compact
+            deferUntilHover
+            initialSaved={bookmarkInitiallySaved}
+            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+          />
+        )}
         {scene.studioName && scene.studioId && !selecting && (
           <div className="absolute top-0 right-0 p-1 z-[5]">
             <img src={entityImages.studioImageUrl(scene.studioId)} alt={scene.studioName} className="max-h-8 max-w-[120px] object-contain drop-shadow-md"
@@ -535,7 +552,10 @@ interface SceneTileProps {
 
 export function SceneTile({ scene, onClick }: SceneTileProps) {
   const file = scene.files[0];
-  const duration = file?.duration ?? 0;
+  const clipDuration = typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number"
+    ? Math.max(0, scene.clipEndSec - scene.clipStartSec)
+    : undefined;
+  const duration = clipDuration ?? file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
   const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 960);
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
@@ -717,9 +737,10 @@ interface ImageTileProps {
   selected?: boolean;
   onSelect?: () => void;
   selecting?: boolean;
+  bookmarkInitiallySaved?: boolean;
 }
 
-export function ImageTile({ image, engagement, onClick, onNavigate, onQuickView, selected, onSelect, selecting }: ImageTileProps & { engagement?: EntityEngagement }) {
+export function ImageTile({ image, engagement, onClick, onNavigate, onQuickView, selected, onSelect, selecting, bookmarkInitiallySaved }: ImageTileProps & { engagement?: EntityEngagement }) {
   const likeCount = engagement?.likeCount ?? 0;
   const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || likeCount > 0 || image.organized;
   const displayTitle = getImageDisplayTitle(image);
@@ -730,6 +751,16 @@ export function ImageTile({ image, engagement, onClick, onNavigate, onQuickView,
         <img src={images.thumbnailUrl(image.id)} alt={displayTitle} className="h-full w-full object-cover" loading="lazy" />
         <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
+        {!selecting && (
+          <BookmarkButton
+            hostType="image"
+            hostId={image.id}
+            compact
+            deferUntilHover
+            initialSaved={bookmarkInitiallySaved}
+            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+          />
+        )}
         {image.studioName && (
           <div className="absolute top-1 right-1 text-[10px] bg-black/70 px-1 py-0.5 rounded text-white truncate max-w-[80%]">{image.studioName}</div>
         )}
@@ -796,9 +827,10 @@ interface GalleryTileProps {
   selected?: boolean;
   onSelect?: () => void;
   selecting?: boolean;
+  bookmarkInitiallySaved?: boolean;
 }
 
-export function GalleryTile({ gallery, engagement, onClick, selected, onSelect, selecting }: GalleryTileProps & { engagement?: EntityEngagement }) {
+export function GalleryTile({ gallery, engagement, onClick, selected, onSelect, selecting, bookmarkInitiallySaved }: GalleryTileProps & { engagement?: EntityEngagement }) {
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "gallery", id: gallery.id }} onClick={onClick} label={`Open gallery ${gallery.title || "Untitled"}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
@@ -810,6 +842,16 @@ export function GalleryTile({ gallery, engagement, onClick, selected, onSelect, 
         )}
         <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
+        {!selecting && (
+          <BookmarkButton
+            hostType="gallery"
+            hostId={gallery.id}
+            compact
+            deferUntilHover
+            initialSaved={bookmarkInitiallySaved}
+            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+          />
+        )}
       </div>
       <div className="card-body border-t border-border/50 p-2.5 flex-1 flex flex-col gap-1">
         <p className="card-title font-semibold text-foreground line-clamp-2 group-hover:text-accent">{gallery.title || "Untitled"}</p>
@@ -827,20 +869,43 @@ interface GroupTileProps {
   selected?: boolean;
   onSelect?: () => void;
   selecting?: boolean;
+  bookmarkInitiallySaved?: boolean;
 }
 
-export function GroupTile({ group, engagement, onClick, selected, onSelect, selecting }: GroupTileProps & { engagement?: EntityEngagement }) {
+export function GroupTile({ group, engagement, onClick, selected, onSelect, selecting, bookmarkInitiallySaved }: GroupTileProps & { engagement?: EntityEngagement }) {
+  const count = group.kind === "dynamic" ? group.cachedItemCount ?? group.sceneCount : group.sceneCount;
+  const countLabel = group.kind === "dynamic"
+    ? `${count} item${count !== 1 ? "s" : ""}`
+    : `${count} scene${count !== 1 ? "s" : ""}`;
+
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "group", id: group.id }} onClick={onClick} label={`Open group ${group.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card relative">
-        <Layers className="h-10 w-10 text-muted" />
+      <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card relative overflow-hidden">
+        {group.frontImagePath ? (
+          <img src={group.frontImagePath} alt={group.name} className="h-full w-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        ) : (
+          <Layers className="h-10 w-10 text-muted" />
+        )}
         <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
+        {!selecting && (
+          <BookmarkButton
+            hostType="group"
+            hostId={group.id}
+            compact
+            deferUntilHover
+            initialSaved={bookmarkInitiallySaved}
+            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+          />
+        )}
+        {group.kind === "dynamic" ? (
+          <span className="absolute bottom-1 left-1 rounded bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">Dynamic</span>
+        ) : null}
       </div>
       <div className="card-body border-t border-border/50 p-2.5 flex-1 flex flex-col gap-1">
         <p className="card-title font-semibold text-foreground line-clamp-2 group-hover:text-accent">{group.name}</p>
-        <p className="text-xs text-secondary">{group.sceneCount} scene{group.sceneCount !== 1 ? "s" : ""}</p>
+        <p className="text-xs text-secondary">{countLabel}</p>
       </div>
     </div>
   );

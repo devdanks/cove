@@ -24,7 +24,15 @@ public record SceneDto(
     List<GroupSummaryDto> Groups, List<GallerySummaryDto> Galleries,
     List<SceneRemoteIdDto> RemoteIds, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     List<TagApplicationDto>? ContextTagApplications = null,
-    List<FieldProvenanceDto>? FieldProvenance = null);
+    List<FieldProvenanceDto>? FieldProvenance = null,
+    int? ParentSceneId = null,
+    string? ParentSceneTitle = null,
+    double? ClipStartSec = null,
+    double? ClipEndSec = null,
+    int ChildSceneCount = 0,
+    string? ImagePath = null);
+
+public record SceneListEntryDto(string Kind, int Id, SceneDto? Scene = null, GroupDto? Group = null);
 
 public record FieldProvenanceDto(
     string FieldKey,
@@ -43,14 +51,16 @@ public record SceneCreateDto(
     string? Date, int? Rating, bool Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields = null);
+    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields = null,
+    int? ParentSceneId = null, double? ClipStartSec = null, double? ClipEndSec = null);
 
 public record SceneUpdateDto(
     string? Title, string? Code, string? Details, string? Director,
     string? Date, int? Rating, bool? Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields);
+    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields,
+    double? ClipStartSec = null, double? ClipEndSec = null);
 
 // ===== PERFORMER DTOs =====
 public record PerformerDto(
@@ -286,24 +296,27 @@ public record GalleryUpdateDto(string? Title, string? Code, string? Date, string
 public record ImageDto(int Id, string? Title, string? Code, string? Details, string? Photographer,
     bool Organized, int? StudioId, string? StudioName, string? Date,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
-    int GalleryCount, List<int> GalleryIds, List<GallerySummaryDto> Galleries, List<ImageFileDto> Files, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
+    int GalleryCount, List<int> GalleryIds, List<GallerySummaryDto> Galleries, List<ImageFileDto> Files, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt, List<GroupSummaryDto>? Groups = null);
 
 public record ImageFileDto(int Id, string Path, string Basename, string Format, int Width, int Height, long Size);
 
 public record ImageCreateDto(string? Title, string? Code, string? Details, string? Photographer,
     int? Rating, bool Organized, int? StudioId, string? Date,
-    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, Dictionary<string, object>? CustomFields = null);
+    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, Dictionary<string, object>? CustomFields = null, List<SceneGroupInputDto>? GroupIds = null);
 
 public record ImageUpdateDto(string? Title, string? Code, string? Details, string? Photographer,
     int? Rating, bool? Organized, int? StudioId, string? Date,
-    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, Dictionary<string, object>? CustomFields);
+    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, Dictionary<string, object>? CustomFields = null, List<SceneGroupInputDto>? GroupIds = null);
 
 // ===== GROUP DTOs =====
 public record GroupDto(int Id, string Name, string? Aliases, int? Duration, string? Date,
     int? StudioId, string? StudioName, string? Director, string? Synopsis,
     List<string> Urls, List<TagDto> Tags, int SceneCount, bool IsCompilation, int SubGroupCount, int ContainingGroupCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    string? FrontImagePath, string? BackImagePath);
+    string? FrontImagePath, string? BackImagePath,
+    GroupKind Kind = GroupKind.Static, string? QuerySourceKey = null, string? QueryJson = null,
+    string? LastResolvedAt = null, int? CachedItemCount = null, int CacheTtlSec = 60,
+    bool ShowInSceneLists = true, List<string>? AllowedHostTypes = null, int SortOrder = 0);
 
 public record GroupSummaryDto(int Id, string Name, int SceneIndex);
 
@@ -312,8 +325,14 @@ public record GroupItemDto(
     int GroupId,
     int OrderIndex,
     GroupItemKind Kind,
-    int SceneId,
+    int? SceneId,
     string? SceneTitle,
+    string HostType,
+    int HostId,
+    int? ImageId,
+    string? ImageTitle,
+    int? ChildGroupId,
+    string? ChildGroupName,
     double? StartSec,
     double? EndSec,
     string? Title,
@@ -328,14 +347,16 @@ public record GroupItemDto(
 public record GroupItemCreateDto(
     int OrderIndex,
     GroupItemKind Kind,
-    int SceneId,
+    int? SceneId,
     double? StartSec,
     double? EndSec,
     string? Title,
     string? Notes,
     string? SourceSpanKey,
     int? SourceProfileId,
-    string? SourceQueryJson = null);
+    string? SourceQueryJson = null,
+    string? HostType = null,
+    int? HostId = null);
 
 public record GroupItemUpdateDto(
     int OrderIndex,
@@ -345,7 +366,7 @@ public record GroupItemUpdateDto(
     string? Title,
     string? Notes);
 
-public record GroupItemsReorderDto(List<int> Ids);
+public record GroupItemsReorderDto(List<int> Ids, int StartIndex = 0);
 
 public record GroupItemSpanInputDto(
     string? SpanKey,
@@ -373,11 +394,23 @@ public record GroupPlaybackManifestDto(List<GroupPlaybackManifestItemDto> Items)
 
 public record GroupCreateDto(string Name, string? Aliases, int? Duration, string? Date,
     int? Rating, int? StudioId, string? Director, string? Synopsis,
-    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields = null);
+    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields = null,
+    GroupKind Kind = GroupKind.Static, string? QuerySourceKey = null, string? QueryJson = null,
+    int? CacheTtlSec = null, bool? ShowInSceneLists = null, List<string>? AllowedHostTypes = null, int? SortOrder = null);
 
 public record GroupUpdateDto(string? Name, string? Aliases, int? Duration, string? Date,
     int? Rating, int? StudioId, string? Director, string? Synopsis,
-    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields);
+    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields,
+    GroupKind? Kind = null, string? QuerySourceKey = null, string? QueryJson = null,
+    int? CacheTtlSec = null, bool? ShowInSceneLists = null, List<string>? AllowedHostTypes = null, int? SortOrder = null);
+
+public record BookmarkDto(AffinityHostType HostType, int HostId, string CreatedAt);
+public record BookmarkToggleDto(AffinityHostType HostType, int HostId, bool Saved);
+public record BookmarkStateDto(AffinityHostType HostType, int HostId, bool Saved, string? CreatedAt = null);
+public record BookmarkBatchRequestDto(AffinityHostType HostType, List<int> HostIds);
+public record DynamicGroupSourceDto(string Key, string DisplayName);
+public record GroupQueryUpdateDto(string QuerySourceKey, string? QueryJson = null, int? CacheTtlSec = null);
+public record GroupReorderDto(List<int> Ids, int StartIndex = 0);
 
 // ===== SHARED DTOs =====
 public record VideoFileDto(int Id, string Path, string Basename, string Format,

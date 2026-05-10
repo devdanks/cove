@@ -466,6 +466,60 @@ public class SceneFilterBehaviorTests
     }
 
     [Fact]
+    public async Task ScenesController_FindWithCompilations_ReturnsSceneRangeGroupsAsPagedRows()
+    {
+        await using var context = CreateContext();
+        var scene = CreateSceneWithFile("scene row");
+        scene.CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        scene.UpdatedAt = scene.CreatedAt;
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        context.Groups.AddRange(
+            new Group
+            {
+                Name = "compilation row",
+                CreatedAt = new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc),
+                UpdatedAt = new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc),
+                ShowInSceneLists = true,
+                GroupItems = [new GroupItem { Kind = GroupItemKind.SceneRange, SceneId = scene.Id, HostId = scene.Id, StartSec = 10, EndSec = 20 }],
+            },
+            new Group
+            {
+                Name = "ordinary scene group",
+                CreatedAt = new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc),
+                UpdatedAt = new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc),
+                ShowInSceneLists = true,
+                GroupItems = [new GroupItem { Kind = GroupItemKind.Scene, SceneId = scene.Id, HostId = scene.Id }],
+            },
+            new Group
+            {
+                Name = "hidden compilation",
+                CreatedAt = new DateTime(2024, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                UpdatedAt = new DateTime(2024, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                ShowInSceneLists = false,
+                GroupItems = [new GroupItem { Kind = GroupItemKind.SceneRange, SceneId = scene.Id, HostId = scene.Id, StartSec = 20, EndSec = 30 }],
+            });
+        await context.SaveChangesAsync();
+
+        var controller = CreateScenesController(context);
+
+        var response = await controller.FindWithCompilations(
+            q: null, page: 1, perPage: 10, sort: "created_at", direction: "desc", seed: null,
+            title: null, rating: null, organized: null, studioId: null, groupId: null, galleryId: null,
+            tagIds: null, performerIds: null, ct: default);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PaginatedResponse<SceneListEntryDto>>(ok.Value);
+
+        Assert.Equal(2, payload.TotalCount);
+        Assert.Equal(["compilation", "scene"], payload.Items.Select(item => item.Kind).ToArray());
+        Assert.Equal("compilation row", payload.Items[0].Group?.Name);
+        Assert.True(payload.Items[0].Group?.IsCompilation);
+        Assert.Equal("scene row", payload.Items[1].Scene?.Title);
+    }
+
+    [Fact]
     public async Task ScenesController_FindDuplicates_ExactFingerprint_UsesMd5AndOshash()
     {
         await using var context = CreateContext();

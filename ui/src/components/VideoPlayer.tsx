@@ -388,6 +388,7 @@ export function VideoPlayer({
   );
 
   const effectiveStreamUrl = selectedQuality === "Direct" ? streamUrl : scenes.transcodeUrl(sceneId, selectedQuality);
+  const effectiveSourceType = selectedQuality === "Direct" ? undefined : "video/mp4";
 
   useEffect(() => {
     const v = videoRef.current;
@@ -873,7 +874,7 @@ export function VideoPlayer({
           onEndedProp?.();
         }}
       >
-        <source src={effectiveStreamUrl} type={`video/${format || "mp4"}`} />
+        <source src={effectiveStreamUrl} {...(effectiveSourceType ? { type: effectiveSourceType } : {})} />
         {captions?.map((cap, idx) => (
           <track
             key={cap.id}
