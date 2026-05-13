@@ -13,6 +13,7 @@ vi.mock("../api/client", () => ({
 
 describe("batchDownloads", () => {
   beforeEach(() => {
+    mocks.systemStartBatchDownload.mockReset();
     mocks.systemStartBatchDownload.mockResolvedValue({ jobId: "job-1", queuedCount: 1 });
   });
 
@@ -28,20 +29,21 @@ describe("batchDownloads", () => {
       items: [
         {
           url: "https://example.com/watch/4",
+          sourceUrl: undefined,
           entity: "Scene",
           entityId: 4,
           label: "Existing Scene",
         },
       ],
-      followUp: {
+      followUp: expect.objectContaining({
         scrapeScenes: true,
         allowDuplicateDownloads: true,
         generate: expect.objectContaining({ thumbnails: true }),
-      },
+      }),
     });
   });
 
-  it("queues every stored URL candidate for download-later items", async () => {
+  it("queues the child URL as primary when an existing item also stores a source URL", async () => {
     await queueBatchDownloads(
       "Audio",
       [{
@@ -59,8 +61,12 @@ describe("batchDownloads", () => {
 
     expect(mocks.systemStartBatchDownload).toHaveBeenCalledWith(expect.objectContaining({
       items: [
-        expect.objectContaining({ url: "https://reddit.com/r/example/comments/abc/post", entity: "Audio", entityId: 9 }),
-        expect.objectContaining({ url: "https://audio.example.net/track/two", entity: "Audio", entityId: 9 }),
+        expect.objectContaining({
+          url: "https://audio.example.net/track/two",
+          sourceUrl: "https://reddit.com/r/example/comments/abc/post",
+          entity: "Audio",
+          entityId: 9,
+        }),
       ],
     }));
   });
@@ -83,11 +89,11 @@ describe("batchDownloads", () => {
           createEntityIfMissing: true,
         },
       ],
-      followUp: {
+      followUp: expect.objectContaining({
         scrapeScenes: true,
         allowDuplicateDownloads: false,
         generate: expect.any(Object),
-      },
+      }),
     });
   });
 

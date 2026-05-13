@@ -395,6 +395,7 @@ function TextCard({
       <div className="card-body flex flex-1 flex-col gap-2 border-t border-border/50 p-2.5">
         <div className="flex min-h-0 flex-1 flex-col">
           <h2 className="card-title line-clamp-2 font-semibold text-foreground transition-colors group-hover:text-accent">{title}</h2>
+          <p className="mt-1 line-clamp-3 text-xs leading-snug text-muted">{preview}</p>
           <div className="mt-auto pt-2">
             <EntityReferencePopovers
               studio={{ id: text.studioId, name: text.studioName }}
@@ -402,9 +403,9 @@ function TextCard({
               tags={text.tags}
               groups={text.groups}
               onNavigate={onNavigate}
+              className="w-full justify-center"
             />
           </div>
-          <p className="mt-1 line-clamp-3 text-xs leading-snug text-muted">{preview}</p>
         </div>
 
         <div className="flex flex-wrap gap-1.5 text-[11px] text-muted">

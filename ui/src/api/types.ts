@@ -2763,7 +2763,7 @@ export interface Plugin {
 
 export interface PluginSettingSchema {
   name: string;
-  type: "STRING" | "NUMBER" | "BOOLEAN";
+  type: "STRING" | "NUMBER" | "BOOLEAN" | "PASSWORD";
   displayName?: string;
   description?: string;
 }
@@ -2926,10 +2926,29 @@ export interface ExtensionInfo {
   categories: string[];
   minCoveVersion?: string;
   dependencies: Record<string, string>;
+  externalDependencies: ExtensionExternalDependency[];
+  settings: PluginSettingSchema[];
   kind: string;
   source: string;
   installedAt?: string;
   jobs: { id: string; name: string; description?: string }[];
+}
+
+export interface ExtensionExternalDependency {
+  id: string;
+  name: string;
+  kind: string;
+  required: boolean;
+  description?: string;
+  versionRequirement?: string;
+  executables: string[];
+  environmentVariables: string[];
+  configurationKeys: string[];
+  installHint?: string;
+  nativeHint?: string;
+  dockerHint?: string;
+  url?: string;
+  extensionIds?: string[];
 }
 
 // ===== Registry Types =====
@@ -2959,6 +2978,8 @@ export interface RegistryExtensionDetail extends RegistryExtensionSummary {
   changelog?: string;
   screenshots: string[];
   dependencies: Record<string, string>;
+  externalDependencies?: ExtensionExternalDependency[];
+  settings?: PluginSettingSchema[];
   versions: RegistryVersionInfo[];
 }
 

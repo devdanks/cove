@@ -114,6 +114,7 @@ export async function queueBatchDownloads(
   const issues: BatchDownloadIssue[] = [];
   const batchItems: Array<{
     url: string;
+    sourceUrl?: string;
     entity: DownloadSelectionEntity;
     entityId: number;
     label: string;
@@ -127,14 +128,15 @@ export async function queueBatchDownloads(
       continue;
     }
 
-    for (const candidateUrl of candidateUrls) {
-      batchItems.push({
-        url: candidateUrl,
-        entity,
-        entityId: item.id,
-        label,
-      });
-    }
+    const sourceUrl = candidateUrls[0];
+    const primaryDownloadUrl = candidateUrls.find(url => !areUrlsEqual(url, sourceUrl)) ?? sourceUrl;
+    batchItems.push({
+      url: primaryDownloadUrl,
+      sourceUrl: areUrlsEqual(primaryDownloadUrl, sourceUrl) ? undefined : sourceUrl,
+      entity,
+      entityId: item.id,
+      label,
+    });
   }
 
   if (batchItems.length === 0) {
@@ -251,6 +253,10 @@ function normalizeUrlLines(urls: string[]) {
 
 function getItemDownloadUrls(urls: string[]) {
   return [...new Set(normalizeUrlLines(urls))];
+}
+
+function areUrlsEqual(left: string, right: string) {
+  return left.trim() === right.trim();
 }
 
 function deriveImportedItemTitle(url: string) {

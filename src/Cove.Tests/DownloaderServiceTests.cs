@@ -1012,6 +1012,71 @@ public class DownloaderServiceTests
     }
 
     [Fact]
+    public async Task DownloadAndIngestBatchAsync_PrefersChildTagsWhenExpandingSourceUrl()
+    {
+        const string sourceUrl = "https://forum.example.net/topics/abc/example-post";
+        var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(libraryRoot);
+        var scanService = new FakeScanService();
+
+        var service = CreateService(
+            out var services,
+            config: new CoveConfiguration
+            {
+                CovePaths = [new CovePath { Path = libraryRoot }],
+                MaxConcurrentDownloads = 2,
+            },
+            scanService: scanService,
+            includeForumProvider: true);
+
+        try
+        {
+            var summary = await service.DownloadAndIngestBatchAsync(
+                [
+                    new DownloaderBatchItemDto
+                    {
+                        Url = sourceUrl,
+                        Entity = "Audio",
+                        Title = "Forum Metadata Title",
+                        CreateEntityIfMissing = true,
+                    }
+                ],
+                new DownloaderBatchFollowUpDto
+                {
+                    AutoApplyMetadata = true,
+                    CreateMissingTags = true,
+                },
+                progress: null,
+                CancellationToken.None);
+
+            Assert.Equal(2, summary.TotalCount);
+            Assert.Equal(2, summary.SucceededCount);
+            Assert.Equal(0, summary.SkippedCount);
+            Assert.Equal(0, summary.FailedCount);
+
+            using var scope = services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+            var audios = await db.Audios
+                .Include(audio => audio.Urls)
+                .Include(audio => audio.AudioTags)
+                .ThenInclude(audioTag => audioTag.Tag)
+                .ToListAsync();
+
+            var firstAudio = Assert.Single(audios, audio => audio.Urls.Any(url => url.Url == "https://audio.example.net/track/one"));
+            var secondAudio = Assert.Single(audios, audio => audio.Urls.Any(url => url.Url == "https://audio.example.net/track/two"));
+
+            Assert.Equal(["Track Tag"], firstAudio.AudioTags.Select(item => item.Tag!.Name).OrderBy(name => name).ToList());
+            Assert.Equal(["Forum Tag"], secondAudio.AudioTags.Select(item => item.Tag!.Name).OrderBy(name => name).ToList());
+        }
+        finally
+        {
+            await services.DisposeAsync();
+            if (Directory.Exists(libraryRoot))
+                Directory.Delete(libraryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PreflightBatchAsync_QueuesSpecificAudioChildWhenSourceUrlExistsOnSibling()
     {
         const string sourceUrl = "https://forum.example.net/topics/abc/example-post";
@@ -1132,9 +1197,28 @@ public class DownloaderServiceTests
     {
         var serviceCollection = new ServiceCollection();
         var databaseName = $"cove-downloader-tests-{Guid.NewGuid():N}";
+        var effectiveConfig = config ?? new CoveConfiguration();
+        var extensionManager = new ExtensionManager(new ExtensionContext
+        {
+            Configuration = new ConfigurationBuilder().Build(),
+            DataDirectory = Path.GetTempPath(),
+            CoveVersion = "test",
+        });
+
+        downloaderProvider = new FakeDownloaderProvider();
+        extensionManager.Register(downloaderProvider);
+        if (includeForumProvider)
+            extensionManager.Register(new FakeForumProvider());
+
         serviceCollection.AddHttpClient();
         serviceCollection.AddDbContext<DownloaderTestContext>(options => options.UseInMemoryDatabase(databaseName));
         serviceCollection.AddScoped<CoveContext>(provider => provider.GetRequiredService<DownloaderTestContext>());
+        serviceCollection.AddSingleton(extensionManager);
+        serviceCollection.AddSingleton(provider => new ScraperService(
+            effectiveConfig,
+            NullLogger<ScraperService>.Instance,
+            provider.GetRequiredService<IHttpClientFactory>(),
+            provider.GetRequiredService<ExtensionManager>()));
         if (scanService != null)
             serviceCollection.AddSingleton(scanService);
         if (sceneMetadataApplyService != null)
@@ -1149,22 +1233,11 @@ public class DownloaderServiceTests
             db.SaveChanges();
         }
 
-        var extensionManager = new ExtensionManager(new ExtensionContext
-        {
-            Configuration = new ConfigurationBuilder().Build(),
-            DataDirectory = Path.GetTempPath(),
-            CoveVersion = "test",
-        });
-        downloaderProvider = new FakeDownloaderProvider();
-        extensionManager.Register(downloaderProvider);
-        if (includeForumProvider)
-            extensionManager.Register(new FakeForumProvider());
-
         return new DownloaderService(
             extensionManager,
             services.GetRequiredService<IHttpClientFactory>(),
             NullLoggerFactory.Instance,
-            config ?? new CoveConfiguration(),
+            effectiveConfig,
             services.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<DownloaderService>.Instance);
     }
@@ -1394,12 +1467,20 @@ public class DownloaderServiceTests
                 });
             }
 
-            if (url.Contains("audio.example.net", StringComparison.OrdinalIgnoreCase))
+            if (url.Contains("audio.example.net/track/one", StringComparison.OrdinalIgnoreCase))
             {
                 return Task.FromResult<ScrapedAudioDto?>(new ScrapedAudioDto
                 {
                     Urls = [url],
                     TagNames = ["Track Tag"],
+                });
+            }
+
+            if (url.Contains("audio.example.net", StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult<ScrapedAudioDto?>(new ScrapedAudioDto
+                {
+                    Urls = [url],
                 });
             }
 

@@ -51,6 +51,7 @@ import type {
   CustomFieldType,
   DownloaderDescriptor,
   DownloaderPathOverrideConfig,
+  ExtensionExternalDependency,
   IdentifyDefaultsConfig,
   MetadataServerValidationResult,
   ScrapeApplyDefaultsConfig,
@@ -5012,7 +5013,7 @@ function ScraperTable({ entityType, scrapers }: { entityType: string; scrapers: 
   );
 }
 
-// ===== Extension Settings Form (legacy Python extensions with config) =====
+// ===== Extension Settings Form =====
 function ExtensionSettingsForm({ extensionId, schema }: { extensionId: string; schema: import("../api/types").PluginSettingSchema[] }) {
   const queryClient = useQueryClient();
   const { data: configValues, isLoading } = useQuery({
@@ -5070,7 +5071,7 @@ function ExtensionSettingsForm({ extensionId, schema }: { extensionId: string; s
               />
             ) : (
               <input
-                type="text"
+                type={s.type === "PASSWORD" ? "password" : "text"}
                 value={(localValues[s.name] as string) ?? ""}
                 onChange={(e) => updateValue(s.name, e.target.value || null)}
                 className="flex-1 bg-card border border-border rounded px-2 py-1 text-sm focus:border-accent outline-none"
@@ -5096,6 +5097,51 @@ function ExtensionSettingsForm({ extensionId, schema }: { extensionId: string; s
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ExternalDependencyDetails({ dependency }: { dependency: ExtensionExternalDependency }) {
+  return (
+    <div className="bg-surface/50 rounded px-3 py-2 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-foreground">{dependency.name}</div>
+          {dependency.description && <div className="text-xs text-muted mt-0.5">{dependency.description}</div>}
+          {dependency.url && (
+            <a href={dependency.url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline break-all">
+              {dependency.url}
+            </a>
+          )}
+        </div>
+        <div className="flex flex-wrap justify-end gap-1 shrink-0">
+          <span className={`px-2 py-0.5 text-[11px] rounded ${dependency.required ? "bg-amber-500/15 text-amber-300" : "bg-card/50 text-muted"}`}>
+            {dependency.required ? "Required" : "Optional"}
+          </span>
+          <span className="px-2 py-0.5 text-[11px] rounded bg-card/50 text-muted">{dependency.kind || "tool"}</span>
+          {dependency.versionRequirement && (
+            <span className="px-2 py-0.5 text-[11px] rounded bg-card/50 text-muted">{dependency.versionRequirement}</span>
+          )}
+        </div>
+      </div>
+
+      <DependencyValueList label="Executables" values={dependency.executables} />
+      <DependencyValueList label="Environment" values={dependency.environmentVariables} />
+      <DependencyValueList label="Config" values={dependency.configurationKeys} />
+
+      {dependency.installHint && <p className="text-xs text-secondary">{dependency.installHint}</p>}
+      {dependency.nativeHint && <p className="text-xs text-muted"><span className="text-secondary">Native:</span> {dependency.nativeHint}</p>}
+      {dependency.dockerHint && <p className="text-xs text-muted"><span className="text-secondary">Docker:</span> {dependency.dockerHint}</p>}
+    </div>
+  );
+}
+
+function DependencyValueList({ label, values }: { label: string; values?: string[] }) {
+  if (!values || values.length === 0) return null;
+  return (
+    <div className="text-xs text-muted">
+      <span className="text-secondary">{label}:</span>{" "}
+      <span className="font-mono break-all">{values.join(", ")}</span>
     </div>
   );
 }
@@ -5163,6 +5209,7 @@ function ExtensionsPanel() {
     kind: string;
     categories: string[];
     dependencies: Record<string, string>;
+    externalDependencies: ExtensionExternalDependency[];
     source: "native" | "legacy";
     hasUI: boolean;
     hasApi: boolean;
@@ -5171,7 +5218,7 @@ function ExtensionsPanel() {
     hasEvents: boolean;
     jobs: { id: string; name: string; description?: string }[];
     legacyTasks?: import("../api/types").PluginTask[];
-    legacySettings?: import("../api/types").PluginSettingSchema[];
+    settings?: import("../api/types").PluginSettingSchema[];
   };
 
   const allExtensions: UnifiedExtension[] = useMemo(() => {
@@ -5190,6 +5237,7 @@ function ExtensionsPanel() {
         kind: ext.kind ?? "extension",
         categories: ext.categories,
         dependencies: ext.dependencies,
+        externalDependencies: ext.externalDependencies ?? [],
         source: "native",
         hasUI: ext.hasUI,
         hasApi: ext.hasApi,
@@ -5197,6 +5245,7 @@ function ExtensionsPanel() {
         hasState: ext.hasState,
         hasEvents: ext.hasEvents,
         jobs: ext.jobs,
+        settings: ext.settings ?? [],
       });
     }
 
@@ -5214,6 +5263,7 @@ function ExtensionsPanel() {
         kind: "extension",
         categories: [],
         dependencies: {},
+        externalDependencies: [],
         source: "legacy",
         hasUI: false,
         hasApi: false,
@@ -5222,7 +5272,7 @@ function ExtensionsPanel() {
         hasEvents: false,
         jobs: [],
         legacyTasks: p.tasks,
-        legacySettings: p.settings,
+        settings: p.settings,
       });
     }
 
@@ -5395,6 +5445,17 @@ function ExtensionsPanel() {
                       </div>
                     )}
 
+                    {ext.externalDependencies.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-secondary mb-2">External Tools</div>
+                        <div className="space-y-1.5">
+                          {ext.externalDependencies.map(dependency => (
+                            <ExternalDependencyDetails key={dependency.id} dependency={dependency} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Jobs (only shown if extension has them) */}
                     {ext.jobs.length > 0 && (
                       <div>
@@ -5437,8 +5498,8 @@ function ExtensionsPanel() {
                     )}
 
                     {/* Legacy settings */}
-                    {ext.legacySettings && ext.legacySettings.length > 0 && (
-                      <ExtensionSettingsForm extensionId={ext.id} schema={ext.legacySettings} />
+                    {ext.settings && ext.settings.length > 0 && (
+                      <ExtensionSettingsForm extensionId={ext.id} schema={ext.settings} />
                     )}
                   </div>
                 )}

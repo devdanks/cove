@@ -147,6 +147,8 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
                     e.Categories.ToList(),
                     e.MinCoveVersion,
                     e.Dependencies.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    GetExternalDependencies(manifest, e.Id),
+                    GetSettings(manifest, e.Id),
                     manifest?.Kind ?? "extension",
                     install?.Source ?? "unknown",
                     install?.InstalledAt,
@@ -185,6 +187,8 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
                     manifest.Categories.ToList(),
                     manifest.MinCoveVersion,
                     manifest.Dependencies,
+                    GetExternalDependencies(manifest, manifest.Id),
+                    GetSettings(manifest, manifest.Id),
                     manifest.Kind,
                     install.Source,
                     install.InstalledAt,
@@ -195,6 +199,17 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
 
         return Ok(items);
     }
+
+    private static List<ExtensionExternalDependency> GetExternalDependencies(ExtensionManifestFile? manifest, string extensionId) =>
+        manifest?.ExternalDependencies.Where(d => AppliesToExtension(d.ExtensionIds, extensionId)).ToList() ?? [];
+
+    private static List<ExtensionSettingManifest> GetSettings(ExtensionManifestFile? manifest, string extensionId) =>
+        manifest?.Settings.Where(s => AppliesToExtension(s.ExtensionIds, extensionId)).ToList() ?? [];
+
+    private static bool AppliesToExtension(IReadOnlyList<string>? extensionIds, string extensionId) =>
+        extensionIds == null
+        || extensionIds.Count == 0
+        || extensionIds.Any(id => string.Equals(id, extensionId, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Get all available extension categories (from loaded extensions + registry).</summary>
     [HttpGet("categories")]
@@ -577,6 +592,8 @@ public record ExtensionInfo(
     List<string> Categories,
     string? MinCoveVersion,
     Dictionary<string, string> Dependencies,
+    List<ExtensionExternalDependency> ExternalDependencies,
+    List<ExtensionSettingManifest> Settings,
     string Kind,
     string Source,
     DateTime? InstalledAt,

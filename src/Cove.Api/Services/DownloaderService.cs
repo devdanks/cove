@@ -550,7 +550,7 @@ public class DownloaderService(
             Date = ChooseValue(primary.Date, secondary.Date),
             StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
             Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
-            TagNames = MergeDistinctStrings(primary.TagNames, secondary.TagNames),
+            TagNames = ChoosePreferredNames(primary.TagNames, secondary.TagNames),
             PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
         };
     }
@@ -573,7 +573,7 @@ public class DownloaderService(
             ImageUrl = ChooseValue(primary.ImageUrl, secondary.ImageUrl),
             StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
             Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
-            TagNames = MergeDistinctStrings(primary.TagNames, secondary.TagNames),
+            TagNames = ChoosePreferredNames(primary.TagNames, secondary.TagNames),
             PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
         };
     }
@@ -594,7 +594,7 @@ public class DownloaderService(
             Date = ChooseValue(primary.Date, secondary.Date),
             StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
             Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
-            TagNames = MergeDistinctStrings(primary.TagNames, secondary.TagNames),
+            TagNames = ChoosePreferredNames(primary.TagNames, secondary.TagNames),
             PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
         };
     }
@@ -617,7 +617,7 @@ public class DownloaderService(
             Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
             StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
             PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
-            TagNames = MergeDistinctStrings(primary.TagNames, secondary.TagNames),
+            TagNames = ChoosePreferredNames(primary.TagNames, secondary.TagNames),
             GalleryTitle = ChooseValue(primary.GalleryTitle, secondary.GalleryTitle),
         };
     }
@@ -1158,6 +1158,12 @@ public class DownloaderService(
     private static List<string> MergeDistinctStrings(IEnumerable<string>? first, IEnumerable<string>? second)
     {
         return NormalizeNames((first ?? []).Concat(second ?? []));
+    }
+
+    private static List<string> ChoosePreferredNames(IEnumerable<string>? primary, IEnumerable<string>? secondary)
+    {
+        var preferred = NormalizeNames(primary ?? []);
+        return preferred.Count > 0 ? preferred : NormalizeNames(secondary ?? []);
     }
 
     private static List<string> MergeDistinctStrings(IEnumerable<string>? first, params string?[] extraValues)

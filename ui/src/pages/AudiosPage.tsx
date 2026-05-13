@@ -441,6 +441,7 @@ function AudioCard({
       <div className="card-body flex flex-1 flex-col gap-2 border-t border-border/50 p-2.5">
         <div className="flex min-h-0 flex-1 flex-col">
           <h2 className="card-title line-clamp-2 font-semibold text-foreground transition-colors group-hover:text-accent">{title}</h2>
+          {audio.details ? <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted">{audio.details}</p> : null}
           <div data-audio-preview-ignore className="mt-auto pt-2">
             <EntityReferencePopovers
               studio={{ id: audio.studioId, name: audio.studioName }}
@@ -448,9 +449,9 @@ function AudioCard({
               tags={audio.tags}
               groups={audio.groups}
               onNavigate={onNavigate}
+              className="w-full justify-center"
             />
           </div>
-          {audio.details ? <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted">{audio.details}</p> : null}
         </div>
 
         <div className="flex flex-wrap gap-1.5 text-[11px] text-muted">

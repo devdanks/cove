@@ -72,6 +72,8 @@ public class RegistryExtensionDetail : RegistryExtensionSummary
     public string? Changelog { get; set; }
     public List<string> Screenshots { get; set; } = [];
     public Dictionary<string, string> Dependencies { get; set; } = [];
+    public List<ExtensionExternalDependency> ExternalDependencies { get; set; } = [];
+    public List<ExtensionSettingManifest> Settings { get; set; } = [];
     public List<RegistryVersionInfo> Versions { get; set; } = [];
 }
 

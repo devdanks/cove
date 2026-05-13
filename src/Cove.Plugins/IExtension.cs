@@ -347,6 +347,10 @@ public class ExtensionManifestFile
     public string? MinCoveVersion { get; set; }
     /// <summary>Extension dependencies: ID → semver range (e.g. ">=1.0.0").</summary>
     public Dictionary<string, string> Dependencies { get; set; } = [];
+    /// <summary>External tools, runtimes, or services this extension can use.</summary>
+    public List<ExtensionExternalDependency> ExternalDependencies { get; set; } = [];
+    /// <summary>Generic key/value settings surfaced in the Extensions settings UI.</summary>
+    public List<ExtensionSettingManifest> Settings { get; set; } = [];
     /// <summary>The DLL filename containing the IExtension implementation.</summary>
     public string? EntryDll { get; set; }
     /// <summary>Relative path to the frontend JS bundle (ESM module).</summary>
@@ -361,6 +365,33 @@ public class ExtensionManifestFile
     public string? Checksum { get; set; }
     /// <summary>Registry source URL (set when installed from remote registry).</summary>
     public string? RegistryUrl { get; set; }
+}
+
+public class ExtensionExternalDependency
+{
+    public required string Id { get; set; }
+    public required string Name { get; set; }
+    public string Kind { get; set; } = "tool";
+    public bool Required { get; set; } = true;
+    public string? Description { get; set; }
+    public string? VersionRequirement { get; set; }
+    public List<string> Executables { get; set; } = [];
+    public List<string> EnvironmentVariables { get; set; } = [];
+    public List<string> ConfigurationKeys { get; set; } = [];
+    public string? InstallHint { get; set; }
+    public string? NativeHint { get; set; }
+    public string? DockerHint { get; set; }
+    public string? Url { get; set; }
+    public List<string> ExtensionIds { get; set; } = [];
+}
+
+public class ExtensionSettingManifest
+{
+    public required string Name { get; set; }
+    public string Type { get; set; } = "STRING";
+    public string? DisplayName { get; set; }
+    public string? Description { get; set; }
+    public List<string> ExtensionIds { get; set; } = [];
 }
 
 // ============================================================================
