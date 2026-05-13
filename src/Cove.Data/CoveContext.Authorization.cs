@@ -354,6 +354,150 @@ public partial class CoveContext
                     ? CanReadGroups
                     : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGroups, CanReadGroupsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Group, item.GroupId)));
 
+        modelBuilder.Entity<AudioUrl>().HasQueryFilter(link =>
+            AuthorizationFiltersBypassed
+                ? true
+                : !RequiresAudioReadScopeEvaluation
+                    ? CanReadAudios
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadAudios, CanReadAudiosByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Audio, link.AudioId));
+
+        modelBuilder.Entity<AudioTrack>().HasQueryFilter(track =>
+            AuthorizationFiltersBypassed
+                ? true
+                : !RequiresAudioReadScopeEvaluation
+                    ? CanReadAudios
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadAudios, CanReadAudiosByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Audio, track.AudioId));
+
+        modelBuilder.Entity<AudioTag>().HasQueryFilter(link =>
+            AuthorizationFiltersBypassed
+                ? true
+                : (!RequiresAudioReadScopeEvaluation
+                    ? CanReadAudios
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadAudios, CanReadAudiosByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Audio, link.AudioId))
+                && (!RequiresTagReadScopeEvaluation
+                    ? CanReadTags
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTags, CanReadTagsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Tag, link.TagId)));
+
+        modelBuilder.Entity<AudioPerformer>().HasQueryFilter(link =>
+            AuthorizationFiltersBypassed
+                ? true
+                : (!RequiresAudioReadScopeEvaluation
+                    ? CanReadAudios
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadAudios, CanReadAudiosByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Audio, link.AudioId))
+                && (!RequiresPerformerReadScopeEvaluation
+                    ? CanReadPerformers
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadPerformers, CanReadPerformersByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Performer, link.PerformerId)));
+
+        modelBuilder.Entity<TextUrl>().HasQueryFilter(link =>
+            AuthorizationFiltersBypassed
+                ? true
+                : !RequiresTextReadScopeEvaluation
+                    ? CanReadTexts
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTexts, CanReadTextsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Text, link.TextDocumentId));
+
+        modelBuilder.Entity<TextTag>().HasQueryFilter(link =>
+            AuthorizationFiltersBypassed
+                ? true
+                : (!RequiresTextReadScopeEvaluation
+                    ? CanReadTexts
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTexts, CanReadTextsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Text, link.TextDocumentId))
+                && (!RequiresTagReadScopeEvaluation
+                    ? CanReadTags
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTags, CanReadTagsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Tag, link.TagId)));
+
+        modelBuilder.Entity<TextPerformer>().HasQueryFilter(link =>
+            AuthorizationFiltersBypassed
+                ? true
+                : (!RequiresTextReadScopeEvaluation
+                    ? CanReadTexts
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTexts, CanReadTextsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Text, link.TextDocumentId))
+                && (!RequiresPerformerReadScopeEvaluation
+                    ? CanReadPerformers
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadPerformers, CanReadPerformersByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Performer, link.PerformerId)));
+
+        modelBuilder.Entity<FaceAppearance>().HasQueryFilter(appearance =>
+            AuthorizationFiltersBypassed
+                ? true
+                : CanReadFaces
+                && (appearance.HostType == FaceAppearanceHostType.Scene
+                    ? (!RequiresSceneReadScopeEvaluation
+                        ? CanReadScenes
+                        : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, appearance.HostId))
+                    : appearance.HostType == FaceAppearanceHostType.Image
+                        ? (!RequiresImageReadScopeEvaluation
+                            ? CanReadImages
+                            : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadImages, CanReadImagesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Image, appearance.HostId))
+                        : false));
+
+        modelBuilder.Entity<FaceSuggestionDecision>().HasQueryFilter(decision =>
+            AuthorizationFiltersBypassed
+                ? true
+                : (CurrentUserId != null && decision.UserId == CurrentUserId)
+                && CanReadFaces
+                && (!RequiresPerformerReadScopeEvaluation
+                    ? CanReadPerformers
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadPerformers, CanReadPerformersByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Performer, decision.PerformerId)));
+
+        modelBuilder.Entity<TagApplication>().HasQueryFilter(application =>
+            AuthorizationFiltersBypassed
+                ? true
+                : (application.HostType == AffinityHostType.Scene
+                    ? (!RequiresSceneReadScopeEvaluation
+                        ? CanReadScenes
+                        : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, application.HostId))
+                    : application.HostType == AffinityHostType.Image
+                        ? (!RequiresImageReadScopeEvaluation
+                            ? CanReadImages
+                            : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadImages, CanReadImagesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Image, application.HostId))
+                        : application.HostType == AffinityHostType.Performer
+                            ? (!RequiresPerformerReadScopeEvaluation
+                                ? CanReadPerformers
+                                : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadPerformers, CanReadPerformersByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Performer, application.HostId))
+                            : application.HostType == AffinityHostType.Face
+                                ? CanReadFaces
+                                : application.HostType == AffinityHostType.Tag
+                                    ? (!RequiresTagReadScopeEvaluation
+                                        ? CanReadTags
+                                        : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTags, CanReadTagsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Tag, application.HostId))
+                                    : application.HostType == AffinityHostType.Studio
+                                        ? (!RequiresStudioReadScopeEvaluation
+                                            ? CanReadStudios
+                                            : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadStudios, CanReadStudiosByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Studio, application.HostId))
+                                        : application.HostType == AffinityHostType.Gallery
+                                            ? (!RequiresGalleryReadScopeEvaluation
+                                                ? CanReadGalleries
+                                                : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGalleries, CanReadGalleriesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Gallery, application.HostId))
+                                            : application.HostType == AffinityHostType.Group
+                                                ? (!RequiresGroupReadScopeEvaluation
+                                                    ? CanReadGroups
+                                                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadGroups, CanReadGroupsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Group, application.HostId))
+                                                : application.HostType == AffinityHostType.Audio
+                                                    ? (!RequiresAudioReadScopeEvaluation
+                                                        ? CanReadAudios
+                                                        : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadAudios, CanReadAudiosByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Audio, application.HostId))
+                                                    : application.HostType == AffinityHostType.Text
+                                                        ? (!RequiresTextReadScopeEvaluation
+                                                            ? CanReadTexts
+                                                            : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTexts, CanReadTextsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Text, application.HostId))
+                                                        : false)
+                && (!RequiresTagReadScopeEvaluation
+                    ? CanReadTags
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTags, CanReadTagsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Tag, application.TagId))
+                && (application.ContextType == null
+                    ? application.ContextId == null
+                    : application.ContextId != null
+                        && (application.ContextType == "performer"
+                            ? (!RequiresPerformerReadScopeEvaluation
+                                ? CanReadPerformers
+                                : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadPerformers, CanReadPerformersByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Performer, application.ContextId.Value))
+                            : application.ContextType == "face"
+                                ? CanReadFaces
+                                : application.ContextType == "segment" || application.ContextType == "detection"
+                                    ? (!RequiresMarkerReadScopeEvaluation
+                                        ? CanReadSegments
+                                        : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadSegments, CanReadSegmentsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Marker, application.ContextId.Value))
+                                    : false)));
+
         modelBuilder.Entity<PerformerTag>().HasQueryFilter(link =>
             AuthorizationFiltersBypassed
                 ? true
