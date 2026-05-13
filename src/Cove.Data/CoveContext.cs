@@ -8,6 +8,7 @@ using Cove.Plugins;
 using System.Text.Json;
 using System.Linq.Expressions;
 using Pgvector;
+using NpgsqlTypes;
 
 namespace Cove.Data;
 
@@ -156,10 +157,83 @@ public partial class CoveContext : DbContext
 
         if (Database.ProviderName?.Contains("Npgsql", StringComparison.Ordinal) == true)
         {
+            ConfigureSearchVectors(modelBuilder);
             ConfigureAuthorizationFilters(modelBuilder);
         }
         else
             ConfigureProviderFallbacks(modelBuilder);
+    }
+
+    private static void ConfigureSearchVectors(ModelBuilder modelBuilder)
+    {
+        ConfigureSearchVector<Scene>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Title", '') || ' ' || coalesce("Code", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Details", '') || ' ' || coalesce("Director", '')), 'B') ||
+            setweight(to_tsvector('simple', coalesce("Captions", '') || ' ' || coalesce("FileSearchText", '') || ' ' || coalesce("SearchText", '')), 'C')
+            """);
+
+        ConfigureSearchVector<Image>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Title", '') || ' ' || coalesce("Code", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Details", '') || ' ' || coalesce("Photographer", '')), 'B') ||
+            setweight(to_tsvector('simple', coalesce("FileSearchText", '') || ' ' || coalesce("SearchText", '')), 'C')
+            """);
+
+        ConfigureSearchVector<Audio>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Title", '') || ' ' || coalesce("Code", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Details", '')), 'B') ||
+            setweight(to_tsvector('simple', coalesce("FileSearchText", '') || ' ' || coalesce("SearchText", '')), 'C')
+            """);
+
+        ConfigureSearchVector<TextDocument>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Title", '') || ' ' || coalesce("Code", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Details", '')), 'B') ||
+            setweight(to_tsvector('simple', coalesce("FileSearchText", '') || ' ' || coalesce("SearchText", '')), 'C')
+            """);
+
+        ConfigureSearchVector<Performer>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Name", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Disambiguation", '') || ' ' || coalesce("Details", '') || ' ' || coalesce("SearchText", '')), 'B') ||
+            setweight(to_tsvector('simple', coalesce("Country", '') || ' ' || coalesce("Ethnicity", '') || ' ' || coalesce("Tattoos", '') || ' ' || coalesce("Piercings", '')), 'C')
+            """);
+
+        ConfigureSearchVector<Tag>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Name", '') || ' ' || coalesce("SortName", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Description", '') || ' ' || coalesce("SearchText", '')), 'B')
+            """);
+
+        ConfigureSearchVector<Studio>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Name", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Details", '') || ' ' || coalesce("SearchText", '')), 'B')
+            """);
+
+        ConfigureSearchVector<Gallery>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Title", '') || ' ' || coalesce("Code", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Details", '') || ' ' || coalesce("Photographer", '')), 'B') ||
+            setweight(to_tsvector('simple', coalesce("SearchText", '')), 'C')
+            """);
+
+        ConfigureSearchVector<Group>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Name", '') || ' ' || coalesce("Aliases", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("Synopsis", '') || ' ' || coalesce("Director", '') || ' ' || coalesce("SearchText", '')), 'B')
+            """);
+
+        ConfigureSearchVector<Face>(modelBuilder, """
+            setweight(to_tsvector('simple', coalesce("Label", '')), 'A') ||
+            setweight(to_tsvector('simple', coalesce("PrimarySourceKey", '') || ' ' || coalesce("SearchText", '')), 'B')
+            """);
+    }
+
+    private static void ConfigureSearchVector<TEntity>(ModelBuilder modelBuilder, string computedColumnSql)
+        where TEntity : class
+    {
+        modelBuilder.Entity<TEntity>()
+            .Property<NpgsqlTsVector>("SearchVector")
+            .HasColumnType("tsvector")
+            .HasComputedColumnSql(computedColumnSql, stored: true);
+
+        modelBuilder.Entity<TEntity>()
+            .HasIndex("SearchVector")
+            .HasMethod("gin");
     }
 
     private static void ConfigureVectorStorage(ModelBuilder modelBuilder)

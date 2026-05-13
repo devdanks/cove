@@ -21,6 +21,7 @@ public class TextDocument : BaseEntity
     public string? MinPath { get; set; }
     public string? MaxPath { get; set; }
     public string? FileSearchText { get; set; }
+    public string? SearchText { get; set; }
 
     public Studio? Studio { get; set; }
     public ICollection<TextUrl> Urls { get; set; } = [];

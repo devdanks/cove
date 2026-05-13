@@ -8,6 +8,7 @@ public class Studio : BaseEntity
     public string? Details { get; set; }
     public bool IgnoreAutoTag { get; set; }
     public bool Organized { get; set; }
+    public string? SearchText { get; set; }
 
     // Image stored as blob reference
     public string? ImageBlobId { get; set; }

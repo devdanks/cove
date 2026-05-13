@@ -152,7 +152,7 @@ export function ImagesPage({ onNavigate }: Props) {
   }, [filter, setFilter]);
 
   const bulkDeleteMut = useMutation({
-    mutationFn: (options?: { deleteFile?: boolean; deleteGenerated?: boolean }) => images.bulkDelete([...selectedIds], options),
+    mutationFn: () => images.bulkDelete([...selectedIds]),
     onSuccess: () => { setShowDeleteConfirm(false); selectNone(); queryClient.invalidateQueries({ queryKey: ["images"] }); },
   });
 
@@ -181,7 +181,7 @@ export function ImagesPage({ onNavigate }: Props) {
       isLoading={isLoading}
       searchMode={searchMode}
       searchModes={SEARCH_MODE_OPTIONS}
-      searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Filter..."}
+      searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Search images, tags, performers..."}
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}
@@ -228,7 +228,7 @@ export function ImagesPage({ onNavigate }: Props) {
         title={`Delete ${selectedIds.size} image${selectedIds.size === 1 ? "" : "s"}`}
         message={`Delete ${selectedIds.size} selected image${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`}
         confirmLabel={bulkDeleteMut.isPending ? "Deleting..." : "Delete"}
-        onConfirm={(options) => bulkDeleteMut.mutate(options)}
+        onConfirm={() => bulkDeleteMut.mutate()}
         onCancel={() => setShowDeleteConfirm(false)}
         showDeleteFile
         showDeleteGenerated

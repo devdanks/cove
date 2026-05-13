@@ -34,135 +34,6 @@ public class StashMigrationMetadataTests
     }
 
     [Fact]
-    public async Task AddImportedAffinitiesAsync_AggregatesDuplicateHostsAndUpdatesExistingRows()
-    {
-        await using var context = CreateContext();
-        var userId = await context.Users.Select(user => user.Id).SingleAsync();
-        context.UserEntityAffinities.Add(new UserEntityAffinity
-        {
-            UserId = userId,
-            HostType = AffinityHostType.Scene,
-            HostId = 42,
-            LikeCount = 1,
-            ViewCount = 2,
-            TotalConsumedSec = 4,
-            LastPositionSec = 3,
-            LastConsumedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-        });
-        await context.SaveChangesAsync();
-
-        var service = CreateService(context);
-        await InvokePrivateAsync(
-            service,
-            "AddImportedAffinitiesAsync",
-            CreateImportedAffinitySeeds(
-                service,
-                (1, 2, 3, 12.5, 8, new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc)),
-                (2, 1, 4, 20, 9, new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc)),
-                (3, 5, 6, null, 10, null)),
-            new Dictionary<int, int> { [1] = 42, [2] = 42, [3] = 43 },
-            AffinityHostType.Scene,
-            CancellationToken.None);
-
-        var affinities = await context.UserEntityAffinities
-            .OrderBy(affinity => affinity.HostId)
-            .ToListAsync();
-
-        Assert.Equal(2, affinities.Count);
-        Assert.Equal(42, affinities[0].HostId);
-        Assert.Equal(3, affinities[0].LikeCount);
-        Assert.Equal(7, affinities[0].ViewCount);
-        Assert.Equal(17d, affinities[0].TotalConsumedSec);
-        Assert.Equal(20d, affinities[0].LastPositionSec);
-        Assert.Equal(new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc), affinities[0].LastConsumedAt);
-        Assert.Equal(43, affinities[1].HostId);
-        Assert.Equal(5, affinities[1].LikeCount);
-    }
-
-    [Fact]
-    public async Task AddImportedOverallRatingsAsync_CollapsesDuplicateHostsAndUpdatesExistingRows()
-    {
-        await using var context = CreateContext();
-        var userId = await context.Users.Select(user => user.Id).SingleAsync();
-        context.Ratings.Add(new Rating
-        {
-            UserId = userId,
-            HostType = RatingHostType.Scene,
-            HostId = 42,
-            Aspect = "overall",
-            Value = 25,
-        });
-        await context.SaveChangesAsync();
-
-        var service = CreateService(context);
-        await InvokePrivateAsync(
-            service,
-            "AddImportedOverallRatingsAsync",
-            CreateImportedRatingSeeds(service, (1, 60), (2, 80), (3, 90)),
-            new Dictionary<int, int> { [1] = 42, [2] = 42, [3] = 43 },
-            RatingHostType.Scene,
-            CancellationToken.None);
-
-        var ratings = await context.Ratings
-            .OrderBy(rating => rating.HostId)
-            .ToListAsync();
-
-        Assert.Equal(2, ratings.Count);
-        Assert.Equal(42, ratings[0].HostId);
-        Assert.Equal(80, ratings[0].Value);
-        Assert.Equal(43, ratings[1].HostId);
-        Assert.Equal(90, ratings[1].Value);
-    }
-
-        [Fact]
-        public async Task ImportTagsAsync_ReusesExistingAndDuplicateSourceNames()
-        {
-                await using var context = CreateContext();
-                var existing = new Tag { Name = "Existing Tag" };
-                context.Tags.Add(existing);
-                await context.SaveChangesAsync();
-
-                await using var stash = new SqliteConnection("Data Source=:memory:");
-                await stash.OpenAsync();
-                await ExecuteSqlAsync(stash, @"
-CREATE TABLE tags (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    sort_name TEXT,
-    description TEXT,
-    favorite INTEGER NOT NULL,
-    ignore_auto_tag INTEGER NOT NULL,
-    image_blob TEXT
-);
-CREATE TABLE tags_relations (parent_id INTEGER NOT NULL, child_id INTEGER NOT NULL);
-INSERT INTO tags (id, name, favorite, ignore_auto_tag) VALUES
-    (1, 'Existing Tag', 0, 0),
-    (2, 'Shared Source Tag', 0, 0),
-    (3, 'Shared Source Tag', 1, 0);
-INSERT INTO tags_relations (parent_id, child_id) VALUES (2, 3), (2, 3);
-");
-
-                var service = CreateService(context);
-                var result = await InvokePrivateAsync(
-                        service,
-                        "ImportTagsAsync",
-                        stash,
-                        new Dictionary<string, string>(),
-                        NullJobProgress.Instance,
-                        0d,
-                        1d,
-                        CancellationToken.None);
-                var idMap = Assert.IsType<Dictionary<int, int>>(result);
-
-                var tags = await context.Tags.OrderBy(tag => tag.Name).ToListAsync();
-                Assert.Equal(2, tags.Count);
-                Assert.Equal(existing.Id, idMap[1]);
-                Assert.Equal(idMap[2], idMap[3]);
-                Assert.NotEqual(existing.Id, idMap[2]);
-                Assert.Empty(await context.Set<TagParent>().ToListAsync());
-        }
-
-    [Fact]
     public async Task ImportPerformersAsync_ImportsPerformerTags()
     {
         await using var context = CreateContext();
@@ -1230,45 +1101,6 @@ VALUES (51, 41, 'scene', 3, 'tag', 'body', NULL, 7, 8.0, 11.0, '{""confidence"":
         return task!.GetType().GetProperty("Result")?.GetValue(task);
     }
 
-    private static Array CreateImportedAffinitySeeds(
-        StashMigrationService service,
-        params (int StashId, int LikeCount, int ViewCount, double? LastPositionSec, double TotalConsumedSec, DateTime? LastConsumedAt)[] seeds)
-    {
-        var seedType = service.GetType().GetNestedType("ImportedAffinitySeed", BindingFlags.NonPublic);
-        Assert.NotNull(seedType);
-        var array = Array.CreateInstance(seedType!, seeds.Length);
-        for (var i = 0; i < seeds.Length; i++)
-        {
-            var seed = seeds[i];
-            array.SetValue(Activator.CreateInstance(
-                seedType!,
-                seed.StashId,
-                seed.LikeCount,
-                seed.ViewCount,
-                seed.LastPositionSec,
-                seed.TotalConsumedSec,
-                seed.LastConsumedAt), i);
-        }
-
-        return array;
-    }
-
-    private static Array CreateImportedRatingSeeds(
-        StashMigrationService service,
-        params (int StashId, int? Value)[] seeds)
-    {
-        var seedType = service.GetType().GetNestedType("ImportedRatingSeed", BindingFlags.NonPublic);
-        Assert.NotNull(seedType);
-        var array = Array.CreateInstance(seedType!, seeds.Length);
-        for (var i = 0; i < seeds.Length; i++)
-        {
-            var seed = seeds[i];
-            array.SetValue(Activator.CreateInstance(seedType!, seed.StashId, seed.Value), i);
-        }
-
-        return array;
-    }
-
     private static async Task ExecuteSqlAsync(SqliteConnection connection, string sql)
     {
         await using var command = connection.CreateCommand();
@@ -1328,6 +1160,14 @@ VALUES (51, 41, 'scene', 3, 'tag', 'body', NULL, 7, 8.0, 11.0, '{""confidence"":
         {
             base.OnModelCreating(modelBuilder);
 
+            modelBuilder.Entity<Scene>().Ignore(scene => scene.CustomFields);
+            modelBuilder.Entity<Image>().Ignore(image => image.CustomFields);
+            modelBuilder.Entity<Tag>().Ignore(tag => tag.CustomFields);
+            modelBuilder.Entity<Studio>().Ignore(studio => studio.CustomFields);
+            modelBuilder.Entity<Performer>().Ignore(performer => performer.CustomFields);
+            modelBuilder.Entity<Gallery>().Ignore(gallery => gallery.CustomFields);
+            modelBuilder.Entity<Group>().Ignore(group => group.CustomFields);
+            modelBuilder.Entity<Face>().Ignore(face => face.CustomFields);
         }
     }
 

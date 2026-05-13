@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups, scenes } from "../api/client";
-import type { FindFilter, Group, GroupItem, Image as ImageEntity, Scene, SegmentDerivedQueryDescriptor, SegmentSpanDerivedQuery } from "../api/types";
-import { formatDate, formatDuration, CustomFieldsDisplay } from "../components/shared";
-import { BookOpenText, Clapperboard, ExternalLink, Film, GripVertical, Headphones, Image as ImageIcon, Layers, Link as LinkIcon, Pencil, Play, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import type { FindFilter, Group, GroupItem, Scene, SegmentDerivedQueryDescriptor, SegmentSpanDerivedQuery } from "../api/types";
+import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
+import { Clapperboard, ExternalLink, Film, GripVertical, Layers, Link as LinkIcon, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { GroupEditModal } from "./GroupEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
-import { GroupTile, ImageTile, SceneCard } from "../components/EntityCards";
+import { GroupTile, SceneCard } from "../components/EntityCards";
+import { CompilationPlayer } from "../components/CompilationPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { DetailListToolbar } from "../components/DetailListToolbar";
@@ -20,9 +21,7 @@ import { useExtensionTabs } from "../components/useExtensionTabs";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
-import { SortableList, type DragHandleProps } from "../components/SortableList";
-import { BookmarkButton } from "../components/BookmarkButton";
-import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
+import { SortableList } from "../components/SortableList";
 
 interface Props {
   id: number;
@@ -30,11 +29,6 @@ interface Props {
 }
 
 type TabKey = "items" | "containingGroups" | "metadata" | "edit" | (string & {});
-type GroupItemsDisplayMode = "grid" | "list";
-
-function getGroupItemCount(group: Group) {
-  return group.itemCount ?? (group.kind === "dynamic" ? group.cachedItemCount ?? group.sceneCount : group.sceneCount);
-}
 
 export function GroupDetailPage({ id, onNavigate }: Props) {
   const { data: group, isLoading } = useQuery({
@@ -45,7 +39,6 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("items");
-  const [groupItemsDisplayMode, setGroupItemsDisplayMode] = useState<GroupItemsDisplayMode>("grid");
   const { allTabs: groupTabs, renderExtensionTab } = useExtensionTabs("group", [
     { key: "items", label: "Items" },
     { key: "containingGroups", label: "Containing Groups" },
@@ -53,7 +46,6 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     { key: "edit", label: "Edit" },
   ], id);
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "asc", sort: "date" });
-  const [groupItemFilter, setGroupItemFilter] = useState<FindFilter>({ page: 1, perPage: 40, direction: "asc", sort: "order" });
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "groups" }, onNavigate);
   const canReadGroups = canReadEntity("group", hasPermission);
@@ -62,25 +54,18 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const canDeleteGroup = canDeleteEntity("group", hasPermission);
   const canReadStudios = canReadEntity("studio", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
-  const isDynamicGroup = group?.kind === "dynamic";
-  const isBuiltInPersonalGroup = isDynamicGroup && isBuiltInPersonalDynamicSource(group?.querySourceKey);
-  const canModifyGroup = canWriteGroup && !isBuiltInPersonalGroup;
-  const canRemoveGroup = canDeleteGroup && !isBuiltInPersonalGroup;
-  const { data: groupItemsPage, isLoading: pagedGroupItemsLoading } = useQuery({
-    queryKey: ["group-items-page", id, groupItemFilter],
-    queryFn: () => groups.items.page(id, groupItemFilter),
-    enabled: canReadGroups && !!group,
+  const { data: groupItems = [], isLoading: groupItemsLoading } = useQuery({
+    queryKey: ["group-items", id],
+    queryFn: () => groups.items.list(id),
+    enabled: canReadGroups,
   });
-  const groupItems = groupItemsPage?.items ?? [];
-  const groupItemsLoading = pagedGroupItemsLoading;
-  const groupItemsTotalCount = groupItemsPage?.totalCount ?? (isDynamicGroup ? group?.cachedItemCount ?? groupItems.length : groupItems.length);
   const { data: playbackManifest, isLoading: playbackManifestLoading } = useQuery({
     queryKey: ["group", id, "playback-manifest"],
     queryFn: () => groups.items.playbackManifest(id),
     enabled: canReadScenes,
   });
   const hasPlaybackItems = (playbackManifest?.items.length ?? 0) > 0;
-  const hasCompilationItems = playbackManifest?.items.some((item) => item.endSec != null) ?? groupItems.some((item) => item.kind === "sceneRange");
+  const hasCompilationItems = groupItems.some((item) => item.kind === "sceneRange");
 
   useEffect(() => {
     if (group) document.title = `${group.name} | Cove`;
@@ -95,31 +80,12 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  const snapshotMut = useMutation({
-    mutationFn: () => groups.snapshot(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["group", id] });
-      queryClient.invalidateQueries({ queryKey: ["group-items", id] });
-      queryClient.invalidateQueries({ queryKey: ["group-items-page", id] });
-      queryClient.invalidateQueries({ queryKey: ["group", id, "playback-manifest"] });
-      queryClient.invalidateQueries({ queryKey: ["groups"] });
-    },
-  });
-
-  const showInSceneListsMut = useMutation({
-    mutationFn: (showInSceneLists: boolean) => groups.update(id, { showInSceneLists }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["group", id] });
-      queryClient.invalidateQueries({ queryKey: ["groups"] });
-    },
-  });
-
   const tabs = useMemo(() => {
     const countedTabs = groupTabs.map((tab) => ({
       ...tab,
       count:
         tab.key === "items"
-          ? groupItemsTotalCount
+          ? groupItems.length + (group?.subGroupCount ?? 0)
           : tab.key === "containingGroups"
             ? group?.containingGroupCount
             : undefined,
@@ -130,10 +96,8 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       containingGroups: "groups.read",
       metadata: "groups.read",
       edit: "groups.read",
-    }, hasPermission)
-      .filter((tab) => tab.key !== "items" || canReadScenes || canReadGroups)
-      .filter((tab) => !isBuiltInPersonalGroup || tab.key !== "edit");
-  }, [canReadGroups, canReadScenes, group?.containingGroupCount, groupItemsTotalCount, groupTabs, hasPermission, isBuiltInPersonalGroup]);
+    }, hasPermission).filter((tab) => tab.key !== "items" || canReadScenes || canReadGroups);
+  }, [canReadGroups, canReadScenes, group?.containingGroupCount, group?.subGroupCount, groupItems.length, groupTabs, hasPermission]);
 
   useEffect(() => {
     if (tabs.length > 0 && !tabs.some((tab) => tab.key === activeTab)) {
@@ -155,36 +119,25 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
 
   const itemsContent = (
     <div className="space-y-6">
-      {canReadGroups ? (
-        <GroupItemsPanel
+      {canReadScenes ? (
+        <GroupScenesPanel
           groupId={id}
           filter={sceneFilter}
           setFilter={setSceneFilter}
           onNavigate={onNavigate}
           groupItems={groupItems}
           groupItemsLoading={groupItemsLoading}
-          groupItemsTotalCount={groupItemsTotalCount}
-          groupItemFilter={groupItemFilter}
-          setGroupItemFilter={setGroupItemFilter}
-          groupItemsDisplayMode={groupItemsDisplayMode}
-          setGroupItemsDisplayMode={setGroupItemsDisplayMode}
-          canWriteGroup={canModifyGroup}
-          group={group}
-          onRefreshDynamic={() => {
-            queryClient.invalidateQueries({ queryKey: ["group-items", id] });
-            queryClient.invalidateQueries({ queryKey: ["group-items-page", id] });
-            queryClient.invalidateQueries({ queryKey: ["group", id, "playback-manifest"] });
-            queryClient.invalidateQueries({ queryKey: ["group", id] });
-          }}
-          refreshingDynamic={groupItemsLoading || playbackManifestLoading}
-          onSnapshotDynamic={() => snapshotMut.mutate()}
-          snapshottingDynamic={snapshotMut.isPending}
-          canReadScenes={canReadScenes}
+          canWriteGroup={canWriteGroup}
         />
       ) : (
-        <EmptyPanel icon={<Layers className="h-12 w-12" />} message="Item access is unavailable for this group." />
+        <EmptyPanel icon={<Film className="h-12 w-12" />} message="Scene playback and scene list access are unavailable for this group." />
       )}
 
+      {canReadGroups ? (
+        <section className="rounded-2xl border border-border bg-card/70 p-5">
+          <GroupSubGroupsPanel groupId={id} onNavigate={onNavigate} canWriteGroup={canWriteGroup} />
+        </section>
+      ) : null}
     </div>
   );
 
@@ -203,7 +156,6 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       <section className="rounded-2xl border border-border bg-card/70 p-5">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted">Metadata</h2>
         <dl className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <MetadataField label="Item Count" value={getGroupItemCount(group)} />
           <MetadataField label="Scene Count" value={group.sceneCount} />
           <MetadataField label="Sub-Group Count" value={group.subGroupCount} />
           <MetadataField label="Containing Groups" value={group.containingGroupCount} />
@@ -239,17 +191,15 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Edit Group</h2>
           <p className="mt-1 text-sm text-secondary">
-            {canModifyGroup
-              ? "Open the group editor, adjust collection metadata, or remove the group entirely."
-              : isBuiltInPersonalGroup
-                ? "This built-in personal group is managed automatically."
-                : "You have read access to this group, but not write access."}
+            {canWriteGroup
+              ? "Open the group editor modal, adjust collection metadata, or remove the group entirely."
+              : "You have read access to this group, but not write access."}
           </p>
         </div>
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        {canModifyGroup ? (
+        {canWriteGroup ? (
           <button
             type="button"
             onClick={() => setEditing(true)}
@@ -259,17 +209,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
             Edit metadata
           </button>
         ) : null}
-        {canModifyGroup ? (
-          <button
-            type="button"
-            onClick={() => showInSceneListsMut.mutate(!(group.showInSceneLists ?? true))}
-            disabled={showInSceneListsMut.isPending}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-wait disabled:opacity-60"
-          >
-            {group.showInSceneLists ?? true ? "Hide from scene browsing" : "Show in scene browsing"}
-          </button>
-        ) : null}
-        {canRemoveGroup ? (
+        {canDeleteGroup ? (
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
@@ -304,18 +244,6 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
             ? editContent
             : renderExtensionTab(activeTab, id, onNavigate);
 
-  const heroCounts = group.kind === "dynamic"
-    ? [
-        { key: "items", label: "Items", value: groupItemsTotalCount || group.cachedItemCount || 0, icon: <Layers className="h-4 w-4" /> },
-        { key: "source", label: "Source", value: formatDynamicSourceLabel(group.querySourceKey), icon: <RefreshCw className="h-4 w-4" /> },
-        { key: "containing", label: "Containing", value: group.containingGroupCount, icon: <LinkIcon className="h-4 w-4" /> },
-      ]
-    : [
-        { key: "items", label: "Items", value: getGroupItemCount(group), icon: <Layers className="h-4 w-4" /> },
-        { key: "subgroups", label: "Sub-groups", value: group.subGroupCount, icon: <Layers className="h-4 w-4" /> },
-        { key: "containing", label: "Containing", value: group.containingGroupCount, icon: <LinkIcon className="h-4 w-4" /> },
-      ];
-
   return (
     <div>
       <GroupEditModal group={group} open={editing} onClose={() => setEditing(false)} />
@@ -349,11 +277,14 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         backLabel={backLabel}
         onGoBack={goBack}
         imageFallback={<Layers className="h-14 w-14" />}
-        counts={heroCounts}
+        counts={[
+          { key: "scenes", label: "Scenes", value: group.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "subgroups", label: "Sub-groups", value: group.subGroupCount, icon: <Layers className="h-4 w-4" /> },
+          { key: "containing", label: "Containing", value: group.containingGroupCount, icon: <LinkIcon className="h-4 w-4" /> },
+        ]}
         actions={
           <>
             <ExtensionSlot slot="group-detail-actions" context={{ group, onNavigate }} />
-            {!isBuiltInPersonalGroup ? <BookmarkButton hostType="group" hostId={group.id} compact /> : null}
             {hasPlaybackItems ? (
               <button
                 type="button"
@@ -364,7 +295,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
                 <Play className="h-4 w-4" />
               </button>
             ) : null}
-            {canModifyGroup ? (
+            {canWriteGroup ? (
               <button
                 type="button"
                 onClick={() => setEditing(true)}
@@ -374,7 +305,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
                 <Pencil className="h-4 w-4" />
               </button>
             ) : null}
-            {canRemoveGroup ? (
+            {canDeleteGroup ? (
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}
@@ -387,15 +318,12 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
           </>
         }
       >
-        {canReadGroups ? (
-          <section className="mx-auto max-w-7xl pb-5">
-            <GroupSubGroupsPanel groupId={id} onNavigate={onNavigate} canWriteGroup={canModifyGroup} />
-          </section>
-        ) : null}
-        <EntityDetailTabs tabs={tabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl" />
-        <div className="py-6">
-          {activeContent}
-          <ExtensionSlot slot="group-detail-main-bottom" context={{ group, onNavigate }} />
+        <div className="mx-auto max-w-7xl">
+          <EntityDetailTabs tabs={tabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} />
+          <div className="py-6">
+            {activeContent}
+            <ExtensionSlot slot="group-detail-main-bottom" context={{ group, onNavigate }} />
+          </div>
         </div>
       </EntityHeroLayout>
 
@@ -413,156 +341,149 @@ function MetadataField({ label, value }: { label: string; value: React.ReactNode
   );
 }
 
-function GroupItemsPanel({ groupId, filter, setFilter, onNavigate, groupItems, groupItemsLoading, groupItemsTotalCount, groupItemFilter, setGroupItemFilter, groupItemsDisplayMode, setGroupItemsDisplayMode, canWriteGroup, group, onRefreshDynamic, refreshingDynamic, onSnapshotDynamic, snapshottingDynamic, canReadScenes }: {
+function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, groupItemsLoading, canWriteGroup }: {
   groupId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
   groupItems?: GroupItem[];
   groupItemsLoading?: boolean;
-  groupItemsTotalCount?: number;
-  groupItemFilter?: FindFilter;
-  setGroupItemFilter?: (filter: FindFilter) => void;
-  groupItemsDisplayMode: GroupItemsDisplayMode;
-  setGroupItemsDisplayMode: (mode: GroupItemsDisplayMode) => void;
   canWriteGroup?: boolean;
-  group: Group;
-  onRefreshDynamic?: () => void;
-  refreshingDynamic?: boolean;
-  onSnapshotDynamic?: () => void;
-  snapshottingDynamic?: boolean;
-  canReadScenes: boolean;
 }) {
   const queryClient = useQueryClient();
   const [zoomLevel, setZoomLevel] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
-  const isDynamic = group.kind === "dynamic";
   const { data: groupScenes, isLoading } = useQuery({
     queryKey: ["group-scenes", groupId, filter],
     queryFn: () => scenes.find(filter, { groupId: String(groupId) }),
-    enabled: !isDynamic && canReadScenes,
   });
   const deleteItemMutation = useMutation({
     mutationFn: (itemId: number) => groups.items.delete(groupId, itemId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["group-items", groupId] });
-      queryClient.invalidateQueries({ queryKey: ["group-items-page", groupId] });
       queryClient.invalidateQueries({ queryKey: ["group", groupId] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
     },
   });
   const reorderItemMutation = useMutation({
-    mutationFn: (ids: number[]) => groups.items.reorder(groupId, { ids, startIndex: ((groupItemFilter?.page ?? 1) - 1) * (groupItemFilter?.perPage ?? 40) }),
+    mutationFn: (ids: number[]) => groups.items.reorder(groupId, { ids }),
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ["group-items", groupId] });
+      const previousItems = queryClient.getQueryData<GroupItem[]>(["group-items", groupId]) ?? [];
+      const itemsById = new Map(previousItems.map((item) => [item.id, item]));
+      const nextItems = ids
+        .map((itemId, index) => {
+          const item = itemsById.get(itemId);
+          return item ? { ...item, orderIndex: index } : undefined;
+        })
+        .filter((item): item is GroupItem => item != null);
+
+      queryClient.setQueryData(["group-items", groupId], nextItems);
+      return { previousItems };
+    },
+    onError: (_error, _ids, context) => {
+      if (context?.previousItems) {
+        queryClient.setQueryData(["group-items", groupId], context.previousItems);
+      }
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["group-items", groupId] });
-      queryClient.invalidateQueries({ queryKey: ["group-items-page", groupId] });
-      queryClient.invalidateQueries({ queryKey: ["group", groupId, "playback-manifest"] });
     },
   });
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(groupScenes?.items ?? []);
   const selecting = selectedIds.size > 0;
 
-  useEffect(() => {
-    if (isDynamic && !groupItemsLoading && groupItems) {
-      queryClient.invalidateQueries({ queryKey: ["group", groupId] });
-      queryClient.invalidateQueries({ queryKey: ["groups"] });
-    }
-  }, [groupId, groupItems, groupItemsLoading, isDynamic, queryClient]);
-
   if (groupItemsLoading) {
-    return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading items..." />;
+    return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading group items..." />;
   }
 
-  if (isDynamic || (groupItemsTotalCount ?? 0) > 0 || (groupItems && groupItems.length > 0)) {
-    const orderedItems = [...(groupItems ?? [])].sort((left, right) => left.orderIndex - right.orderIndex || left.id - right.id);
-    const canReorderItems = !isDynamic && !!canWriteGroup && (groupItemFilter?.sort ?? "order") === "order" && (groupItemFilter?.direction ?? "asc") !== "desc";
-    const bookmarkInitiallySaved = group.querySourceKey === "save-for-later" ? true : undefined;
+  if (groupItems && groupItems.length > 0) {
+    const orderedItems = [...groupItems].sort((left, right) => left.orderIndex - right.orderIndex || left.id - right.id);
 
     return (
       <div className="space-y-4">
-        {isDynamic ? (
-          <section className="mx-auto w-full max-w-7xl">
-            <DynamicGroupBanner
-              group={group}
-              resolvedCount={groupItemsTotalCount ?? orderedItems.length}
-              onRefresh={onRefreshDynamic}
-              refreshing={refreshingDynamic}
-              onSnapshot={onSnapshotDynamic}
-              snapshotting={snapshottingDynamic}
-              canWriteGroup={!!canWriteGroup}
-            />
-          </section>
-        ) : null}
-
-        {groupItemFilter && setGroupItemFilter ? (
-          <DetailListToolbar
-            filter={groupItemFilter}
-            onFilterChange={setGroupItemFilter}
-            totalCount={groupItemsTotalCount ?? orderedItems.length}
-            sortOptions={[
-              { value: "order", label: "Manual Order" },
-              { value: "title", label: "Title" },
-              { value: "kind", label: "Kind" },
-              { value: "created_at", label: "Created At" },
-            ]}
-            showSort={!isDynamic}
-            showSearch={!isDynamic}
-            zoomLevel={zoomLevel}
-            onZoomChange={setZoomLevel}
-            displayMode={groupItemsDisplayMode}
-            onDisplayModeChange={setGroupItemsDisplayMode}
-          />
-        ) : null}
-
-        {orderedItems.length === 0 ? (
-          <EmptyPanel icon={<Layers className="h-12 w-12" />} message={isDynamic ? "No items resolved for this dynamic group" : "No items"} />
-        ) : null}
-
-        {groupItemsDisplayMode === "grid" ? (
-          canReorderItems ? (
-            <SortableList
-              items={orderedItems}
-              getKey={(item) => item.id}
-              onReorder={(nextItems) => reorderItemMutation.mutate(nextItems.map((item) => item.id))}
-              disabled={reorderItemMutation.isPending}
-              className="grid gap-4"
-              style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${220 + zoomLevel * 50}px, 1fr))` }}
-              renderItem={(item, { dragHandleProps, isDragging, isOver }) => (
-                <GroupItemCard item={item} onNavigate={onNavigate} onRemove={canWriteGroup ? () => deleteItemMutation.mutate(item.id) : undefined} dragHandleProps={dragHandleProps} isDragging={isDragging} isOver={isOver} bookmarkInitiallySaved={bookmarkInitiallySaved} />
-              )}
-            />
-          ) : (
-            <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-              {orderedItems.map((item) => (
-                <GroupItemCard key={item.id} item={item} onNavigate={onNavigate} onRemove={!isDynamic && canWriteGroup ? () => deleteItemMutation.mutate(item.id) : undefined} bookmarkInitiallySaved={bookmarkInitiallySaved} />
-              ))}
-            </EntityCardGrid>
-          )
-        ) : canReorderItems ? (
-          <SortableList
-            items={orderedItems}
-            getKey={(item) => item.id}
-            onReorder={(nextItems) => reorderItemMutation.mutate(nextItems.map((item) => item.id))}
-            disabled={reorderItemMutation.isPending}
-            className="space-y-2"
-            renderItem={(item, { dragHandleProps, isDragging, isOver }) => (
-              <GroupItemRow item={item} onNavigate={onNavigate} onRemove={canWriteGroup ? () => deleteItemMutation.mutate(item.id) : undefined} dragHandleProps={dragHandleProps} isDragging={isDragging} isOver={isOver} />
-            )}
-          />
-        ) : (
-          <div className="space-y-2">
-            {orderedItems.map((item) => (
-              <GroupItemRow key={item.id} item={item} onNavigate={onNavigate} onRemove={!isDynamic && canWriteGroup ? () => deleteItemMutation.mutate(item.id) : undefined} />
-            ))}
+        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-4">
+          <div>
+            <div className="text-sm font-semibold text-foreground">Group Items</div>
+            <div className="mt-1 text-sm text-secondary">This tab now reads the ordered playback items directly from the new group item API.</div>
           </div>
-        )}
+          <div className="text-xs text-muted">{orderedItems.length} item{orderedItems.length === 1 ? "" : "s"}</div>
+        </div>
+
+        <SortableList
+          items={orderedItems}
+          getKey={(item) => item.id}
+          onReorder={(nextItems) => reorderItemMutation.mutate(nextItems.map((item) => item.id))}
+          disabled={!canWriteGroup || reorderItemMutation.isPending}
+          className="space-y-2"
+          renderItem={(item, { dragHandleProps, isDragging, isOver }) => {
+            const label = item.title || item.sceneTitle || `Scene #${item.sceneId}`;
+            return (
+              <div className={`rounded-xl border bg-card/80 p-4 transition-colors ${isDragging ? "border-accent opacity-40" : isOver ? "border-accent bg-accent/5" : "border-border"}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    {canWriteGroup ? (
+                      <span {...dragHandleProps} className="mt-0.5 inline-flex shrink-0 cursor-grab items-center text-muted active:cursor-grabbing">
+                        <GripVertical className="h-4 w-4" />
+                      </span>
+                    ) : null}
+                    <div>
+                      <div className="text-sm font-medium text-foreground">{label}</div>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary">
+                        <span>#{item.orderIndex + 1}</span>
+                        <span>{item.kind === "sceneRange" ? formatDurationRange(item.startSec, item.endSec) : "Full scene"}</span>
+                        {item.sourceSpanKey ? <span>Span snapshot</span> : null}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onNavigate({ page: "scene", id: item.sceneId, seekTo: item.startSec ?? 0 })}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open scene
+                    </button>
+                    {item.sourceSpanKey ? (
+                      <button
+                        type="button"
+                        onClick={() => onNavigate({
+                          page: "scene-span",
+                          id: item.sceneId,
+                          spanKey: item.sourceSpanKey,
+                          profileId: item.sourceProfileId,
+                          derivedQueryDescriptor: parseGroupItemDerivedQueryDescriptor(item.sourceQueryJson),
+                        })}
+                        className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+                      >
+                        Open span
+                      </button>
+                    ) : null}
+                    {canWriteGroup ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => deleteItemMutation.mutate(item.id)}
+                          disabled={deleteItemMutation.isPending}
+                          className="rounded-lg border border-red-400/30 px-3 py-2 text-sm text-red-200 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            );
+          }}
+        />
       </div>
     );
   }
 
-  if (!canReadScenes) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No visible items" />;
-  if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading items..." />;
-  if (!groupScenes || groupScenes.items.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No items in this group" />;
+  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
+  if (!groupScenes || groupScenes.items.length === 0) return <EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes in this group" />;
 
   return (
     <>
@@ -570,7 +491,12 @@ function GroupItemsPanel({ groupId, filter, setFilter, onNavigate, groupItems, g
         filter={filter}
         onFilterChange={setFilter}
         totalCount={groupScenes.totalCount}
-        sortOptions={SCENE_SORT_OPTIONS}
+        sortOptions={[
+          { value: "title", label: "Title" },
+          { value: "date", label: "Date" },
+          { value: "rating", label: "Rating" },
+          { value: "created_at", label: "Created At" },
+        ]}
         zoomLevel={zoomLevel}
         onZoomChange={setZoomLevel}
         showSearch
@@ -589,227 +515,6 @@ function GroupItemsPanel({ groupId, filter, setFilter, onNavigate, groupItems, g
       )}
     </>
   );
-}
-
-function GroupItemCard({ item, onNavigate, onRemove, dragHandleProps, isDragging, isOver, bookmarkInitiallySaved }: { item: GroupItem; onNavigate: (r: any) => void; onRemove?: () => void; dragHandleProps?: DragHandleProps; isDragging?: boolean; isOver?: boolean; bookmarkInitiallySaved?: boolean }) {
-  const label = getGroupItemLabel(item);
-  const target = getGroupItemRoute(item);
-  const actionOverlay = (
-    <div className="absolute left-1.5 right-1.5 top-1.5 z-30 flex items-center justify-between gap-2 pointer-events-none">
-      {dragHandleProps ? (
-        <span
-          {...dragHandleProps}
-          onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto inline-flex h-7 w-7 cursor-grab items-center justify-center rounded bg-black/70 text-white transition-colors hover:bg-black/85 active:cursor-grabbing"
-          title="Drag to reorder"
-        >
-          <GripVertical className="h-4 w-4" />
-        </span>
-      ) : <span />}
-      {onRemove ? (
-        <button
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onRemove(); }}
-          className="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded bg-black/70 text-white transition-colors hover:bg-red-600"
-          title="Remove from group"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-      ) : null}
-    </div>
-  );
-
-  const wrapperClass = `relative h-full transition ${isDragging ? "opacity-50" : ""} ${isOver ? "rounded-lg outline outline-2 outline-accent" : ""}`;
-
-  if (item.sceneId) {
-    const scene = groupItemToScene(item);
-    return (
-      <div className={wrapperClass}>
-        {actionOverlay}
-        {item.kind === "sceneRange" ? (
-          <span className="absolute bottom-1.5 left-1.5 z-30 rounded bg-black/75 px-1.5 py-0.5 text-[11px] text-white">{formatDurationRange(item.startSec, item.endSec)}</span>
-        ) : null}
-        <SceneCard scene={scene} onClick={() => onNavigate({ page: "scene", id: scene.id, seekTo: item.startSec ?? 0 })} onNavigate={onNavigate} bookmarkInitiallySaved={bookmarkInitiallySaved} />
-      </div>
-    );
-  }
-
-  if (item.imageId || item.hostType === "image") {
-    const image = groupItemToImage(item);
-    return (
-      <div className={wrapperClass}>
-        {actionOverlay}
-        <ImageTile image={image} onClick={() => onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} bookmarkInitiallySaved={bookmarkInitiallySaved} />
-      </div>
-    );
-  }
-
-  if (item.childGroupId || item.hostType === "group") {
-    const childGroup = groupItemToGroup(item);
-    return (
-      <div className={wrapperClass}>
-        {actionOverlay}
-        <GroupTile group={childGroup} onClick={() => onNavigate({ page: "group", id: childGroup.id })} bookmarkInitiallySaved={bookmarkInitiallySaved} />
-      </div>
-    );
-  }
-
-  return (
-    <article className={`${wrapperClass} flex h-full flex-col rounded-lg border border-border bg-card/80 p-4 transition-colors hover:border-accent/60`}>
-      {actionOverlay}
-      <div className="flex items-start gap-3">
-        <GroupItemKindIcon item={item} />
-        <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 text-sm font-semibold text-foreground">{label}</h3>
-          <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary">
-            <span>#{item.orderIndex + 1}</span>
-            <span>{getGroupItemMeta(item)}</span>
-          </div>
-        </div>
-      </div>
-      <div className="mt-auto flex flex-wrap gap-2 pt-4">
-        {target ? (
-          <button
-            type="button"
-            onClick={() => onNavigate(target.route)}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-          >
-            <ExternalLink className="h-4 w-4" />
-            {target.label}
-          </button>
-        ) : null}
-        {item.sourceSpanKey ? (
-          <button
-            type="button"
-            onClick={() => onNavigate({
-              page: "scene-span",
-              id: item.sceneId,
-              spanKey: item.sourceSpanKey,
-              profileId: item.sourceProfileId,
-              derivedQueryDescriptor: parseGroupItemDerivedQueryDescriptor(item.sourceQueryJson),
-            })}
-            className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-          >
-            Open span
-          </button>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function GroupItemRow({ item, onNavigate, onRemove, dragHandleProps, isDragging, isOver }: { item: GroupItem; onNavigate: (r: any) => void; onRemove?: () => void; dragHandleProps?: DragHandleProps; isDragging?: boolean; isOver?: boolean }) {
-  const label = getGroupItemLabel(item);
-  const target = getGroupItemRoute(item);
-  return (
-    <div className={`rounded-xl border bg-card/80 p-4 transition-colors ${isDragging ? "border-accent opacity-40" : isOver ? "border-accent bg-accent/5" : "border-border"}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          {dragHandleProps ? (
-            <span {...dragHandleProps} className="mt-0.5 inline-flex shrink-0 cursor-grab items-center text-muted active:cursor-grabbing">
-              <GripVertical className="h-4 w-4" />
-            </span>
-          ) : null}
-          <GroupItemKindIcon item={item} />
-          <div>
-            <div className="text-sm font-medium text-foreground">{label}</div>
-            <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary">
-              <span>#{item.orderIndex + 1}</span>
-              <span>{getGroupItemMeta(item)}</span>
-              {item.sceneId && item.kind !== "scene" && item.kind !== "sceneRange" ? <span>Playable scene reference</span> : null}
-              {item.kind !== "scene" && item.kind !== "sceneRange" ? <span>Skipped by player</span> : null}
-              {item.sourceSpanKey ? <span>Span snapshot</span> : null}
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {target ? (
-            <button
-              type="button"
-              onClick={() => onNavigate(target.route)}
-              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-            >
-              <ExternalLink className="h-4 w-4" />
-              {target.label}
-            </button>
-          ) : null}
-          {item.sourceSpanKey ? (
-            <button
-              type="button"
-              onClick={() => onNavigate({
-                page: "scene-span",
-                id: item.sceneId,
-                spanKey: item.sourceSpanKey,
-                profileId: item.sourceProfileId,
-                derivedQueryDescriptor: parseGroupItemDerivedQueryDescriptor(item.sourceQueryJson),
-              })}
-              className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-            >
-              Open span
-            </button>
-          ) : null}
-          {onRemove ? (
-            <button
-              type="button"
-              onClick={onRemove}
-              className="rounded-lg border border-red-400/30 px-3 py-2 text-sm text-red-200 transition-colors hover:border-red-400"
-            >
-              Remove
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function groupItemToScene(item: GroupItem): Scene {
-  return {
-    id: item.sceneId ?? item.hostId ?? 0,
-    title: getGroupItemLabel(item),
-    organized: false,
-    urls: [],
-    tags: [],
-    performers: [],
-    files: [],
-    groups: [],
-    galleries: [],
-    remoteIds: [],
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt,
-  };
-}
-
-function groupItemToImage(item: GroupItem): ImageEntity {
-  return {
-    id: item.imageId ?? item.hostId ?? 0,
-    title: getGroupItemLabel(item),
-    organized: false,
-    urls: [],
-    tags: [],
-    performers: [],
-    galleryCount: 0,
-    galleryIds: [],
-    galleries: [],
-    files: [],
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt,
-  };
-}
-
-function groupItemToGroup(item: GroupItem): Group {
-  return {
-    id: item.childGroupId ?? item.hostId ?? 0,
-    name: item.childGroupName ?? getGroupItemLabel(item),
-    urls: [],
-    tags: [],
-    sceneCount: 0,
-    itemCount: item.hostId || item.childGroupId ? 1 : 0,
-    subGroupCount: 0,
-    containingGroupCount: 0,
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt,
-  };
 }
 
 function parseGroupItemDerivedQueryDescriptor(sourceQueryJson?: string): SegmentDerivedQueryDescriptor | undefined {
@@ -841,108 +546,6 @@ function parseGroupItemDerivedQueryDescriptor(sourceQueryJson?: string): Segment
     return undefined;
   }
 }
-
-function DynamicGroupBanner({ group, resolvedCount, onRefresh, refreshing, onSnapshot, snapshotting, canWriteGroup }: {
-  group: Group;
-  resolvedCount: number;
-  onRefresh?: () => void;
-  refreshing?: boolean;
-  onSnapshot?: () => void;
-  snapshotting?: boolean;
-  canWriteGroup: boolean;
-}) {
-  const sourceLabel = formatDynamicSourceLabel(group.querySourceKey);
-  const resolvedAge = group.lastResolvedAt ? formatResolvedAge(group.lastResolvedAt) : resolvedCount > 0 ? "resolved just now" : "not resolved yet";
-  return (
-    <div className="rounded-xl border border-accent/30 bg-accent/5 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-foreground">Dynamic</div>
-          <div className="mt-1 text-sm text-secondary">
-            {resolvedCount || group.cachedItemCount || 0} items · {sourceLabel} · {resolvedAge}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-wait disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-          {canWriteGroup ? (
-            <button
-              type="button"
-              onClick={onSnapshot}
-              disabled={snapshotting}
-              className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-60"
-            >
-              Snapshot to static
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatDynamicSourceLabel(sourceKey?: string | null): string {
-  if (sourceKey === "filter") return "filtered items";
-  return sourceKey ? sourceKey.replaceAll("-", " ") : "dynamic";
-}
-
-function isBuiltInPersonalDynamicSource(sourceKey?: string | null): boolean {
-  return sourceKey === "save-for-later" || sourceKey === "watch-history" || sourceKey === "continue-watching";
-}
-
-function GroupItemKindIcon({ item }: { item: GroupItem }) {
-  const className = "mt-0.5 h-4 w-4 shrink-0 text-muted";
-  if (item.kind === "image") return <ImageIcon className={className} />;
-  if (item.kind === "audio") return <Headphones className={className} />;
-  if (item.kind === "text") return <BookOpenText className={className} />;
-  if (item.kind === "group") return <Layers className={className} />;
-  return <Film className={className} />;
-}
-
-function getGroupItemLabel(item: GroupItem): string {
-  return item.title || item.sceneTitle || item.imageTitle || item.childGroupName || `${item.hostType || item.kind} #${item.hostId ?? item.sceneId ?? item.imageId ?? item.childGroupId ?? item.id}`;
-}
-
-function getGroupItemMeta(item: GroupItem): string {
-  if (item.kind === "sceneRange") return formatDurationRange(item.startSec, item.endSec);
-  if (item.kind === "scene") return "Full scene";
-  if (item.kind === "image") return "Image";
-  if (item.kind === "audio") return "Audio";
-  if (item.kind === "text") return "Text";
-  if (item.kind === "group") return "Group";
-  return item.hostType ? item.hostType : item.kind;
-}
-
-function getGroupItemRoute(item: GroupItem): { label: string; route: any } | null {
-  if (item.sceneId) return { label: "Open scene", route: { page: "scene", id: item.sceneId, seekTo: item.startSec ?? 0 } };
-  if (item.imageId) return { label: "Open image", route: { page: "image", id: item.imageId } };
-  if (item.childGroupId) return { label: "Open group", route: { page: "group", id: item.childGroupId } };
-  if (item.hostType === "image" && item.hostId) return { label: "Open image", route: { page: "image", id: item.hostId } };
-  if (item.hostType === "audio" && item.hostId) return { label: "Open audio", route: { page: "audio", id: item.hostId } };
-  if (item.hostType === "text" && item.hostId) return { label: "Open text", route: { page: "text", id: item.hostId } };
-  if (item.hostType === "group" && item.hostId) return { label: "Open group", route: { page: "group", id: item.hostId } };
-  if (item.hostType === "scene" && item.hostId) return { label: "Open scene", route: { page: "scene", id: item.hostId, seekTo: item.startSec ?? 0 } };
-  return null;
-}
-
-function formatResolvedAge(value?: string | null): string {
-  if (!value) return "not resolved yet";
-  const resolvedAt = new Date(value).getTime();
-  if (!Number.isFinite(resolvedAt)) return "resolved recently";
-  const seconds = Math.max(0, Math.floor((Date.now() - resolvedAt) / 1000));
-  if (seconds < 60) return `resolved ${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `resolved ${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return `resolved ${hours}h ago`;
-}
 function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: number; onNavigate: (r: any) => void; canWriteGroup: boolean }) {
   const queryClient = useQueryClient();
   const { data: subGroups, isLoading } = useQuery({
@@ -960,14 +563,7 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
 
   const addMut = useMutation({
     mutationFn: (subGroupId: number) => groups.addSubGroup(groupId, subGroupId),
-    onSuccess: (_result, subGroupId) => {
-      setShowAddDialog(false);
-      setSearchTerm("");
-      queryClient.invalidateQueries({ queryKey: ["group-subgroups", groupId] });
-      queryClient.invalidateQueries({ queryKey: ["group-containinggroups", subGroupId] });
-      queryClient.invalidateQueries({ queryKey: ["group", groupId] });
-      queryClient.invalidateQueries({ queryKey: ["groups"] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["group-subgroups", groupId] }),
   });
 
   const removeMut = useMutation({
@@ -1049,9 +645,6 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
           ) : (
             <p className="text-sm text-muted text-center py-4">Type to search for groups</p>
           )}
-          {addMut.isError ? (
-            <p className="mt-3 text-xs text-red-300">{addMut.error instanceof Error ? addMut.error.message : "Could not add sub-group"}</p>
-          ) : null}
         </div>
       )}
 
@@ -1071,7 +664,7 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
               ) : null}
               <span className="w-6 text-center text-xs text-muted">{index + 1}</span>
               <button onClick={() => onNavigate({ page: "group", id: g.id })} className="flex-1 text-left text-sm font-medium text-foreground hover:text-accent">{g.name}</button>
-              <span className="text-xs text-muted">{getGroupItemCount(g)} item{getGroupItemCount(g) === 1 ? "" : "s"}</span>
+              <span className="text-xs text-muted">{g.sceneCount} scenes</span>
               {canWriteGroup ? <button
                 onClick={() => { if (confirm(`Remove "${g.name}" from sub-groups?`)) removeMut.mutate(g.id); }}
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-900/20 text-muted hover:text-red-400"
@@ -1102,6 +695,38 @@ function GroupContainingGroupsPanel({ groupId, onNavigate }: { groupId: number; 
       {containingGroups.map((g) => (
         <GroupTile key={g.id} group={g} onClick={() => onNavigate({ page: "group", id: g.id })} />
       ))}
+    </div>
+  );
+}
+
+function Pager({ filter, setFilter, totalCount }: {
+  filter: FindFilter;
+  setFilter: (filter: FindFilter) => void;
+  totalCount: number;
+}) {
+  const perPage = filter.perPage ?? 1;
+  const page = filter.page ?? 1;
+  const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
+
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="mx-auto max-w-7xl mt-6 flex items-center justify-center gap-4">
+      <button
+        disabled={page <= 1}
+        onClick={() => setFilter({ ...filter, page: page - 1 })}
+        className="rounded border border-border bg-card px-4 py-2 text-sm text-secondary hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Previous
+      </button>
+      <span className="text-sm text-secondary">Page {page} of {totalPages}</span>
+      <button
+        disabled={page >= totalPages}
+        onClick={() => setFilter({ ...filter, page: page + 1 })}
+        className="rounded border border-border bg-card px-4 py-2 text-sm text-secondary hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Next
+      </button>
     </div>
   );
 }

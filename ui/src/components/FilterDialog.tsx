@@ -28,8 +28,6 @@ import type {
   StudioFilterCriteria,
   GalleryFilterCriteria,
   ImageFilterCriteria,
-  AudioFilterCriteria,
-  TextFilterCriteria,
   GroupFilterCriteria,
 } from "../api/types";
 import { RESOLUTION_FILTER_OPTIONS } from "../utils/resolutionBuckets";
@@ -238,7 +236,6 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
   { id: "duplicatedRemoteId", label: "Duplicated Remote ID", type: "bool", filterKey: "duplicatedRemoteIdCriterion" },
   { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "likeCounter", label: "Likes", type: "number", filterKey: "likeCounterCriterion" },
-  { id: "includeCompilations", label: "Include Compilations", type: "bool", filterKey: "includeCompilationGroups" },
   { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
   { id: "duration", label: "Duration", type: "duration", filterKey: "durationCriterion" },
   { id: "tagDuration", label: "Tag Duration", type: "tagDuration", entityType: "tags", filterKey: "tagDurationCriterion" },
@@ -274,47 +271,6 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
     { value: "portrait", label: "Portrait" },
     { value: "square", label: "Square" },
   ] },
-];
-
-export const AUDIO_CRITERIA: CriteriaDefinitionList<AudioFilterCriteria> = [
-  { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
-  { id: "code", label: "Studio Code", type: "string", filterKey: "codeCriterion" },
-  { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
-  { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
-  { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
-  { id: "duration", label: "Duration", type: "duration", filterKey: "durationCriterion" },
-  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
-  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
-  { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
-  { id: "groups", label: "Groups", type: "multiId", entityType: "groups", filterKey: "groupsCriterion" },
-  { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
-  { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
-  { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
-  { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
-];
-
-export const TEXT_CRITERIA: CriteriaDefinitionList<TextFilterCriteria> = [
-  { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
-  { id: "code", label: "Studio Code", type: "string", filterKey: "codeCriterion" },
-  { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
-  { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
-  { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
-  { id: "words", label: "Words", type: "number", filterKey: "wordCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "pages", label: "Pages", type: "number", filterKey: "pageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
-  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
-  { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
-  { id: "groups", label: "Groups", type: "multiId", entityType: "groups", filterKey: "groupsCriterion" },
-  { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
-  { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
-  { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
-  { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
 ];
 
 export const PERFORMER_CRITERIA: CriteriaDefinitionList<PerformerFilterCriteria> = [
@@ -670,7 +626,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
       }}
     >
       <div
-        className="bg-surface border border-border sm:rounded-lg shadow-xl w-full sm:w-[min(92vw,56rem)] h-[85vh] sm:h-auto sm:max-h-[80vh] flex flex-col rounded-t-lg"
+        className="bg-surface border border-border sm:rounded-lg shadow-xl w-full sm:max-w-lg h-[85vh] sm:h-auto sm:max-h-[80vh] flex flex-col rounded-t-lg"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -748,7 +704,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
         )}
 
         {/* Criterion list */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
+        <div className="flex-1 overflow-y-auto px-2 py-1">
           {(customSections ?? []).map((section) => {
             const value = editFilter[section.filterKey] ?? section.defaultValue;
             const isActive = section.isActive(editFilter[section.filterKey]);
@@ -1216,7 +1172,7 @@ function TagDurationClauseEditor({
   const unit = clause.unit ?? "seconds";
   const isBetween = modifier === "BETWEEN" || modifier === "NOT_BETWEEN";
   const selectedTag = tags.find((tag) => tag.id === clause.tagId);
-  const selectedTagName = clause.tagId ? selectedTag?.name ?? existingNames[String(clause.tagId)] ?? "Unavailable tag" : null;
+  const selectedTagName = clause.tagId ? selectedTag?.name ?? existingNames[String(clause.tagId)] ?? `Tag #${clause.tagId}` : null;
   const tagResults = useMemo(
     () => filterTagsForSelector(tags, tagSearch, excludedTagIds).slice(0, 50),
     [excludedTagIds, tagSearch, tags]
@@ -1749,7 +1705,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
   // Build a name lookup from available entities
   const nameMap = useMemo(() => {
     const map: Record<string, string> = { ...existingNames };
-    if (entities) for (const e of entities as any[]) map[String(e.id)] = e.name || e.title || "Untitled item";
+    if (entities) for (const e of entities as any[]) map[String(e.id)] = e.name || e.title || `#${e.id}`;
     return map;
   }, [entities, existingNames]);
 
@@ -1792,7 +1748,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
     onChange(buildCriterion(nextInc, nextExc, modifier, includeHierarchy));
   };
 
-  const getName = (e: any) => e.name || e.title || "Untitled item";
+  const getName = (e: any) => e.name || e.title || `#${e.id}`;
 
   return (
     <div className="space-y-2">
@@ -1852,7 +1808,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
             const entity = entities?.find((e: any) => e.id === id);
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-green-900/50 text-green-300 border border-green-700">
-                {entity ? getName(entity) : "Unavailable item"}
+                {entity ? getName(entity) : `#${id}`}
                 <button onClick={() => removeId(id)} className="hover:text-red-400">
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -1868,7 +1824,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
             const entity = entities?.find((e: any) => e.id === id);
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-red-900/50 text-red-300 border border-red-700">
-                {entity ? getName(entity) : "Unavailable item"}
+                {entity ? getName(entity) : `#${id}`}
                 <button onClick={() => removeId(id)} className="hover:text-red-400">
                   <X className="w-2.5 h-2.5" />
                 </button>

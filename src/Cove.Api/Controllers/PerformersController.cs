@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.PerformersRead)]
-public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService customFields) : ControllerBase
+public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
 {
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -37,8 +37,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         };
 
         var (items, totalCount) = await performerRepo.FindAsync(filter, findFilter, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, items.Select(p => p.Id), ct);
-        var dtos = items.Select(p => MapToDto(p, customFieldValues: GetCustomFields(customFieldValues, p.Id))).ToList();
+        var dtos = items.Select(p => MapToDto(p)).ToList();
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, page, perPage));
     }
 
@@ -48,8 +47,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new PerformerFilter();
         var (items, totalCount) = await performerRepo.FindAsync(filter, findFilter, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, items.Select(p => p.Id), ct);
-        var dtos = items.Select(p => MapToDto(p, customFieldValues: GetCustomFields(customFieldValues, p.Id))).ToList();
+        var dtos = items.Select(p => MapToDto(p)).ToList();
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -59,7 +57,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     {
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
         if (performer == null) return NotFound();
-        return Ok(MapToDto(performer, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, id, ct)));
+        return Ok(MapToDto(performer));
     }
 
     [HttpPost]
@@ -78,14 +76,13 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             Tattoos = dto.Tattoos, Piercings = dto.Piercings,
             Favorite = dto.Favorite, Details = dto.Details,
             IgnoreAutoTag = dto.IgnoreAutoTag,
+            CustomFields = dto.CustomFields
         };
         if (dto.Urls?.Count > 0) performer.Urls = dto.Urls.Select(u => new PerformerUrl { Url = u }).ToList();
         if (dto.Aliases?.Count > 0) performer.Aliases = dto.Aliases.Select(a => new PerformerAlias { Alias = a }).ToList();
         if (dto.TagIds?.Count > 0) performer.PerformerTags = dto.TagIds.Select(id => new PerformerTag { TagId = id }).ToList();
 
         performer = await performerRepo.AddAsync(performer, ct);
-        if (dto.CustomFields != null)
-            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Performer, performer.Id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Performer, performer.Id, dto.Rating, cancellationToken: ct);
         if (dto.Urls?.Count > 0)
@@ -93,7 +90,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.Aliases?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Performer, performer.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await performerRepo.GetByIdWithRelationsAsync(performer.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = performer.Id }, MapToDto(result!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, performer.Id, ct)));
+        return CreatedAtAction(nameof(GetById), new { id = performer.Id }, MapToDto(result!));
     }
 
     [HttpPut("{id:int}")]
@@ -142,9 +139,9 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             p.PerformerTags.Clear();
             p.PerformerTags = dto.TagIds.Select(tid => new PerformerTag { TagId = tid, PerformerId = id }).ToList();
         }
+        if (dto.CustomFields != null) p.CustomFields = dto.CustomFields;
+
         await performerRepo.UpdateAsync(p, ct);
-        if (dto.CustomFields != null)
-            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Performer, id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Performer, id, dto.Rating, cancellationToken: ct);
         if (dto.Urls != null)
@@ -152,7 +149,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.Aliases != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Performer, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, id, ct)));
+        return Ok(MapToDto(updated!));
     }
 
     [HttpPost("{id:int}/scrape-url")]
@@ -180,7 +177,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         await performerRepo.UpdateAsync(performer, ct);
 
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, id, ct)));
+        return Ok(MapToDto(updated!));
     }
 
     [HttpPost("{id:int}/scrape-preview")]
@@ -211,7 +208,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         await performerRepo.UpdateAsync(performer, ct);
 
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, id, ct)));
+        return Ok(MapToDto(updated!));
     }
 
     private async Task<ResolvedPerformerScrape> ResolveScrapeAsync(Performer performer, PerformerScrapeRequestDto dto, CancellationToken ct)
@@ -301,7 +298,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
 
         await performerRepo.UpdateAsync(performer, ct);
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, id, ct)));
+        return Ok(MapToDto(updated!));
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]
@@ -364,12 +361,11 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     {
         var p = await performerRepo.GetByIdAsync(id, ct);
         if (p == null) return NotFound();
-        await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Performer, id, ct);
         await performerRepo.DeleteAsync(id, ct);
         return NoContent();
     }
 
-    private PerformerDto MapToDto(Performer p, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null, Dictionary<string, object>? customFieldValues = null) => new(
+    private PerformerDto MapToDto(Performer p, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null) => new(
         p.Id, p.Name, p.Disambiguation, p.Gender?.ToString(),
         p.Birthdate?.ToString("yyyy-MM-dd"), p.DeathDate?.ToString("yyyy-MM-dd"),
         p.Ethnicity, p.Country, p.EyeColor, p.HairColor, p.HeightCm, p.Weight,
@@ -382,12 +378,9 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         p.RemoteIds.Select(remoteId => new PerformerRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
         sceneCount ?? p.SceneCount, imageCount ?? p.ImageCount, galleryCount ?? p.GalleryCount, groupCount ?? 0,
         p.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, p.Id, p.UpdatedAt) : null,
-        customFieldValues,
+        p.CustomFields,
         p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o")
     );
-
-    private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
-        => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
     private static T? ParseEnum<T>(string? value) where T : struct, Enum => Enum.TryParse<T>(value, true, out var e) ? e : null;
@@ -503,12 +496,11 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             if (!target.Aliases.Any(a => a.Alias == source.Name))
                 target.Aliases.Add(new PerformerAlias { Alias = source.Name, PerformerId = target.Id });
             // Delete source
-            await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Performer, source.Id, ct);
             db.Performers.Remove(source);
         }
 
         await db.SaveChangesAsync(ct);
         var result = await performerRepo.GetByIdWithRelationsAsync(target.Id, ct);
-        return Ok(MapToDto(result!, customFieldValues: await customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, target.Id, ct)));
+        return Ok(MapToDto(result!));
     }
 }

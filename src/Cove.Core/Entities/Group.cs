@@ -18,6 +18,7 @@ public class Group : BaseEntity
     public int? StudioId { get; set; }
     public string? Director { get; set; }
     public string? Synopsis { get; set; }
+    public string? SearchText { get; set; }
 
     // Image blobs
     public string? FrontImageBlobId { get; set; }

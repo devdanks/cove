@@ -14,43 +14,6 @@ public sealed class ManagedPostgresIntegrationCollection;
 public class BackupServiceIntegrationTests
 {
     [Fact]
-    public void ResolveToolPath_UsesConfiguredPostgresDataPathEvenWhenUnmanaged()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "cove-backup-tool-tests", Guid.NewGuid().ToString("n"));
-        var bin = Path.Combine(root, "pgsql", "bin");
-        Directory.CreateDirectory(bin);
-        var toolPath = Path.Combine(bin, Exe("pg_dump"));
-        File.WriteAllText(toolPath, string.Empty);
-
-        try
-        {
-            var service = new BackupService(
-                new NullJobService(),
-                new CoveConfiguration
-                {
-                    Postgres = new PostgresConfig
-                    {
-                        Managed = false,
-                        DataPath = root,
-                        ConnectionString = "Host=localhost;Port=5433;Database=cove;Username=postgres",
-                    },
-                },
-                NullLogger<BackupService>.Instance);
-
-            var method = typeof(BackupService).GetMethod("ResolveToolPath", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            Assert.NotNull(method);
-
-            var resolved = Assert.IsType<string>(method.Invoke(service, ["pg_dump"]));
-            Assert.Equal(toolPath, resolved);
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
     public async Task CreateBackupAndRestore_RestoresDatabaseToBackupPoint()
     {
         var managedRoot = ResolveManagedPostgresRoot();

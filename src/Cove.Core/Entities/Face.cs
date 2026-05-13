@@ -13,6 +13,7 @@ public class Face : BaseEntity
     public int SceneCount { get; set; }
     public int ImageCount { get; set; }
     public string? PrimarySourceKey { get; set; }
+    public string? SearchText { get; set; }
 
     public Performer? Performer { get; set; }
     public Face? MergedIntoFace { get; set; }

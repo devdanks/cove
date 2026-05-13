@@ -17,9 +17,6 @@ public class SceneRepository : ISceneRepository
     public async Task<Scene?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
         => await _db.Scenes
             .Include(s => s.Studio)
-            .Include(s => s.ParentScene).ThenInclude(parent => parent!.Files).ThenInclude(file => file.Captions)
-            .Include(s => s.ParentScene).ThenInclude(parent => parent!.Files).ThenInclude(file => file.Fingerprints)
-            .Include(s => s.ChildScenes)
             .Include(s => s.Urls)
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
@@ -84,15 +81,12 @@ public class SceneRepository : ISceneRepository
         // Apply all filters to the lightweight query
         filterQuery = ApplyFilters(filterQuery, filter, expandedTags?.ValueGroups);
 
-        // Apply text search
-        if (findFilter != null && !string.IsNullOrEmpty(findFilter.Q))
-        {
-            filterQuery = FilterHelpers.ApplyBooleanKeywordSearch(filterQuery, findFilter.Q,
-                s => s.Title,
-                s => s.Details,
-                s => s.Code,
-                s => s.FileSearchText);
-        }
+        filterQuery = FullTextSearchHelpers.Apply(_db, filterQuery, findFilter?.Q,
+            s => s.Title,
+            s => s.Details,
+            s => s.Code,
+            s => s.FileSearchText,
+            s => s.SearchText);
 
         // COUNT runs on the lightweight query â€” no JOINs from Includes
         var perPage = findFilter?.PerPage ?? 25;
@@ -111,6 +105,7 @@ public class SceneRepository : ISceneRepository
         var sort = findFilter?.Sort ?? "updated_at";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
         filterQuery = ApplySorting(filterQuery, sort, desc, findFilter?.Seed);
+        filterQuery = FullTextSearchHelpers.OrderByRelevance(_db, filterQuery, findFilter?.Q);
 
         var page = findFilter?.Page ?? 1;
         var pagedIds = await filterQuery
@@ -125,8 +120,6 @@ public class SceneRepository : ISceneRepository
         // Load full entities only for the paged IDs
         var items = await _db.Scenes
             .Include(s => s.Studio)
-            .Include(s => s.ParentScene).ThenInclude(parent => parent!.Files)
-            .Include(s => s.ChildScenes)
             .Include(s => s.Urls)
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
@@ -354,49 +347,43 @@ public class SceneRepository : ISceneRepository
         return ApplySortingSwitch(query, sort, desc);
     }
 
-    private IQueryable<Scene> ApplySortingSwitch(IQueryable<Scene> query, string sort, bool desc)
+    private IQueryable<Scene> ApplySortingSwitch(IQueryable<Scene> query, string sort, bool desc) => sort switch
     {
-        if (FilterHelpers.TryParseCustomFieldSort(sort, out _, out _))
-            return query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Scene, sort, desc);
-
-        return sort switch
-        {
-            "title" => desc ? query.OrderByDescending(s => s.Title) : query.OrderBy(s => s.Title),
-            // Null dates sort to bottom: treat null as MinValue so they come last when desc
-            "date" => desc ? query.OrderByDescending(s => s.Date ?? DateOnly.MinValue) : query.OrderBy(s => s.Date ?? DateOnly.MinValue),
-            "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Scene, desc),
-            "play_count" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.ViewCount), desc),
-            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LikeCount), desc),
-            "last_like_at" => ApplyLastFavoriteSort(query, desc),
-            "organized" => desc ? query.OrderByDescending(s => s.Organized) : query.OrderBy(s => s.Organized),
-            "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastConsumedAt), desc),
-            "play_duration" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.TotalConsumedSec), desc),
-            "resume_time" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastPositionSec), desc),
-            "random" => query.OrderBy(s => s.Id),
-            "duration" => desc ? query.OrderByDescending(s => s.MaxDuration) : query.OrderBy(s => s.MaxDuration),
-            "file_size" => desc ? query.OrderByDescending(s => s.MaxFileSize) : query.OrderBy(s => s.MaxFileSize),
-            "file_mod_time" => ApplyFileModTimeSort(query, desc),
-            "file_count" => desc ? query.OrderByDescending(s => s.FileCount) : query.OrderBy(s => s.FileCount),
-            "path" => ApplyPathSort(query, desc),
-            "resolution" => desc ? query.OrderByDescending(s => s.MaxHeight) : query.OrderBy(s => s.MaxHeight),
-            "framerate" => desc ? query.OrderByDescending(s => s.MaxFrameRate) : query.OrderBy(s => s.MaxFrameRate),
-            "bitrate" => desc ? query.OrderByDescending(s => s.MaxBitRate) : query.OrderBy(s => s.MaxBitRate),
-            "phash" => ApplyPhashSort(query, desc),
-            "perceptual_similarity" => ApplyPhashSort(query, desc),
-            "tag_count" => desc
-                ? query.OrderByDescending(s => s.SceneTags.Count)
-                : query.OrderBy(s => s.SceneTags.Count),
-            "performer_count" => desc
-                ? query.OrderByDescending(s => s.ScenePerformers.Count)
-                : query.OrderBy(s => s.ScenePerformers.Count),
-            "performer_age" => ApplyPerformerAgeSort(query, desc),
-            "studio" => ApplyStudioSort(query, desc),
-            "code" => ApplyStudioCodeSort(query, desc),
-            "studio_code" => ApplyStudioCodeSort(query, desc),
-            "created_at" => desc ? query.OrderByDescending(s => s.CreatedAt) : query.OrderBy(s => s.CreatedAt),
-            _ => desc ? query.OrderByDescending(s => s.UpdatedAt) : query.OrderBy(s => s.UpdatedAt),
-        };
-    }
+        "title" => desc ? query.OrderByDescending(s => s.Title) : query.OrderBy(s => s.Title),
+        // Null dates sort to bottom: treat null as MinValue so they come last when desc
+        "date" => desc ? query.OrderByDescending(s => s.Date ?? DateOnly.MinValue) : query.OrderBy(s => s.Date ?? DateOnly.MinValue),
+        "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Scene, desc),
+        "play_count" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.ViewCount), desc),
+        "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LikeCount), desc),
+        "last_like_at" => ApplyLastFavoriteSort(query, desc),
+        "organized" => desc ? query.OrderByDescending(s => s.Organized) : query.OrderBy(s => s.Organized),
+        "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastConsumedAt), desc),
+        "play_duration" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.TotalConsumedSec), desc),
+        "resume_time" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastPositionSec), desc),
+        "random" => query.OrderBy(s => s.Id),
+        "duration" => desc ? query.OrderByDescending(s => s.MaxDuration) : query.OrderBy(s => s.MaxDuration),
+        "file_size" => desc ? query.OrderByDescending(s => s.MaxFileSize) : query.OrderBy(s => s.MaxFileSize),
+        "file_mod_time" => ApplyFileModTimeSort(query, desc),
+        "file_count" => desc ? query.OrderByDescending(s => s.FileCount) : query.OrderBy(s => s.FileCount),
+        "path" => ApplyPathSort(query, desc),
+        "resolution" => desc ? query.OrderByDescending(s => s.MaxHeight) : query.OrderBy(s => s.MaxHeight),
+        "framerate" => desc ? query.OrderByDescending(s => s.MaxFrameRate) : query.OrderBy(s => s.MaxFrameRate),
+        "bitrate" => desc ? query.OrderByDescending(s => s.MaxBitRate) : query.OrderBy(s => s.MaxBitRate),
+        "phash" => ApplyPhashSort(query, desc),
+        "perceptual_similarity" => ApplyPhashSort(query, desc),
+        "tag_count" => desc
+            ? query.OrderByDescending(s => s.SceneTags.Count)
+            : query.OrderBy(s => s.SceneTags.Count),
+        "performer_count" => desc
+            ? query.OrderByDescending(s => s.ScenePerformers.Count)
+            : query.OrderBy(s => s.ScenePerformers.Count),
+        "performer_age" => ApplyPerformerAgeSort(query, desc),
+        "studio" => ApplyStudioSort(query, desc),
+        "code" => ApplyStudioCodeSort(query, desc),
+        "studio_code" => ApplyStudioCodeSort(query, desc),
+        "created_at" => desc ? query.OrderByDescending(s => s.CreatedAt) : query.OrderBy(s => s.CreatedAt),
+        _ => desc ? query.OrderByDescending(s => s.UpdatedAt) : query.OrderBy(s => s.UpdatedAt),
+    };
 
     private static IQueryable<Scene> ApplyLastFavoriteSort(IQueryable<Scene> query, bool desc)
     {

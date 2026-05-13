@@ -83,7 +83,7 @@ export function TextsPage({ onNavigate }: Props) {
       onFilterChange={setFilter}
       totalCount={data?.totalCount ?? 0}
       isLoading={isLoading}
-      searchPlaceholder="Filter text..."
+      searchPlaceholder="Search text, tags, performers..."
       sortOptions={SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}

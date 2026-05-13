@@ -10,6 +10,7 @@ using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
+using Cove.Data.Repositories;
 
 namespace Cove.Api.Controllers;
 
@@ -112,19 +113,18 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         if (organized.HasValue || groupId.HasValue || galleryId.HasValue)
             compilationQuery = compilationQuery.Where(_ => false);
 
-        if (!string.IsNullOrWhiteSpace(q))
-        {
-            var query = q.Trim();
-            sceneQuery = sceneQuery.Where(scene =>
-                (scene.Title != null && EF.Functions.ILike(scene.Title, $"%{query}%"))
-                || (scene.Details != null && EF.Functions.ILike(scene.Details, $"%{query}%"))
-                || (scene.Code != null && EF.Functions.ILike(scene.Code, $"%{query}%"))
-                || (scene.FileSearchText != null && EF.Functions.ILike(scene.FileSearchText, $"%{query}%")));
-            compilationQuery = compilationQuery.Where(group =>
-                EF.Functions.ILike(group.Name, $"%{query}%")
-                || (group.Synopsis != null && EF.Functions.ILike(group.Synopsis, $"%{query}%"))
-                || (group.Director != null && EF.Functions.ILike(group.Director, $"%{query}%")));
-        }
+        sceneQuery = FullTextSearchHelpers.Apply(db, sceneQuery, q,
+            scene => scene.Title,
+            scene => scene.Details,
+            scene => scene.Code,
+            scene => scene.FileSearchText,
+            scene => scene.SearchText);
+        compilationQuery = FullTextSearchHelpers.Apply(db, compilationQuery, q,
+            group => group.Name,
+            group => group.Aliases,
+            group => group.Synopsis,
+            group => group.Director,
+            group => group.SearchText);
 
         var sceneRows = sceneQuery.Select(scene => new SceneListEntryKey
         {
@@ -975,8 +975,12 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             .Include(s => s.Studio)
             .AsNoTracking();
 
-        if (!string.IsNullOrEmpty(q))
-            query = query.Where(s => s.Title != null && EF.Functions.ILike(s.Title, $"%{q}%"));
+        query = FullTextSearchHelpers.Apply(db, query, q,
+            scene => scene.Title,
+            scene => scene.Details,
+            scene => scene.Code,
+            scene => scene.FileSearchText,
+            scene => scene.SearchText);
 
         var scenes = await query.OrderBy(_ => EF.Functions.Random()).Take(count).ToListAsync(ct);
         var engagement = await engagementService.GetSceneSnapshotsAsync(scenes.Select(scene => scene.Id), ct);

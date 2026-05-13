@@ -303,7 +303,7 @@ export function ScenesPage({ onNavigate }: Props) {
       isLoading={loading}
       searchMode={searchMode}
       searchModes={SEARCH_MODE_OPTIONS}
-      searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Filter..."}
+      searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Search scenes, tags, performers..."}
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}

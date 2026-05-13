@@ -14,6 +14,7 @@ public class Tag : BaseEntity
     public bool? ShowAsSegment { get; set; }
     public string? SegmentColorOverride { get; set; }
     public int? SegmentLaneOverride { get; set; }
+    public string? SearchText { get; set; }
 
     // Image stored as blob reference
     public string? ImageBlobId { get; set; }

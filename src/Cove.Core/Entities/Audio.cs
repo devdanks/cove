@@ -21,6 +21,7 @@ public class Audio : BaseEntity
     public string? MinPath { get; set; }
     public string? MaxPath { get; set; }
     public string? FileSearchText { get; set; }
+    public string? SearchText { get; set; }
     public bool HasVideoFiles { get; set; }
 
     public Studio? Studio { get; set; }

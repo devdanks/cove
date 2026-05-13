@@ -26,7 +26,6 @@ import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
-import { BookmarkButton } from "../components/BookmarkButton";
 
 interface Props {
   id: number;
@@ -295,7 +294,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         actions={
           <>
             <ExtensionSlot slot="gallery-detail-actions" context={{ gallery, onNavigate }} />
-            <BookmarkButton hostType="gallery" hostId={gallery.id} />
             {canWriteGallery ? (
               <button
                 type="button"

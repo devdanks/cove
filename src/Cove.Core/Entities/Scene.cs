@@ -34,6 +34,7 @@ public class Scene : BaseEntity
     public string? MinPath { get; set; }
     public string? MaxPath { get; set; }
     public string? FileSearchText { get; set; }
+    public string? SearchText { get; set; }
     public bool HasDimensionData { get; set; }
     public bool HasLandscapeFiles { get; set; }
     public bool HasPortraitFiles { get; set; }

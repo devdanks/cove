@@ -57,6 +57,7 @@ const PER_PAGE_OPTIONS = [20, 40, 60, 120, 250, 500, 1000];
 const DEFAULT_ZOOM_LEVEL = 1;
 const MIN_ZOOM_LEVEL = 0;
 const MAX_ZOOM_LEVEL = 5;
+const LIST_SEARCH_DEBOUNCE_MS = 350;
 
 const CUSTOM_FIELD_ENTITY_BY_FILTER_MODE: Record<string, CustomFieldEntityType> = {
   scenes: "scene",
@@ -742,21 +743,41 @@ export function ListPage({
     setSearchText(filter.q ?? "");
   }, [filter.q]);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pageKey && searchText.trim().length > 0) {
+  const commitSearch = useCallback((rawSearchText: string, source: "debounce" | "submit" | "clear") => {
+    const normalizedSearch = rawSearchText.trim();
+    const currentSearch = (filter.q ?? "").trim();
+    if (normalizedSearch === currentSearch) {
+      return;
+    }
+
+    if (pageKey && normalizedSearch.length > 0 && source !== "clear") {
       trackInteraction({
         hostType: "collection",
         kind: "searchQuery",
         meta: {
           pageKey,
-          query: searchText.trim(),
+          query: normalizedSearch,
           source: "listPageToolbar",
           activeFilterCount: Object.keys(objectFilter ?? {}).length,
         },
       });
     }
-    onFilterChange({ ...filter, q: searchText || undefined, page: 1 });
+
+    onFilterChange({ ...filter, q: normalizedSearch || undefined, page: 1 });
+  }, [filter, objectFilter, onFilterChange, pageKey]);
+
+  useEffect(() => {
+    if (searchText.trim() === (filter.q ?? "").trim()) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => commitSearch(searchText, "debounce"), LIST_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [commitSearch, filter.q, searchText]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    commitSearch(searchText, "submit");
   };
 
   const goTo = useCallback(
@@ -822,7 +843,7 @@ export function ListPage({
         </div>
 
         {/* Search */}
-        <form onSubmit={handleSearch} className="flex shrink-0 items-center gap-1" style={{ width: searchModes?.length ? "18rem" : "13rem", maxWidth: "100%" }}>
+        <form onSubmit={handleSearch} className="flex shrink-0 items-center gap-1" style={{ width: searchModes?.length ? "22rem" : "18rem", maxWidth: "100%" }}>
           {searchModes && searchModes.length > 0 && onSearchModeChange && (
             <select
               value={searchMode ?? searchModes[0]?.value ?? "text"}
@@ -844,11 +865,25 @@ export function ListPage({
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder={searchPlaceholder ?? "Filter..."}
-              aria-label="Filter list"
+              placeholder={searchPlaceholder ?? "Search names, titles, tags..."}
+              aria-label="Search list"
               data-list-search="true"
-              className="w-full rounded-lg border border-border bg-card/70 pl-7 pr-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
+              className="w-full rounded-lg border border-border bg-card/70 pl-7 pr-7 py-1.5 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
             />
+            {searchText.trim().length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchText("");
+                  commitSearch("", "clear");
+                }}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted hover:bg-card/80 hover:text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+                aria-label="Clear search"
+                title="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
         </form>
 

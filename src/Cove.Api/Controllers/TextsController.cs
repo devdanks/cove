@@ -43,17 +43,15 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
             .Include(text => text.TextPerformers).ThenInclude(link => link.Performer)
             .AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(q))
-        {
-            var pattern = $"%{q.Trim()}%";
-            query = query.Where(text =>
-                EF.Functions.ILike(text.Title ?? string.Empty, pattern)
-                || EF.Functions.ILike(text.Code ?? string.Empty, pattern)
-                || EF.Functions.ILike(text.Details ?? string.Empty, pattern)
-                || EF.Functions.ILike(text.FileSearchText ?? string.Empty, pattern));
-        }
+        query = FullTextSearchHelpers.Apply(db, query, q,
+            text => text.Title,
+            text => text.Code,
+            text => text.Details,
+            text => text.FileSearchText,
+            text => text.SearchText);
 
         query = ApplySort(query, sort, descending);
+        query = FullTextSearchHelpers.OrderByRelevance(db, query, q);
 
         var totalCount = await query.CountAsync(ct);
         var items = await query
@@ -81,18 +79,16 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
             .Include(text => text.TextPerformers).ThenInclude(link => link.Performer)
             .AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(findFilter.Q))
-        {
-            var pattern = $"%{findFilter.Q.Trim()}%";
-            query = query.Where(text =>
-                EF.Functions.ILike(text.Title ?? string.Empty, pattern)
-                || EF.Functions.ILike(text.Code ?? string.Empty, pattern)
-                || EF.Functions.ILike(text.Details ?? string.Empty, pattern)
-                || EF.Functions.ILike(text.FileSearchText ?? string.Empty, pattern));
-        }
+        query = FullTextSearchHelpers.Apply(db, query, findFilter.Q,
+            text => text.Title,
+            text => text.Code,
+            text => text.Details,
+            text => text.FileSearchText,
+            text => text.SearchText);
 
         query = ApplyFilter(query, req.ObjectFilter);
         query = ApplySort(query, findFilter.Sort, descending);
+        query = FullTextSearchHelpers.OrderByRelevance(db, query, findFilter.Q);
 
         var totalCount = await query.CountAsync(ct);
         var items = await query

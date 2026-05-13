@@ -84,7 +84,7 @@ export function AudiosPage({ onNavigate }: Props) {
       onFilterChange={setFilter}
       totalCount={data?.totalCount ?? 0}
       isLoading={isLoading}
-      searchPlaceholder="Filter audio..."
+      searchPlaceholder="Search audio, tags, performers..."
       sortOptions={SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}

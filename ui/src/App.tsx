@@ -155,7 +155,7 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName)) {
         e.preventDefault();
-        const searchInput = document.querySelector<HTMLInputElement>("input[placeholder='Filter...']")
+        const searchInput = document.querySelector<HTMLInputElement>("input[data-list-search='true']")
           ?? document.querySelector<HTMLInputElement>("input[placeholder='Search all...']");
         searchInput?.focus();
       }

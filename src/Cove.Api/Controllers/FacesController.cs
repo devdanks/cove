@@ -3,6 +3,7 @@ using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
+using Cove.Data.Repositories;
 using Cove.Data.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -45,12 +46,11 @@ public class FacesController(
             .Include(face => face.Performer)
             .AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(q))
-        {
-            query = query.Where(face =>
-                (face.Label != null && face.Label.Contains(q)) ||
-                (face.Performer != null && face.Performer.Name.Contains(q)));
-        }
+        query = FullTextSearchHelpers.Apply(db, query, q,
+            face => face.Label,
+            face => face.PrimarySourceKey,
+            face => face.SearchText,
+            face => face.Performer != null ? face.Performer.Name : null);
 
         if (performerId.HasValue)
             query = query.Where(face => face.PerformerId == performerId.Value);
@@ -69,7 +69,11 @@ public class FacesController(
                 : query.Where(face => face.MergedIntoFaceId == null);
 
         var totalCount = await query.CountAsync(cancellationToken);
-        var items = await ApplyFaceSort(query, sort)
+        var sortedQuery = FullTextSearchHelpers.IsActive(db, q)
+            ? FullTextSearchHelpers.OrderByRelevance(db, query, q)
+            : ApplyFaceSort(query, sort);
+
+        var items = await sortedQuery
             .Skip((page - 1) * perPage)
             .Take(perPage)
             .ToListAsync(cancellationToken);
