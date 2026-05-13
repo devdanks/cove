@@ -312,7 +312,7 @@ const starPrecisionOptions: { value: RatingStarPrecision; label: string }[] = [
 ];
 
 function emptyPath(): CovePathConfig {
-  return { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false };
+  return { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false, excludeText: false };
 }
 
 function emptyDownloaderPathOverride(): DownloaderPathOverrideConfig {
@@ -793,6 +793,7 @@ export function SettingsPage() {
           options: [],
           filterable: true,
           sortable: false,
+          isMultiValue: false,
         },
       ],
     }));

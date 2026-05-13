@@ -394,7 +394,7 @@ function normalizeReferenceFieldValue(value: unknown, isMultiValue: boolean): un
 
 function normalizeConfiguredFieldValue(rawValue: unknown, definition: CustomFieldDefinition): unknown {
   if (isEntityReferenceType(definition.type)) {
-    return normalizeReferenceFieldValue(rawValue, definition.isMultiValue);
+    return normalizeReferenceFieldValue(rawValue, definition.isMultiValue ?? false);
   }
 
   if (definition.isMultiValue && definition.type === "enum") {

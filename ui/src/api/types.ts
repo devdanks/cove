@@ -21,6 +21,18 @@ export interface Scene {
   createdAt: string;
   updatedAt: string;
   contextTagApplications?: TagApplication[];
+  parentSceneId?: number | null;
+  parentSceneTitle?: string | null;
+  clipStartSec?: number | null;
+  clipEndSec?: number | null;
+  imagePath?: string | null;
+}
+
+export interface SceneListEntry {
+  kind: "scene" | "compilation";
+  id: number;
+  scene?: Scene;
+  group?: Group;
 }
 
 export interface SceneRemoteId {
@@ -41,8 +53,15 @@ export interface SceneCreate {
   tagIds?: number[];
   performerIds?: number[];
   galleryIds?: number[];
-  groups?: { groupId: number; sceneIndex: number }[];
+  groups?: SceneGroupInput[];
   customFields?: Record<string, unknown>;
+  parentSceneId?: number | null;
+  clipStartSec?: number | null;
+  clipEndSec?: number | null;
+}
+
+export interface FileBackedCreate {
+  filePath: string;
 }
 
 export interface SceneUpdate extends Partial<SceneCreate> {}
@@ -464,6 +483,7 @@ export interface Image {
   galleryCount: number;
   galleryIds: number[];
   galleries: GallerySummary[];
+  groups?: GroupSummary[];
   files: ImageFile[];
   customFields?: Record<string, unknown>;
   createdAt: string;
@@ -497,6 +517,7 @@ export interface ImageCreate {
   performerIds?: number[];
   galleryIds?: number[];
   customFields?: Record<string, unknown>;
+  groupIds?: SceneGroupInput[];
 }
 
 export interface ImageUpdate {
@@ -513,6 +534,154 @@ export interface ImageUpdate {
   performerIds?: number[];
   galleryIds?: number[];
   customFields?: Record<string, unknown>;
+  groupIds?: SceneGroupInput[];
+}
+
+export interface AudioFile {
+  id: number;
+  path: string;
+  basename: string;
+  format: string;
+  duration: number;
+  audioCodec: string;
+  bitRate: number;
+  sampleRate?: number | null;
+  channels?: number | null;
+  size: number;
+  hasVideoTrack: boolean;
+}
+
+export interface AudioTrackInfo {
+  id: number;
+  orderIndex: number;
+  title?: string;
+  startSec: number;
+  endSec?: number | null;
+}
+
+export interface Audio {
+  id: number;
+  title?: string;
+  code?: string;
+  details?: string;
+  organized: boolean;
+  studioId?: number;
+  studioName?: string;
+  date?: string;
+  imagePath?: string | null;
+  urls: string[];
+  tags: Tag[];
+  performers: PerformerSummary[];
+  tracks: AudioTrackInfo[];
+  files: AudioFile[];
+  groups: GroupSummary[];
+  customFields?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  fileCount: number;
+  maxDuration: number;
+  hasVideoFiles: boolean;
+}
+
+export interface AudioCreate {
+  title?: string;
+  code?: string;
+  details?: string;
+  organized?: boolean;
+  studioId?: number;
+  date?: string;
+  urls?: string[];
+  tagIds?: number[];
+  performerIds?: number[];
+  customFields?: Record<string, unknown>;
+  groupIds?: SceneGroupInput[];
+}
+
+export interface AudioUpdate {
+  title?: string;
+  code?: string;
+  details?: string;
+  organized?: boolean;
+  studioId?: number;
+  date?: string;
+  urls?: string[];
+  tagIds?: number[];
+  performerIds?: number[];
+  customFields?: Record<string, unknown>;
+  groupIds?: SceneGroupInput[];
+}
+
+export interface TextFile {
+  id: number;
+  path: string;
+  basename: string;
+  format: string;
+  pageCount?: number | null;
+  wordCount?: number | null;
+  excerptText?: string | null;
+  size: number;
+}
+
+export interface TextDocument {
+  id: number;
+  title?: string;
+  code?: string;
+  details?: string;
+  organized: boolean;
+  studioId?: number;
+  studioName?: string;
+  date?: string;
+  imagePath?: string | null;
+  urls: string[];
+  tags: Tag[];
+  performers: PerformerSummary[];
+  files: TextFile[];
+  groups: GroupSummary[];
+  customFields?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  fileCount: number;
+  maxWordCount?: number | null;
+  maxPageCount?: number | null;
+}
+
+export interface TextCreate {
+  title?: string;
+  code?: string;
+  details?: string;
+  organized?: boolean;
+  studioId?: number;
+  date?: string;
+  urls?: string[];
+  tagIds?: number[];
+  performerIds?: number[];
+  customFields?: Record<string, unknown>;
+  groupIds?: SceneGroupInput[];
+}
+
+export interface TextUpdate {
+  title?: string;
+  code?: string;
+  details?: string;
+  organized?: boolean;
+  studioId?: number;
+  date?: string;
+  urls?: string[];
+  tagIds?: number[];
+  performerIds?: number[];
+  customFields?: Record<string, unknown>;
+  groupIds?: SceneGroupInput[];
+}
+
+export interface TextContent {
+  format: string;
+  renderMode: "text" | "markdown" | "html";
+  content: string;
+}
+
+export interface DeleteEntityOptions {
+  deleteFile?: boolean;
+  deleteGenerated?: boolean;
 }
 
 export interface Group {
@@ -530,12 +699,27 @@ export interface Group {
   urls: string[];
   tags: Tag[];
   sceneCount: number;
+  itemCount?: number;
   isCompilation?: boolean;
   subGroupCount: number;
   containingGroupCount: number;
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  kind?: "static" | "dynamic";
+  querySourceKey?: string | null;
+  queryJson?: string | null;
+  lastResolvedAt?: string | null;
+  cachedItemCount?: number | null;
+  cacheTtlSec?: number;
+  showInSceneLists?: boolean;
+  allowedHostTypes?: string[];
+  sortOrder?: number;
+}
+
+export interface GroupReorder {
+  ids: number[];
+  startIndex?: number;
 }
 
 export interface GroupSummary {
@@ -544,15 +728,21 @@ export interface GroupSummary {
   sceneIndex: number;
 }
 
-export type GroupItemKind = "scene" | "sceneRange";
+export type GroupItemKind = "scene" | "sceneRange" | "image" | "audio" | "text" | "group" | "performer" | "studio" | "tag" | "gallery" | "face" | "segment";
 
 export interface GroupItem {
   id: number;
   groupId: number;
   orderIndex: number;
   kind: GroupItemKind;
-  sceneId: number;
+  sceneId?: number | null;
   sceneTitle?: string;
+  hostType?: string;
+  hostId?: number;
+  imageId?: number | null;
+  imageTitle?: string | null;
+  childGroupId?: number | null;
+  childGroupName?: string | null;
   startSec?: number;
   endSec?: number;
   title?: string;
@@ -568,7 +758,7 @@ export interface GroupItem {
 export interface GroupItemCreate {
   orderIndex: number;
   kind: GroupItemKind;
-  sceneId: number;
+  sceneId?: number;
   startSec?: number;
   endSec?: number;
   title?: string;
@@ -576,6 +766,8 @@ export interface GroupItemCreate {
   sourceSpanKey?: string;
   sourceProfileId?: number;
   sourceQueryJson?: string;
+  hostType?: string;
+  hostId?: number;
 }
 
 export interface GroupItemUpdate {
@@ -589,6 +781,7 @@ export interface GroupItemUpdate {
 
 export interface GroupItemsReorder {
   ids: number[];
+  startIndex?: number;
 }
 
 export interface GroupItemSpanInput {
@@ -607,7 +800,10 @@ export interface GroupItemsFromSpans {
 
 export interface GroupPlaybackManifestItem {
   groupItemId: number;
-  sceneId: number;
+  hostType: string;
+  hostId: number;
+  sceneId?: number | null;
+  audioId?: number | null;
   sceneTitle?: string;
   src: string;
   startSec: number;
@@ -615,6 +811,8 @@ export interface GroupPlaybackManifestItem {
   durationSec?: number;
   posterPath?: string;
   title?: string;
+  format?: string | null;
+  hasVideoTrack: boolean;
 }
 
 export interface GroupPlaybackManifest {
@@ -639,9 +837,51 @@ export interface GroupCreate {
   urls?: string[];
   tagIds?: number[];
   customFields?: Record<string, unknown>;
+  kind?: "static" | "dynamic";
+  querySourceKey?: string;
+  queryJson?: string | null;
+  cacheTtlSec?: number;
+  showInSceneLists?: boolean;
+  allowedHostTypes?: string[];
+  sortOrder?: number;
 }
 
 export interface GroupUpdate extends Partial<GroupCreate> {}
+
+export interface BookmarkDto {
+  hostType: AffinityHostType;
+  hostId: number;
+  createdAt: string;
+}
+
+export interface BookmarkToggle {
+  hostType: AffinityHostType;
+  hostId: number;
+  saved: boolean;
+}
+
+export interface BookmarkState {
+  hostType: AffinityHostType;
+  hostId: number;
+  saved: boolean;
+  createdAt?: string | null;
+}
+
+export interface BookmarkBatchRequest {
+  hostType: AffinityHostType;
+  hostIds: number[];
+}
+
+export interface DynamicGroupSource {
+  key: string;
+  displayName: string;
+}
+
+export interface GroupQueryUpdate {
+  querySourceKey: string;
+  queryJson?: string | null;
+  cacheTtlSec?: number | null;
+}
 
 export interface VideoFile {
   id: number;
@@ -686,7 +926,7 @@ export interface TagSegmentWall {
 
 export type SegmentHostType = "scene" | "image" | "audio";
 export type DetectionHostType = "scene" | "image";
-export type AffinityHostType = "scene" | "image" | "performer" | "face" | "tag" | "studio" | "gallery" | "group";
+export type AffinityHostType = "scene" | "audio" | "text" | "image" | "performer" | "face" | "tag" | "studio" | "gallery" | "group";
 export type InteractionHostType = AffinityHostType | "segment" | "search" | "collection";
 
 export interface Segment {
@@ -1324,6 +1564,9 @@ export interface UserUiPreferences {
   theme?: UserThemePreferences | null;
   ratingSystemOptions?: RatingSystemOptions | null;
   tracking?: UserTrackingPreferences | null;
+  scenes?: UserScenesPreferences | null;
+  keybindingOverrides?: Record<string, string> | null;
+  playback?: UserPlaybackPreferences | null;
 }
 
 export interface UserTrackingPreferences {
@@ -1333,6 +1576,14 @@ export interface UserTrackingPreferences {
   minImageDetailViewSeconds?: number | null;
   minDerivedLikeSessionSeconds?: number | null;
   sessionIdleTimeoutSec?: number | null;
+}
+
+export interface UserScenesPreferences {
+  includeCompilationGroups?: boolean | null;
+}
+
+export interface UserPlaybackPreferences {
+  skipSeconds?: number | null;
 }
 
 export interface MeResponse {
@@ -1358,10 +1609,11 @@ export interface InterfaceConfig {
   disableDropdownCreateTag: boolean;
 }
 
-export type CustomFieldEntityType = "scene" | "performer" | "tag" | "studio" | "gallery" | "image" | "group" | "face";
-export type CustomFieldType = "text" | "number" | "boolean" | "date" | "url" | "enum";
+export type CustomFieldEntityType = "scene" | "audio" | "text" | "performer" | "tag" | "studio" | "gallery" | "image" | "group" | "face";
+export type CustomFieldType = "text" | "longText" | "number" | "boolean" | "date" | "timestamp" | "duration" | "percent" | "url" | "enum" | "tag" | "performer" | "studio" | "scene" | "gallery" | "image" | "group";
 
 export interface CustomFieldDefinition {
+  id?: number;
   key: string;
   label: string;
   type: CustomFieldType;
@@ -1369,6 +1621,34 @@ export interface CustomFieldDefinition {
   options: string[];
   filterable: boolean;
   sortable: boolean;
+  isMultiValue?: boolean;
+  displayOrder?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CustomFieldDefinitionCreate {
+  key?: string;
+  label: string;
+  type: CustomFieldType;
+  entityTypes: CustomFieldEntityType[];
+  options: string[];
+  filterable: boolean;
+  sortable: boolean;
+  isMultiValue?: boolean;
+  displayOrder?: number | null;
+}
+
+export interface CustomFieldDefinitionUpdate {
+  key?: string;
+  label?: string;
+  type?: CustomFieldType;
+  entityTypes?: CustomFieldEntityType[];
+  options?: string[];
+  filterable?: boolean;
+  sortable?: boolean;
+  isMultiValue?: boolean;
+  displayOrder?: number | null;
 }
 
 export interface UiConfig {
@@ -1439,6 +1719,14 @@ export interface MetadataBatchDefaultsConfig {
   excludeFields: string[];
 }
 
+export interface ScrapeApplyDefaultsConfig {
+  createMissingTags: boolean;
+  createMissingPerformers: boolean;
+  createMissingStudio: boolean;
+  markOrganized: boolean;
+  hydratePerformers: boolean;
+}
+
 export interface ScraperPreference {
   site: string;
   scraperId: string;
@@ -1450,6 +1738,7 @@ export interface ScrapingConfig {
   metadataServers: MetadataServer[];
   scraperPreferences: ScraperPreference[];
   identifyDefaults: IdentifyDefaultsConfig;
+  scrapeApplyDefaults?: ScrapeApplyDefaultsConfig;
   metadataBatchDefaults: MetadataBatchDefaultsConfig;
 }
 
@@ -1503,6 +1792,7 @@ export interface CovePathConfig {
   excludeVideo: boolean;
   excludeImage: boolean;
   excludeAudio: boolean;
+  excludeText: boolean;
 }
 
 export interface DownloaderPathOverrideConfig {
@@ -1598,6 +1888,13 @@ export interface CreateScrapeAttemptRequest {
   fragment?: Record<string, unknown>;
 }
 
+export type ScrapeCollectionItemAction = "include" | "create" | "exclude";
+
+export interface ScrapeCollectionItemSelection {
+  name: string;
+  action: ScrapeCollectionItemAction;
+}
+
 export interface ApplySceneScrapeAttemptRequest {
   replaceFields?: string[];
   collectionModes?: Record<string, string>;
@@ -1607,7 +1904,11 @@ export interface ApplySceneScrapeAttemptRequest {
   markOrganized?: boolean;
   hydratePerformers?: boolean;
   selectedCandidateIndex?: number;
+  tagSelections?: ScrapeCollectionItemSelection[];
+  performerSelections?: ScrapeCollectionItemSelection[];
 }
+
+export type ApplyScrapeAttemptRequest = ApplySceneScrapeAttemptRequest;
 
 export interface BatchSceneScrapeStartRequest {
   scraperId: string;
@@ -1642,6 +1943,7 @@ export interface DownloaderMatch {
   normalizedUrl: string;
   label?: string;
   qualityOptions: DownloaderQualityOption[];
+  sourceUrl?: string | null;
 }
 
 export interface DownloaderMatchRequest {
@@ -1667,6 +1969,12 @@ export interface DownloaderStartRequest {
   qualityId?: string;
   autoApplyMetadata?: boolean;
   allowDuplicateDownload?: boolean;
+  sourceUrl?: string;
+  createMissingTags?: boolean;
+  createMissingPerformers?: boolean;
+  createMissingStudio?: boolean;
+  markOrganized?: boolean;
+  hydratePerformers?: boolean;
 }
 
 export interface DownloaderBatchGenerateOptions {
@@ -1691,10 +1999,18 @@ export interface DownloaderBatchItem {
   entity: string;
   entityId?: number;
   qualityId?: string;
+  sourceUrl?: string;
   label?: string;
   title?: string;
   createEntityIfMissing?: boolean;
   autoApplyMetadata?: boolean;
+  createMissingTags?: boolean;
+  createMissingPerformers?: boolean;
+  createMissingStudio?: boolean;
+  markOrganized?: boolean;
+  hydratePerformers?: boolean;
+  galleryIds?: number[];
+  groupIds?: SceneGroupInput[];
 }
 
 export interface DownloaderBatchFollowUp {
@@ -1708,9 +2024,16 @@ export interface DownloaderBatchStartRequest {
   followUp?: DownloaderBatchFollowUp;
 }
 
+export interface DownloaderBatchIssue {
+  kind: "skipped" | "failed";
+  label: string;
+  reason: string;
+}
+
 export interface DownloaderBatchStartResponse {
   jobId: string;
   queuedCount: number;
+  issues?: DownloaderBatchIssue[];
 }
 
 export interface MetadataServerValidationResult {
@@ -1886,6 +2209,9 @@ export interface StringCriterion {
 export interface CustomFieldCriterion extends StringCriterion {
   key: string;
   type?: CustomFieldType;
+  value2?: string;
+  displayValue?: string;
+  displayValue2?: string;
 }
 
 export interface BoolCriterion {
@@ -1939,6 +2265,7 @@ export interface SceneFilterCriteria {
   code?: string;
   path?: string;
   organized?: boolean;
+  includeCompilationGroups?: boolean;
   studioId?: number;
   groupId?: number;
   tagIds?: number[];
@@ -2188,6 +2515,51 @@ export interface ImageFilterCriteria {
   customFieldCriteria?: CustomFieldCriterion[];
 }
 
+export interface AudioFilterCriteria {
+  titleCriterion?: StringCriterion;
+  codeCriterion?: StringCriterion;
+  detailsCriterion?: StringCriterion;
+  pathCriterion?: StringCriterion;
+  urlCriterion?: StringCriterion;
+  organizedCriterion?: BoolCriterion;
+  dateCriterion?: DateCriterion;
+  durationCriterion?: IntCriterion;
+  fileCountCriterion?: IntCriterion;
+  tagCountCriterion?: IntCriterion;
+  performerCountCriterion?: IntCriterion;
+  tagsCriterion?: MultiIdCriterion;
+  performersCriterion?: MultiIdCriterion;
+  studiosCriterion?: MultiIdCriterion;
+  groupsCriterion?: MultiIdCriterion;
+  createdAtCriterion?: TimestampCriterion;
+  updatedAtCriterion?: TimestampCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
+}
+
+export interface TextFilterCriteria {
+  titleCriterion?: StringCriterion;
+  codeCriterion?: StringCriterion;
+  detailsCriterion?: StringCriterion;
+  pathCriterion?: StringCriterion;
+  urlCriterion?: StringCriterion;
+  organizedCriterion?: BoolCriterion;
+  dateCriterion?: DateCriterion;
+  wordCountCriterion?: IntCriterion;
+  pageCountCriterion?: IntCriterion;
+  fileCountCriterion?: IntCriterion;
+  tagCountCriterion?: IntCriterion;
+  performerCountCriterion?: IntCriterion;
+  tagsCriterion?: MultiIdCriterion;
+  performersCriterion?: MultiIdCriterion;
+  studiosCriterion?: MultiIdCriterion;
+  groupsCriterion?: MultiIdCriterion;
+  createdAtCriterion?: TimestampCriterion;
+  updatedAtCriterion?: TimestampCriterion;
+  customFieldCriterion?: CustomFieldCriterion;
+  customFieldCriteria?: CustomFieldCriterion[];
+}
+
 export interface GroupFilterCriteria {
   name?: string;
   studioId?: number;
@@ -2307,6 +2679,34 @@ export interface BulkImageUpdate {
   performerMode?: BulkUpdateMode;
   galleryIds?: number[];
   galleryMode?: BulkUpdateMode;
+}
+
+export interface BulkAudioUpdate {
+  ids: number[];
+  clearFields?: string[];
+  organized?: boolean;
+  studioId?: number | null;
+  date?: string;
+  code?: string;
+  details?: string;
+  tagIds?: number[];
+  tagMode?: BulkUpdateMode;
+  performerIds?: number[];
+  performerMode?: BulkUpdateMode;
+}
+
+export interface BulkTextUpdate {
+  ids: number[];
+  clearFields?: string[];
+  organized?: boolean;
+  studioId?: number | null;
+  date?: string;
+  code?: string;
+  details?: string;
+  tagIds?: number[];
+  tagMode?: BulkUpdateMode;
+  performerIds?: number[];
+  performerMode?: BulkUpdateMode;
 }
 
 export interface BulkGroupUpdate {

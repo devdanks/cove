@@ -63,7 +63,7 @@ export async function createFromUrlWithOptionalDownload<TCreate extends { title?
     qualityId: match.qualityOptions[0]?.id,
     autoApplyMetadata: scrapeMetadata,
     ...(scrapeMetadata ? buildMetadataApplyOptions() : {}),
-    sourceUrl: match.sourceUrl,
+    sourceUrl: match.sourceUrl ?? undefined,
   });
 
   return created;
