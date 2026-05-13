@@ -32,7 +32,7 @@ import {
   UserCog,
   X,
 } from "lucide-react";
-import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi, customFields as customFieldsApi } from "../api/client";
+import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi } from "../api/client";
 import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, StashAiImportResult, UserRow } from "../api/client";
 import type {
   JobInfo,
@@ -51,15 +51,13 @@ import type {
   CustomFieldType,
   DownloaderDescriptor,
   DownloaderPathOverrideConfig,
-  ExtensionExternalDependency,
   IdentifyDefaultsConfig,
   MetadataServerValidationResult,
-  ScrapeApplyDefaultsConfig,
   TagGroup,
   UserTrackingPreferences,
 } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
-import { getScraperSiteKey, loadScrapeApplyPreferences, saveScrapeApplyPreferences } from "../components/sceneScrapeUtils";
+import { getScraperSiteKey } from "../components/sceneScrapeUtils";
 import { useAppConfig } from "../state/AppConfigContext";
 import { LOCATION_CHANGE_EVENT, buildCurrentUrl, navigateToUrl } from "../router/location";
 import { DisplayProfilesSettingsPanel } from "./settings/DisplayProfilesSettingsPanel";
@@ -77,11 +75,8 @@ import { UsersTab, RolesTab, AuditTab, ContentRulesTab, ApiTokensTab, ShareLinks
 import { isLimitedPrimarySettingsTabVisible } from "./settings/tabVisibility";
 import { defaultRatingSystemOptions, normalizeRatingOptions } from "../components/Rating";
 import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
-import { DEFAULT_PLAYBACK_PREFERENCES, normalizePlaybackPreferences, type ResolvedPlaybackPreferences } from "../utils/playbackPreferences";
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 import { KEYBINDING_GROUPS, keybindingDefault } from "../keyboard/keybindings";
-import { readStoredKeybindingOverrides, writeStoredKeybindingOverrides } from "../hooks/useResolvedKeybindingOverrides";
-import { useCustomFieldDefinitions } from "../hooks/useCustomFieldDefinitions";
 
 type SettingsTab = "tasks" | "library" | "interface" | "user-settings" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
@@ -93,8 +88,6 @@ type ResolvedTrackingPreferences = {
   minDerivedLikeSessionSeconds: number;
   sessionIdleTimeoutSec: number;
 };
-
-type CustomFieldDefinitionDraft = CustomFieldDefinition & { draftId: string; isNew?: boolean };
 
 const defaultTrackingPreferences: ResolvedTrackingPreferences = {
   enabled: true,
@@ -179,8 +172,6 @@ const DEFAULT_SCAN_OPTIONS: ScanOptions = {
   scanGenerateMd5: false,
   scanGenerateThumbnails: false,
   scanGenerateImagePhashes: false,
-  scanGenerateAudioPhashes: false,
-  scanGenerateTextPhashes: false,
   rescan: false,
 };
 
@@ -195,8 +186,6 @@ const DEFAULT_GENERATE_OPTIONS: GenerateOptions = {
   md5: false,
   imageThumbnails: false,
   imagePhashes: false,
-  audioPhashes: false,
-  textPhashes: false,
   overwrite: false,
 };
 
@@ -299,8 +288,6 @@ const languageOptions = [
 
 const menuItems = [
   { value: "scenes", label: "Scenes" },
-  { value: "audios", label: "Audios" },
-  { value: "texts", label: "Texts" },
   { value: "segments", label: "Segments" },
   { value: "images", label: "Images" },
   { value: "faces", label: "Faces" },
@@ -309,6 +296,7 @@ const menuItems = [
   { value: "studios", label: "Studios" },
   { value: "tags", label: "Tags" },
   { value: "groups", label: "Groups" },
+  { value: "audios", label: "Audios" },
 ];
 
 const ratingSystemOptions: { value: RatingSystemType; label: string }[] = [
@@ -324,7 +312,7 @@ const starPrecisionOptions: { value: RatingStarPrecision; label: string }[] = [
 ];
 
 function emptyPath(): CovePathConfig {
-  return { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false, excludeText: false };
+  return { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false };
 }
 
 function emptyDownloaderPathOverride(): DownloaderPathOverrideConfig {
@@ -357,27 +345,8 @@ function defaultMetadataBatchDefaults() {
   };
 }
 
-function defaultScrapeApplyDefaults(): ScrapeApplyDefaultsConfig {
-  return {
-    createMissingTags: false,
-    createMissingPerformers: false,
-    createMissingStudio: false,
-    markOrganized: false,
-    hydratePerformers: false,
-  };
-}
-
 function defaultScraperPreferences(): ScraperPreference[] {
   return [];
-}
-
-function isGenericWildcardUrlPattern(pattern: string) {
-  const normalized = pattern.trim().toLowerCase();
-  return normalized === "http://*" || normalized === "https://*" || normalized === "http://*/*" || normalized === "https://*/*";
-}
-
-function hasOnlyGenericWildcardUrlPatterns(urls: string[]) {
-  return urls.length > 0 && urls.every(isGenericWildcardUrlPattern);
 }
 
 const METADATA_BATCH_EXCLUDE_OPTIONS = [
@@ -411,26 +380,16 @@ const customFieldEntityOptions: { value: CustomFieldEntityType; label: string }[
   { value: "gallery", label: "Galleries" },
   { value: "image", label: "Images" },
   { value: "group", label: "Groups" },
+  { value: "face", label: "Faces" },
 ];
 
 const customFieldTypeOptions: { value: CustomFieldType; label: string }[] = [
   { value: "text", label: "Text" },
-  { value: "longText", label: "Long Text" },
   { value: "number", label: "Number" },
   { value: "boolean", label: "Boolean" },
   { value: "date", label: "Date" },
-  { value: "timestamp", label: "Timestamp" },
   { value: "url", label: "URL" },
   { value: "enum", label: "Enum" },
-  { value: "duration", label: "Duration" },
-  { value: "percent", label: "Percent" },
-  { value: "tag", label: "Tag Reference" },
-  { value: "performer", label: "Performer Reference" },
-  { value: "studio", label: "Studio Reference" },
-  { value: "scene", label: "Scene Reference" },
-  { value: "gallery", label: "Gallery Reference" },
-  { value: "image", label: "Image Reference" },
-  { value: "group", label: "Group Reference" },
 ];
 
 function cloneConfig(config: CoveConfig): CoveConfig {
@@ -443,53 +402,6 @@ function linesToList(value: string) {
 
 function listToLines(values: string[]) {
   return values.join("\n");
-}
-
-function createCustomFieldDraftId(seed: string) {
-  return `custom-field-${seed}`;
-}
-
-function toCustomFieldDefinitionDraft(definition: CustomFieldDefinition, index = 0): CustomFieldDefinitionDraft {
-  return {
-    ...definition,
-    draftId: createCustomFieldDraftId(definition.id > 0 ? String(definition.id) : `${definition.key || "draft"}-${index}`),
-  };
-}
-
-function createCustomFieldDefinitionDraft(index: number): CustomFieldDefinitionDraft {
-  const now = new Date().toISOString();
-  return {
-    draftId: createCustomFieldDraftId(`${Date.now()}-${index}`),
-    id: -Date.now() - index,
-    key: "",
-    label: "",
-    type: "text",
-    entityTypes: ["scene"],
-    options: [],
-    filterable: true,
-    sortable: false,
-    isMultiValue: false,
-    displayOrder: index * 10,
-    createdAt: now,
-    updatedAt: now,
-    isNew: true,
-  };
-}
-
-function sanitizeCustomFieldDefinitionDraft(definition: CustomFieldDefinitionDraft) {
-  return {
-    key: definition.key.trim() || undefined,
-    label: definition.label.trim(),
-    type: definition.type,
-    entityTypes: definition.entityTypes.filter(Boolean),
-    options: (definition.type === "enum" ? definition.options : [])
-      .map((option) => option.trim())
-      .filter((option, index, items) => option !== "" && items.findIndex((candidate) => candidate.toLowerCase() === option.toLowerCase()) === index),
-    filterable: definition.filterable,
-    sortable: definition.sortable,
-    isMultiValue: definition.isMultiValue,
-    displayOrder: definition.displayOrder,
-  };
 }
 
 function normalizeConfig(config: CoveConfig): CoveConfig {
@@ -513,8 +425,6 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
     videoExtensions: config.videoExtensions.map((value) => value.trim()).filter(Boolean),
     imageExtensions: config.imageExtensions.map((value) => value.trim()).filter(Boolean),
     galleryExtensions: config.galleryExtensions.map((value) => value.trim()).filter(Boolean),
-    audioExtensions: (config.audioExtensions ?? []).map((value) => value.trim()).filter(Boolean),
-    textExtensions: (config.textExtensions ?? []).map((value) => value.trim()).filter(Boolean),
     excludePatterns: config.excludePatterns.map((value) => value.trim()).filter(Boolean),
     excludeImagePatterns: config.excludeImagePatterns.map((value) => value.trim()).filter(Boolean),
     excludeGalleryPatterns: config.excludeGalleryPatterns.map((value) => value.trim()).filter(Boolean),
@@ -531,6 +441,18 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
           .filter(([key, value]) => key !== "" && value !== "")
       ),
     },
+    customFieldDefinitions: (config.customFieldDefinitions ?? [])
+      .map((definition) => ({
+        ...definition,
+        key: definition.key.trim(),
+        label: definition.label.trim() || definition.key.trim(),
+        type: definition.type,
+        entityTypes: definition.entityTypes.filter(Boolean),
+        options: definition.options.map((option) => option.trim()).filter(Boolean),
+        filterable: definition.filterable,
+        sortable: definition.sortable,
+      }))
+      .filter((definition, index, items) => definition.key !== "" && items.findIndex((candidate) => candidate.key.toLowerCase() === definition.key.toLowerCase()) === index),
     security: {
       ...config.security,
       username: config.security.username?.trim() || undefined,
@@ -565,10 +487,6 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
         ...defaultIdentifyDefaults(),
         ...config.scraping.identifyDefaults,
       },
-      scrapeApplyDefaults: {
-        ...defaultScrapeApplyDefaults(),
-        ...config.scraping.scrapeApplyDefaults,
-      },
       metadataBatchDefaults: {
         ...defaultMetadataBatchDefaults(),
         ...config.scraping.metadataBatchDefaults,
@@ -593,19 +511,10 @@ export function SettingsPage() {
   const [authGroupOpen, setAuthGroupOpen] = useState(() => authTabKeys.has(readSettingsTabFromUrl()));
   const [draftState, setDraft] = useState<CoveConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDefinitionDraft[]>([]);
   const initializedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const [metadataServerValidation, setMetadataServerValidation] = useState<Record<string, MetadataServerValidationResult>>({});
-
-  const customFieldsQuery = useCustomFieldDefinitions(undefined, canWriteSystemSettings && activeTab === "interface");
-
-  useEffect(() => {
-    if (customFieldsQuery.data) {
-      setCustomFieldDrafts(customFieldsQuery.data.map((definition, index) => toCustomFieldDefinitionDraft(definition, index)));
-    }
-  }, [customFieldsQuery.data]);
 
   const securityUsersQ = useQuery<UserRow[]>({
     queryKey: ["admin", "users", "security"],
@@ -621,31 +530,6 @@ export function SettingsPage() {
 
   const shutdownMutation = useMutation({
     mutationFn: system.shutdown,
-    onError: (err: Error) => setError(err.message),
-  });
-
-  const saveCustomFieldDefinitionMutation = useMutation({
-    mutationFn: async (definition: CustomFieldDefinitionDraft) => {
-      const payload = sanitizeCustomFieldDefinitionDraft(definition);
-      return definition.isNew || definition.id <= 0
-        ? customFieldsApi.create(payload)
-        : customFieldsApi.update(definition.id, payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["custom-fields"] });
-      setError(null);
-    },
-    onError: (err: Error) => setError(err.message),
-  });
-
-  const deleteCustomFieldDefinitionMutation = useMutation({
-    mutationFn: (definition: CustomFieldDefinitionDraft) => definition.isNew || definition.id <= 0
-      ? Promise.resolve()
-      : customFieldsApi.delete(definition.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["custom-fields"] });
-      setError(null);
-    },
     onError: (err: Error) => setError(err.message),
   });
 
@@ -669,7 +553,7 @@ export function SettingsPage() {
         continue;
       }
 
-      const sites = new Set(scraper.urls.filter((pattern) => !isGenericWildcardUrlPattern(pattern)).map((pattern) => getScraperSiteKey(pattern)).filter(Boolean));
+      const sites = new Set(scraper.urls.map((pattern) => getScraperSiteKey(pattern)).filter(Boolean));
       for (const site of sites) {
         const siteScrapers = groups.get(site) ?? [];
         if (!siteScrapers.some((candidate) => candidate.id === scraper.id)) {
@@ -712,10 +596,6 @@ export function SettingsPage() {
     if (!nextDraft.scraping.identifyDefaults) {
       nextDraft.scraping.identifyDefaults = defaultIdentifyDefaults();
     }
-    nextDraft.scraping.scrapeApplyDefaults = {
-      ...defaultScrapeApplyDefaults(),
-      ...nextDraft.scraping.scrapeApplyDefaults,
-    };
     nextDraft.scraping.scraperPreferences = nextDraft.scraping.scraperPreferences ?? defaultScraperPreferences();
     nextDraft.scraping.metadataBatchDefaults = {
       ...defaultMetadataBatchDefaults(),
@@ -877,19 +757,52 @@ export function SettingsPage() {
     setDraft((current) => (current ? updater(current) : current));
   };
 
-  const updateCustomFieldDefinition = (index: number, updater: (definition: CustomFieldDefinitionDraft) => CustomFieldDefinitionDraft) => {
-    setCustomFieldDrafts((current) => current.map((definition, candidateIndex) => candidateIndex === index ? updater(definition) : definition));
+  const updateKeybindingOverride = (id: string, value: string) => {
+    updateDraft((current) => {
+      const nextOverrides = { ...(current.ui.keybindingOverrides ?? {}) };
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === keybindingDefault(id)) {
+        delete nextOverrides[id];
+      } else {
+        nextOverrides[id] = trimmed;
+      }
+      return { ...current, ui: { ...current.ui, keybindingOverrides: nextOverrides } };
+    });
+  };
+
+  const updateCustomFieldDefinition = (index: number, updater: (definition: CustomFieldDefinition) => CustomFieldDefinition) => {
+    updateDraft((current) => {
+      const definitions = [...(current.customFieldDefinitions ?? [])];
+      const existing = definitions[index];
+      if (!existing) return current;
+      definitions[index] = updater(existing);
+      return { ...current, customFieldDefinitions: definitions };
+    });
   };
 
   const addCustomFieldDefinition = () => {
-    setCustomFieldDrafts((current) => [...current, createCustomFieldDefinitionDraft(current.length)]);
+    updateDraft((current) => ({
+      ...current,
+      customFieldDefinitions: [
+        ...(current.customFieldDefinitions ?? []),
+        {
+          key: "",
+          label: "",
+          type: "text",
+          entityTypes: ["scene"],
+          options: [],
+          filterable: true,
+          sortable: false,
+        },
+      ],
+    }));
   };
 
   const removeCustomFieldDefinition = (index: number) => {
-    const definition = customFieldDrafts[index];
-    if (!definition) return;
-    setCustomFieldDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index));
-    deleteCustomFieldDefinitionMutation.mutate(definition);
+    updateDraft((current) => ({
+      ...current,
+      customFieldDefinitions: (current.customFieldDefinitions ?? []).filter((_, candidateIndex) => candidateIndex !== index),
+    }));
   };
 
   const toggleCustomFieldEntity = (index: number, entityType: CustomFieldEntityType) => {
@@ -908,20 +821,6 @@ export function SettingsPage() {
   const activeTabDescription = resolvedActiveTab === "interface" && !canWriteSystemSettings
     ? "Theme and rating display preferences stored locally in this browser."
     : tabDescriptions[resolvedActiveTab];
-  const updateScrapeApplyDefault = (field: keyof ScrapeApplyDefaultsConfig, checked: boolean) => {
-    const nextPreferences = { ...loadScrapeApplyPreferences(draft.scraping.scrapeApplyDefaults), [field]: checked };
-    saveScrapeApplyPreferences(nextPreferences);
-    updateDraft((current) => ({
-      ...current,
-      scraping: {
-        ...current.scraping,
-        scrapeApplyDefaults: {
-          ...current.scraping.scrapeApplyDefaults,
-          [field]: checked,
-        },
-      },
-    }));
-  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
@@ -1053,18 +952,6 @@ export function SettingsPage() {
                               ...current,
                               covePaths: current.covePaths.map((item, itemIndex) =>
                                 itemIndex === index ? { ...item, excludeAudio: checked } : item,
-                              ),
-                            }))
-                          }
-                        />
-                        <CheckboxLabel
-                          label="Exclude texts"
-                          checked={path.excludeText}
-                          onChange={(checked) =>
-                            updateDraft((current) => ({
-                              ...current,
-                              covePaths: current.covePaths.map((item, itemIndex) =>
-                                itemIndex === index ? { ...item, excludeText: checked } : item,
                               ),
                             }))
                           }
@@ -1217,18 +1104,6 @@ export function SettingsPage() {
                   label="Gallery extensions"
                   value={listToLines(draft.galleryExtensions)}
                   onChange={(value) => updateDraft((current) => ({ ...current, galleryExtensions: linesToList(value) }))}
-                  rows={7}
-                />
-                <TextAreaField
-                  label="Audio extensions"
-                  value={listToLines(draft.audioExtensions)}
-                  onChange={(value) => updateDraft((current) => ({ ...current, audioExtensions: linesToList(value) }))}
-                  rows={7}
-                />
-                <TextAreaField
-                  label="Text extensions"
-                  value={listToLines(draft.textExtensions)}
-                  onChange={(value) => updateDraft((current) => ({ ...current, textExtensions: linesToList(value) }))}
                   rows={7}
                 />
               </div>
@@ -1391,40 +1266,51 @@ export function SettingsPage() {
               </div>
             </SectionCard>
 
+            <SectionCard title="Keyboard Shortcuts" description="Override the registered global and list-page shortcut keys.">
+              <div className="space-y-5">
+                {KEYBINDING_GROUPS.map((group) => (
+                  <div key={group.group} className="space-y-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted">{group.group}</div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {group.definitions.map((definition) => (
+                        <TextField
+                          key={definition.id}
+                          label={definition.label}
+                          value={draft.ui.keybindingOverrides?.[definition.id] ?? definition.keys}
+                          onChange={(value) => updateKeybindingOverride(definition.id, value)}
+                          placeholder={definition.keys}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => updateDraft((current) => ({ ...current, ui: { ...current.ui, keybindingOverrides: {} } }))}
+                  className="rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground"
+                >
+                  Reset shortcuts
+                </button>
+              </div>
+            </SectionCard>
+
             <SectionCard title="Custom Fields" description="Define typed metadata fields for entities that need extra structured values.">
               <div className="space-y-4">
-                {customFieldsQuery.isLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading fields
-                  </div>
-                ) : null}
-                {customFieldDrafts.map((definition, index) => (
-                  <div key={definition.draftId} className="rounded-lg border border-border bg-card p-4">
+                {(draft.customFieldDefinitions ?? []).map((definition, index) => (
+                  <div key={`${definition.key || "new"}-${index}`} className="rounded-lg border border-border bg-card p-4">
                     <div className="mb-4 flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-foreground">{definition.label || definition.key || "New custom field"}</div>
                         <div className="truncate text-xs text-muted">{definition.key || "Unsaved key"}</div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => saveCustomFieldDefinitionMutation.mutate(definition)}
-                          disabled={saveCustomFieldDefinitionMutation.isPending}
-                          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground disabled:opacity-50"
-                        >
-                          {saveCustomFieldDefinitionMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeCustomFieldDefinition(index)}
-                          aria-label="Remove custom field definition"
-                          className="rounded-lg border border-border p-2 text-muted hover:border-red-400 hover:text-red-300"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeCustomFieldDefinition(index)}
+                        aria-label="Remove custom field definition"
+                        className="rounded-lg border border-border p-2 text-muted hover:border-red-400 hover:text-red-300"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <TextField
@@ -1457,11 +1343,6 @@ export function SettingsPage() {
                             label="Sortable"
                             checked={definition.sortable}
                             onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, sortable: checked }))}
-                          />
-                          <CheckboxLabel
-                            label="Multiple values"
-                            checked={definition.isMultiValue}
-                            onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, isMultiValue: checked }))}
                           />
                         </div>
                       </div>
@@ -1640,11 +1521,21 @@ export function SettingsPage() {
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, wallShowTitle: checked } }))}
                 />
                 <SelectField
+                  label="Wall playback"
+                  value={String(draft.ui.wallPlayback)}
+                  onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, wallPlayback: Number(value) } }))}
+                  options={[
+                    { value: "0", label: "Audio" },
+                    { value: "1", label: "Silent" },
+                  ]}
+                />
+                <SelectField
                   label="Wall preview type"
                   value={draft.ui.wallPreviewType ?? "video"}
                   onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, wallPreviewType: value } }))}
                   options={[
                     { value: "video", label: "Video" },
+                    { value: "webp", label: "Animated WebP" },
                     { value: "image", label: "Static Image" },
                   ]}
                 />
@@ -2096,39 +1987,6 @@ export function SettingsPage() {
                   <Plus className="h-4 w-4" /> Add MetadataServer instance
                 </button>
               </div>
-            </SectionCard>
-
-            <SectionCard title="Scrape & Download Defaults" description="Defaults used when scraper or downloader metadata is applied from review dialogs, list actions, and detail actions.">
-              <div className="grid gap-3 md:grid-cols-2">
-                <CheckboxLabel
-                  label="Create missing tags by default"
-                  checked={draft.scraping.scrapeApplyDefaults.createMissingTags}
-                  onChange={(checked) => updateScrapeApplyDefault("createMissingTags", checked)}
-                />
-                <CheckboxLabel
-                  label="Create missing performers by default"
-                  checked={draft.scraping.scrapeApplyDefaults.createMissingPerformers}
-                  onChange={(checked) => updateScrapeApplyDefault("createMissingPerformers", checked)}
-                />
-                <CheckboxLabel
-                  label="Create missing studios by default"
-                  checked={draft.scraping.scrapeApplyDefaults.createMissingStudio}
-                  onChange={(checked) => updateScrapeApplyDefault("createMissingStudio", checked)}
-                />
-                <CheckboxLabel
-                  label="Mark applied media organized by default"
-                  checked={draft.scraping.scrapeApplyDefaults.markOrganized}
-                  onChange={(checked) => updateScrapeApplyDefault("markOrganized", checked)}
-                />
-                <CheckboxLabel
-                  label="Hydrate performers by default"
-                  checked={draft.scraping.scrapeApplyDefaults.hydratePerformers}
-                  onChange={(checked) => updateScrapeApplyDefault("hydratePerformers", checked)}
-                />
-              </div>
-              <p className="mt-3 text-xs text-muted">
-                Dialog changes still update the remembered choices for the next run.
-              </p>
             </SectionCard>
 
             <SectionCard title="Default Batch Options" description="Defaults used to prefill MetadataServer batch-tag dialogs.">
@@ -2754,73 +2612,11 @@ function LocalInterfacePanel({
   );
 }
 
-function normalizeUserKeybindingOverrides(overrides?: Record<string, string> | null) {
-  return Object.fromEntries(
-    Object.entries(overrides ?? {})
-      .map(([key, value]) => [key.trim(), value.trim()] as const)
-      .filter(([key, value]) => key.length > 0 && value.length > 0),
-  );
-}
-
-function applyUserKeybindingOverride(current: Record<string, string>, id: string, value: string) {
-  const next = { ...current };
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === keybindingDefault(id)) {
-    delete next[id];
-  } else {
-    next[id] = trimmed;
-  }
-
-  return next;
-}
-
-function KeybindingSettingsEditor({
-  overrides,
-  onOverrideChange,
-  onReset,
-}: {
-  overrides: Record<string, string>;
-  onOverrideChange: (id: string, value: string) => void;
-  onReset: () => void;
-}) {
-  return (
-    <div className="space-y-5">
-      {KEYBINDING_GROUPS.map((group) => (
-        <div key={group.group} className="space-y-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted">{group.group}</div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {group.definitions.map((definition) => (
-              <TextField
-                key={definition.id}
-                label={definition.label}
-                value={overrides[definition.id] ?? definition.keys}
-                onChange={(value) => onOverrideChange(definition.id, value)}
-                placeholder={definition.keys}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={onReset}
-        className="rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground"
-      >
-        Reset shortcuts
-      </button>
-    </div>
-  );
-}
-
 function UserSettingsPanel() {
   const { authEnabled, user, logout } = useAuth();
   const accountBackedPreferences = supportsServerBackedUiPreferences(user);
   const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
   const [trackingPreferences, setTrackingPreferences] = useState<ResolvedTrackingPreferences>(() => resolveTrackingPreferences(user?.uiPreferences?.tracking));
-  const [playbackPreferences, setPlaybackPreferences] = useState<ResolvedPlaybackPreferences>(() => normalizePlaybackPreferences(user?.uiPreferences?.playback));
-  const [keybindingOverrides, setKeybindingOverrides] = useState<Record<string, string>>(() => accountBackedPreferences
-    ? normalizeUserKeybindingOverrides(user?.uiPreferences?.keybindingOverrides)
-    : readStoredKeybindingOverrides());
   const [logoutPending, setLogoutPending] = useState(false);
 
   const handleLogout = async () => {
@@ -2835,14 +2631,7 @@ function UserSettingsPanel() {
 
   useEffect(() => {
     setTrackingPreferences(resolveTrackingPreferences(user?.uiPreferences?.tracking));
-    setPlaybackPreferences(normalizePlaybackPreferences(user?.uiPreferences?.playback));
   }, [user]);
-
-  useEffect(() => {
-    setKeybindingOverrides(accountBackedPreferences
-      ? normalizeUserKeybindingOverrides(user?.uiPreferences?.keybindingOverrides)
-      : readStoredKeybindingOverrides());
-  }, [accountBackedPreferences, user]);
 
   const updateTrackingPreferences = (patch: Partial<ResolvedTrackingPreferences>) => {
     const nextTracking = {
@@ -2857,57 +2646,14 @@ function UserSettingsPanel() {
     }));
   };
 
-  const updatePlaybackPreferences = (patch: Partial<ResolvedPlaybackPreferences>) => {
-    const nextPlayback = normalizePlaybackPreferences({
-      ...DEFAULT_PLAYBACK_PREFERENCES,
-      ...playbackPreferences,
-      ...patch,
-    });
-    setPlaybackPreferences(nextPlayback);
-    updateAuthenticatedUserUiPreferences((current) => ({
-      ...(current ?? {}),
-      playback: nextPlayback,
-    }));
-  };
-
-  const commitKeybindingOverrides = (nextOverrides: Record<string, string>) => {
-    setKeybindingOverrides(nextOverrides);
-    if (accountBackedPreferences) {
-      updateAuthenticatedUserUiPreferences((current) => ({
-        ...(current ?? {}),
-        keybindingOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : null,
-      }));
-      return;
-    }
-
-    writeStoredKeybindingOverrides(nextOverrides);
-  };
-
-  const updateKeybindingPreference = (id: string, value: string) => {
-    commitKeybindingOverrides(applyUserKeybindingOverride(keybindingOverrides, id, value));
-  };
-
   if (!accountBackedPreferences) {
     return (
-      <div className="space-y-5">
-        <SectionCard
-          title="User Settings"
-          description="Sign in or use the shared built-in profile to store engagement preferences outside this browser."
-        >
-          <p className="text-sm text-secondary">No account-backed user settings are available in the current session.</p>
-        </SectionCard>
-
-        <SectionCard
-          title="Browser Keyboard Shortcuts"
-          description="These shortcuts are stored only in this browser so they still stay user-scoped even without a signed-in profile."
-        >
-          <KeybindingSettingsEditor
-            overrides={keybindingOverrides}
-            onOverrideChange={updateKeybindingPreference}
-            onReset={() => commitKeybindingOverrides({})}
-          />
-        </SectionCard>
-      </div>
+      <SectionCard
+        title="User Settings"
+        description="Sign in or use the shared built-in profile to store engagement preferences outside this browser."
+      >
+        <p className="text-sm text-secondary">No account-backed user settings are available in the current session.</p>
+      </SectionCard>
     );
   }
 
@@ -2977,36 +2723,6 @@ function UserSettingsPanel() {
             />
           </div>
         </div>
-      </SectionCard>
-
-      <SectionCard
-        title={sharedProfilePreferences ? "Shared Playback Controls" : "Personal Playback Controls"}
-        description={sharedProfilePreferences
-          ? "These player controls are stored in Cove's shared built-in profile and apply across browsers."
-          : "These player controls follow your signed-in account and apply to audio and video playback."}
-      >
-        <div className="grid gap-4 md:grid-cols-2">
-          <NumberField
-            label="Skip interval seconds"
-            value={playbackPreferences.skipSeconds ?? DEFAULT_PLAYBACK_PREFERENCES.skipSeconds}
-            min={1}
-            max={300}
-            onChange={(value) => updatePlaybackPreferences({ skipSeconds: value ?? DEFAULT_PLAYBACK_PREFERENCES.skipSeconds })}
-          />
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title={sharedProfilePreferences ? "Shared Keyboard Shortcuts" : "Personal Keyboard Shortcuts"}
-        description={sharedProfilePreferences
-          ? "These shortcuts are stored in Cove's shared built-in profile and apply to that profile across browsers."
-          : "These shortcuts follow your signed-in account and override Cove's defaults just for you."}
-      >
-        <KeybindingSettingsEditor
-          overrides={keybindingOverrides}
-          onOverrideChange={updateKeybindingPreference}
-          onReset={() => commitKeybindingOverrides({})}
-        />
       </SectionCard>
     </div>
   );
@@ -3422,7 +3138,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
       refetchJobs();
       const summary = formatBatchDownloadSummary(downloadImportEntity.toLowerCase(), result);
       setDownloadImportStatus({
-        type: result.queuedCount > 0 || result.issues.length > 0 ? "success" : "error",
+        type: result.queuedCount > 0 ? "success" : "error",
         text: summary,
       });
     },
@@ -3464,12 +3180,10 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             <CheckboxLabel label="Generate covers" checked={!!scanOpts.scanGenerateCovers} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateCovers: c })} />
             <CheckboxLabel label="Generate previews" checked={!!scanOpts.scanGeneratePreviews} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePreviews: c })} />
             <CheckboxLabel label="Generate sprites" checked={!!scanOpts.scanGenerateSprites} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateSprites: c })} />
-            <CheckboxLabel label="Generate scene perceptual hashes" checked={!!scanOpts.scanGeneratePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePhashes: c })} />
+            <CheckboxLabel label="Generate perceptual hashes" checked={!!scanOpts.scanGeneratePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePhashes: c })} />
             <CheckboxLabel label="Generate MD5 checksums" checked={!!scanOpts.scanGenerateMd5} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateMd5: c })} />
             <CheckboxLabel label="Generate image thumbnails" checked={!!scanOpts.scanGenerateThumbnails} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateThumbnails: c })} />
-            <CheckboxLabel label="Generate image perceptual hashes" checked={!!scanOpts.scanGenerateImagePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateImagePhashes: c })} />
-            <CheckboxLabel label="Generate audio perceptual hashes" checked={!!scanOpts.scanGenerateAudioPhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateAudioPhashes: c })} />
-            <CheckboxLabel label="Generate text perceptual hashes" checked={!!scanOpts.scanGenerateTextPhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateTextPhashes: c })} />
+            <CheckboxLabel label="Generate image phashes" checked={!!scanOpts.scanGenerateImagePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateImagePhashes: c })} />
             <CheckboxLabel label="Force rescan (ignore mtime)" checked={!!scanOpts.rescan} onChange={(c) => setScanOpts({ ...scanOpts, rescan: c })} />
             {selectablePaths.length > 0 && (
               <div className="sm:col-span-2 space-y-2 rounded-xl border border-border/60 bg-surface/60 p-3">
@@ -3535,18 +3249,13 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
                 checked={!!genOpts.segmentPreviews}
                 onChange={(c) => setGenOpts({ ...genOpts, segmentThumbnails: c ? true : genOpts.segmentThumbnails, segmentPreviews: c, markers: false })}
               />
-              <CheckboxLabel label="Scene perceptual hashes" checked={!!genOpts.phashes} onChange={(c) => setGenOpts({ ...genOpts, phashes: c })} />
+              <CheckboxLabel label="Perceptual hashes (phash)" checked={!!genOpts.phashes} onChange={(c) => setGenOpts({ ...genOpts, phashes: c })} />
               <CheckboxLabel label="MD5 checksums" checked={!!genOpts.md5} onChange={(c) => setGenOpts({ ...genOpts, md5: c })} />
             </div>
             <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Image options</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <CheckboxLabel label="Image thumbnails" checked={!!genOpts.imageThumbnails} onChange={(c) => setGenOpts({ ...genOpts, imageThumbnails: c })} />
-              <CheckboxLabel label="Image perceptual hashes" checked={!!genOpts.imagePhashes} onChange={(c) => setGenOpts({ ...genOpts, imagePhashes: c })} />
-            </div>
-            <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Audio and text options</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <CheckboxLabel label="Audio perceptual hashes" checked={!!genOpts.audioPhashes} onChange={(c) => setGenOpts({ ...genOpts, audioPhashes: c })} />
-              <CheckboxLabel label="Text perceptual hashes" checked={!!genOpts.textPhashes} onChange={(c) => setGenOpts({ ...genOpts, textPhashes: c })} />
+              <CheckboxLabel label="Image phashes" checked={!!genOpts.imagePhashes} onChange={(c) => setGenOpts({ ...genOpts, imagePhashes: c })} />
             </div>
             <div className="pt-2">
               <CheckboxLabel label="Overwrite existing generated files" checked={!!genOpts.overwrite} onChange={(c) => setGenOpts({ ...genOpts, overwrite: c })} />
@@ -3656,8 +3365,6 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
                 <CheckboxLabel label="MD5 checksums" checked={!!downloadImportGenerateOpts.md5} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, md5: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Image thumbnails" checked={!!downloadImportGenerateOpts.imageThumbnails} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, imageThumbnails: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Image perceptual hashes" checked={!!downloadImportGenerateOpts.imagePhashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, imagePhashes: checked })); setDownloadImportStatus(null); }} />
-                <CheckboxLabel label="Audio perceptual hashes" checked={!!downloadImportGenerateOpts.audioPhashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, audioPhashes: checked })); setDownloadImportStatus(null); }} />
-                <CheckboxLabel label="Text perceptual hashes" checked={!!downloadImportGenerateOpts.textPhashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, textPhashes: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Overwrite generated files" checked={!!downloadImportGenerateOpts.overwrite} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, overwrite: checked })); setDownloadImportStatus(null); }} />
               </div>
             </div>
@@ -4146,7 +3853,6 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
         </div>
       </div>
     </SectionCard>
-
   );
 }
 
@@ -4995,13 +4701,7 @@ function ScraperTable({ entityType, scrapers }: { entityType: string; scrapers: 
                 <td className="px-4 py-3 font-medium text-foreground">{scraper.name}</td>
                 <td className="px-4 py-3 text-secondary">{scraper.supportedScrapes.join(", ")}</td>
                 <td className="px-4 py-3 text-secondary">
-                  {scraper.urls.length === 0 ? (
-                    <span className="text-muted">No URL matchers</span>
-                  ) : hasOnlyGenericWildcardUrlPatterns(scraper.urls) ? (
-                    <span className="text-muted">Generic URL probe; provider checks support at run time</span>
-                  ) : (
-                    scraper.urls.join(", ")
-                  )}
+                  {scraper.urls.length > 0 ? scraper.urls.join(", ") : <span className="text-muted">No URL matchers</span>}
                 </td>
                 <td className="px-4 py-3 text-xs text-muted">{scraper.sourcePath}</td>
               </tr>
@@ -5013,7 +4713,7 @@ function ScraperTable({ entityType, scrapers }: { entityType: string; scrapers: 
   );
 }
 
-// ===== Extension Settings Form =====
+// ===== Extension Settings Form (legacy Python extensions with config) =====
 function ExtensionSettingsForm({ extensionId, schema }: { extensionId: string; schema: import("../api/types").PluginSettingSchema[] }) {
   const queryClient = useQueryClient();
   const { data: configValues, isLoading } = useQuery({
@@ -5071,7 +4771,7 @@ function ExtensionSettingsForm({ extensionId, schema }: { extensionId: string; s
               />
             ) : (
               <input
-                type={s.type === "PASSWORD" ? "password" : "text"}
+                type="text"
                 value={(localValues[s.name] as string) ?? ""}
                 onChange={(e) => updateValue(s.name, e.target.value || null)}
                 className="flex-1 bg-card border border-border rounded px-2 py-1 text-sm focus:border-accent outline-none"
@@ -5097,51 +4797,6 @@ function ExtensionSettingsForm({ extensionId, schema }: { extensionId: string; s
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-function ExternalDependencyDetails({ dependency }: { dependency: ExtensionExternalDependency }) {
-  return (
-    <div className="bg-surface/50 rounded px-3 py-2 space-y-2">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-foreground">{dependency.name}</div>
-          {dependency.description && <div className="text-xs text-muted mt-0.5">{dependency.description}</div>}
-          {dependency.url && (
-            <a href={dependency.url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline break-all">
-              {dependency.url}
-            </a>
-          )}
-        </div>
-        <div className="flex flex-wrap justify-end gap-1 shrink-0">
-          <span className={`px-2 py-0.5 text-[11px] rounded ${dependency.required ? "bg-amber-500/15 text-amber-300" : "bg-card/50 text-muted"}`}>
-            {dependency.required ? "Required" : "Optional"}
-          </span>
-          <span className="px-2 py-0.5 text-[11px] rounded bg-card/50 text-muted">{dependency.kind || "tool"}</span>
-          {dependency.versionRequirement && (
-            <span className="px-2 py-0.5 text-[11px] rounded bg-card/50 text-muted">{dependency.versionRequirement}</span>
-          )}
-        </div>
-      </div>
-
-      <DependencyValueList label="Executables" values={dependency.executables} />
-      <DependencyValueList label="Environment" values={dependency.environmentVariables} />
-      <DependencyValueList label="Config" values={dependency.configurationKeys} />
-
-      {dependency.installHint && <p className="text-xs text-secondary">{dependency.installHint}</p>}
-      {dependency.nativeHint && <p className="text-xs text-muted"><span className="text-secondary">Native:</span> {dependency.nativeHint}</p>}
-      {dependency.dockerHint && <p className="text-xs text-muted"><span className="text-secondary">Docker:</span> {dependency.dockerHint}</p>}
-    </div>
-  );
-}
-
-function DependencyValueList({ label, values }: { label: string; values?: string[] }) {
-  if (!values || values.length === 0) return null;
-  return (
-    <div className="text-xs text-muted">
-      <span className="text-secondary">{label}:</span>{" "}
-      <span className="font-mono break-all">{values.join(", ")}</span>
     </div>
   );
 }
@@ -5209,7 +4864,6 @@ function ExtensionsPanel() {
     kind: string;
     categories: string[];
     dependencies: Record<string, string>;
-    externalDependencies: ExtensionExternalDependency[];
     source: "native" | "legacy";
     hasUI: boolean;
     hasApi: boolean;
@@ -5218,7 +4872,7 @@ function ExtensionsPanel() {
     hasEvents: boolean;
     jobs: { id: string; name: string; description?: string }[];
     legacyTasks?: import("../api/types").PluginTask[];
-    settings?: import("../api/types").PluginSettingSchema[];
+    legacySettings?: import("../api/types").PluginSettingSchema[];
   };
 
   const allExtensions: UnifiedExtension[] = useMemo(() => {
@@ -5237,7 +4891,6 @@ function ExtensionsPanel() {
         kind: ext.kind ?? "extension",
         categories: ext.categories,
         dependencies: ext.dependencies,
-        externalDependencies: ext.externalDependencies ?? [],
         source: "native",
         hasUI: ext.hasUI,
         hasApi: ext.hasApi,
@@ -5245,7 +4898,6 @@ function ExtensionsPanel() {
         hasState: ext.hasState,
         hasEvents: ext.hasEvents,
         jobs: ext.jobs,
-        settings: ext.settings ?? [],
       });
     }
 
@@ -5263,7 +4915,6 @@ function ExtensionsPanel() {
         kind: "extension",
         categories: [],
         dependencies: {},
-        externalDependencies: [],
         source: "legacy",
         hasUI: false,
         hasApi: false,
@@ -5272,7 +4923,7 @@ function ExtensionsPanel() {
         hasEvents: false,
         jobs: [],
         legacyTasks: p.tasks,
-        settings: p.settings,
+        legacySettings: p.settings,
       });
     }
 
@@ -5445,17 +5096,6 @@ function ExtensionsPanel() {
                       </div>
                     )}
 
-                    {ext.externalDependencies.length > 0 && (
-                      <div>
-                        <div className="text-xs font-medium text-secondary mb-2">External Tools</div>
-                        <div className="space-y-1.5">
-                          {ext.externalDependencies.map(dependency => (
-                            <ExternalDependencyDetails key={dependency.id} dependency={dependency} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
                     {/* Jobs (only shown if extension has them) */}
                     {ext.jobs.length > 0 && (
                       <div>
@@ -5498,8 +5138,8 @@ function ExtensionsPanel() {
                     )}
 
                     {/* Legacy settings */}
-                    {ext.settings && ext.settings.length > 0 && (
-                      <ExtensionSettingsForm extensionId={ext.id} schema={ext.settings} />
+                    {ext.legacySettings && ext.legacySettings.length > 0 && (
+                      <ExtensionSettingsForm extensionId={ext.id} schema={ext.legacySettings} />
                     )}
                   </div>
                 )}
