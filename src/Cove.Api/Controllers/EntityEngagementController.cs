@@ -116,6 +116,10 @@ public class EntityEngagementController(IUserEngagementService engagementService
         {
             (AffinityHostType.Scene, false) => Permissions.ScenesRead,
             (AffinityHostType.Scene, true) => Permissions.ScenesWrite,
+            (AffinityHostType.Audio, false) => Permissions.AudiosRead,
+            (AffinityHostType.Audio, true) => Permissions.AudiosWrite,
+            (AffinityHostType.Text, false) => Permissions.TextsRead,
+            (AffinityHostType.Text, true) => Permissions.TextsWrite,
             (AffinityHostType.Image, false) => Permissions.ImagesRead,
             (AffinityHostType.Image, true) => Permissions.ImagesWrite,
             (AffinityHostType.Performer, false) => Permissions.PerformersRead,
@@ -142,6 +146,8 @@ public class EntityEngagementController(IUserEngagementService engagementService
         {
             InteractionHostType.Scene => Permissions.ScenesRead,
             InteractionHostType.Image => Permissions.ImagesRead,
+            InteractionHostType.Audio => Permissions.AudiosRead,
+            InteractionHostType.Text => Permissions.TextsRead,
             InteractionHostType.Performer => Permissions.PerformersRead,
             InteractionHostType.Face => Permissions.FacesRead,
             InteractionHostType.Tag => Permissions.TagsRead,

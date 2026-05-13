@@ -48,6 +48,13 @@ internal static class SchemaCompatibilityBootstrap
             return kind?.ToString();
         }
 
+        async Task<bool> ColumnExistsAsync(string table, string column)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT column_name FROM information_schema.columns WHERE table_name='{table}' AND column_name='{column}'";
+            return await cmd.ExecuteScalarAsync() is not null;
+        }
+
         async Task AddColumnIfMissing(string table, string column, string type, string? defaultValue = null, bool skipIfTableMissing = false)
         {
             var relationKind = await GetRelationKindAsync(table);
@@ -69,6 +76,18 @@ internal static class SchemaCompatibilityBootstrap
             await using var alter = conn.CreateCommand();
             alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {type}{def}";
             await alter.ExecuteNonQueryAsync();
+        }
+
+        async Task DropColumnIfExists(string table, string column)
+        {
+            var relationKind = await GetRelationKindAsync(table);
+            if (relationKind is not ("r" or "p"))
+                return;
+
+            if (!await ColumnExistsAsync(table, column))
+                return;
+
+            await ExecuteNonQueryAsync($"ALTER TABLE \"{table}\" DROP COLUMN IF EXISTS \"{column}\"");
         }
 
         async Task EnsureTableExists(string table, string createSql)
@@ -145,6 +164,181 @@ internal static class SchemaCompatibilityBootstrap
         await AddColumnIfMissing("tags", "ShowAsSegment", "boolean");
         await AddColumnIfMissing("tags", "SegmentColorOverride", "text");
         await AddColumnIfMissing("tags", "SegmentLaneOverride", "integer");
+        await AddColumnIfMissing("files", "ImageFile_Format", "text");
+        await AddColumnIfMissing("files", "VideoFile_Format", "text");
+        await AddColumnIfMissing("files", "VideoFile_Width", "integer");
+        await AddColumnIfMissing("files", "VideoFile_Height", "integer");
+        await AddColumnIfMissing("files", "Duration", "double precision");
+        await AddColumnIfMissing("files", "VideoCodec", "text");
+        await AddColumnIfMissing("files", "AudioCodec", "text");
+        await AddColumnIfMissing("files", "FrameRate", "double precision");
+        await AddColumnIfMissing("files", "BitRate", "bigint");
+        await AddColumnIfMissing("files", "Interactive", "boolean", "false");
+        await AddColumnIfMissing("files", "InteractiveSpeed", "integer");
+        await AddColumnIfMissing("files", "VideoFile_Duration", "double precision");
+        await AddColumnIfMissing("files", "VideoFile_VideoCodec", "text");
+        await AddColumnIfMissing("files", "VideoFile_AudioCodec", "text");
+        await AddColumnIfMissing("files", "VideoFile_FrameRate", "double precision");
+        await AddColumnIfMissing("files", "VideoFile_BitRate", "bigint");
+        await AddColumnIfMissing("files", "VideoFile_Interactive", "boolean", "false");
+        await AddColumnIfMissing("files", "VideoFile_InteractiveSpeed", "integer");
+        await AddColumnIfMissing("files", "AudioId", "integer");
+        await AddColumnIfMissing("files", "TextDocumentId", "integer");
+        await AddColumnIfMissing("files", "TextFile_Format", "text");
+        await AddColumnIfMissing("files", "SampleRate", "integer");
+        await AddColumnIfMissing("files", "Channels", "integer");
+        await AddColumnIfMissing("files", "HasVideoTrack", "boolean", "false");
+        await AddColumnIfMissing("files", "PageCount", "integer");
+        await AddColumnIfMissing("files", "WordCount", "integer");
+        await AddColumnIfMissing("files", "ExcerptText", "text");
+                await ExecuteNonQueryAsync("""
+                        UPDATE "files"
+                        SET "ImageFile_Format" = "Format"
+                        WHERE "FileType" = 'Image'
+                            AND ("ImageFile_Format" IS NULL OR "ImageFile_Format" = '')
+                            AND "Format" IS NOT NULL
+                            AND "Format" <> ''
+                        """);
+                await ExecuteNonQueryAsync("""
+                        UPDATE "files"
+                        SET "Format" = "ImageFile_Format"
+                        WHERE "FileType" = 'Image'
+                            AND ("Format" IS NULL OR "Format" = '')
+                            AND "ImageFile_Format" IS NOT NULL
+                            AND "ImageFile_Format" <> ''
+                        """);
+        await ExecuteNonQueryAsync("""
+            UPDATE "files"
+            SET "TextFile_Format" = "Format"
+            WHERE "FileType" = 'Text'
+              AND ("TextFile_Format" IS NULL OR "TextFile_Format" = '')
+              AND "Format" IS NOT NULL
+              AND "Format" <> ''
+            """);
+
+        await EnsureTableExists("audios", """
+            CREATE TABLE IF NOT EXISTS audios (
+                "Id" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                "Title" text NULL,
+                "Code" text NULL,
+                "Details" text NULL,
+                "Organized" boolean NOT NULL DEFAULT false,
+                "StudioId" integer NULL REFERENCES "studios"("Id") ON DELETE SET NULL,
+                "Date" date NULL,
+                "ImageBlobId" text NULL,
+                "TagIds" integer[] NOT NULL DEFAULT '{}'::integer[],
+                "PerformerIds" integer[] NOT NULL DEFAULT '{}'::integer[],
+                "FileCount" integer NOT NULL DEFAULT 0,
+                "MaxDuration" double precision NOT NULL DEFAULT 0,
+                "MaxBitRate" bigint NOT NULL DEFAULT 0,
+                "MaxFileSize" bigint NOT NULL DEFAULT 0,
+                "MaxFileModTime" timestamp with time zone NULL,
+                "MinPath" text NULL,
+                "MaxPath" text NULL,
+                "FileSearchText" text NULL,
+                "HasVideoFiles" boolean NOT NULL DEFAULT false,
+                "CreatedAt" timestamp with time zone NOT NULL DEFAULT timezone('utc', now()),
+                "UpdatedAt" timestamp with time zone NOT NULL DEFAULT timezone('utc', now())
+            )
+            """);
+        await EnsureTableExists("audio_urls", """
+            CREATE TABLE IF NOT EXISTS audio_urls (
+                "Id" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                "AudioId" integer NOT NULL REFERENCES audios("Id") ON DELETE CASCADE,
+                "Url" text NOT NULL
+            )
+            """);
+        await EnsureTableExists("audio_tracks", """
+            CREATE TABLE IF NOT EXISTS audio_tracks (
+                "Id" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                "AudioId" integer NOT NULL REFERENCES audios("Id") ON DELETE CASCADE,
+                "OrderIndex" integer NOT NULL DEFAULT 0,
+                "Title" text NULL,
+                "StartSec" double precision NOT NULL DEFAULT 0,
+                "EndSec" double precision NULL,
+                "CreatedAt" timestamp with time zone NOT NULL DEFAULT timezone('utc', now()),
+                "UpdatedAt" timestamp with time zone NOT NULL DEFAULT timezone('utc', now())
+            )
+            """);
+        await EnsureTableExists("audio_tags", """
+            CREATE TABLE IF NOT EXISTS audio_tags (
+                "AudioId" integer NOT NULL REFERENCES audios("Id") ON DELETE CASCADE,
+                "TagId" integer NOT NULL REFERENCES tags("Id") ON DELETE CASCADE,
+                PRIMARY KEY ("AudioId", "TagId")
+            )
+            """);
+        await EnsureTableExists("audio_performers", """
+            CREATE TABLE IF NOT EXISTS audio_performers (
+                "AudioId" integer NOT NULL REFERENCES audios("Id") ON DELETE CASCADE,
+                "PerformerId" integer NOT NULL REFERENCES performers("Id") ON DELETE CASCADE,
+                PRIMARY KEY ("AudioId", "PerformerId")
+            )
+            """);
+        await EnsureTableExists("text_documents", """
+            CREATE TABLE IF NOT EXISTS text_documents (
+                "Id" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                "Title" text NULL,
+                "Code" text NULL,
+                "Details" text NULL,
+                "Organized" boolean NOT NULL DEFAULT false,
+                "StudioId" integer NULL REFERENCES "studios"("Id") ON DELETE SET NULL,
+                "Date" date NULL,
+                "ImageBlobId" text NULL,
+                "TagIds" integer[] NOT NULL DEFAULT '{}'::integer[],
+                "PerformerIds" integer[] NOT NULL DEFAULT '{}'::integer[],
+                "FileCount" integer NOT NULL DEFAULT 0,
+                "MaxWordCount" integer NULL,
+                "MaxPageCount" integer NULL,
+                "MaxFileSize" bigint NOT NULL DEFAULT 0,
+                "MaxFileModTime" timestamp with time zone NULL,
+                "MinPath" text NULL,
+                "MaxPath" text NULL,
+                "FileSearchText" text NULL,
+                "CreatedAt" timestamp with time zone NOT NULL DEFAULT timezone('utc', now()),
+                "UpdatedAt" timestamp with time zone NOT NULL DEFAULT timezone('utc', now())
+            )
+            """);
+        await EnsureTableExists("text_urls", """
+            CREATE TABLE IF NOT EXISTS text_urls (
+                "Id" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                "TextDocumentId" integer NOT NULL REFERENCES text_documents("Id") ON DELETE CASCADE,
+                "Url" text NOT NULL
+            )
+            """);
+        await EnsureTableExists("text_tags", """
+            CREATE TABLE IF NOT EXISTS text_tags (
+                "TextDocumentId" integer NOT NULL REFERENCES text_documents("Id") ON DELETE CASCADE,
+                "TagId" integer NOT NULL REFERENCES tags("Id") ON DELETE CASCADE,
+                PRIMARY KEY ("TextDocumentId", "TagId")
+            )
+            """);
+        await EnsureTableExists("text_performers", """
+            CREATE TABLE IF NOT EXISTS text_performers (
+                "TextDocumentId" integer NOT NULL REFERENCES text_documents("Id") ON DELETE CASCADE,
+                "PerformerId" integer NOT NULL REFERENCES performers("Id") ON DELETE CASCADE,
+                PRIMARY KEY ("TextDocumentId", "PerformerId")
+            )
+            """);
+
+        if (await ColumnExistsAsync("files", "Path"))
+        {
+            await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_files_AudioId_Path\" ON \"files\" (\"AudioId\", \"Path\")");
+            await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_files_TextDocumentId_Path\" ON \"files\" (\"TextDocumentId\", \"Path\")");
+        }
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_audios_StudioId\" ON audios (\"StudioId\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_audios_Title\" ON audios (\"Title\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_audio_urls_AudioId\" ON audio_urls (\"AudioId\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_audio_tracks_AudioId_OrderIndex\" ON audio_tracks (\"AudioId\", \"OrderIndex\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_audio_tags_TagId\" ON audio_tags (\"TagId\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_audio_performers_PerformerId\" ON audio_performers (\"PerformerId\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_text_documents_StudioId\" ON text_documents (\"StudioId\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_text_documents_Title\" ON text_documents (\"Title\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_text_urls_TextDocumentId\" ON text_urls (\"TextDocumentId\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_text_tags_TagId\" ON text_tags (\"TagId\")");
+        await ExecuteNonQueryAsync("CREATE INDEX IF NOT EXISTS \"IX_text_performers_PerformerId\" ON text_performers (\"PerformerId\")");
+
+        await MigrateLegacyCreatorColumnAsync("audios", "Artist", "audio_performers", "AudioId");
+        await MigrateLegacyCreatorColumnAsync("text_documents", "Author", "text_performers", "TextDocumentId");
 
         var legacyIdentifierRelations = new[]
         {
@@ -387,6 +581,67 @@ internal static class SchemaCompatibilityBootstrap
                 IndexSql = new[] { "CREATE INDEX IF NOT EXISTS \"IX_StudioRemoteId_StudioId\" ON \"StudioRemoteId\" (\"StudioId\")" }
             },
         };
+
+        async Task MigrateLegacyCreatorColumnAsync(string table, string column, string relationTable, string relationEntityColumn)
+        {
+            if (!await ColumnExistsAsync(table, column))
+                return;
+
+            await ExecuteNonQueryAsync($"""
+                WITH legacy_names AS (
+                    SELECT DISTINCT btrim("{column}") AS "Name"
+                    FROM "{table}"
+                    WHERE "{column}" IS NOT NULL AND btrim("{column}") <> ''
+                ), missing_names AS (
+                    SELECT legacy_names."Name"
+                    FROM legacy_names
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM "performers" performer
+                        WHERE lower(performer."Name") = lower(legacy_names."Name")
+                    )
+                )
+                INSERT INTO "performers" ("Name", "Favorite", "IgnoreAutoTag", "CreatedAt", "UpdatedAt")
+                SELECT "Name", false, false, timezone('utc', now()), timezone('utc', now())
+                FROM missing_names
+                """);
+
+            await ExecuteNonQueryAsync($"""
+                WITH legacy_values AS (
+                    SELECT entity."Id" AS "EntityId", btrim(entity."{column}") AS "Name"
+                    FROM "{table}" entity
+                    WHERE entity."{column}" IS NOT NULL AND btrim(entity."{column}") <> ''
+                ), matched_performers AS (
+                    SELECT legacy_values."EntityId", min(performer."Id") AS "PerformerId"
+                    FROM legacy_values
+                    JOIN "performers" performer ON lower(performer."Name") = lower(legacy_values."Name")
+                    GROUP BY legacy_values."EntityId"
+                )
+                INSERT INTO "{relationTable}" ("{relationEntityColumn}", "PerformerId")
+                SELECT "EntityId", "PerformerId"
+                FROM matched_performers
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM "{relationTable}" relation
+                    WHERE relation."{relationEntityColumn}" = matched_performers."EntityId"
+                      AND relation."PerformerId" = matched_performers."PerformerId"
+                )
+                """);
+
+            await ExecuteNonQueryAsync($"""
+                UPDATE "{table}" entity
+                SET "PerformerIds" = COALESCE((
+                    SELECT array_agg(relation."PerformerId" ORDER BY relation."PerformerId")
+                    FROM "{relationTable}" relation
+                    WHERE relation."{relationEntityColumn}" = entity."Id"
+                ), ARRAY[]::integer[])
+                WHERE EXISTS (
+                    SELECT 1 FROM "{relationTable}" relation
+                    WHERE relation."{relationEntityColumn}" = entity."Id"
+                )
+                """);
+
+            await ExecuteNonQueryAsync($"DROP INDEX IF EXISTS \"IX_{table}_{column}\"");
+            await DropColumnIfExists(table, column);
+        }
 
         foreach (var relation in legacyIdentifierRelations)
         {

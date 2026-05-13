@@ -4,6 +4,7 @@ using Cove.Core.Interfaces;
 using Cove.Plugins;
 using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -25,6 +26,8 @@ public class ScraperService
     private IReadOnlyList<ScraperSummaryDto> _cached = [];
     private readonly Dictionary<string, ScraperManifest> _manifestCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionScraperRegistration> _extensionScraperCache = new(StringComparer.OrdinalIgnoreCase);
+    private const string BuiltinScraperSourcePath = "builtin:cove.core.scrapers";
+    private static readonly Regex BracketTagRegex = new(@"\[[^\[\]\r\n]{1,80}\]", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions ExtensionScrapeJsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -78,7 +81,7 @@ public class ScraperService
                         string.Equals(s.EntityType, entityType, StringComparison.OrdinalIgnoreCase))
             .Where(s => s.SupportedScrapes.Any(k => string.Equals(k, "URL", StringComparison.OrdinalIgnoreCase)))
             .Where(s => s.Urls.Any(pattern => UrlMatchesPattern(loweredUrl, pattern)))
-            .OrderByDescending(s => s.SourcePath.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(s => s.SourcePath.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(s => BestPatternStrength(loweredUrl, s.Urls))
             .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -201,10 +204,26 @@ public class ScraperService
             }
         }
 
+        summaries.AddRange(GetBuiltinUrlScrapers());
+
         return summaries
             .OrderBy(summary => summary.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(summary => summary.EntityType, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static IReadOnlyList<ScraperSummaryDto> GetBuiltinUrlScrapers()
+    {
+        var genericTextPatterns = new List<string>
+        {
+            "http://*",
+            "https://*",
+        };
+
+        return
+        [
+            new ScraperSummaryDto("builtin.generic:text", "Generic Web Page", "text", ["URL"], genericTextPatterns, BuiltinScraperSourcePath),
+        ];
     }
 
     private IReadOnlyList<ScraperSummaryDto> ParseScraperFile(string file)
@@ -269,6 +288,22 @@ public class ScraperService
             "group",
             file,
             byUrls: [.. definition.GroupByUrl, .. definition.MovieByUrl]
+        );
+        AddSummary(
+            summaries,
+            scraperId,
+            scraperName,
+            "audio",
+            file,
+            byUrls: definition.AudioByUrl
+        );
+        AddSummary(
+            summaries,
+            scraperId,
+            scraperName,
+            "text",
+            file,
+            byUrls: definition.TextByUrl
         );
 
         return summaries;
@@ -366,6 +401,12 @@ public class ScraperService
         [YamlMember(Alias = "groupByURL")]
         public List<ByUrlDefinition> GroupByUrl { get; init; } = [];
 
+        [YamlMember(Alias = "audioByURL")]
+        public List<ByUrlDefinition> AudioByUrl { get; init; } = [];
+
+        [YamlMember(Alias = "textByURL")]
+        public List<ByUrlDefinition> TextByUrl { get; init; } = [];
+
         [YamlMember(Alias = "movieByURL")]
         public List<ByUrlDefinition> MovieByUrl { get; init; } = [];
 
@@ -454,6 +495,10 @@ public class ScraperService
         // Ensure scrapers are loaded
         GetScrapers();
 
+        var builtinResult = await ScrapeUrlWithBuiltinAsync(scraperId, entityType, url, ct);
+        if (builtinResult != null)
+            return builtinResult;
+
         if (TryGetExtensionScraperRegistration(scraperId, entityType, out var extensionRegistration))
             return await ScrapeUrlWithExtensionAsync(extensionRegistration, url, ct);
 
@@ -474,6 +519,8 @@ public class ScraperService
             "gallery" => manifest.GalleryByUrl,
             "image" => manifest.ImageByUrl,
             "group" or "movie" => [.. manifest.GroupByUrl, .. manifest.MovieByUrl],
+            "audio" => manifest.AudioByUrl,
+            "text" => manifest.TextByUrl,
             _ => []
         };
 
@@ -500,6 +547,161 @@ public class ScraperService
             "scrapeJson" => await ScrapeJsonAsync(manifest, scraperName, entityType, targetUrl, ct),
             _ => null
         };
+    }
+
+    private async Task<Dictionary<string, object>?> ScrapeUrlWithBuiltinAsync(string scraperId, string entityType, string url, CancellationToken ct)
+    {
+        if (!scraperId.StartsWith("builtin.", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        try
+        {
+            var normalizedEntityType = entityType.Trim().ToLowerInvariant();
+            if (scraperId.Equals("builtin.generic:text", StringComparison.OrdinalIgnoreCase)
+                && normalizedEntityType == "text")
+            {
+                return await ScrapeGenericTextPageAsync(url, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Built-in scraper {ScraperId} failed for URL {Url}", scraperId, url);
+        }
+
+        return null;
+    }
+
+    private async Task<Dictionary<string, object>?> ScrapeGenericTextPageAsync(string url, CancellationToken ct)
+    {
+        var html = await _httpClient.GetStringAsync(url, ct);
+        var document = new HtmlDocument();
+        document.LoadHtml(html);
+
+        var rawTitle = ReadMetaContent(document, "og:title", "twitter:title", "dc.title")
+            ?? ReadText(document, "//head/title")
+            ?? ReadText(document, "//h1")
+            ?? DeriveTitleFromScrapeUrl(url);
+        var rawDetails = ReadMetaContent(document, "og:description", "description", "twitter:description");
+        var author = ReadMetaContent(document, "author", "article:author", "dc.creator", "twitter:creator")
+            ?? ReadText(document, "//*[@rel='author']");
+        var title = CleanTextPageTitle(CleanBracketTaggedText(rawTitle));
+        var details = CleanBracketTaggedText(rawDetails);
+        var tags = MergeBracketTags(rawTitle, rawDetails);
+        var urls = NormalizeScrapedUrls([
+            ReadMetaContent(document, "og:url", "twitter:url"),
+            ReadLinkHref(document, "canonical"),
+            url,
+        ]);
+
+        var result = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        AddResultValue(result, "title", title);
+        AddResultValue(result, "details", details);
+        if (!string.IsNullOrWhiteSpace(author))
+            AddResultValue(result, "performers", new[] { author });
+        AddResultValue(result, "tags", tags);
+        AddResultValue(result, "urls", urls);
+        return result.Count == 0 ? null : result;
+    }
+
+    private static List<string> ExtractBracketTags(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return [];
+
+        return BracketTagRegex.Matches(text)
+            .Select(match => match.Value.Trim())
+            .Where(value => value.Length > 2)
+            .Select(value => value[1..^1].Trim())
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> MergeBracketTags(params string?[] values)
+    {
+        return values
+            .SelectMany(ExtractBracketTags)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? CleanBracketTaggedText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var cleaned = BracketTagRegex.Replace(value, string.Empty).Trim();
+        cleaned = Regex.Replace(cleaned, @"\s{2,}", " ").Trim();
+        return string.IsNullOrWhiteSpace(cleaned) ? value.Trim() : cleaned;
+    }
+
+    private static string? CleanTextPageTitle(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var cleaned = value.Trim();
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
+    }
+
+    private static List<string> NormalizeScrapedUrls(IEnumerable<string?> urls)
+    {
+        return urls
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Select(url => url!.Trim())
+            .Where(url => Uri.TryCreate(url, UriKind.Absolute, out _))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AddResultValue(Dictionary<string, object> result, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+            result[key] = value.Trim();
+    }
+
+    private static void AddResultValue(Dictionary<string, object> result, string key, IReadOnlyList<string> values)
+    {
+        if (values.Count > 0)
+            result[key] = values.ToList();
+    }
+
+    private static string? ReadMetaContent(HtmlDocument document, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var node = document.DocumentNode.SelectSingleNode($"//meta[translate(@property, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='{name.ToLowerInvariant()}']")
+                ?? document.DocumentNode.SelectSingleNode($"//meta[translate(@name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='{name.ToLowerInvariant()}']");
+            var value = node?.GetAttributeValue("content", string.Empty);
+            if (!string.IsNullOrWhiteSpace(value))
+                return WebUtility.HtmlDecode(value).Trim();
+        }
+
+        return null;
+    }
+
+    private static string? ReadLinkHref(HtmlDocument document, string rel)
+    {
+        var node = document.DocumentNode.SelectSingleNode($"//link[contains(concat(' ', translate(@rel, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), ' '), ' {rel.ToLowerInvariant()} ')]");
+        var value = node?.GetAttributeValue("href", string.Empty);
+        return string.IsNullOrWhiteSpace(value) ? null : WebUtility.HtmlDecode(value).Trim();
+    }
+
+    private static string? ReadText(HtmlDocument document, string xpath)
+    {
+        var value = document.DocumentNode.SelectSingleNode(xpath)?.InnerText;
+        return string.IsNullOrWhiteSpace(value) ? null : WebUtility.HtmlDecode(value).Trim();
+    }
+
+    private static string DeriveTitleFromScrapeUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return url;
+
+        var lastSegment = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        return string.IsNullOrWhiteSpace(lastSegment)
+            ? uri.Host
+            : Uri.UnescapeDataString(lastSegment).Replace('-', ' ').Replace('_', ' ').Trim();
     }
 
     /// <summary>
@@ -991,50 +1193,94 @@ public class ScraperService
 
     private async Task<Dictionary<string, object>?> ScrapeUrlWithExtensionAsync(ExtensionScraperRegistration registration, string url, CancellationToken ct)
     {
-        if (registration.Descriptor.Entity != ScraperEntity.Scene || !registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByUrl))
+        if (!registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByUrl))
             return null;
 
-        var result = await registration.Provider.ScrapeSceneAsync(
-            new ScraperRequest<SceneScrapeInput>(
-                registration.Descriptor.Id,
-                new SceneScrapeInput { Url = url, Urls = string.IsNullOrWhiteSpace(url) ? [] : [url] },
-                BuildScraperPermissions(url)),
-            ct);
+        List<string> urls = string.IsNullOrWhiteSpace(url) ? [] : [url];
+        var permissions = BuildScraperPermissions(url);
 
-        return ToResultDictionary(result);
+        return registration.Descriptor.Entity switch
+        {
+            ScraperEntity.Scene => ToResultDictionary(await registration.Provider.ScrapeSceneAsync(new ScraperRequest<SceneScrapeInput>(registration.Descriptor.Id, new SceneScrapeInput { Url = url, Urls = urls }, permissions), ct)),
+            ScraperEntity.Performer => ToResultDictionary(await registration.Provider.ScrapePerformerAsync(new ScraperRequest<PerformerScrapeInput>(registration.Descriptor.Id, new PerformerScrapeInput { Url = url, Urls = urls }, permissions), ct)),
+            ScraperEntity.Gallery => ToResultDictionary(await registration.Provider.ScrapeGalleryAsync(new ScraperRequest<GalleryScrapeInput>(registration.Descriptor.Id, new GalleryScrapeInput { Url = url, Urls = urls }, permissions), ct)),
+            ScraperEntity.Image => ToResultDictionary(await registration.Provider.ScrapeImageAsync(new ScraperRequest<ImageScrapeInput>(registration.Descriptor.Id, new ImageScrapeInput { Url = url, Urls = urls }, permissions), ct)),
+            ScraperEntity.Group => ToResultDictionary(await registration.Provider.ScrapeGroupAsync(new ScraperRequest<GroupScrapeInput>(registration.Descriptor.Id, new GroupScrapeInput { Url = url, Urls = urls }, permissions), ct)),
+            ScraperEntity.Audio => ToResultDictionary(await registration.Provider.ScrapeAudioAsync(new ScraperRequest<AudioScrapeInput>(registration.Descriptor.Id, new AudioScrapeInput { Url = url, Urls = urls }, permissions), ct)),
+            ScraperEntity.Text => ToResultDictionary(await registration.Provider.ScrapeTextAsync(new ScraperRequest<TextScrapeInput>(registration.Descriptor.Id, new TextScrapeInput { Url = url, Urls = urls }, permissions), ct)),
+            _ => null,
+        };
     }
 
     private async Task<List<Dictionary<string, object>>?> ScrapeNameWithExtensionAsync(ExtensionScraperRegistration registration, string name, CancellationToken ct)
     {
-        if (registration.Descriptor.Entity != ScraperEntity.Scene || !registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByName))
+        if (!registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByName))
             return null;
 
-        var results = await registration.Provider.SearchScenesAsync(
-            new ScraperRequest<string>(registration.Descriptor.Id, name, new ScraperPermissions()),
-            ct);
-
-        return results.Select(ToResultDictionary).OfType<Dictionary<string, object>>().ToList();
+        var request = new ScraperRequest<string>(registration.Descriptor.Id, name, new ScraperPermissions());
+        return registration.Descriptor.Entity switch
+        {
+            ScraperEntity.Scene => ToResultDictionaries(await registration.Provider.SearchScenesAsync(request, ct)),
+            ScraperEntity.Performer => ToResultDictionaries(await registration.Provider.SearchPerformersAsync(request, ct)),
+            ScraperEntity.Gallery => ToResultDictionaries(await registration.Provider.SearchGalleriesAsync(request, ct)),
+            ScraperEntity.Image => ToResultDictionaries(await registration.Provider.SearchImagesAsync(request, ct)),
+            ScraperEntity.Group => ToResultDictionaries(await registration.Provider.SearchGroupsAsync(request, ct)),
+            ScraperEntity.Audio => ToResultDictionaries(await registration.Provider.SearchAudiosAsync(request, ct)),
+            ScraperEntity.Text => ToResultDictionaries(await registration.Provider.SearchTextsAsync(request, ct)),
+            _ => null,
+        };
     }
 
     private async Task<Dictionary<string, object>?> ScrapeFragmentWithExtensionAsync(ExtensionScraperRegistration registration, Dictionary<string, object> fragment, CancellationToken ct)
     {
-        if (registration.Descriptor.Entity != ScraperEntity.Scene || !registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByFragment))
+        if (!registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByFragment))
             return null;
 
-        var input = BuildSceneInput(fragment);
-        var result = await registration.Provider.ScrapeSceneAsync(
-            new ScraperRequest<SceneScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)),
-            ct);
-
-        return ToResultDictionary(result);
+        switch (registration.Descriptor.Entity)
+        {
+            case ScraperEntity.Scene:
+            {
+                var input = BuildSceneInput(fragment);
+                return ToResultDictionary(await registration.Provider.ScrapeSceneAsync(new ScraperRequest<SceneScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
+            }
+            case ScraperEntity.Performer:
+            {
+                var input = BuildPerformerInput(fragment);
+                return ToResultDictionary(await registration.Provider.ScrapePerformerAsync(new ScraperRequest<PerformerScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
+            }
+            case ScraperEntity.Gallery:
+            {
+                var input = BuildGalleryInput(fragment);
+                return ToResultDictionary(await registration.Provider.ScrapeGalleryAsync(new ScraperRequest<GalleryScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
+            }
+            case ScraperEntity.Image:
+            {
+                var input = BuildImageInput(fragment);
+                return ToResultDictionary(await registration.Provider.ScrapeImageAsync(new ScraperRequest<ImageScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
+            }
+            case ScraperEntity.Group:
+            {
+                var input = BuildGroupInput(fragment);
+                return ToResultDictionary(await registration.Provider.ScrapeGroupAsync(new ScraperRequest<GroupScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
+            }
+            case ScraperEntity.Audio:
+            {
+                var input = BuildAudioInput(fragment);
+                return ToResultDictionary(await registration.Provider.ScrapeAudioAsync(new ScraperRequest<AudioScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
+            }
+            case ScraperEntity.Text:
+            {
+                var input = BuildTextInput(fragment);
+                return ToResultDictionary(await registration.Provider.ScrapeTextAsync(new ScraperRequest<TextScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
+            }
+            default:
+                return null;
+        }
     }
 
     private static SceneScrapeInput BuildSceneInput(IReadOnlyDictionary<string, object> fragment)
     {
-        var urls = GetFragmentStringList(fragment, "urls", "url");
-        var primaryUrl = GetFragmentString(fragment, "url") ?? urls.FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(primaryUrl) && !urls.Any(url => string.Equals(url, primaryUrl, StringComparison.OrdinalIgnoreCase)))
-            urls.Insert(0, primaryUrl);
+        var (primaryUrl, urls) = BuildFragmentUrls(fragment);
 
         return new SceneScrapeInput
         {
@@ -1046,6 +1292,113 @@ public class ScraperService
             Details = GetFragmentString(fragment, "details", "description"),
             Director = GetFragmentString(fragment, "director"),
         };
+    }
+
+    private static PerformerScrapeInput BuildPerformerInput(IReadOnlyDictionary<string, object> fragment)
+    {
+        var (primaryUrl, urls) = BuildFragmentUrls(fragment);
+
+        return new PerformerScrapeInput
+        {
+            Url = primaryUrl,
+            Urls = urls,
+            Name = GetFragmentString(fragment, "name", "title"),
+            Disambiguation = GetFragmentString(fragment, "disambiguation"),
+            Gender = GetFragmentString(fragment, "gender"),
+            Birthdate = GetFragmentString(fragment, "birthdate", "date"),
+            Country = GetFragmentString(fragment, "country"),
+            Ethnicity = GetFragmentString(fragment, "ethnicity"),
+            EyeColor = GetFragmentString(fragment, "eyeColor", "eye_color"),
+            HairColor = GetFragmentString(fragment, "hairColor", "hair_color"),
+            Measurements = GetFragmentString(fragment, "measurements"),
+            Details = GetFragmentString(fragment, "details", "description"),
+            Aliases = GetFragmentStringList(fragment, "aliases", "alias"),
+        };
+    }
+
+    private static GalleryScrapeInput BuildGalleryInput(IReadOnlyDictionary<string, object> fragment)
+    {
+        var (primaryUrl, urls) = BuildFragmentUrls(fragment);
+
+        return new GalleryScrapeInput
+        {
+            Url = primaryUrl,
+            Urls = urls,
+            Title = GetFragmentString(fragment, "title", "name"),
+            Code = GetFragmentString(fragment, "code", "id"),
+            Date = GetFragmentString(fragment, "date"),
+            Details = GetFragmentString(fragment, "details", "description"),
+            Photographer = GetFragmentString(fragment, "photographer", "artist"),
+        };
+    }
+
+    private static ImageScrapeInput BuildImageInput(IReadOnlyDictionary<string, object> fragment)
+    {
+        var (primaryUrl, urls) = BuildFragmentUrls(fragment);
+
+        return new ImageScrapeInput
+        {
+            Url = primaryUrl,
+            Urls = urls,
+            Title = GetFragmentString(fragment, "title", "name"),
+            Date = GetFragmentString(fragment, "date"),
+            Details = GetFragmentString(fragment, "details", "description"),
+            Photographer = GetFragmentString(fragment, "photographer", "artist"),
+        };
+    }
+
+    private static GroupScrapeInput BuildGroupInput(IReadOnlyDictionary<string, object> fragment)
+    {
+        var (primaryUrl, urls) = BuildFragmentUrls(fragment);
+
+        return new GroupScrapeInput
+        {
+            Url = primaryUrl,
+            Urls = urls,
+            Name = GetFragmentString(fragment, "name", "title"),
+            Date = GetFragmentString(fragment, "date"),
+            Details = GetFragmentString(fragment, "details", "description"),
+        };
+    }
+
+    private static AudioScrapeInput BuildAudioInput(IReadOnlyDictionary<string, object> fragment)
+    {
+        var (primaryUrl, urls) = BuildFragmentUrls(fragment);
+
+        return new AudioScrapeInput
+        {
+            Url = primaryUrl,
+            Urls = urls,
+            Title = GetFragmentString(fragment, "title", "name"),
+            Code = GetFragmentString(fragment, "code", "id"),
+            Date = GetFragmentString(fragment, "date"),
+            Details = GetFragmentString(fragment, "details", "description"),
+        };
+    }
+
+    private static TextScrapeInput BuildTextInput(IReadOnlyDictionary<string, object> fragment)
+    {
+        var (primaryUrl, urls) = BuildFragmentUrls(fragment);
+
+        return new TextScrapeInput
+        {
+            Url = primaryUrl,
+            Urls = urls,
+            Title = GetFragmentString(fragment, "title", "name"),
+            Code = GetFragmentString(fragment, "code", "id"),
+            Date = GetFragmentString(fragment, "date"),
+            Details = GetFragmentString(fragment, "details", "description"),
+        };
+    }
+
+    private static (string? PrimaryUrl, List<string> Urls) BuildFragmentUrls(IReadOnlyDictionary<string, object> fragment)
+    {
+        var urls = GetFragmentStringList(fragment, "urls", "url");
+        var primaryUrl = GetFragmentString(fragment, "url") ?? urls.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(primaryUrl) && !urls.Any(url => string.Equals(url, primaryUrl, StringComparison.OrdinalIgnoreCase)))
+            urls.Insert(0, primaryUrl);
+
+        return (primaryUrl, urls);
     }
 
     private static string? GetFragmentString(IReadOnlyDictionary<string, object> fragment, params string[] names)
@@ -1231,6 +1584,9 @@ public class ScraperService
             ExtensionScrapeJsonOptions);
     }
 
+    private static List<Dictionary<string, object>> ToResultDictionaries<T>(IEnumerable<T> values)
+        => values.Select(ToResultDictionary).OfType<Dictionary<string, object>>().ToList();
+
     private static List<string> GetSupportedScrapeNames(ScraperCapabilities capabilities)
     {
         var names = new List<string>();
@@ -1267,6 +1623,8 @@ public class ScraperService
             "gallery" => scraperDef.Gallery,
             "image" => scraperDef.Image,
             "group" or "movie" => scraperDef.Group,
+            "audio" => scraperDef.Audio,
+            "text" => scraperDef.Text,
             _ => null
         };
     }
@@ -1763,6 +2121,12 @@ public class ScraperService
 
         [YamlMember(Alias = "group")]
         public Dictionary<string, object>? Group { get; init; }
+
+        [YamlMember(Alias = "audio")]
+        public Dictionary<string, object>? Audio { get; init; }
+
+        [YamlMember(Alias = "text")]
+        public Dictionary<string, object>? Text { get; init; }
     }
 
     private abstract class ActionDefinitionBase

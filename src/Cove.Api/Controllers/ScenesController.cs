@@ -301,6 +301,22 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         return CreatedAtAction(nameof(GetById), new { id = scene.Id }, await MapToDtoWithProvenanceAsync(result!, engagement, HasUserScopedEngagement, ct));
     }
 
+    [HttpPost("from-file")]
+    [RequiresPermission(Permissions.ScenesWrite)]
+    public async Task<ActionResult<SceneDto>> CreateFromFile([FromBody] FileBackedCreateDto? dto, CancellationToken ct)
+    {
+        var filePath = dto?.FilePath?.Trim();
+        if (string.IsNullOrWhiteSpace(filePath) || !System.IO.File.Exists(filePath))
+            return BadRequest(new { error = "A valid file path is required." });
+
+        var sceneId = await scanService.ImportDownloadedSceneAsync(filePath, sceneId: null, ct);
+        var scene = await sceneRepo.GetByIdWithRelationsAsync(sceneId, ct);
+        if (scene == null) return NotFound();
+
+        var engagement = (await engagementService.GetSceneSnapshotsAsync([sceneId], ct)).GetValueOrDefault(sceneId);
+        return CreatedAtAction(nameof(GetById), new { id = sceneId }, await MapToDtoWithProvenanceAsync(scene, engagement, HasUserScopedEngagement, ct));
+    }
+
     [HttpPut("{id:int}")]
     [RequiresPermission(Permissions.ScenesWrite)]
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
@@ -383,19 +399,11 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.ScenesDelete)]
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesDelete)]
-    public async Task<IActionResult> Delete(int id, [FromQuery] bool deleteFile = false, CancellationToken ct = default)
+    public async Task<IActionResult> Delete(int id, [FromQuery] bool deleteFile = false, [FromQuery] bool deleteGenerated = false, CancellationToken ct = default)
     {
         var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
         if (scene == null) return NotFound();
-        if (deleteFile)
-        {
-            foreach (var file in scene.Files)
-            {
-                var path = file.Path;
-                if (System.IO.File.Exists(path))
-                    System.IO.File.Delete(path);
-            }
-        }
+        await DeleteSceneArtifactsAsync(scene, new HashSet<int> { id }, new HashSet<string>(StringComparer.OrdinalIgnoreCase), deleteFile, deleteGenerated, ct);
         if (tagProvenanceService != null)
             await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Scene, id, ct);
         await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Scene, id, ct);
@@ -416,20 +424,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             var scene = await sceneRepo.GetByIdWithRelationsAsync(id, ct);
             if (scene != null)
             {
-                if (dto.DeleteFiles)
-                {
-                    foreach (var file in scene.Files)
-                    {
-                        var path = file.Path;
-                        if (string.IsNullOrWhiteSpace(path) || !deletedPaths.Add(path))
-                            continue;
-
-                        var referencedByKeptScene = await db.Set<VideoFile>()
-                            .AnyAsync(videoFile => videoFile.Path == path && videoFile.SceneId.HasValue && !idsToDelete.Contains(videoFile.SceneId.Value), ct);
-                        if (!referencedByKeptScene && System.IO.File.Exists(path))
-                            System.IO.File.Delete(path);
-                    }
-                }
+                await DeleteSceneArtifactsAsync(scene, idsToDelete, deletedPaths, dto.DeleteFiles, dto.DeleteGenerated, ct);
 
                 if (tagProvenanceService != null)
                     await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Scene, id, ct);
@@ -439,6 +434,37 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             }
         }
         return Ok(new { deleted = deletedCount });
+    }
+
+    private async Task DeleteSceneArtifactsAsync(Scene scene, IReadOnlySet<int> idsToDelete, HashSet<string> deletedPaths, bool deleteFiles, bool deleteGenerated, CancellationToken ct)
+    {
+        if (deleteFiles)
+        {
+            foreach (var file in scene.Files)
+            {
+                var path = file.Path;
+                if (string.IsNullOrWhiteSpace(path) || !deletedPaths.Add(path))
+                    continue;
+
+                var referencedByKeptScene = await db.Set<VideoFile>()
+                    .AnyAsync(videoFile => videoFile.Path == path && videoFile.SceneId.HasValue && !idsToDelete.Contains(videoFile.SceneId.Value), ct);
+                if (!referencedByKeptScene && System.IO.File.Exists(path))
+                    System.IO.File.Delete(path);
+            }
+        }
+
+        if (scene.Files.Count > 0)
+            db.VideoFiles.RemoveRange(scene.Files);
+
+        if (deleteGenerated)
+            await thumbnailService.DeleteSceneGeneratedFilesAsync(scene.Id, ct);
+
+        if (!string.IsNullOrWhiteSpace(scene.ImageBlobId))
+        {
+            if (deleteGenerated)
+                await thumbnailService.DeleteBlobGeneratedFilesAsync(scene.ImageBlobId, ct);
+            await blobService.DeleteBlobAsync(scene.ImageBlobId, ct);
+        }
     }
 
     [HttpGet("{id:int}/metadata-server/search")]
@@ -578,6 +604,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         group.Urls.Select(url => url.Url).ToList(),
         group.GroupTags.Where(groupTag => groupTag.Tag != null).Select(groupTag => TagDtoMapping.MapTagDto(groupTag.Tag!)).ToList(),
         group.GroupItems.Where(item => item.SceneId.HasValue).Select(item => item.SceneId!.Value).Distinct().Count(),
+        group.GroupItems.Count,
         true,
         group.SubGroupRelations?.Count ?? 0,
         group.ContainingGroupRelations?.Count ?? 0,
@@ -1251,7 +1278,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     private void ReplaceWholeSceneGroupItems(Scene scene, IEnumerable<SceneGroupInputDto> groups)
     {
         RemoveWholeSceneGroupItems(scene, scene.GroupItems.Where(item => item.Kind == GroupItemKind.Scene).ToList());
-        foreach (var group in groups)
+        foreach (var group in groups.Where(group => group is { GroupId: > 0 }))
         {
             scene.GroupItems.Add(new GroupItem
             {

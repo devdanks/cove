@@ -165,9 +165,9 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
                 }
             ),
             new UIThemeDefinition(
-                Id: "pornhub",
-                Name: "Pornhub",
-                Description: "Black and orange inspired by Pornhub",
+                Id: "copper-noir",
+                Name: "Copper Noir",
+                Description: "High-contrast dark theme with vivid orange accents",
                 CssVariables: new()
                 {
                     ["--color-background"] = "#000000",
@@ -187,9 +187,9 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
                 }
             ),
             new UIThemeDefinition(
-                Id: "plex",
-                Name: "Plex",
-                Description: "Dark theme with warm gold accents inspired by Plex",
+                Id: "golden-hour",
+                Name: "Golden Hour",
+                Description: "Dark theme with warm gold accents",
                 CssVariables: new()
                 {
                     ["--color-background"] = "#1f1f1f",
@@ -209,9 +209,9 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
                 }
             ),
             new UIThemeDefinition(
-                Id: "reddit",
-                Name: "Reddit Dark",
-                Description: "Dark theme with blue-white tones inspired by Reddit",
+                Id: "signal-dark",
+                Name: "Signal Dark",
+                Description: "Dark theme with cool neutrals and bright accent contrast",
                 CssVariables: new()
                 {
                     ["--color-background"] = "#030303",
@@ -256,7 +256,7 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
             new UIThemeDefinition(
                 Id: "liquid-glass",
                 Name: "Liquid Glass",
-                Description: "Dramatic translucent glass with vivid gradient — inspired by Apple's Liquid Glass",
+                Description: "Dramatic translucent glass with vivid gradient highlights",
                 CssVariables: new()
                 {
                     ["--color-background"] = "#0a0a12",
@@ -475,25 +475,25 @@ public class SystemToolsExtension : IExtension, IApiExtension, IUIExtension
             gcMemory = GC.GetTotalMemory(false),
         }));
 
-        group.MapGet("/extensions", (ExtensionManager mgr) =>
-        {
-            return Results.Ok(mgr.Extensions.Select(e => new
+            group.MapGet("/extensions", (ExtensionManager mgr) =>
             {
-                e.Id,
-                e.Name,
-                e.Version,
-                e.Description,
-                enabled = mgr.IsEnabled(e.Id),
-                capabilities = new
+                return Results.Ok(mgr.Extensions.Select(e => new
                 {
-                    ui = e is IUIExtension,
-                    api = e is IApiExtension,
-                    stateful = e is IStatefulExtension,
-                    jobs = e is IJobExtension,
-                    events = e is IEventExtension,
-                }
-            }));
-        });
+                    e.Id,
+                    e.Name,
+                    e.Version,
+                    e.Description,
+                    enabled = mgr.IsEnabled(e.Id),
+                    capabilities = new
+                    {
+                        ui = e is IUIExtension,
+                        api = e is IApiExtension,
+                        stateful = e is IStatefulExtension,
+                        jobs = e is IJobExtension,
+                        events = e is IEventExtension,
+                    }
+                }));
+            });
     }
 
     public UIManifest GetUIManifest() => new()

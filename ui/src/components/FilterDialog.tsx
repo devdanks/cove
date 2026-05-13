@@ -28,6 +28,8 @@ import type {
   StudioFilterCriteria,
   GalleryFilterCriteria,
   ImageFilterCriteria,
+  AudioFilterCriteria,
+  TextFilterCriteria,
   GroupFilterCriteria,
 } from "../api/types";
 import { RESOLUTION_FILTER_OPTIONS } from "../utils/resolutionBuckets";
@@ -236,6 +238,7 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
   { id: "duplicatedRemoteId", label: "Duplicated Remote ID", type: "bool", filterKey: "duplicatedRemoteIdCriterion" },
   { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "likeCounter", label: "Likes", type: "number", filterKey: "likeCounterCriterion" },
+  { id: "includeCompilations", label: "Include Compilations", type: "bool", filterKey: "includeCompilationGroups" },
   { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
   { id: "duration", label: "Duration", type: "duration", filterKey: "durationCriterion" },
   { id: "tagDuration", label: "Tag Duration", type: "tagDuration", entityType: "tags", filterKey: "tagDurationCriterion" },
@@ -271,6 +274,47 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
     { value: "portrait", label: "Portrait" },
     { value: "square", label: "Square" },
   ] },
+];
+
+export const AUDIO_CRITERIA: CriteriaDefinitionList<AudioFilterCriteria> = [
+  { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
+  { id: "code", label: "Studio Code", type: "string", filterKey: "codeCriterion" },
+  { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
+  { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
+  { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
+  { id: "duration", label: "Duration", type: "duration", filterKey: "durationCriterion" },
+  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
+  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
+  { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
+  { id: "groups", label: "Groups", type: "multiId", entityType: "groups", filterKey: "groupsCriterion" },
+  { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
+  { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
+  { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
+  { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
+];
+
+export const TEXT_CRITERIA: CriteriaDefinitionList<TextFilterCriteria> = [
+  { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
+  { id: "code", label: "Studio Code", type: "string", filterKey: "codeCriterion" },
+  { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
+  { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
+  { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
+  { id: "words", label: "Words", type: "number", filterKey: "wordCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "pages", label: "Pages", type: "number", filterKey: "pageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
+  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
+  { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
+  { id: "groups", label: "Groups", type: "multiId", entityType: "groups", filterKey: "groupsCriterion" },
+  { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
+  { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
+  { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
+  { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
 ];
 
 export const PERFORMER_CRITERIA: CriteriaDefinitionList<PerformerFilterCriteria> = [

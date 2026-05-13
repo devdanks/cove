@@ -530,6 +530,15 @@ public class AiCoreControllerTests
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetBlobImageThumbnailStreamAsync(string blobId, int maxDimension, CancellationToken ct = default)
             => throw new NotSupportedException();
 
+        public Task DeleteSceneGeneratedFilesAsync(int sceneId, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task DeleteImageGeneratedFilesAsync(int imageId, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task DeleteBlobGeneratedFilesAsync(string blobId, CancellationToken ct = default)
+            => Task.CompletedTask;
+
         public Task GenerateSceneThumbnailAsync(int sceneId, double? atSeconds = null, CancellationToken ct = default)
             => throw new NotSupportedException();
 

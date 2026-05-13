@@ -141,6 +141,141 @@ public class GroupItemConfiguration : IEntityTypeConfiguration<GroupItem>
     }
 }
 
+public class AudioConfiguration : IEntityTypeConfiguration<Audio>
+{
+    public void Configure(EntityTypeBuilder<Audio> builder)
+    {
+        builder.ToTable("audios");
+        builder.HasKey(audio => audio.Id);
+        builder.HasOne(audio => audio.Studio).WithMany().HasForeignKey(audio => audio.StudioId).OnDelete(DeleteBehavior.SetNull);
+        builder.HasMany(audio => audio.Urls).WithOne(url => url.Audio).HasForeignKey(url => url.AudioId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(audio => audio.Files).WithOne(file => file.Audio).HasForeignKey(file => file.AudioId).OnDelete(DeleteBehavior.SetNull);
+        builder.HasMany(audio => audio.Tracks).WithOne(track => track.Audio).HasForeignKey(track => track.AudioId).OnDelete(DeleteBehavior.Cascade);
+
+        builder.Property(audio => audio.TagIds).HasColumnType("integer[]");
+        builder.Property(audio => audio.PerformerIds).HasColumnType("integer[]");
+        builder.Property(audio => audio.FileCount).HasDefaultValue(0);
+        builder.Property(audio => audio.MaxDuration).HasDefaultValue(0d);
+        builder.Property(audio => audio.MaxBitRate).HasDefaultValue(0L);
+        builder.Property(audio => audio.MaxFileSize).HasDefaultValue(0L);
+        builder.Property(audio => audio.HasVideoFiles).HasDefaultValue(false);
+
+        builder.HasIndex(audio => audio.Title);
+        builder.HasIndex(audio => audio.StudioId);
+        builder.HasIndex(audio => audio.Date);
+        builder.HasIndex(audio => audio.CreatedAt);
+        builder.HasIndex(audio => audio.UpdatedAt);
+        builder.HasIndex(audio => audio.MaxDuration);
+        builder.HasIndex(audio => audio.TagIds).HasMethod("gin");
+        builder.HasIndex(audio => audio.PerformerIds).HasMethod("gin");
+    }
+}
+
+public class AudioUrlConfiguration : IEntityTypeConfiguration<AudioUrl>
+{
+    public void Configure(EntityTypeBuilder<AudioUrl> builder)
+    {
+        builder.ToTable("audio_urls");
+        builder.HasKey(url => url.Id);
+        builder.Property(url => url.Url).IsRequired();
+        builder.HasIndex(url => url.AudioId);
+    }
+}
+
+public class AudioTrackConfiguration : IEntityTypeConfiguration<AudioTrack>
+{
+    public void Configure(EntityTypeBuilder<AudioTrack> builder)
+    {
+        builder.ToTable("audio_tracks");
+        builder.HasKey(track => track.Id);
+        builder.HasIndex(track => new { track.AudioId, track.OrderIndex });
+    }
+}
+
+public class AudioTagConfiguration : IEntityTypeConfiguration<AudioTag>
+{
+    public void Configure(EntityTypeBuilder<AudioTag> builder)
+    {
+        builder.ToTable("audio_tags");
+        builder.HasKey(link => new { link.AudioId, link.TagId });
+        builder.HasOne(link => link.Audio).WithMany(audio => audio.AudioTags).HasForeignKey(link => link.AudioId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(link => link.Tag).WithMany().HasForeignKey(link => link.TagId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(link => link.TagId);
+    }
+}
+
+public class AudioPerformerConfiguration : IEntityTypeConfiguration<AudioPerformer>
+{
+    public void Configure(EntityTypeBuilder<AudioPerformer> builder)
+    {
+        builder.ToTable("audio_performers");
+        builder.HasKey(link => new { link.AudioId, link.PerformerId });
+        builder.HasOne(link => link.Audio).WithMany(audio => audio.AudioPerformers).HasForeignKey(link => link.AudioId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(link => link.Performer).WithMany().HasForeignKey(link => link.PerformerId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(link => link.PerformerId);
+    }
+}
+
+public class TextDocumentConfiguration : IEntityTypeConfiguration<TextDocument>
+{
+    public void Configure(EntityTypeBuilder<TextDocument> builder)
+    {
+        builder.ToTable("text_documents");
+        builder.HasKey(text => text.Id);
+        builder.HasOne(text => text.Studio).WithMany().HasForeignKey(text => text.StudioId).OnDelete(DeleteBehavior.SetNull);
+        builder.HasMany(text => text.Urls).WithOne(url => url.TextDocument).HasForeignKey(url => url.TextDocumentId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(text => text.Files).WithOne(file => file.TextDocument).HasForeignKey(file => file.TextDocumentId).OnDelete(DeleteBehavior.SetNull);
+
+        builder.Property(text => text.TagIds).HasColumnType("integer[]");
+        builder.Property(text => text.PerformerIds).HasColumnType("integer[]");
+        builder.Property(text => text.FileCount).HasDefaultValue(0);
+        builder.Property(text => text.MaxFileSize).HasDefaultValue(0L);
+
+        builder.HasIndex(text => text.Title);
+        builder.HasIndex(text => text.StudioId);
+        builder.HasIndex(text => text.Date);
+        builder.HasIndex(text => text.CreatedAt);
+        builder.HasIndex(text => text.UpdatedAt);
+        builder.HasIndex(text => text.TagIds).HasMethod("gin");
+        builder.HasIndex(text => text.PerformerIds).HasMethod("gin");
+    }
+}
+
+public class TextUrlConfiguration : IEntityTypeConfiguration<TextUrl>
+{
+    public void Configure(EntityTypeBuilder<TextUrl> builder)
+    {
+        builder.ToTable("text_urls");
+        builder.HasKey(url => url.Id);
+        builder.Property(url => url.Url).IsRequired();
+        builder.HasIndex(url => url.TextDocumentId);
+    }
+}
+
+public class TextTagConfiguration : IEntityTypeConfiguration<TextTag>
+{
+    public void Configure(EntityTypeBuilder<TextTag> builder)
+    {
+        builder.ToTable("text_tags");
+        builder.HasKey(link => new { link.TextDocumentId, link.TagId });
+        builder.HasOne(link => link.TextDocument).WithMany(text => text.TextTags).HasForeignKey(link => link.TextDocumentId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(link => link.Tag).WithMany().HasForeignKey(link => link.TagId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(link => link.TagId);
+    }
+}
+
+public class TextPerformerConfiguration : IEntityTypeConfiguration<TextPerformer>
+{
+    public void Configure(EntityTypeBuilder<TextPerformer> builder)
+    {
+        builder.ToTable("text_performers");
+        builder.HasKey(link => new { link.TextDocumentId, link.PerformerId });
+        builder.HasOne(link => link.TextDocument).WithMany(text => text.TextPerformers).HasForeignKey(link => link.TextDocumentId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(link => link.Performer).WithMany().HasForeignKey(link => link.PerformerId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(link => link.PerformerId);
+    }
+}
+
 public class CustomFieldDefinitionConfiguration : IEntityTypeConfiguration<CustomFieldDefinition>
 {
     public void Configure(EntityTypeBuilder<CustomFieldDefinition> builder)
@@ -956,6 +1091,22 @@ public class GalleryFileConfiguration : IEntityTypeConfiguration<GalleryFile>
     public void Configure(EntityTypeBuilder<GalleryFile> builder)
     {
         builder.HasIndex(g => new { g.GalleryId, g.Path });
+    }
+}
+
+public class AudioFileConfiguration : IEntityTypeConfiguration<AudioFile>
+{
+    public void Configure(EntityTypeBuilder<AudioFile> builder)
+    {
+        builder.HasIndex(file => new { file.AudioId, file.Path });
+    }
+}
+
+public class TextFileConfiguration : IEntityTypeConfiguration<TextFile>
+{
+    public void Configure(EntityTypeBuilder<TextFile> builder)
+    {
+        builder.HasIndex(file => new { file.TextDocumentId, file.Path });
     }
 }
 

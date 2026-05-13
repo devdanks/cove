@@ -1283,6 +1283,60 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
+    public async Task GroupItemsController_CanCreateAudioAndTextItems()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+        var group = new Group { Name = "Mixed Media" };
+        var audio = new Audio { Title = "Audio Chapter" };
+        var text = new TextDocument { Title = "Text Chapter" };
+        context.AddRange(group, audio, text);
+        await context.SaveChangesAsync();
+
+        var controller = new GroupItemsController(context, new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
+
+        var createAudioResult = await controller.Create(group.Id, new GroupItemCreateDto(
+            0,
+            GroupItemKind.Audio,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "audio",
+            audio.Id), CancellationToken.None);
+        var createAudioCreated = Assert.IsType<CreatedAtActionResult>(createAudioResult.Result);
+        var audioItem = Assert.IsType<GroupItemDto>(createAudioCreated.Value);
+        Assert.Equal(GroupItemKind.Audio, audioItem.Kind);
+        Assert.Equal("audio", audioItem.HostType);
+        Assert.Equal(audio.Id, audioItem.HostId);
+        Assert.Equal("Audio Chapter", audioItem.Title);
+
+        var createTextResult = await controller.Create(group.Id, new GroupItemCreateDto(
+            1,
+            GroupItemKind.Text,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "text",
+            text.Id), CancellationToken.None);
+        var createTextCreated = Assert.IsType<CreatedAtActionResult>(createTextResult.Result);
+        var textItem = Assert.IsType<GroupItemDto>(createTextCreated.Value);
+        Assert.Equal(GroupItemKind.Text, textItem.Kind);
+        Assert.Equal("text", textItem.HostType);
+        Assert.Equal(text.Id, textItem.HostId);
+        Assert.Equal("Text Chapter", textItem.Title);
+    }
+
+    [Fact]
     public async Task GroupItemsController_CanSnapshotResolvedSpans()
     {
         await using var scope = await CreateContextAsync();

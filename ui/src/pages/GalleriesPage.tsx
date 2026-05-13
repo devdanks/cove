@@ -58,7 +58,7 @@ export function GalleriesPage({ onNavigate }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [wallColumnCount, setWallColumnCount] = useState(5);
-  const [downloadTarget, setDownloadTarget] = useState<Gallery | "new" | null>(null);
+  const [downloadTarget, setDownloadTarget] = useState<Gallery | null>(null);
   const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
@@ -119,12 +119,14 @@ export function GalleriesPage({ onNavigate }: Props) {
   return (
     <>
     <GalleryCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "gallery", id })} />
-    <GalleryDownloadDialog
-      open={downloadTarget !== null}
-      gallery={downloadTarget && downloadTarget !== "new" ? downloadTarget : undefined}
-      onClose={() => setDownloadTarget(null)}
-      onNavigate={onNavigate}
-    />
+    {downloadTarget ? (
+      <GalleryDownloadDialog
+        open
+        gallery={downloadTarget}
+        onClose={() => setDownloadTarget(null)}
+        onNavigate={onNavigate}
+      />
+    ) : null}
     <BatchDownloadOptionsDialog
       open={showBatchDownloadOptions}
       entity="Gallery"
@@ -151,14 +153,6 @@ export function GalleriesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall"]}
-      renderOperations={canDownloadGallery ? () => (
-        <button
-          onClick={() => setDownloadTarget("new")}
-          className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
-        >
-          From URL
-        </button>
-      ) : undefined}
       criteriaDefinitions={GALLERY_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}

@@ -52,36 +52,47 @@ export const DEFAULT_COLLECTION_MODES: Record<string, CollectionMode> = {
 };
 
 export const DEFAULT_SCRAPE_APPLY_PREFERENCES: ScrapeApplyPreferences = {
-  createMissingStudio: true,
-  createMissingTags: true,
-  createMissingPerformers: true,
+  createMissingStudio: false,
+  createMissingTags: false,
+  createMissingPerformers: false,
   markOrganized: false,
   hydratePerformers: false,
 };
 
 const SCRAPE_PREFERENCES_STORAGE_KEY = "cove.sceneScrapePreferences";
 
-export function loadScrapeApplyPreferences(): ScrapeApplyPreferences {
+export function resolveScrapeApplyDefaults(defaults?: Partial<ScrapeApplyPreferences> | null): ScrapeApplyPreferences {
+  return {
+    createMissingStudio: defaults?.createMissingStudio ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.createMissingStudio,
+    createMissingTags: defaults?.createMissingTags ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.createMissingTags,
+    createMissingPerformers: defaults?.createMissingPerformers ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.createMissingPerformers,
+    markOrganized: defaults?.markOrganized ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.markOrganized,
+    hydratePerformers: defaults?.hydratePerformers ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.hydratePerformers,
+  };
+}
+
+export function loadScrapeApplyPreferences(defaults?: Partial<ScrapeApplyPreferences> | null): ScrapeApplyPreferences {
+  const fallback = resolveScrapeApplyDefaults(defaults);
   if (typeof window === "undefined") {
-    return DEFAULT_SCRAPE_APPLY_PREFERENCES;
+    return fallback;
   }
 
   try {
     const raw = window.localStorage.getItem(SCRAPE_PREFERENCES_STORAGE_KEY);
     if (!raw) {
-      return DEFAULT_SCRAPE_APPLY_PREFERENCES;
+      return fallback;
     }
 
     const parsed = JSON.parse(raw) as Partial<ScrapeApplyPreferences>;
     return {
-      createMissingStudio: parsed.createMissingStudio ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.createMissingStudio,
-      createMissingTags: parsed.createMissingTags ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.createMissingTags,
-      createMissingPerformers: parsed.createMissingPerformers ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.createMissingPerformers,
-      markOrganized: parsed.markOrganized ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.markOrganized,
-      hydratePerformers: parsed.hydratePerformers ?? DEFAULT_SCRAPE_APPLY_PREFERENCES.hydratePerformers,
+      createMissingStudio: parsed.createMissingStudio ?? fallback.createMissingStudio,
+      createMissingTags: parsed.createMissingTags ?? fallback.createMissingTags,
+      createMissingPerformers: parsed.createMissingPerformers ?? fallback.createMissingPerformers,
+      markOrganized: parsed.markOrganized ?? fallback.markOrganized,
+      hydratePerformers: parsed.hydratePerformers ?? fallback.hydratePerformers,
     };
   } catch {
-    return DEFAULT_SCRAPE_APPLY_PREFERENCES;
+    return fallback;
   }
 }
 

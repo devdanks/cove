@@ -260,7 +260,8 @@ public record ScanPathInfo(
     bool ExcludeVideo,
     bool ExcludeImage,
     bool ExcludeAudio,
-    bool IsFile
+    bool IsFile,
+    bool ExcludeText = false
 );
 
 /// <summary>

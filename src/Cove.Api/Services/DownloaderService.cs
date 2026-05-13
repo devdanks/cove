@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Events;
 using Cove.Core.Interfaces;
 using Cove.Plugins;
 using Cove.Data;
@@ -19,6 +21,12 @@ public sealed record DownloaderBatchExecutionSummary(
 public sealed record DownloaderBatchPreflightResult(
     IReadOnlyList<DownloaderBatchItemDto> ItemsToQueue,
     IReadOnlyList<DownloaderBatchStartIssueDto> Issues);
+
+public sealed record DownloaderMetadataApplyOptions(
+    bool CreateMissingTags = false,
+    bool CreateMissingPerformers = false,
+    bool CreateMissingStudio = false,
+    bool MarkOrganized = false);
 
 public class DownloaderService(
     ExtensionManager extensionManager,
@@ -48,26 +56,62 @@ public class DownloaderService(
 
     public async Task<IReadOnlyList<DownloaderMatchDto>> MatchUrlAsync(string url, CancellationToken ct)
     {
+        return await MatchUrlAsync(url, ct, new HashSet<string>(StringComparer.OrdinalIgnoreCase), 0);
+    }
+
+    private async Task<IReadOnlyList<DownloaderMatchDto>> MatchUrlAsync(string url, CancellationToken ct, IReadOnlySet<string> excludedProviderIds, int diversionDepth)
+    {
         if (string.IsNullOrWhiteSpace(url))
             return [];
 
+        if (diversionDepth > 4)
+            return [];
+
         var results = new List<DownloaderMatchDto>();
-        foreach (var provider in extensionManager.GetDownloaderProviders())
+        var providers = extensionManager.GetDownloaderProviders()
+            .Where(provider => !excludedProviderIds.Contains(provider.Id))
+            .ToList();
+        var descriptorLookup = providers
+            .SelectMany(provider => provider.GetDownloaders())
+            .GroupBy(descriptor => descriptor.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var provider in providers)
         {
             try
             {
-                var match = await provider.MatchAsync(url, ct);
-                if (match == null)
+                var matches = await provider.MatchAllAsync(url, ct);
+                if (matches.Count == 0)
                     continue;
 
-                var descriptor = provider.GetDownloaders().FirstOrDefault(item => string.Equals(item.Id, match.DownloaderId, StringComparison.OrdinalIgnoreCase));
-                if (descriptor == null)
+                foreach (var match in matches)
                 {
-                    logger.LogWarning("Downloader provider {ProviderId} returned unknown downloader id {DownloaderId}", provider.Id, match.DownloaderId);
-                    continue;
-                }
+                    if (match.Divert)
+                    {
+                        var nextExcludedProviderIds = excludedProviderIds
+                            .Append(provider.Id)
+                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        var divertedMatches = await MatchUrlAsync(match.NormalizedUrl, ct, nextExcludedProviderIds, diversionDepth + 1);
+                        foreach (var divertedMatch in divertedMatches)
+                        {
+                            results.Add(divertedMatch with
+                            {
+                                Label = string.IsNullOrWhiteSpace(match.Label) ? divertedMatch.Label : match.Label,
+                                SourceUrl = string.IsNullOrWhiteSpace(divertedMatch.SourceUrl) ? match.SourceUrl : divertedMatch.SourceUrl,
+                            });
+                        }
 
-                results.Add(ToDto(descriptor, match));
+                        continue;
+                    }
+
+                    if (!descriptorLookup.TryGetValue(match.DownloaderId, out var descriptor))
+                    {
+                        logger.LogWarning("Downloader provider {ProviderId} returned unknown downloader id {DownloaderId}", provider.Id, match.DownloaderId);
+                        continue;
+                    }
+
+                    results.Add(ToDto(descriptor, match));
+                }
             }
             catch (Exception ex)
             {
@@ -120,6 +164,7 @@ public class DownloaderService(
         Cove.Core.Interfaces.IJobProgress? progress,
         CancellationToken ct,
         bool autoApplyMetadata = false,
+        DownloaderMetadataApplyOptions? metadataApplyOptions = null,
         bool allowDuplicateDownload = false)
     {
         if (!allowDuplicateDownload)
@@ -138,30 +183,23 @@ public class DownloaderService(
             DownloaderEntity.Scene => await ImportSceneAsync(scanService, libraryPath, entityId, progress, ct),
             DownloaderEntity.Image => await ImportImageAsync(scanService, libraryPath, entityId, progress, ct),
             DownloaderEntity.Gallery => await ImportGalleryAsync(scanService, libraryPath, entityId, progress, ct),
+            DownloaderEntity.Audio => await ImportAudioAsync(scanService, libraryPath, entityId, progress, ct),
+            DownloaderEntity.Text => await ImportTextAsync(scanService, libraryPath, entityId, progress, ct),
             _ => entityId,
         };
 
-        if (autoApplyMetadata
-            && request.Entity == DownloaderEntity.Scene
-            && importedEntityId.HasValue)
+        if (importedEntityId.HasValue)
         {
-            var metadata = result.InlineSceneMetadata;
-            if (metadata == null)
+            await AttachDownloadedUrlAsync(request.Entity, importedEntityId.Value, request.Url, ct);
+            if (!string.IsNullOrWhiteSpace(request.SourceUrl)
+                && !string.Equals(request.SourceUrl, request.Url, StringComparison.OrdinalIgnoreCase))
             {
-                progress?.Report(0.97d, "Looking up scraper for downloaded URL...");
-                var scraperService = scope.ServiceProvider.GetRequiredService<ScraperService>();
-                var scraped = await scraperService.ScrapeUrlAutoAsync(request.Url, "scene", ct);
-                if (scraped != null)
-                    metadata = ConvertScrapeResultToSceneMetadata(scraped.Value.Result, request.Url);
-            }
-
-            if (metadata != null)
-            {
-                progress?.Report(0.99d, "Applying downloaded scene metadata...");
-                var metadataApplyService = scope.ServiceProvider.GetRequiredService<ISceneMetadataApplyService>();
-                await metadataApplyService.ApplyAsync(importedEntityId.Value, metadata, ct);
+                await AttachDownloadedUrlAsync(request.Entity, importedEntityId.Value, request.SourceUrl, ct);
             }
         }
+
+        if (autoApplyMetadata && importedEntityId.HasValue)
+            await ApplyAutoMetadataAsync(scope.ServiceProvider, request, result, importedEntityId.Value, metadataApplyOptions ?? new DownloaderMetadataApplyOptions(), progress, ct);
 
         return (result with { LocalPath = libraryPath }, importedEntityId);
     }
@@ -172,13 +210,16 @@ public class DownloaderService(
         Cove.Core.Interfaces.IJobProgress? progress,
         CancellationToken ct)
     {
+        var expansion = await ExpandBatchItemsAsync(items, ct);
+        items = expansion.ItemsToQueue;
+
         if (items.Count == 0)
-            return new DownloaderBatchExecutionSummary(0, 0, 0, 0, null, []);
+            return new DownloaderBatchExecutionSummary(0, 0, expansion.Issues.Count, 0, null, expansion.Issues.Select(issue => $"{issue.Label}: {issue.Reason}").ToList());
 
         followUp ??= new DownloaderBatchFollowUpDto();
 
         var batchItems = items.Select((item, index) => new IndexedBatchItem(item, index)).ToList();
-        var issues = new ConcurrentQueue<string>();
+        var issues = new ConcurrentQueue<string>(expansion.Issues.Select(issue => $"{issue.Label}: {issue.Reason}"));
         var importedPaths = new ConcurrentBag<string>();
         var reservedDownloads = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         var processed = 0;
@@ -200,20 +241,23 @@ public class DownloaderService(
                 var label = BuildBatchItemLabel(batchItem.Item, batchItem.Index);
                 try
                 {
-                    var resolvedItem = await ResolveBatchItemAsync(batchItem.Item, batchItem.Index, followUp.AllowDuplicateDownloads, reservedDownloads, token);
+                    var resolvedItem = await ResolveBatchItemAsync(batchItem.Item, batchItem.Index, followUp, reservedDownloads, token);
                     label = resolvedItem.Label;
 
-                    var (result, _) = await DownloadAndIngestAsync(
+                    var (result, importedEntityId) = await DownloadAndIngestAsync(
                         resolvedItem.Request,
                         resolvedItem.EntityId,
                         progress: null,
                         token,
                         autoApplyMetadata: resolvedItem.AutoApplyMetadata || (followUp.ScrapeScenes && resolvedItem.Request.Entity == DownloaderEntity.Scene),
+                        metadataApplyOptions: resolvedItem.MetadataApplyOptions,
                         allowDuplicateDownload: followUp.AllowDuplicateDownloads);
 
                     if (result != null)
                     {
                         importedPaths.Add(result.LocalPath);
+                        if (importedEntityId.HasValue)
+                            await AttachBatchRelationshipsAsync(resolvedItem.Request.Entity, importedEntityId.Value, batchItem.Item, token);
                         Interlocked.Increment(ref succeeded);
                     }
                     else
@@ -272,8 +316,12 @@ public class DownloaderService(
             return new DownloaderBatchPreflightResult([], []);
 
         followUp ??= new DownloaderBatchFollowUpDto();
+        var expansion = await ExpandBatchItemsAsync(items, ct);
+        items = expansion.ItemsToQueue;
+        var issues = expansion.Issues.ToList();
+
         if (followUp.AllowDuplicateDownloads)
-            return new DownloaderBatchPreflightResult(items, []);
+            return new DownloaderBatchPreflightResult(items, issues);
 
         var entities = items
             .Select(item => Enum.TryParse<DownloaderEntity>(item.Entity, true, out var entity) ? entity : (DownloaderEntity?)null)
@@ -284,7 +332,6 @@ public class DownloaderService(
         var downloadedEntityIds = await LoadDownloadedEntityIdLookupAsync(entities, ct);
         var reservedDownloads = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var itemsToQueue = new List<DownloaderBatchItemDto>();
-        var issues = new List<DownloaderBatchStartIssueDto>();
 
         for (var index = 0; index < items.Count; index++)
         {
@@ -328,98 +375,1099 @@ public class DownloaderService(
         return new DownloaderBatchPreflightResult(itemsToQueue, issues);
     }
 
+    private async Task<DownloaderBatchPreflightResult> ExpandBatchItemsAsync(IReadOnlyList<DownloaderBatchItemDto> items, CancellationToken ct)
+    {
+        var expandedItems = new List<DownloaderBatchItemDto>();
+        var issues = new List<DownloaderBatchStartIssueDto>();
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            if (!string.IsNullOrWhiteSpace(item.DownloaderId)
+                || !Enum.TryParse<DownloaderEntity>(item.Entity, true, out var entity)
+                || string.IsNullOrWhiteSpace(item.Url))
+            {
+                expandedItems.Add(item);
+                continue;
+            }
+
+            var matches = (await MatchUrlAsync(item.Url, ct))
+                .Where(match => string.Equals(match.SupportedEntity, entity.ToString(), StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (matches.Count == 0)
+            {
+                expandedItems.Add(item);
+                continue;
+            }
+
+            foreach (var match in matches)
+                expandedItems.Add(ApplyDownloaderMatch(item, match, useMatchLabel: matches.Count > 1 || !string.IsNullOrWhiteSpace(match.SourceUrl)));
+        }
+
+        return new DownloaderBatchPreflightResult(expandedItems, issues);
+    }
+
+    private static DownloaderBatchItemDto ApplyDownloaderMatch(DownloaderBatchItemDto item, DownloaderMatchDto match, bool useMatchLabel)
+    {
+        var label = string.IsNullOrWhiteSpace(match.Label) ? item.Label : match.Label;
+        if (!useMatchLabel && !string.IsNullOrWhiteSpace(item.Title))
+            label = item.Label;
+
+        var title = string.IsNullOrWhiteSpace(item.Title) ? label : item.Title;
+        return item with
+        {
+            DownloaderId = match.DownloaderId,
+            Url = string.IsNullOrWhiteSpace(match.NormalizedUrl) ? item.Url : match.NormalizedUrl,
+            QualityId = item.QualityId ?? match.QualityOptions.FirstOrDefault()?.Id,
+            SourceUrl = string.IsNullOrWhiteSpace(match.SourceUrl) ? item.SourceUrl : match.SourceUrl,
+            Label = label,
+            Title = title,
+        };
+    }
+
     internal static ScrapedSceneDto? ConvertScrapeResultToSceneMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
     {
         if (result.Count == 0)
             return null;
 
-        string? GetString(params string[] keys)
-        {
-            foreach (var key in keys)
-            {
-                foreach (var (entryKey, entryValue) in result)
-                {
-                    if (!string.Equals(entryKey, key, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    if (entryValue is string s && !string.IsNullOrWhiteSpace(s))
-                        return s.Trim();
-                    if (entryValue is not null && entryValue is not System.Collections.IEnumerable)
-                        return entryValue.ToString();
-                }
-            }
-            return null;
-        }
-
-        List<string> GetStringList(params string[] keys)
-        {
-            var values = new List<string>();
-            foreach (var key in keys)
-            {
-                foreach (var (entryKey, entryValue) in result)
-                {
-                    if (!string.Equals(entryKey, key, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    switch (entryValue)
-                    {
-                        case string s when !string.IsNullOrWhiteSpace(s):
-                            foreach (var part in s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                                values.Add(part);
-                            break;
-                        case System.Collections.IEnumerable list:
-                            foreach (var item in list)
-                            {
-                                switch (item)
-                                {
-                                    case string str when !string.IsNullOrWhiteSpace(str):
-                                        values.Add(str.Trim());
-                                        break;
-                                    case IDictionary<string, string> map:
-                                        if (map.TryGetValue("Name", out var n) || map.TryGetValue("name", out n))
-                                            values.Add(n);
-                                        break;
-                                    case System.Collections.IDictionary genericMap:
-                                        var nameValue = genericMap["Name"] ?? genericMap["name"] ?? genericMap["Title"] ?? genericMap["title"];
-                                        if (nameValue is string nameStr && !string.IsNullOrWhiteSpace(nameStr))
-                                            values.Add(nameStr.Trim());
-                                        break;
-                                }
-                            }
-                            break;
-                    }
-                }
-            }
-            return values
-                .Where(v => !string.IsNullOrWhiteSpace(v))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
         var dto = new ScrapedSceneDto
         {
-            Title = GetString("Title", "title", "Name", "name"),
-            Code = GetString("Code", "code"),
-            Details = GetString("Details", "details", "Description", "description"),
-            Director = GetString("Director", "director"),
-            Date = GetString("Date", "date", "ReleaseDate", "releaseDate"),
-            ImageUrl = GetString("Image", "image", "ImageUrl", "imageUrl"),
-            StudioName = GetString("Studio", "studio", "StudioName", "studioName"),
-            Urls = GetStringList("URLs", "urls", "URL", "url"),
-            TagNames = GetStringList("Tags", "tags", "Tag", "tag", "TagNames", "tagNames"),
-            PerformerNames = GetStringList("Performers", "performers", "Performer", "performer", "PerformerNames", "performerNames"),
+            Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
+            Code = GetScrapeResultString(result, "Code", "code"),
+            Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
+            Director = GetScrapeResultString(result, "Director", "director"),
+            Date = GetScrapeResultString(result, "Date", "date", "ReleaseDate", "releaseDate"),
+            ImageUrl = GetScrapeResultString(result, "Image", "image", "ImageUrl", "imageUrl"),
+            StudioName = GetScrapeResultString(result, "Studio", "studio", "StudioName", "studioName"),
+            Urls = MergeDistinctStrings(GetScrapeResultStringList(result, "URLs", "urls", "URL", "url", "Links", "links"), sourceUrl),
+            TagNames = GetScrapeResultStringList(result, "Tags", "tags", "Tag", "tag", "TagNames", "tagNames"),
+            PerformerNames = GetScrapeResultStringList(result, "Performers", "performers", "Performer", "performer", "PerformerNames", "performerNames"),
         };
 
-        if (!dto.Urls.Contains(sourceUrl, StringComparer.OrdinalIgnoreCase))
-            dto.Urls.Add(sourceUrl);
-
-        var hasContent = !string.IsNullOrWhiteSpace(dto.Title)
-            || !string.IsNullOrWhiteSpace(dto.Code)
-            || !string.IsNullOrWhiteSpace(dto.Details)
-            || !string.IsNullOrWhiteSpace(dto.Date)
-            || !string.IsNullOrWhiteSpace(dto.StudioName)
+        return HasMetadataContent(dto.Title, dto.Code, dto.Details, dto.Date, dto.StudioName)
             || dto.PerformerNames.Count > 0
-            || dto.TagNames.Count > 0;
+            || dto.TagNames.Count > 0
+            || dto.Urls.Count > 0
+            ? dto
+            : null;
+    }
 
-        return hasContent ? dto : null;
+    internal static ScrapedImageDto? ConvertScrapeResultToImageMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    {
+        if (result.Count == 0)
+            return null;
+
+        var dto = new ScrapedImageDto
+        {
+            Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
+            Date = GetScrapeResultString(result, "Date", "date", "ReleaseDate", "releaseDate"),
+            Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
+            Photographer = GetScrapeResultString(result, "Photographer", "photographer", "Artist", "artist"),
+            ImageUrl = GetScrapeResultString(result, "Image", "image", "ImageUrl", "imageUrl"),
+            Urls = MergeDistinctStrings(GetScrapeResultStringList(result, "URLs", "urls", "URL", "url", "Links", "links"), sourceUrl),
+            StudioName = GetScrapeResultString(result, "Studio", "studio", "StudioName", "studioName"),
+            PerformerNames = GetScrapeResultStringList(result, "Performers", "performers", "Performer", "performer", "PerformerNames", "performerNames"),
+            TagNames = GetScrapeResultStringList(result, "Tags", "tags", "Tag", "tag", "TagNames", "tagNames"),
+            GalleryTitle = GetScrapeResultString(result, "GalleryTitle", "galleryTitle", "Gallery", "gallery"),
+        };
+
+        return HasMetadataContent(dto.Title, dto.Details, dto.Date, dto.Photographer, dto.StudioName, dto.GalleryTitle)
+            || dto.PerformerNames.Count > 0
+            || dto.TagNames.Count > 0
+            || dto.Urls.Count > 0
+            ? dto
+            : null;
+    }
+
+    internal static ScrapedAudioMetadata? ConvertScrapeResultToAudioMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    {
+        if (result.Count == 0)
+            return null;
+
+        var metadata = new ScrapedAudioMetadata
+        {
+            Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
+            Code = GetScrapeResultString(result, "Code", "code"),
+            Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
+            Date = GetScrapeResultString(result, "Date", "date", "ReleaseDate", "releaseDate"),
+            StudioName = GetScrapeResultString(result, "Studio", "studio", "StudioName", "studioName"),
+            Urls = MergeDistinctStrings(GetScrapeResultStringList(result, "URLs", "urls", "URL", "url", "Links", "links"), sourceUrl),
+            TagNames = GetScrapeResultStringList(result, "Tags", "tags", "Tag", "tag", "TagNames", "tagNames"),
+            PerformerNames = MergeDistinctStrings(
+                GetScrapeResultStringList(result, "Performers", "performers", "Performer", "performer", "PerformerNames", "performerNames"),
+                GetScrapeResultStringList(result, "Artist", "artist", "Creator", "creator", "Author", "author")),
+        };
+
+        return HasMetadataContent(metadata.Title, metadata.Code, metadata.Details, metadata.Date, metadata.StudioName)
+            || metadata.PerformerNames.Count > 0
+            || metadata.TagNames.Count > 0
+            || metadata.Urls.Count > 0
+            ? metadata
+            : null;
+    }
+
+    internal static ScrapedTextMetadata? ConvertScrapeResultToTextMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    {
+        if (result.Count == 0)
+            return null;
+
+        var metadata = new ScrapedTextMetadata
+        {
+            Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
+            Code = GetScrapeResultString(result, "Code", "code"),
+            Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
+            Date = GetScrapeResultString(result, "Date", "date", "ReleaseDate", "releaseDate"),
+            StudioName = GetScrapeResultString(result, "Studio", "studio", "StudioName", "studioName"),
+            Urls = MergeDistinctStrings(GetScrapeResultStringList(result, "URLs", "urls", "URL", "url", "Links", "links"), sourceUrl),
+            TagNames = GetScrapeResultStringList(result, "Tags", "tags", "Tag", "tag", "TagNames", "tagNames"),
+            PerformerNames = MergeDistinctStrings(
+                GetScrapeResultStringList(result, "Performers", "performers", "Performer", "performer", "PerformerNames", "performerNames"),
+                GetScrapeResultStringList(result, "Author", "author", "Creator", "creator", "Artist", "artist")),
+        };
+
+        return HasMetadataContent(metadata.Title, metadata.Code, metadata.Details, metadata.Date, metadata.StudioName)
+            || metadata.PerformerNames.Count > 0
+            || metadata.TagNames.Count > 0
+            || metadata.Urls.Count > 0
+            ? metadata
+            : null;
+    }
+
+    internal static ScrapedAudioMetadata? MergeAudioMetadata(ScrapedAudioMetadata? primary, ScrapedAudioMetadata? secondary)
+    {
+        if (primary == null)
+            return secondary;
+
+        if (secondary == null)
+            return primary;
+
+        return new ScrapedAudioMetadata
+        {
+            Title = ChooseValue(primary.Title, secondary.Title),
+            Code = ChooseValue(primary.Code, secondary.Code),
+            Details = ChooseValue(primary.Details, secondary.Details),
+            Date = ChooseValue(primary.Date, secondary.Date),
+            StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
+            Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
+            TagNames = MergeDistinctStrings(primary.TagNames, secondary.TagNames),
+            PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
+        };
+    }
+
+    internal static ScrapedSceneDto? MergeSceneMetadata(ScrapedSceneDto? primary, ScrapedSceneDto? secondary)
+    {
+        if (primary == null)
+            return secondary;
+
+        if (secondary == null)
+            return primary;
+
+        return primary with
+        {
+            Title = ChooseValue(primary.Title, secondary.Title),
+            Code = ChooseValue(primary.Code, secondary.Code),
+            Details = ChooseValue(primary.Details, secondary.Details),
+            Director = ChooseValue(primary.Director, secondary.Director),
+            Date = ChooseValue(primary.Date, secondary.Date),
+            ImageUrl = ChooseValue(primary.ImageUrl, secondary.ImageUrl),
+            StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
+            Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
+            TagNames = MergeDistinctStrings(primary.TagNames, secondary.TagNames),
+            PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
+        };
+    }
+
+    internal static ScrapedTextMetadata? MergeTextMetadata(ScrapedTextMetadata? primary, ScrapedTextMetadata? secondary)
+    {
+        if (primary == null)
+            return secondary;
+
+        if (secondary == null)
+            return primary;
+
+        return new ScrapedTextMetadata
+        {
+            Title = ChooseValue(primary.Title, secondary.Title),
+            Code = ChooseValue(primary.Code, secondary.Code),
+            Details = ChooseValue(primary.Details, secondary.Details),
+            Date = ChooseValue(primary.Date, secondary.Date),
+            StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
+            Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
+            TagNames = MergeDistinctStrings(primary.TagNames, secondary.TagNames),
+            PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
+        };
+    }
+
+    internal static ScrapedImageDto? MergeImageMetadata(ScrapedImageDto? primary, ScrapedImageDto? secondary)
+    {
+        if (primary == null)
+            return secondary;
+
+        if (secondary == null)
+            return primary;
+
+        return primary with
+        {
+            Title = ChooseValue(primary.Title, secondary.Title),
+            Date = ChooseValue(primary.Date, secondary.Date),
+            Details = ChooseValue(primary.Details, secondary.Details),
+            Photographer = ChooseValue(primary.Photographer, secondary.Photographer),
+            ImageUrl = ChooseValue(primary.ImageUrl, secondary.ImageUrl),
+            Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
+            StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
+            PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
+            TagNames = MergeDistinctStrings(primary.TagNames, secondary.TagNames),
+            GalleryTitle = ChooseValue(primary.GalleryTitle, secondary.GalleryTitle),
+        };
+    }
+
+    private async Task ApplyAutoMetadataAsync(
+        IServiceProvider services,
+        DownloaderRequest request,
+        DownloaderResult result,
+        int importedEntityId,
+        DownloaderMetadataApplyOptions options,
+        Cove.Core.Interfaces.IJobProgress? progress,
+        CancellationToken ct)
+    {
+        switch (request.Entity)
+        {
+            case DownloaderEntity.Scene:
+            {
+                var metadata = result.InlineSceneMetadata;
+                if (metadata == null)
+                {
+                    progress?.Report(0.97d, "Looking up downloaded scene metadata...");
+                    metadata = await BuildMergedSceneMetadataAsync(services, request, ct);
+                }
+
+                if (metadata != null)
+                {
+                    metadata = metadata with { Urls = ResolveDownloadedMetadataUrls(metadata.Urls, request) };
+                    progress?.Report(0.99d, "Applying downloaded scene metadata...");
+                    var metadataApplyService = services.GetRequiredService<ISceneMetadataApplyService>();
+                    await metadataApplyService.ApplyAsync(importedEntityId, metadata, options, ct);
+                }
+
+                break;
+            }
+            case DownloaderEntity.Image:
+            {
+                ScrapedImageDto? metadata = result.InlineImageMetadata;
+                if (metadata == null)
+                {
+                    progress?.Report(0.97d, "Looking up downloaded image metadata...");
+                    metadata = await BuildMergedImageMetadataAsync(services, request, ct);
+                }
+
+                if (metadata != null)
+                {
+                    metadata = metadata with { Urls = ResolveDownloadedMetadataUrls(metadata.Urls, request) };
+                    progress?.Report(0.99d, "Applying downloaded image metadata...");
+                    await ApplyImageMetadataAsync(importedEntityId, metadata, ct, options);
+                }
+
+                break;
+            }
+            case DownloaderEntity.Audio:
+            {
+                progress?.Report(0.97d, "Looking up downloaded audio metadata...");
+                var metadata = await BuildMergedAudioMetadataAsync(services, request, ct);
+                if (metadata != null)
+                {
+                    metadata = metadata with { Urls = ResolveDownloadedMetadataUrls(metadata.Urls, request) };
+                    progress?.Report(0.99d, "Applying downloaded audio metadata...");
+                    await ApplyAudioMetadataAsync(importedEntityId, metadata, ct, options);
+                }
+
+                break;
+            }
+            case DownloaderEntity.Text:
+            {
+                progress?.Report(0.97d, "Looking up downloaded text metadata...");
+                var metadata = await BuildMergedTextMetadataAsync(services, request, ct);
+                if (metadata != null)
+                {
+                    metadata = metadata with { Urls = ResolveDownloadedMetadataUrls(metadata.Urls, request) };
+                    progress?.Report(0.99d, "Applying downloaded text metadata...");
+                    await ApplyTextMetadataAsync(importedEntityId, metadata, ct, options);
+                }
+
+                break;
+            }
+        }
+    }
+
+    private async Task<ScrapedImageDto?> BuildMergedImageMetadataAsync(IServiceProvider services, DownloaderRequest request, CancellationToken ct)
+    {
+        var scraperService = services.GetRequiredService<ScraperService>();
+        var primaryUrl = request.Url;
+        var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
+        var primary = ConvertScrapeResultToImageMetadata(await ScrapeMetadataAsync(scraperService, primaryUrl, "image", ct) ?? [], primaryUrl);
+        var secondary = secondaryUrl == null
+            ? null
+            : ConvertScrapeResultToImageMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "image", ct) ?? [], secondaryUrl);
+        return MergeImageMetadata(primary, secondary);
+    }
+
+    private async Task<ScrapedSceneDto?> BuildMergedSceneMetadataAsync(IServiceProvider services, DownloaderRequest request, CancellationToken ct)
+    {
+        var scraperService = services.GetRequiredService<ScraperService>();
+        var primaryUrl = request.Url;
+        var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
+        var primary = ConvertScrapeResultToSceneMetadata(await ScrapeMetadataAsync(scraperService, primaryUrl, "scene", ct) ?? [], primaryUrl);
+        var secondary = secondaryUrl == null
+            ? null
+            : ConvertScrapeResultToSceneMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "scene", ct) ?? [], secondaryUrl);
+        return MergeSceneMetadata(primary, secondary);
+    }
+
+    private async Task<ScrapedAudioMetadata?> BuildMergedAudioMetadataAsync(IServiceProvider services, DownloaderRequest request, CancellationToken ct)
+    {
+        var scraperService = services.GetRequiredService<ScraperService>();
+        var primaryUrl = request.Url;
+        var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
+        var primary = ConvertScrapeResultToAudioMetadata(await ScrapeMetadataAsync(scraperService, primaryUrl, "audio", ct) ?? [], primaryUrl);
+        var secondary = secondaryUrl == null
+            ? null
+            : ConvertScrapeResultToAudioMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "audio", ct) ?? [], secondaryUrl);
+        return MergeAudioMetadata(primary, secondary);
+    }
+
+    private async Task<ScrapedTextMetadata?> BuildMergedTextMetadataAsync(IServiceProvider services, DownloaderRequest request, CancellationToken ct)
+    {
+        var scraperService = services.GetRequiredService<ScraperService>();
+        var primaryUrl = request.Url;
+        var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
+        var primary = ConvertScrapeResultToTextMetadata(await ScrapeMetadataAsync(scraperService, primaryUrl, "text", ct) ?? [], primaryUrl);
+        var secondary = secondaryUrl == null
+            ? null
+            : ConvertScrapeResultToTextMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "text", ct) ?? [], secondaryUrl);
+        return MergeTextMetadata(primary, secondary);
+    }
+
+    internal async Task<bool> ApplyAudioMetadataAsync(int audioId, ScrapedAudioMetadata metadata, CancellationToken ct, DownloaderMetadataApplyOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        options ??= new DownloaderMetadataApplyOptions();
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var tagProvenanceService = scope.ServiceProvider.GetService<ITagProvenanceService>();
+        var fieldProvenanceService = scope.ServiceProvider.GetService<IFieldProvenanceService>();
+        var eventBus = scope.ServiceProvider.GetService<IEventBus>();
+
+        var audio = await db.Audios
+            .Include(item => item.Urls)
+            .Include(item => item.AudioTags).ThenInclude(item => item.Tag)
+            .Include(item => item.AudioPerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.Studio)
+            .FirstOrDefaultAsync(item => item.Id == audioId, ct);
+
+        if (audio == null)
+            return false;
+
+        var fieldProvenance = new Dictionary<string, object?>();
+
+        if (!string.IsNullOrWhiteSpace(metadata.Title))
+        {
+            audio.Title = metadata.Title.Trim();
+            fieldProvenance["title"] = audio.Title;
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.Code))
+        {
+            audio.Code = metadata.Code.Trim();
+            fieldProvenance["code"] = audio.Code;
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.Details))
+        {
+            audio.Details = metadata.Details.Trim();
+            fieldProvenance["details"] = audio.Details;
+        }
+
+        if (ScrapedSceneDateParser.TryParse(metadata.Date, out var parsedDate))
+        {
+            audio.Date = parsedDate;
+            fieldProvenance["date"] = parsedDate.ToString("yyyy-MM-dd");
+        }
+
+        if (options.MarkOrganized)
+            audio.Organized = true;
+
+        var urls = NormalizeNames(metadata.Urls);
+        if (urls.Count > 0)
+        {
+            ApplyAudioUrls(audio, urls);
+            fieldProvenance["urls"] = urls;
+        }
+
+        var tagNames = NormalizeNames(metadata.TagNames);
+        if (tagNames.Count > 0)
+        {
+            await ApplyAudioTagsAsync(db, audio, tagNames, options.CreateMissingTags, tagProvenanceService, ct);
+            fieldProvenance["tags"] = tagNames;
+        }
+
+        var performerNames = NormalizeNames(metadata.PerformerNames);
+        if (performerNames.Count > 0)
+        {
+            await ApplyAudioPerformersAsync(db, audio, performerNames, options.CreateMissingPerformers, ct);
+            fieldProvenance["performers"] = performerNames;
+        }
+
+        var studioName = NormalizeOptionalValue(metadata.StudioName);
+        if (!string.IsNullOrWhiteSpace(studioName))
+        {
+            await ApplyStudioAsync(db, audio, studioName, options.CreateMissingStudio, ct);
+            fieldProvenance["studio"] = studioName;
+        }
+
+        if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Audio, audio.Id, fieldProvenance, "scraper", cancellationToken: ct);
+
+        await db.SaveChangesAsync(ct);
+        await RefreshAudioArraysAsync(db, audio, ct);
+        eventBus?.Publish(new EntityEvent(EventType.AudioUpdated, "Audio", audio.Id));
+        return true;
+    }
+
+    private async Task<bool> ApplyImageMetadataAsync(int imageId, ScrapedImageDto metadata, CancellationToken ct, DownloaderMetadataApplyOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        options ??= new DownloaderMetadataApplyOptions();
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var tagProvenanceService = scope.ServiceProvider.GetService<ITagProvenanceService>();
+        var fieldProvenanceService = scope.ServiceProvider.GetService<IFieldProvenanceService>();
+        var eventBus = scope.ServiceProvider.GetService<IEventBus>();
+
+        var image = await db.Images
+            .Include(item => item.Urls)
+            .Include(item => item.ImageTags).ThenInclude(item => item.Tag)
+            .Include(item => item.ImagePerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.Studio)
+            .FirstOrDefaultAsync(item => item.Id == imageId, ct);
+
+        if (image == null)
+            return false;
+
+        var fieldProvenance = new Dictionary<string, object?>();
+
+        if (!string.IsNullOrWhiteSpace(metadata.Title))
+        {
+            image.Title = metadata.Title.Trim();
+            fieldProvenance["title"] = image.Title;
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.Details))
+        {
+            image.Details = metadata.Details.Trim();
+            fieldProvenance["details"] = image.Details;
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.Photographer))
+        {
+            image.Photographer = metadata.Photographer.Trim();
+            fieldProvenance["photographer"] = image.Photographer;
+        }
+
+        if (ScrapedSceneDateParser.TryParse(metadata.Date, out var parsedDate))
+        {
+            image.Date = parsedDate;
+            fieldProvenance["date"] = parsedDate.ToString("yyyy-MM-dd");
+        }
+
+        if (options.MarkOrganized)
+            image.Organized = true;
+
+        var urls = NormalizeNames(metadata.Urls);
+        if (urls.Count > 0)
+        {
+            ApplyImageUrls(image, urls);
+            fieldProvenance["urls"] = urls;
+        }
+
+        var tagNames = NormalizeNames(metadata.TagNames);
+        if (tagNames.Count > 0)
+        {
+            await ApplyImageTagsAsync(db, image, tagNames, options.CreateMissingTags, tagProvenanceService, ct);
+            fieldProvenance["tags"] = tagNames;
+        }
+
+        var performerNames = NormalizeNames(metadata.PerformerNames);
+        if (performerNames.Count > 0)
+        {
+            await ApplyImagePerformersAsync(db, image, performerNames, options.CreateMissingPerformers, ct);
+            fieldProvenance["performers"] = performerNames;
+        }
+
+        var studioName = NormalizeOptionalValue(metadata.StudioName);
+        if (!string.IsNullOrWhiteSpace(studioName))
+        {
+            await ApplyStudioAsync(db, image, studioName, options.CreateMissingStudio, ct);
+            fieldProvenance["studio"] = studioName;
+        }
+
+        if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Image, image.Id, fieldProvenance, "scraper", cancellationToken: ct);
+
+        await db.SaveChangesAsync(ct);
+        eventBus?.Publish(new EntityEvent(EventType.ImageUpdated, "Image", image.Id));
+        return true;
+    }
+
+    private async Task<bool> ApplyTextMetadataAsync(int textDocumentId, ScrapedTextMetadata metadata, CancellationToken ct, DownloaderMetadataApplyOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        options ??= new DownloaderMetadataApplyOptions();
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var tagProvenanceService = scope.ServiceProvider.GetService<ITagProvenanceService>();
+        var fieldProvenanceService = scope.ServiceProvider.GetService<IFieldProvenanceService>();
+        var eventBus = scope.ServiceProvider.GetService<IEventBus>();
+
+        var textDocument = await db.TextDocuments
+            .Include(item => item.Urls)
+            .Include(item => item.TextTags).ThenInclude(item => item.Tag)
+            .Include(item => item.TextPerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.Studio)
+            .FirstOrDefaultAsync(item => item.Id == textDocumentId, ct);
+
+        if (textDocument == null)
+            return false;
+
+        var fieldProvenance = new Dictionary<string, object?>();
+
+        if (!string.IsNullOrWhiteSpace(metadata.Title))
+        {
+            textDocument.Title = metadata.Title.Trim();
+            fieldProvenance["title"] = textDocument.Title;
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.Code))
+        {
+            textDocument.Code = metadata.Code.Trim();
+            fieldProvenance["code"] = textDocument.Code;
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata.Details))
+        {
+            textDocument.Details = metadata.Details.Trim();
+            fieldProvenance["details"] = textDocument.Details;
+        }
+
+        if (ScrapedSceneDateParser.TryParse(metadata.Date, out var parsedDate))
+        {
+            textDocument.Date = parsedDate;
+            fieldProvenance["date"] = parsedDate.ToString("yyyy-MM-dd");
+        }
+
+        if (options.MarkOrganized)
+            textDocument.Organized = true;
+
+        var urls = NormalizeNames(metadata.Urls);
+        if (urls.Count > 0)
+        {
+            ApplyTextUrls(textDocument, urls);
+            fieldProvenance["urls"] = urls;
+        }
+
+        var tagNames = NormalizeNames(metadata.TagNames);
+        if (tagNames.Count > 0)
+        {
+            await ApplyTextTagsAsync(db, textDocument, tagNames, options.CreateMissingTags, tagProvenanceService, ct);
+            fieldProvenance["tags"] = tagNames;
+        }
+
+        var performerNames = NormalizeNames(metadata.PerformerNames);
+        if (performerNames.Count > 0)
+        {
+            await ApplyTextPerformersAsync(db, textDocument, performerNames, options.CreateMissingPerformers, ct);
+            fieldProvenance["performers"] = performerNames;
+        }
+
+        var studioName = NormalizeOptionalValue(metadata.StudioName);
+        if (!string.IsNullOrWhiteSpace(studioName))
+        {
+            await ApplyStudioAsync(db, textDocument, studioName, options.CreateMissingStudio, ct);
+            fieldProvenance["studio"] = studioName;
+        }
+
+        if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Text, textDocument.Id, fieldProvenance, "scraper", cancellationToken: ct);
+
+        await db.SaveChangesAsync(ct);
+        await RefreshTextArraysAsync(db, textDocument, ct);
+        eventBus?.Publish(new EntityEvent(EventType.TextUpdated, "Text", textDocument.Id));
+        return true;
+    }
+
+    private static async Task<Dictionary<string, object>?> ScrapeMetadataAsync(ScraperService scraperService, string? url, string entityType, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        var scraped = await scraperService.ScrapeUrlAutoAsync(url, entityType, ct);
+        return scraped?.Result;
+    }
+
+    private static string? ResolveSourceMetadataUrl(DownloaderRequest request, string primaryUrl)
+    {
+        return string.IsNullOrWhiteSpace(request.SourceUrl) || string.Equals(primaryUrl, request.SourceUrl, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : request.SourceUrl;
+    }
+
+    private static List<string> ResolveDownloadedMetadataUrls(IEnumerable<string>? metadataUrls, DownloaderRequest request)
+    {
+        var sourceUrl = ResolveSourceMetadataUrl(request, request.Url);
+        return sourceUrl == null
+            ? MergeDistinctStrings(metadataUrls, request.Url)
+            : MergeDistinctStrings(null, request.Url, sourceUrl);
+    }
+
+    private static string? GetScrapeResultString(IReadOnlyDictionary<string, object> result, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            foreach (var (entryKey, entryValue) in result)
+            {
+                if (!string.Equals(entryKey, key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (entryValue is string s && !string.IsNullOrWhiteSpace(s))
+                    return s.Trim();
+
+                if (entryValue is JsonElement element)
+                {
+                    var elementValue = GetJsonElementString(element);
+                    if (!string.IsNullOrWhiteSpace(elementValue))
+                        return elementValue;
+                }
+
+                if (entryValue is not null && entryValue is not System.Collections.IEnumerable)
+                    return entryValue.ToString();
+            }
+        }
+
+        return null;
+    }
+
+    private static List<string> GetScrapeResultStringList(IReadOnlyDictionary<string, object> result, params string[] keys)
+    {
+        var values = new List<string>();
+        foreach (var key in keys)
+        {
+            foreach (var (entryKey, entryValue) in result)
+            {
+                if (!string.Equals(entryKey, key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                switch (entryValue)
+                {
+                    case string s when !string.IsNullOrWhiteSpace(s):
+                        foreach (var part in s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                            values.Add(part);
+                        break;
+                    case JsonElement element:
+                        AddJsonElementStringListValues(values, element);
+                        break;
+                    case System.Collections.IEnumerable list:
+                        foreach (var item in list)
+                        {
+                            switch (item)
+                            {
+                                case string str when !string.IsNullOrWhiteSpace(str):
+                                    values.Add(str.Trim());
+                                    break;
+                                case JsonElement element:
+                                    AddJsonElementStringListValues(values, element);
+                                    break;
+                                case IDictionary<string, string> map:
+                                    if (map.TryGetValue("Name", out var name) || map.TryGetValue("name", out name))
+                                        values.Add(name);
+                                    break;
+                                case System.Collections.IDictionary genericMap:
+                                    var nameValue = genericMap["Name"] ?? genericMap["name"] ?? genericMap["Title"] ?? genericMap["title"];
+                                    if (nameValue is string nameStr && !string.IsNullOrWhiteSpace(nameStr))
+                                        values.Add(nameStr.Trim());
+                                    break;
+                            }
+                        }
+                        break;
+                }
+            }
+        }
+
+        return NormalizeNames(values);
+    }
+
+    private static void AddJsonElementStringListValues(List<string> values, JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                AddJsonElementStringListValues(values, item);
+            return;
+        }
+
+        var value = GetJsonElementString(element);
+        if (!string.IsNullOrWhiteSpace(value))
+            values.Add(value);
+    }
+
+    private static string? GetJsonElementString(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+            return element.GetString()?.Trim();
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var propertyName in new[] { "Name", "name", "Title", "title" })
+            {
+                if (element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String)
+                    return property.GetString()?.Trim();
+            }
+        }
+
+        return element.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False
+            ? element.ToString()
+            : null;
+    }
+
+    private static bool HasMetadataContent(params string?[] values)
+    {
+        return values.Any(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private static string? ChooseValue(string? primary, string? secondary)
+    {
+        return string.IsNullOrWhiteSpace(primary) ? NormalizeOptionalValue(secondary) : NormalizeOptionalValue(primary);
+    }
+
+    private static string? NormalizeOptionalValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static List<string> MergeDistinctStrings(IEnumerable<string>? first, IEnumerable<string>? second)
+    {
+        return NormalizeNames((first ?? []).Concat(second ?? []));
+    }
+
+    private static List<string> MergeDistinctStrings(IEnumerable<string>? first, params string?[] extraValues)
+    {
+        return NormalizeNames((first ?? []).Concat(extraValues.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!)));
+    }
+
+    private static void ApplyAudioUrls(Audio audio, IReadOnlyList<string> urls)
+    {
+        var existing = audio.Urls.Select(item => item.Url).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var url in urls)
+        {
+            if (existing.Add(url))
+                audio.Urls.Add(new AudioUrl { AudioId = audio.Id, Url = url });
+        }
+    }
+
+    private static void ApplyImageUrls(Image image, IReadOnlyList<string> urls)
+    {
+        var existing = image.Urls.Select(item => item.Url).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var url in urls)
+        {
+            if (existing.Add(url))
+                image.Urls.Add(new ImageUrl { ImageId = image.Id, Url = url });
+        }
+    }
+
+    private static void ApplyTextUrls(TextDocument textDocument, IReadOnlyList<string> urls)
+    {
+        var existing = textDocument.Urls.Select(item => item.Url).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var url in urls)
+        {
+            if (existing.Add(url))
+                textDocument.Urls.Add(new TextUrl { TextDocumentId = textDocument.Id, Url = url });
+        }
+    }
+
+    private static async Task ApplyAudioTagsAsync(CoveContext db, Audio audio, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, CancellationToken ct)
+    {
+        var tagLookup = await LoadTagsByNameAsync(db, tagNames, createMissing, ct);
+        var existing = audio.AudioTags
+            .Where(item => item.Tag != null)
+            .Select(item => item.Tag!.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tagName in tagNames)
+        {
+            if (!tagLookup.TryGetValue(tagName, out var tag))
+                continue;
+
+            if (!existing.Add(tag.Name))
+                continue;
+
+            audio.AudioTags.Add(new AudioTag { Audio = audio, Tag = tag });
+            if (tagProvenanceService != null)
+                await tagProvenanceService.RecordAsync(AffinityHostType.Audio, audio.Id, tag, "scraper", cancellationToken: ct);
+        }
+    }
+
+    private static async Task ApplyImageTagsAsync(CoveContext db, Image image, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, CancellationToken ct)
+    {
+        var tagLookup = await LoadTagsByNameAsync(db, tagNames, createMissing, ct);
+        var existing = image.ImageTags
+            .Where(item => item.Tag != null)
+            .Select(item => item.Tag!.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tagName in tagNames)
+        {
+            if (!tagLookup.TryGetValue(tagName, out var tag))
+                continue;
+
+            if (!existing.Add(tag.Name))
+                continue;
+
+            image.ImageTags.Add(new ImageTag { Image = image, Tag = tag });
+            if (tagProvenanceService != null)
+                await tagProvenanceService.RecordAsync(AffinityHostType.Image, image.Id, tag, "scraper", cancellationToken: ct);
+        }
+    }
+
+    private static async Task ApplyTextTagsAsync(CoveContext db, TextDocument textDocument, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, CancellationToken ct)
+    {
+        var tagLookup = await LoadTagsByNameAsync(db, tagNames, createMissing, ct);
+        var existing = textDocument.TextTags
+            .Where(item => item.Tag != null)
+            .Select(item => item.Tag!.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tagName in tagNames)
+        {
+            if (!tagLookup.TryGetValue(tagName, out var tag))
+                continue;
+
+            if (!existing.Add(tag.Name))
+                continue;
+
+            textDocument.TextTags.Add(new TextTag { TextDocument = textDocument, Tag = tag });
+            if (tagProvenanceService != null)
+                await tagProvenanceService.RecordAsync(AffinityHostType.Text, textDocument.Id, tag, "scraper", cancellationToken: ct);
+        }
+    }
+
+    private static async Task ApplyAudioPerformersAsync(CoveContext db, Audio audio, IReadOnlyList<string> performerNames, bool createMissing, CancellationToken ct)
+    {
+        var performerLookup = await LoadPerformersByNameAsync(db, performerNames, createMissing, ct);
+        var existing = audio.AudioPerformers
+            .Where(item => item.Performer != null)
+            .Select(item => item.Performer!.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var performerName in performerNames)
+        {
+            if (!performerLookup.TryGetValue(performerName, out var performer))
+                continue;
+
+            if (existing.Add(performer.Name))
+                audio.AudioPerformers.Add(new AudioPerformer { Audio = audio, Performer = performer });
+        }
+    }
+
+    private static async Task ApplyImagePerformersAsync(CoveContext db, Image image, IReadOnlyList<string> performerNames, bool createMissing, CancellationToken ct)
+    {
+        var performerLookup = await LoadPerformersByNameAsync(db, performerNames, createMissing, ct);
+        var existing = image.ImagePerformers
+            .Where(item => item.Performer != null)
+            .Select(item => item.Performer!.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var performerName in performerNames)
+        {
+            if (!performerLookup.TryGetValue(performerName, out var performer))
+                continue;
+
+            if (existing.Add(performer.Name))
+                image.ImagePerformers.Add(new ImagePerformer { Image = image, Performer = performer });
+        }
+    }
+
+    private static async Task ApplyTextPerformersAsync(CoveContext db, TextDocument textDocument, IReadOnlyList<string> performerNames, bool createMissing, CancellationToken ct)
+    {
+        var performerLookup = await LoadPerformersByNameAsync(db, performerNames, createMissing, ct);
+        var existing = textDocument.TextPerformers
+            .Where(item => item.Performer != null)
+            .Select(item => item.Performer!.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var performerName in performerNames)
+        {
+            if (!performerLookup.TryGetValue(performerName, out var performer))
+                continue;
+
+            if (existing.Add(performer.Name))
+                textDocument.TextPerformers.Add(new TextPerformer { TextDocument = textDocument, Performer = performer });
+        }
+    }
+
+    private static async Task ApplyStudioAsync(CoveContext db, Audio audio, string studioName, bool createMissing, CancellationToken ct)
+    {
+        var studio = await FindOrCreateStudioAsync(db, studioName, createMissing, ct);
+        if (studio == null)
+            return;
+
+        audio.Studio = studio;
+        audio.StudioId = studio.Id == 0 ? null : studio.Id;
+    }
+
+    private static async Task ApplyStudioAsync(CoveContext db, Image image, string studioName, bool createMissing, CancellationToken ct)
+    {
+        var studio = await FindOrCreateStudioAsync(db, studioName, createMissing, ct);
+        if (studio == null)
+            return;
+
+        image.Studio = studio;
+        image.StudioId = studio.Id == 0 ? null : studio.Id;
+    }
+
+    private static async Task ApplyStudioAsync(CoveContext db, TextDocument textDocument, string studioName, bool createMissing, CancellationToken ct)
+    {
+        var studio = await FindOrCreateStudioAsync(db, studioName, createMissing, ct);
+        if (studio == null)
+            return;
+
+        textDocument.Studio = studio;
+        textDocument.StudioId = studio.Id == 0 ? null : studio.Id;
+    }
+
+    private static async Task<Dictionary<string, Tag>> LoadTagsByNameAsync(CoveContext db, IReadOnlyList<string> tagNames, bool createMissing, CancellationToken ct)
+    {
+        var normalizedNames = tagNames.Select(name => name.ToLowerInvariant()).ToHashSet();
+        var tagLookup = await db.Tags
+            .Where(tag => normalizedNames.Contains(tag.Name.ToLower()))
+            .ToDictionaryAsync(tag => tag.Name, StringComparer.OrdinalIgnoreCase, ct);
+
+        foreach (var tagName in tagNames)
+        {
+            if (tagLookup.ContainsKey(tagName))
+                continue;
+
+            if (!createMissing)
+                continue;
+
+            var tag = new Tag { Name = tagName };
+            db.Tags.Add(tag);
+            tagLookup[tagName] = tag;
+        }
+
+        return tagLookup;
+    }
+
+    private static async Task<Dictionary<string, Performer>> LoadPerformersByNameAsync(CoveContext db, IReadOnlyList<string> performerNames, bool createMissing, CancellationToken ct)
+    {
+        var normalizedNames = performerNames.Select(name => name.ToLowerInvariant()).ToHashSet();
+        var performerLookup = await db.Performers
+            .Where(performer => normalizedNames.Contains(performer.Name.ToLower()))
+            .ToDictionaryAsync(performer => performer.Name, StringComparer.OrdinalIgnoreCase, ct);
+
+        foreach (var performerName in performerNames)
+        {
+            if (performerLookup.ContainsKey(performerName))
+                continue;
+
+            if (!createMissing)
+                continue;
+
+            var performer = new Performer { Name = performerName };
+            db.Performers.Add(performer);
+            performerLookup[performerName] = performer;
+        }
+
+        return performerLookup;
+    }
+
+    private static async Task<Studio?> FindOrCreateStudioAsync(CoveContext db, string studioName, bool createMissing, CancellationToken ct)
+    {
+        var normalizedStudioName = studioName.Trim();
+        var studio = await db.Studios.FirstOrDefaultAsync(item => item.Name == normalizedStudioName, ct);
+        if (studio == null && !createMissing)
+            return null;
+
+        studio ??= new Studio { Name = normalizedStudioName };
+
+        if (studio.Id == 0)
+            db.Studios.Add(studio);
+
+        return studio;
+    }
+
+    private static async Task RefreshAudioArraysAsync(CoveContext db, Audio audio, CancellationToken ct)
+    {
+        var nextTagIds = audio.AudioTags
+            .Select(item => item.TagId != 0 ? item.TagId : item.Tag?.Id ?? 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+        var nextPerformerIds = audio.AudioPerformers
+            .Select(item => item.PerformerId != 0 ? item.PerformerId : item.Performer?.Id ?? 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+
+        if (audio.TagIds.SequenceEqual(nextTagIds) && audio.PerformerIds.SequenceEqual(nextPerformerIds))
+            return;
+
+        audio.TagIds = nextTagIds;
+        audio.PerformerIds = nextPerformerIds;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task RefreshTextArraysAsync(CoveContext db, TextDocument textDocument, CancellationToken ct)
+    {
+        var nextTagIds = textDocument.TextTags
+            .Select(item => item.TagId != 0 ? item.TagId : item.Tag?.Id ?? 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+        var nextPerformerIds = textDocument.TextPerformers
+            .Select(item => item.PerformerId != 0 ? item.PerformerId : item.Performer?.Id ?? 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+
+        if (textDocument.TagIds.SequenceEqual(nextTagIds) && textDocument.PerformerIds.SequenceEqual(nextPerformerIds))
+            return;
+
+        textDocument.TagIds = nextTagIds;
+        textDocument.PerformerIds = nextPerformerIds;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static List<string> NormalizeNames(IEnumerable<string> values)
+    {
+        return values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => NormalizeBracketWrappedValue(value.Trim()))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string NormalizeBracketWrappedValue(string value)
+    {
+        if (value.Length >= 2 && value[0] == '[' && value[^1] == ']')
+            return value[1..^1].Trim();
+
+        return value;
     }
 
     private async Task<IDisposable> AcquireDownloadSlotAsync(Cove.Core.Interfaces.IJobProgress? progress, CancellationToken ct)
@@ -482,7 +1530,8 @@ public class DownloaderService(
             descriptor.SupportedEntity.ToString(),
             match.NormalizedUrl,
             match.Label,
-            match.QualityOptions?.Select(option => new DownloaderQualityOptionDto(option.Id, option.Label, option.Description)).ToList() ?? []);
+            match.QualityOptions?.Select(option => new DownloaderQualityOptionDto(option.Id, option.Label, option.Description)).ToList() ?? [],
+            match.SourceUrl);
     }
 
     private static List<string> GetCapabilityNames(DownloaderCapabilities capabilities)
@@ -527,6 +1576,8 @@ public class DownloaderService(
                 DownloaderEntity.Scene => await db.VideoFiles.AnyAsync(item => item.SceneId == entityId.Value, ct),
                 DownloaderEntity.Image => await db.ImageFiles.AnyAsync(item => item.ImageId == entityId.Value, ct),
                 DownloaderEntity.Gallery => await db.GalleryFiles.AnyAsync(item => item.GalleryId == entityId.Value, ct),
+                DownloaderEntity.Audio => await db.AudioFiles.AnyAsync(item => item.AudioId == entityId.Value, ct),
+                DownloaderEntity.Text => await db.TextFiles.AnyAsync(item => item.TextDocumentId == entityId.Value, ct),
                 _ => false,
             };
 
@@ -543,6 +1594,8 @@ public class DownloaderService(
             DownloaderEntity.Scene => await FindDuplicateSceneLabelAsync(db, entityId, normalizedUrl, ct),
             DownloaderEntity.Image => await FindDuplicateImageLabelAsync(db, entityId, normalizedUrl, ct),
             DownloaderEntity.Gallery => await FindDuplicateGalleryLabelAsync(db, entityId, normalizedUrl, ct),
+            DownloaderEntity.Audio => await FindDuplicateAudioLabelAsync(db, entityId, normalizedUrl, ct),
+            DownloaderEntity.Text => await FindDuplicateTextLabelAsync(db, entityId, normalizedUrl, ct),
             _ => null,
         };
 
@@ -589,6 +1642,24 @@ public class DownloaderService(
                 .Select(item => new { item.GalleryId, item.Url, item.Gallery!.Title })
                 .ToListAsync(ct);
             result[DownloaderEntity.Gallery] = BuildExistingUrlLookup(rows.Select(item => new ExistingUrlRow(item.GalleryId, item.Url, item.Title ?? $"Gallery {item.GalleryId}")));
+        }
+
+        if (entities.Contains(DownloaderEntity.Audio))
+        {
+            var rows = await db.Set<Cove.Core.Entities.AudioUrl>()
+                .AsNoTracking()
+                .Select(item => new { item.AudioId, item.Url, item.Audio!.Title })
+                .ToListAsync(ct);
+            result[DownloaderEntity.Audio] = BuildExistingUrlLookup(rows.Select(item => new ExistingUrlRow(item.AudioId, item.Url, item.Title ?? $"Audio {item.AudioId}")));
+        }
+
+        if (entities.Contains(DownloaderEntity.Text))
+        {
+            var rows = await db.Set<Cove.Core.Entities.TextUrl>()
+                .AsNoTracking()
+                .Select(item => new { item.TextDocumentId, item.Url, item.TextDocument!.Title })
+                .ToListAsync(ct);
+            result[DownloaderEntity.Text] = BuildExistingUrlLookup(rows.Select(item => new ExistingUrlRow(item.TextDocumentId, item.Url, item.Title ?? $"Text {item.TextDocumentId}")));
         }
 
         return result;
@@ -638,6 +1709,28 @@ public class DownloaderService(
                 .Distinct()
                 .ToListAsync(ct);
             result[DownloaderEntity.Gallery] = ids.ToHashSet();
+        }
+
+        if (entities.Contains(DownloaderEntity.Audio))
+        {
+            var ids = await db.AudioFiles
+                .AsNoTracking()
+                .Where(item => item.AudioId != null)
+                .Select(item => item.AudioId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+            result[DownloaderEntity.Audio] = ids.ToHashSet();
+        }
+
+        if (entities.Contains(DownloaderEntity.Text))
+        {
+            var ids = await db.TextFiles
+                .AsNoTracking()
+                .Where(item => item.TextDocumentId != null)
+                .Select(item => item.TextDocumentId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+            result[DownloaderEntity.Text] = ids.ToHashSet();
         }
 
         return result;
@@ -706,6 +1799,7 @@ public class DownloaderService(
             DownloaderEntity.Image => config.CovePaths.FirstOrDefault(path => !path.ExcludeImage)?.Path,
             DownloaderEntity.Gallery => config.CovePaths.FirstOrDefault(path => !path.ExcludeImage)?.Path,
             DownloaderEntity.Audio => config.CovePaths.FirstOrDefault(path => !path.ExcludeAudio)?.Path,
+            DownloaderEntity.Text => config.CovePaths.FirstOrDefault(path => !path.ExcludeText)?.Path,
             _ => null,
         };
 
@@ -837,6 +1931,8 @@ public class DownloaderService(
             GenerateMd5 = generate.Md5,
             GenerateImageThumbnails = generate.ImageThumbnails,
             GenerateImagePhashes = generate.ImagePhashes,
+            GenerateAudioPhashes = generate.AudioPhashes,
+            GenerateTextPhashes = generate.TextPhashes,
             Rescan = generate.Overwrite,
         });
     }
@@ -849,7 +1945,9 @@ public class DownloaderService(
             || generate.Phashes
             || generate.Md5
             || generate.ImageThumbnails
-            || generate.ImagePhashes;
+                || generate.ImagePhashes
+                || generate.AudioPhashes
+                || generate.TextPhashes;
     }
 
     private static bool IsDuplicateDownloadMessage(string message)
@@ -902,7 +2000,7 @@ public class DownloaderService(
     private async Task<ResolvedBatchItem> ResolveBatchItemAsync(
         DownloaderBatchItemDto item,
         int index,
-        bool allowDuplicateDownload,
+        DownloaderBatchFollowUpDto followUp,
         ConcurrentDictionary<string, byte> reservedDownloads,
         CancellationToken ct)
     {
@@ -917,7 +2015,7 @@ public class DownloaderService(
         var matched = await ResolveBatchMatchAsync(item, entity, normalizedUrl, ct);
         var effectiveUrl = matched.NormalizedUrl;
 
-        if (!allowDuplicateDownload)
+        if (!followUp.AllowDuplicateDownloads)
         {
             var normalizedEffectiveUrl = NormalizeUrlForLookup(effectiveUrl);
             var reservationKey = string.Empty;
@@ -948,23 +2046,34 @@ public class DownloaderService(
         }
 
         var entityId = item.EntityId;
+        var resolvedLabel = string.IsNullOrWhiteSpace(matched.Label) ? label : matched.Label.Trim();
         if (!entityId.HasValue && item.CreateEntityIfMissing)
-            entityId = await CreatePlaceholderEntityAsync(entity, effectiveUrl, ResolvePlaceholderTitle(item, effectiveUrl, label), ct);
+            entityId = await CreatePlaceholderEntityAsync(entity, effectiveUrl, ResolvePlaceholderTitle(item, effectiveUrl, resolvedLabel), ct);
 
         if (!entityId.HasValue && entity is DownloaderEntity.Scene or DownloaderEntity.Image or DownloaderEntity.Gallery)
             throw new InvalidOperationException($"Batch download item {index + 1} is missing an entity id.");
 
         return new ResolvedBatchItem(
-            new DownloaderRequest(matched.DownloaderId, effectiveUrl, entity, BuildDownloaderPermissions(effectiveUrl), matched.QualityId),
+            new DownloaderRequest(matched.DownloaderId, effectiveUrl, entity, BuildDownloaderPermissions(effectiveUrl), matched.QualityId, matched.SourceUrl ?? item.SourceUrl),
             entityId,
-            label,
-            item.AutoApplyMetadata);
+            resolvedLabel,
+            item.AutoApplyMetadata || followUp.AutoApplyMetadata,
+            BuildMetadataApplyOptions(item, followUp));
+    }
+
+    private static DownloaderMetadataApplyOptions BuildMetadataApplyOptions(DownloaderBatchItemDto item, DownloaderBatchFollowUpDto followUp)
+    {
+        return new DownloaderMetadataApplyOptions(
+            item.CreateMissingTags || followUp.CreateMissingTags,
+            item.CreateMissingPerformers || followUp.CreateMissingPerformers,
+            item.CreateMissingStudio || followUp.CreateMissingStudio,
+            item.MarkOrganized || followUp.MarkOrganized);
     }
 
     private async Task<ResolvedBatchMatch> ResolveBatchMatchAsync(DownloaderBatchItemDto item, DownloaderEntity entity, string url, CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(item.DownloaderId))
-            return new ResolvedBatchMatch(item.DownloaderId.Trim(), url, item.QualityId);
+            return new ResolvedBatchMatch(item.DownloaderId.Trim(), url, item.QualityId, SourceUrl: item.SourceUrl);
 
         var selectedMatch = (await MatchUrlAsync(url, ct))
             .FirstOrDefault(match => string.Equals(match.SupportedEntity, entity.ToString(), StringComparison.OrdinalIgnoreCase));
@@ -975,7 +2084,9 @@ public class DownloaderService(
         return new ResolvedBatchMatch(
             selectedMatch.DownloaderId,
             string.IsNullOrWhiteSpace(selectedMatch.NormalizedUrl) ? url : selectedMatch.NormalizedUrl,
-            item.QualityId ?? selectedMatch.QualityOptions.FirstOrDefault()?.Id);
+            item.QualityId ?? selectedMatch.QualityOptions.FirstOrDefault()?.Id,
+            selectedMatch.Label,
+            selectedMatch.SourceUrl);
     }
 
     private async Task<int> CreatePlaceholderEntityAsync(DownloaderEntity entity, string url, string title, CancellationToken ct)
@@ -1021,9 +2132,183 @@ public class DownloaderService(
                 await db.SaveChangesAsync(ct);
                 return gallery.Id;
             }
+            case DownloaderEntity.Audio:
+            {
+                var audio = new Audio
+                {
+                    Title = title,
+                    Organized = false,
+                    Urls = [new AudioUrl { Url = url }],
+                };
+                db.Audios.Add(audio);
+                await db.SaveChangesAsync(ct);
+                return audio.Id;
+            }
+            case DownloaderEntity.Text:
+            {
+                var text = new TextDocument
+                {
+                    Title = title,
+                    Organized = false,
+                    Urls = [new TextUrl { Url = url }],
+                };
+                db.TextDocuments.Add(text);
+                await db.SaveChangesAsync(ct);
+                return text.Id;
+            }
             default:
                 throw new InvalidOperationException($"Batch imports do not support creating new {entity.ToString().ToLowerInvariant()} records.");
         }
+    }
+
+    private async Task AttachDownloadedUrlAsync(DownloaderEntity entity, int entityId, string url, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return;
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+
+        switch (entity)
+        {
+            case DownloaderEntity.Scene:
+                if (!await db.Set<Cove.Core.Entities.SceneUrl>().AnyAsync(item => item.SceneId == entityId && item.Url == url, ct))
+                    db.Set<Cove.Core.Entities.SceneUrl>().Add(new Cove.Core.Entities.SceneUrl { SceneId = entityId, Url = url });
+                break;
+            case DownloaderEntity.Image:
+                if (!await db.Set<Cove.Core.Entities.ImageUrl>().AnyAsync(item => item.ImageId == entityId && item.Url == url, ct))
+                    db.Set<Cove.Core.Entities.ImageUrl>().Add(new Cove.Core.Entities.ImageUrl { ImageId = entityId, Url = url });
+                break;
+            case DownloaderEntity.Gallery:
+                if (!await db.Set<Cove.Core.Entities.GalleryUrl>().AnyAsync(item => item.GalleryId == entityId && item.Url == url, ct))
+                    db.Set<Cove.Core.Entities.GalleryUrl>().Add(new Cove.Core.Entities.GalleryUrl { GalleryId = entityId, Url = url });
+                break;
+            case DownloaderEntity.Audio:
+                if (!await db.Set<Cove.Core.Entities.AudioUrl>().AnyAsync(item => item.AudioId == entityId && item.Url == url, ct))
+                    db.Set<Cove.Core.Entities.AudioUrl>().Add(new Cove.Core.Entities.AudioUrl { AudioId = entityId, Url = url });
+                break;
+            case DownloaderEntity.Text:
+                if (!await db.Set<Cove.Core.Entities.TextUrl>().AnyAsync(item => item.TextDocumentId == entityId && item.Url == url, ct))
+                    db.Set<Cove.Core.Entities.TextUrl>().Add(new Cove.Core.Entities.TextUrl { TextDocumentId = entityId, Url = url });
+                break;
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task AttachBatchRelationshipsAsync(DownloaderEntity entity, int entityId, DownloaderBatchItemDto item, CancellationToken ct)
+    {
+        var galleryIds = item.GalleryIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList() ?? [];
+        var groupInputs = item.GroupIds?
+            .Where(group => group is { GroupId: > 0 })
+            .GroupBy(group => group.GroupId)
+            .Select(group => group.First())
+            .ToList() ?? [];
+
+        if ((entity != DownloaderEntity.Image || galleryIds.Count == 0) && groupInputs.Count == 0)
+            return;
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var changed = false;
+
+        if (entity == DownloaderEntity.Image && galleryIds.Count > 0)
+        {
+            var existingGalleryIds = await db.Set<ImageGallery>()
+                .Where(link => link.ImageId == entityId && galleryIds.Contains(link.GalleryId))
+                .Select(link => link.GalleryId)
+                .ToListAsync(ct);
+            var existingGalleryIdSet = existingGalleryIds.ToHashSet();
+            var linksToAdd = galleryIds
+                .Where(galleryId => !existingGalleryIdSet.Contains(galleryId))
+                .Select(galleryId => new ImageGallery { ImageId = entityId, GalleryId = galleryId })
+                .ToList();
+            if (linksToAdd.Count > 0)
+            {
+                db.Set<ImageGallery>().AddRange(linksToAdd);
+                changed = true;
+            }
+        }
+
+        if (groupInputs.Count > 0 && TryResolveGroupItemTarget(entity, out var groupTarget))
+        {
+            var targetGroupIds = groupInputs.Select(group => group.GroupId).ToList();
+            var existingGroupIds = await LoadExistingBatchGroupIdsAsync(db, entity, entityId, groupTarget.Kind, groupTarget.HostType, targetGroupIds, ct);
+            var groupItemsToAdd = groupInputs
+                .Where(group => !existingGroupIds.Contains(group.GroupId))
+                .Select(group => CreateBatchGroupItem(groupTarget.Kind, groupTarget.HostType, entityId, group.GroupId, group.SceneIndex, item.Title ?? item.Label))
+                .ToList();
+            if (groupItemsToAdd.Count > 0)
+            {
+                db.GroupItems.AddRange(groupItemsToAdd);
+                changed = true;
+            }
+        }
+
+        if (changed)
+            await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task<HashSet<int>> LoadExistingBatchGroupIdsAsync(
+        CoveContext db,
+        DownloaderEntity entity,
+        int entityId,
+        GroupItemKind kind,
+        string hostType,
+        IReadOnlyCollection<int> groupIds,
+        CancellationToken ct)
+    {
+        if (groupIds.Count == 0)
+            return [];
+
+        IQueryable<GroupItem> query = db.GroupItems.Where(item => groupIds.Contains(item.GroupId) && item.Kind == kind);
+        query = entity switch
+        {
+            DownloaderEntity.Scene => query.Where(item => (item.HostType == hostType && item.HostId == entityId) || item.SceneId == entityId),
+            DownloaderEntity.Image => query.Where(item => (item.HostType == hostType && item.HostId == entityId) || item.ImageId == entityId),
+            _ => query.Where(item => item.HostType == hostType && item.HostId == entityId),
+        };
+
+        var existing = await query.Select(item => item.GroupId).ToListAsync(ct);
+        return existing.ToHashSet();
+    }
+
+    private static GroupItem CreateBatchGroupItem(GroupItemKind kind, string hostType, int entityId, int groupId, int orderIndex, string? title)
+    {
+        var item = new GroupItem
+        {
+            GroupId = groupId,
+            OrderIndex = orderIndex,
+            Kind = kind,
+            HostType = hostType,
+            HostId = entityId,
+            Title = string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
+        };
+
+        if (kind == GroupItemKind.Scene)
+            item.SceneId = entityId;
+        else if (kind == GroupItemKind.Image)
+            item.ImageId = entityId;
+
+        return item;
+    }
+
+    private static bool TryResolveGroupItemTarget(DownloaderEntity entity, out (GroupItemKind Kind, string HostType) target)
+    {
+        target = entity switch
+        {
+            DownloaderEntity.Scene => (GroupItemKind.Scene, "scene"),
+            DownloaderEntity.Image => (GroupItemKind.Image, "image"),
+            DownloaderEntity.Gallery => (GroupItemKind.Gallery, "gallery"),
+            DownloaderEntity.Audio => (GroupItemKind.Audio, "audio"),
+            DownloaderEntity.Text => (GroupItemKind.Text, "text"),
+            _ => default,
+        };
+
+        return target != default;
     }
 
     private static string ResolvePlaceholderTitle(DownloaderBatchItemDto item, string url, string label)
@@ -1080,9 +2365,33 @@ public class DownloaderService(
         return new DownloaderPermissions();
     }
 
-    private sealed record ResolvedBatchItem(DownloaderRequest Request, int? EntityId, string Label, bool AutoApplyMetadata);
+    internal sealed record ScrapedAudioMetadata
+    {
+        public string? Title { get; init; }
+        public string? Code { get; init; }
+        public string? Details { get; init; }
+        public string? Date { get; init; }
+        public List<string> Urls { get; init; } = [];
+        public string? StudioName { get; init; }
+        public List<string> PerformerNames { get; init; } = [];
+        public List<string> TagNames { get; init; } = [];
+    }
 
-    private sealed record ResolvedBatchMatch(string DownloaderId, string NormalizedUrl, string? QualityId);
+    internal sealed record ScrapedTextMetadata
+    {
+        public string? Title { get; init; }
+        public string? Code { get; init; }
+        public string? Details { get; init; }
+        public string? Date { get; init; }
+        public List<string> Urls { get; init; } = [];
+        public string? StudioName { get; init; }
+        public List<string> PerformerNames { get; init; } = [];
+        public List<string> TagNames { get; init; } = [];
+    }
+
+    private sealed record ResolvedBatchItem(DownloaderRequest Request, int? EntityId, string Label, bool AutoApplyMetadata, DownloaderMetadataApplyOptions MetadataApplyOptions);
+
+    private sealed record ResolvedBatchMatch(string DownloaderId, string NormalizedUrl, string? QualityId, string? Label = null, string? SourceUrl = null);
 
     private sealed record IndexedBatchItem(DownloaderBatchItemDto Item, int Index);
 
@@ -1160,6 +2469,44 @@ public class DownloaderService(
         return duplicate == null ? null : duplicate.Title ?? $"Gallery {duplicate.Id}";
     }
 
+    private static async Task<string?> FindDuplicateAudioLabelAsync(CoveContext db, int? entityId, string normalizedUrl, CancellationToken ct)
+    {
+        var candidateUrls = await db.Set<Cove.Core.Entities.AudioUrl>()
+            .Where(item => !entityId.HasValue || item.AudioId != entityId.Value)
+            .Select(item => new { item.AudioId, item.Url })
+            .AsNoTracking()
+            .ToListAsync(ct);
+        var duplicateId = candidateUrls
+            .Where(item => NormalizeUrlForLookup(item.Url) == normalizedUrl)
+            .Select(item => item.AudioId)
+            .FirstOrDefault();
+
+        if (duplicateId == 0)
+            return null;
+
+        var duplicate = await db.Audios.FirstOrDefaultAsync(item => item.Id == duplicateId, ct);
+        return duplicate == null ? null : duplicate.Title ?? $"Audio {duplicate.Id}";
+    }
+
+    private static async Task<string?> FindDuplicateTextLabelAsync(CoveContext db, int? entityId, string normalizedUrl, CancellationToken ct)
+    {
+        var candidateUrls = await db.Set<Cove.Core.Entities.TextUrl>()
+            .Where(item => !entityId.HasValue || item.TextDocumentId != entityId.Value)
+            .Select(item => new { item.TextDocumentId, item.Url })
+            .AsNoTracking()
+            .ToListAsync(ct);
+        var duplicateId = candidateUrls
+            .Where(item => NormalizeUrlForLookup(item.Url) == normalizedUrl)
+            .Select(item => item.TextDocumentId)
+            .FirstOrDefault();
+
+        if (duplicateId == 0)
+            return null;
+
+        var duplicate = await db.TextDocuments.FirstOrDefaultAsync(item => item.Id == duplicateId, ct);
+        return duplicate == null ? null : duplicate.Title ?? $"Text {duplicate.Id}";
+    }
+
     private static string GetUniquePath(string directory, string fileName)
     {
         var safeFileName = string.IsNullOrWhiteSpace(fileName) ? "download" : fileName;
@@ -1184,6 +2531,7 @@ public class DownloaderService(
             DownloaderEntity.Image => "images",
             DownloaderEntity.Gallery => "galleries",
             DownloaderEntity.Audio => "audio",
+            DownloaderEntity.Text => "texts",
             _ => entity.ToString().ToLowerInvariant() + "s",
         };
     }
@@ -1204,6 +2552,18 @@ public class DownloaderService(
     {
         progress?.Report(0.98d, entityId.HasValue ? "Importing downloaded gallery..." : "Creating gallery from download...");
         return await scanService.ImportDownloadedGalleryAsync(libraryPath, entityId, ct);
+    }
+
+    private static async Task<int> ImportAudioAsync(IScanService scanService, string libraryPath, int? entityId, Cove.Core.Interfaces.IJobProgress? progress, CancellationToken ct)
+    {
+        progress?.Report(0.98d, entityId.HasValue ? "Importing downloaded audio..." : "Creating audio from download...");
+        return await scanService.ImportDownloadedAudioAsync(libraryPath, entityId, ct);
+    }
+
+    private static async Task<int> ImportTextAsync(IScanService scanService, string libraryPath, int? entityId, Cove.Core.Interfaces.IJobProgress? progress, CancellationToken ct)
+    {
+        progress?.Report(0.98d, entityId.HasValue ? "Importing downloaded text..." : "Creating text from download...");
+        return await scanService.ImportDownloadedTextAsync(libraryPath, entityId, ct);
     }
 
     private static void TryDeleteParentDirectory(string filePath)

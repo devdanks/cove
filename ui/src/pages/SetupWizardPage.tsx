@@ -29,7 +29,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
   const [paths, setPaths] = useState<CovePathConfig[]>(
     config.covePaths.length > 0
       ? config.covePaths
-      : [{ path: "", excludeVideo: false, excludeImage: false, excludeAudio: false }]
+      : [{ path: "", excludeVideo: false, excludeImage: false, excludeAudio: false, excludeText: false }]
   );
   const [error, setError] = useState<string | null>(null);
   const [stashDbPath, setStashDbPath] = useState("");
@@ -112,7 +112,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
   });
 
   const addPath = () => {
-    setPaths([...paths, { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false }]);
+    setPaths([...paths, { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false, excludeText: false }]);
   };
 
   const removePath = (index: number) => {
@@ -384,7 +384,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                         </button>
                       )}
                     </div>
-                    <div className="flex gap-4 pl-8">
+                    <div className="flex flex-wrap gap-4 pl-8">
                       <label className="flex items-center gap-1.5 text-xs text-secondary">
                         <input
                           type="checkbox"
@@ -402,6 +402,24 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                           className="h-3.5 w-3.5 rounded border-border bg-card text-accent focus:ring-0"
                         />
                         Exclude images
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={p.excludeAudio}
+                          onChange={(e) => updatePath(i, { excludeAudio: e.target.checked })}
+                          className="h-3.5 w-3.5 rounded border-border bg-card text-accent focus:ring-0"
+                        />
+                        Exclude audio
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={p.excludeText}
+                          onChange={(e) => updatePath(i, { excludeText: e.target.checked })}
+                          className="h-3.5 w-3.5 rounded border-border bg-card text-accent focus:ring-0"
+                        />
+                        Exclude texts
                       </label>
                     </div>
                   </div>
@@ -447,9 +465,9 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                     <div key={i} className="flex items-center gap-3">
                       <FolderOpen className="w-4 h-4 text-accent flex-shrink-0" />
                       <span className="text-sm text-foreground font-mono">{p.path}</span>
-                      {(p.excludeVideo || p.excludeImage) && (
+                      {(p.excludeVideo || p.excludeImage || p.excludeAudio || p.excludeText) && (
                         <span className="text-xs text-muted">
-                          (excludes: {[p.excludeVideo && "video", p.excludeImage && "images"].filter(Boolean).join(", ")})
+                          (excludes: {[p.excludeVideo && "video", p.excludeImage && "images", p.excludeAudio && "audio", p.excludeText && "texts"].filter(Boolean).join(", ")})
                         </span>
                       )}
                     </div>

@@ -12,7 +12,7 @@ namespace Cove.Data.Repositories;
 /// Generic filter helpers that work with any entity type.
 /// Centralizes criterion-based filtering logic previously duplicated per-entity.
 /// </summary>
-internal static class FilterHelpers
+public static class FilterHelpers
 {
     public static IQueryable<T> ApplyBooleanKeywordSearch<T>(IQueryable<T> query, string? search, params Expression<Func<T, string?>>[] selectors)
     {

@@ -285,6 +285,7 @@ function MediaDetailLayoutRoot({
     headerActions.push(<div key="actions" className="flex items-center gap-1">{actions}</div>);
   }
 
+  const isCompactMedia = mediaAspectRatio === "compact";
   const hasFramedMedia = Boolean(media && !mediaFullBleed && (mediaAspectRatio === "video" || mediaAspectRatio === "square"));
   const framedMediaClassName = mediaAspectRatio === "square"
     ? "aspect-square lg:w-[min(100%,calc(100vh-81px))]"
@@ -344,9 +345,10 @@ function MediaDetailLayoutRoot({
   const rightColumn = media ? (
     <div
       className={[
-        "flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden",
+        "flex min-w-0 min-h-0 flex-1 flex-col",
+        isCompactMedia ? "overflow-visible p-4 sm:p-6 lg:p-8" : "overflow-hidden",
         hasFramedMedia ? "items-center justify-center bg-black/95 p-3 sm:p-4" : "",
-        mediaAspectRatio === "square" ? "min-h-[70vw]" : "min-h-[45vh]",
+        isCompactMedia ? "" : mediaAspectRatio === "square" ? "min-h-[70vw]" : "min-h-[45vh]",
         mediaFullBleed ? "bg-black" : "",
         "lg:min-h-0",
         mediaSticky ? "xl:sticky xl:top-0 xl:self-start" : "",
@@ -373,6 +375,8 @@ function MediaDetailLayoutRoot({
         className={
           theaterMode || !media
             ? "flex flex-col"
+            : isCompactMedia
+              ? "flex flex-col lg:flex-row"
             : "flex flex-col lg:h-[calc(100vh-49px)] lg:overflow-hidden lg:flex-row"
         }
       >

@@ -1,13 +1,17 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { images, tags as tagsApi, performers as performersApi, galleries as galleriesApi, groups as groupsApi } from "../api/client";
-import type { Image, ImageCreate, SceneGroupInput } from "../api/types";
+import { images, system, tags as tagsApi, performers as performersApi, galleries as galleriesApi, groups as groupsApi } from "../api/client";
+import type { DownloaderMatch, Image, ImageCreate, SceneGroupInput } from "../api/types";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
+import { FileBackedCreateSource, type CreateSourceMode } from "../components/FileBackedCreateSource";
+import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundError, type UrlDownloadMode } from "../utils/createFromUrlDownload";
+import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
+import { ImageSourceDownloadDialog } from "../components/ImageSourceDownloadDialog";
 
 interface ImageEditProps {
   image: Image;
@@ -50,6 +54,21 @@ interface ImageMetadataModalProps {
   resetSignal?: number;
   createAnother?: boolean;
   onCreateAnotherChange?: (value: boolean) => void;
+  sourceMode?: CreateSourceMode;
+  onSourceModeChange?: (value: CreateSourceMode) => void;
+  filePath?: string;
+  onFilePathChange?: (value: string) => void;
+  url?: string;
+  onUrlChange?: (value: string) => void;
+  urlDownloadMode?: UrlDownloadMode;
+  onUrlDownloadModeChange?: (value: UrlDownloadMode) => void;
+  scrapeMetadata?: boolean;
+  onScrapeMetadataChange?: (value: boolean) => void;
+  noDownloaderFound?: boolean;
+  onCreateWithoutDownload?: (data: ImageCreate) => void;
+  onDismissNoDownloader?: () => void;
+  onCreateFromFile?: (filePath: string, data: ImageCreate) => void;
+  onCreateFromUrl?: (url: string, data: ImageCreate, downloadMode: UrlDownloadMode, scrapeMetadata: boolean) => void;
 }
 
 const EMPTY_FORM_STATE: ImageFormState = {
@@ -108,7 +127,7 @@ function cloneFormState(state: ImageFormState): ImageFormState {
   };
 }
 
-function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPending, error, image, resetSignal, createAnother, onCreateAnotherChange }: ImageMetadataModalProps) {
+function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPending, error, image, resetSignal, createAnother, onCreateAnotherChange, sourceMode = "metadata", onSourceModeChange, filePath = "", onFilePathChange, url = "", onUrlChange, urlDownloadMode = "now", onUrlDownloadModeChange, scrapeMetadata = false, onScrapeMetadataChange, noDownloaderFound = false, onCreateWithoutDownload, onDismissNoDownloader, onCreateFromFile, onCreateFromUrl }: ImageMetadataModalProps) {
   const [form, setForm] = useState<ImageFormState>(() => cloneFormState(initialState));
   const [tagSearch, setTagSearch] = useState("");
   const [perfSearch, setPerfSearch] = useState("");
@@ -148,9 +167,9 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
     setGroupSearch("");
   }, [initialState, open, resetSignal]);
 
-  const handleSave = () => {
+  const buildPayload = (): ImageCreate => {
     const urlList = form.urls.map((url) => url.trim()).filter(Boolean);
-    onSubmit({
+    return {
       title: form.title.trim() || undefined,
       code: form.code.trim() || undefined,
       details: form.details.trim() || undefined,
@@ -165,7 +184,32 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       galleryIds: form.selectedGalleryIds,
       groupIds: form.selectedGroups,
       customFields: image ? form.customFields : Object.keys(form.customFields).length > 0 ? form.customFields : undefined,
-    });
+    };
+  };
+
+  const handleSave = () => {
+    const payload = buildPayload();
+    if (sourceMode === "file" && onCreateFromFile) {
+      const trimmedPath = filePath.trim();
+      if (trimmedPath) onCreateFromFile(trimmedPath, payload);
+      return;
+    }
+
+    if (sourceMode === "url" && onCreateFromUrl) {
+      const requestedUrl = url.trim();
+      if (requestedUrl) onCreateFromUrl(requestedUrl, payload, urlDownloadMode, scrapeMetadata);
+      return;
+    }
+
+    onSubmit(payload);
+  };
+
+  const handleCreateWithoutDownload = () => {
+    const requestedUrl = url.trim();
+    if (requestedUrl && onCreateWithoutDownload) {
+      const payload = buildPayload();
+      onCreateWithoutDownload({ ...payload, urls: mergeUrlLists(payload.urls, [requestedUrl]) });
+    }
   };
 
   const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, form.selectedTagIds);
@@ -183,6 +227,28 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
 
   return (
     <EditModal title={title} open={open} onClose={onClose}>
+      {onSourceModeChange && onFilePathChange ? (
+        <FileBackedCreateSource
+          mode={sourceMode}
+          onModeChange={onSourceModeChange}
+          filePath={filePath}
+          onFilePathChange={onFilePathChange}
+          url={url}
+          onUrlChange={onUrlChange}
+          urlDownloadMode={urlDownloadMode}
+          onUrlDownloadModeChange={onUrlDownloadModeChange}
+          scrapeMetadata={scrapeMetadata}
+          onScrapeMetadataChange={onScrapeMetadataChange}
+          noDownloaderFound={noDownloaderFound}
+          onCreateWithoutDownload={onCreateWithoutDownload ? handleCreateWithoutDownload : undefined}
+          onDismissNoDownloader={onDismissNoDownloader}
+          modes={["metadata", "file", "url"]}
+          filePlaceholder="C:\\Media\\image.jpg"
+          urlPlaceholder="https://example.com/image.jpg"
+        />
+      ) : null}
+
+      <>
       <div className="grid grid-cols-2 gap-4">
         <Field label="Title">
           <TextInput value={form.title} onChange={(value) => setForm({ ...form, title: value })} placeholder="Image title" />
@@ -369,6 +435,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
           <SaveButton loading={isPending} onClick={handleSave} />
         </div>
       )}
+      </>
     </EditModal>
   );
 }
@@ -403,32 +470,132 @@ export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps)
   const queryClient = useQueryClient();
   const [createAnother, setCreateAnother] = useState(false);
   const [resetSignal, setResetSignal] = useState(0);
+  const [sourceMode, setSourceMode] = useState<CreateSourceMode>("metadata");
+  const [filePath, setFilePath] = useState("");
+  const [url, setUrl] = useState("");
+  const { urlDownloadMode, setUrlDownloadMode, scrapeMetadata, setScrapeMetadata } = useFileBackedCreatePreferences("Image");
+  const [noDownloaderFound, setNoDownloaderFound] = useState(false);
+  const [sourceDownload, setSourceDownload] = useState<{ sourceUrl: string; data: ImageCreate; matches: DownloaderMatch[]; autoApplyMetadata: boolean } | null>(null);
+
+  const handleCreated = (created: Image) => {
+    queryClient.invalidateQueries({ queryKey: ["images"] });
+    if (createAnother) {
+      setResetSignal((value) => value + 1);
+      setFilePath("");
+      setUrl("");
+      setNoDownloaderFound(false);
+      setSourceMode("metadata");
+      return;
+    }
+    onClose();
+    if (created?.id) onCreated(created.id);
+  };
 
   const mutation = useMutation({
     mutationFn: (data: ImageCreate) => images.create(data),
-    onSuccess: (created) => {
-      queryClient.invalidateQueries({ queryKey: ["images"] });
-      if (createAnother) {
-        setResetSignal((value) => value + 1);
-        return;
+    onSuccess: handleCreated,
+  });
+
+  const fileMutation = useMutation({
+    mutationFn: async ({ path, data }: { path: string; data: ImageCreate }) => {
+      const created = await images.createFromFile({ filePath: path });
+      return created?.id ? images.update(created.id, data) : created;
+    },
+    onSuccess: handleCreated,
+  });
+
+  const urlMutation = useMutation({
+    mutationFn: async ({ requestedUrl, data, downloadMode, scrapeMetadata }: { requestedUrl: string; data: ImageCreate; downloadMode: UrlDownloadMode; scrapeMetadata: boolean }) => {
+      if (downloadMode === "now") {
+        const matches = (await system.matchDownloaders({ url: requestedUrl }))
+          .filter((match) => match.supportedEntity.toLowerCase() === "image");
+
+        if (matches.length > 1) {
+          setSourceDownload({ sourceUrl: requestedUrl, data, matches, autoApplyMetadata: scrapeMetadata });
+          return null;
+        }
+
+        if (matches.length === 0) {
+          throw new NoDownloaderFoundError(requestedUrl);
+        }
       }
-      onClose();
-      if (created?.id) onCreated(created.id);
+
+      return createFromUrlWithOptionalDownload({ requestedUrl, data, entity: "Image", downloadMode, scrapeMetadata, create: images.create });
+    },
+    onSuccess: (created) => {
+      if (!created) return;
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      handleCreated(created);
+    },
+    onError: (err) => {
+      if (err instanceof NoDownloaderFoundError) setNoDownloaderFound(true);
     },
   });
 
+  const handleSourceModeChange = (value: CreateSourceMode) => {
+    setSourceMode(value);
+    setNoDownloaderFound(false);
+  };
+
+  const handleUrlChange = (value: string) => {
+    setUrl(value);
+    setNoDownloaderFound(false);
+  };
+
+  const handleCreateWithoutDownload = (data: ImageCreate) => {
+    mutation.mutate(data);
+  };
+
+  const visibleError = (mutation.error ?? fileMutation.error ?? urlMutation.error) instanceof NoDownloaderFoundError
+    ? null
+    : (mutation.error ?? fileMutation.error ?? urlMutation.error) as Error | null;
+
   return (
-    <ImageMetadataModal
-      title="Create Image"
-      open={open}
-      onClose={onClose}
-      initialState={EMPTY_FORM_STATE}
-      onSubmit={(data) => mutation.mutate(data)}
-      isPending={mutation.isPending}
-      error={mutation.error as Error | null}
-      resetSignal={resetSignal}
-      createAnother={createAnother}
-      onCreateAnotherChange={setCreateAnother}
-    />
+    <>
+      <ImageMetadataModal
+        title="Create Image"
+        open={open}
+        onClose={onClose}
+        initialState={EMPTY_FORM_STATE}
+        onSubmit={(data) => mutation.mutate(data)}
+        isPending={mutation.isPending || fileMutation.isPending || urlMutation.isPending}
+        error={visibleError}
+        resetSignal={resetSignal}
+        createAnother={createAnother}
+        onCreateAnotherChange={setCreateAnother}
+        sourceMode={sourceMode}
+        onSourceModeChange={handleSourceModeChange}
+        filePath={filePath}
+        onFilePathChange={setFilePath}
+        url={url}
+        onUrlChange={handleUrlChange}
+        urlDownloadMode={urlDownloadMode}
+        onUrlDownloadModeChange={setUrlDownloadMode}
+        scrapeMetadata={scrapeMetadata}
+        onScrapeMetadataChange={setScrapeMetadata}
+        noDownloaderFound={noDownloaderFound}
+        onCreateWithoutDownload={handleCreateWithoutDownload}
+        onDismissNoDownloader={() => setNoDownloaderFound(false)}
+        onCreateFromFile={(path, data) => fileMutation.mutate({ path, data })}
+        onCreateFromUrl={(requestedUrl, data, downloadMode, scrapeMetadata) => urlMutation.mutate({ requestedUrl, data, downloadMode, scrapeMetadata })}
+      />
+      {sourceDownload ? (
+        <ImageSourceDownloadDialog
+          open
+          sourceUrl={sourceDownload.sourceUrl}
+          matches={sourceDownload.matches}
+          baseTitle={sourceDownload.data.title}
+          metadata={sourceDownload.data}
+          autoApplyMetadata={sourceDownload.autoApplyMetadata}
+          onClose={() => setSourceDownload(null)}
+          onQueued={() => {
+            queryClient.invalidateQueries({ queryKey: ["jobs"] });
+            queryClient.invalidateQueries({ queryKey: ["images"] });
+            setSourceDownload(null);
+            onClose();
+          }}
+        />
+      ) : null}
+    </>
   );
 }

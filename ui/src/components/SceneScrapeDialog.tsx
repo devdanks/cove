@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, ImageIcon, Loader2, Search, Sparkles, X } from "lucide-react";
-import { scrapeAttempts, system } from "../api/client";
+import { performers, scrapeAttempts, system, tags } from "../api/client";
 import type { ScrapeAttempt } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
+import {
+  buildRelationActionMap,
+  buildRelationSelectionPayload,
+  relationKey,
+  ScrapeRelationChoices,
+  type ScrapeRelationActionMap,
+} from "./ScrapeRelationChoices";
 import type { CollectionMode, InputKind, ScrapeApplyPreferences, SceneScrapeScene } from "./sceneScrapeUtils";
 import {
   buildDefaultSceneApplyPlan,
@@ -68,6 +75,8 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
   const [replaceFields, setReplaceFields] = useState<string[]>([]);
   const [collectionModes, setCollectionModes] = useState<Record<string, CollectionMode>>({ ...DEFAULT_COLLECTION_MODES });
+  const [tagActions, setTagActions] = useState<ScrapeRelationActionMap>({});
+  const [performerActions, setPerformerActions] = useState<ScrapeRelationActionMap>({});
   const [error, setError] = useState<string | null>(null);
 
   const { data: scrapers = [] } = useQuery({
@@ -80,6 +89,20 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
     queryKey: ["scrape-attempts", "scene", scene.id],
     queryFn: () => scrapeAttempts.list({ entityType: "scene", entityId: scene.id, limit: 12 }),
     enabled: open,
+  });
+
+  const { data: tagPage } = useQuery({
+    queryKey: ["scrape-dialog-tags"],
+    queryFn: () => tags.find({ page: 1, perPage: 10000, sort: "name", direction: "asc" }),
+    enabled: open,
+    staleTime: 60_000,
+  });
+
+  const { data: performerPage } = useQuery({
+    queryKey: ["scrape-dialog-performers"],
+    queryFn: () => performers.find({ page: 1, perPage: 10000, sort: "name", direction: "asc" }),
+    enabled: open,
+    staleTime: 60_000,
   });
 
   const scraperPreferences = config?.scraping.scraperPreferences ?? [];
@@ -100,8 +123,23 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
   );
   const currentData = applyPlan.currentData;
   const scrapedData = applyPlan.scrapedData;
+  const existingTagNames = useMemo(() => (tagPage?.items ?? []).map((tag) => tag.name), [tagPage]);
+  const existingPerformerNames = useMemo(() => (performerPage?.items ?? []).map((performer) => performer.name), [performerPage]);
   const suggestedReplaceKey = useMemo(() => applyPlan.replaceFields.join("|"), [applyPlan.replaceFields]);
   const suggestedCollectionModesKey = useMemo(() => JSON.stringify(applyPlan.collectionModes), [applyPlan.collectionModes]);
+  const relationDefaultsKey = useMemo(
+    () => JSON.stringify({
+      tags: scrapedData?.tags ?? [],
+      performers: scrapedData?.performers ?? [],
+      currentTags: currentData.tags,
+      currentPerformers: currentData.performers,
+      existingTags: existingTagNames,
+      existingPerformers: existingPerformerNames,
+      createMissingTags: preferences.createMissingTags,
+      createMissingPerformers: preferences.createMissingPerformers,
+    }),
+    [currentData.performers, currentData.tags, existingPerformerNames, existingTagNames, preferences.createMissingPerformers, preferences.createMissingTags, scrapedData?.performers, scrapedData?.tags],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -127,6 +165,8 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
     setSelectedCandidateIndex(0);
     setReplaceFields([]);
     setCollectionModes({ ...DEFAULT_COLLECTION_MODES });
+    setTagActions({});
+    setPerformerActions({});
     setError(null);
   }, [open, scene]);
 
@@ -185,6 +225,17 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
     setReplaceFields([...applyPlan.replaceFields]);
     setCollectionModes({ ...applyPlan.collectionModes });
   }, [scene.id, selectedAttempt?.id, scrapedData, suggestedCollectionModesKey, suggestedReplaceKey]);
+
+  useEffect(() => {
+    if (!scrapedData) {
+      setTagActions({});
+      setPerformerActions({});
+      return;
+    }
+
+    setTagActions(buildRelationActionMap(scrapedData.tags, currentData.tags, existingTagNames, preferences.createMissingTags));
+    setPerformerActions(buildRelationActionMap(scrapedData.performers, currentData.performers, existingPerformerNames, preferences.createMissingPerformers));
+  }, [relationDefaultsKey, scene.id, scrapedData, selectedAttempt?.id]);
 
   const runMutation = useMutation({
     mutationFn: async () => {
@@ -245,6 +296,8 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
         markOrganized: preferences.markOrganized,
         hydratePerformers: preferences.hydratePerformers,
         selectedCandidateIndex: candidateResults.length > 1 ? selectedCandidateIndex : undefined,
+        tagSelections: scrapedData?.tags.length ? buildRelationSelectionPayload(scrapedData.tags, tagActions) : undefined,
+        performerSelections: scrapedData?.performers.length ? buildRelationSelectionPayload(scrapedData.performers, performerActions) : undefined,
       });
     },
     onSuccess: async (attempt) => {
@@ -633,10 +686,20 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
 
                 {collectionRows.map((row) => (
                   <section key={row.key} className="rounded-2xl border border-border bg-card/75 p-4">
+                    {(() => {
+                      const isTags = row.key === "tags";
+                      const isPerformers = row.key === "performers";
+                      const relationActions = isTags ? tagActions : performerActions;
+                      const setRelationActions = isTags ? setTagActions : setPerformerActions;
+                      const existingNames = isTags ? existingTagNames : existingPerformerNames;
+                      const showRelationChoices = isTags || isPerformers;
+
+                      return (
+                        <>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-foreground">{row.label}</div>
-                        <div className="text-xs text-secondary">Merge the incoming list, replace it entirely, or leave the current values untouched.</div>
+                        {!showRelationChoices ? <div className="text-xs text-secondary">Merge the incoming list, replace it entirely, or leave the current values untouched.</div> : null}
                       </div>
                       <select
                         value={collectionModes[row.key]}
@@ -657,9 +720,23 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
                       </div>
                       <div className="rounded-2xl border border-accent/30 bg-accent/5 p-3">
                         <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-accent">Scraped</div>
-                        <div className="mt-2 text-sm text-foreground">{row.scraped.join(", ")}</div>
+                        {showRelationChoices ? (
+                          <ScrapeRelationChoices
+                            names={row.scraped}
+                            currentNames={row.current}
+                            existingNames={existingNames}
+                            actions={relationActions}
+                            disabled={collectionModes[row.key] === "skip"}
+                            onActionChange={(name, action) => setRelationActions((current) => ({ ...current, [relationKey(name)]: action }))}
+                          />
+                        ) : (
+                          <div className="mt-2 text-sm text-foreground">{row.scraped.join(", ")}</div>
+                        )}
                       </div>
                     </div>
+                        </>
+                      );
+                    })()}
                   </section>
                 ))}
 
@@ -686,7 +763,7 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
                           onChange={(event) => setPreferences((current) => ({ ...current, createMissingTags: event.target.checked }))}
                           className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
                         />
-                        Create missing tags
+                        Default new tags to create
                       </label>
                       <label className="flex items-center gap-2 text-sm text-secondary">
                         <input
@@ -695,7 +772,7 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
                           onChange={(event) => setPreferences((current) => ({ ...current, createMissingPerformers: event.target.checked }))}
                           className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
                         />
-                        Create missing performers
+                        Default new performers to create
                       </label>
                       <label className="flex items-center gap-2 text-sm text-secondary">
                         <input

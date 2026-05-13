@@ -191,6 +191,8 @@ public sealed class ScanOperationOptions
     public bool GenerateMd5 { get; init; }
     public bool GenerateImageThumbnails { get; init; }
     public bool GenerateImagePhashes { get; init; }
+    public bool GenerateAudioPhashes { get; init; }
+    public bool GenerateTextPhashes { get; init; }
     public bool Rescan { get; init; }
 }
 
@@ -200,6 +202,8 @@ public interface IScanService
     Task<int> ImportDownloadedSceneAsync(string path, int? sceneId, CancellationToken ct = default);
     Task<int> ImportDownloadedImageAsync(string path, int? imageId, CancellationToken ct = default);
     Task<int> ImportDownloadedGalleryAsync(string path, int? galleryId, CancellationToken ct = default);
+    Task<int> ImportDownloadedAudioAsync(string path, int? audioId, CancellationToken ct = default);
+    Task<int> ImportDownloadedTextAsync(string path, int? textDocumentId, CancellationToken ct = default);
 }
 
 public interface IAutoTagService

@@ -36,6 +36,8 @@ public class EntityIdentifier
 public static class EntityKinds
 {
     public const string Scene = "scene";
+    public const string Audio = "audio";
+    public const string Text = "text";
     public const string Performer = "performer";
     public const string Face = "face";
     public const string Tag = "tag";

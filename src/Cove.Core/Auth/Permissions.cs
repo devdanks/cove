@@ -16,6 +16,16 @@ public static class Permissions
     public const string ScenesDeleteFile = "scenes.delete.file";
     public const string ScenesScrape = "scenes.scrape";
 
+    // Audios
+    public const string AudiosRead = "audios.read";
+    public const string AudiosWrite = "audios.write";
+    public const string AudiosDelete = "audios.delete";
+
+    // Texts
+    public const string TextsRead = "texts.read";
+    public const string TextsWrite = "texts.write";
+    public const string TextsDelete = "texts.delete";
+
     // Performers
     public const string PerformersRead = "performers.read";
     public const string PerformersWrite = "performers.write";
@@ -132,6 +142,14 @@ public static class Permissions
         new(ScenesDeleteFile, "Scenes", "Delete underlying scene files from disk.", Dangerous: true, Implies: [ScenesDelete]),
         new(ScenesScrape, "Scenes", "Run scrapers against scenes.", Implies: [ScenesRead]),
 
+        new(AudiosRead, "Audios", "View audio items."),
+        new(AudiosWrite, "Audios", "Create or edit audio metadata.", Implies: [AudiosRead]),
+        new(AudiosDelete, "Audios", "Delete audio rows.", Dangerous: true, Implies: [AudiosRead]),
+
+        new(TextsRead, "Texts", "View text items."),
+        new(TextsWrite, "Texts", "Create or edit text metadata.", Implies: [TextsRead]),
+        new(TextsDelete, "Texts", "Delete text rows.", Dangerous: true, Implies: [TextsRead]),
+
         new(PerformersRead, "Performers", "View performers."),
         new(PerformersWrite, "Performers", "Create or edit performer metadata.", Implies: [PerformersRead]),
         new(PerformersDelete, "Performers", "Delete performer rows.", Dangerous: true, Implies: [PerformersRead]),
@@ -223,6 +241,7 @@ public static class Permissions
     public static readonly string[] MemberDefaults =
     [
         ScenesWrite, ScenesScrape,
+        AudiosWrite, TextsWrite,
         PerformersWrite, PerformersScrape,
         FacesWrite, FacesDelete,
         TagsWrite, TagGroupsWrite, StudiosWrite,
@@ -240,7 +259,7 @@ public static class Permissions
     /// <summary>Default permission set for the Viewer role (read-only).</summary>
     public static readonly string[] ViewerDefaults =
     [
-        ScenesRead, PerformersRead, TagsRead, StudiosRead,
+        ScenesRead, AudiosRead, TextsRead, PerformersRead, TagsRead, StudiosRead,
         TagGroupsRead,
         GalleriesRead, ImagesRead, GroupsRead, SegmentsRead,
         FacesRead, EmbeddingsRead, AiRunsRead,
@@ -251,7 +270,7 @@ public static class Permissions
     /// <summary>Default permission set for the Guest role (share-link target).</summary>
     public static readonly string[] GuestDefaults =
     [
-        ScenesRead, PerformersRead, TagsRead, StudiosRead,
+        ScenesRead, AudiosRead, TextsRead, PerformersRead, TagsRead, StudiosRead,
         TagGroupsRead,
         GalleriesRead, ImagesRead, GroupsRead,
         StreamRead,

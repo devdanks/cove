@@ -107,6 +107,100 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         return NoContent();
     }
 
+    // ── Audios ─────────────────────────────────────────────────
+
+    [HttpPost("audios/{id:int}/image")]
+    [RequiresPermission(Permissions.AudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Audio, Permissions.AudiosWrite)]
+    public async Task<IActionResult> UploadAudioImage(int id, IFormFile file, CancellationToken ct)
+    {
+        if (!IsImage(file)) return BadRequest("File must be an image.");
+
+        var entity = await db.Audios.FirstOrDefaultAsync(audio => audio.Id == id, ct);
+        if (entity == null) return NotFound();
+
+        if (entity.ImageBlobId != null)
+            await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
+
+        await using var stream = file.OpenReadStream();
+        entity.ImageBlobId = await blobService.StoreBlobAsync(stream, file.ContentType, ct);
+        await db.SaveChangesAsync(ct);
+
+        return Ok(new { blobId = entity.ImageBlobId });
+    }
+
+    [HttpGet("audios/{id:int}/image")]
+    [RequiresPermission(Permissions.AudiosRead)]
+    public async Task<IActionResult> GetAudioImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
+    {
+        var entity = await db.Audios.FirstOrDefaultAsync(audio => audio.Id == id, ct);
+        if (entity?.ImageBlobId == null) return NotFound();
+
+        return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
+    }
+
+    [HttpDelete("audios/{id:int}/image")]
+    [RequiresPermission(Permissions.AudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Audio, Permissions.AudiosWrite)]
+    public async Task<IActionResult> DeleteAudioImage(int id, CancellationToken ct)
+    {
+        var entity = await db.Audios.FirstOrDefaultAsync(audio => audio.Id == id, ct);
+        if (entity?.ImageBlobId == null) return NotFound();
+
+        await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
+        entity.ImageBlobId = null;
+        await db.SaveChangesAsync(ct);
+
+        return NoContent();
+    }
+
+    // ── Texts ──────────────────────────────────────────────────
+
+    [HttpPost("texts/{id:int}/image")]
+    [RequiresPermission(Permissions.TextsWrite)]
+    [RequiresEntityAccess(EntityKinds.Text, Permissions.TextsWrite)]
+    public async Task<IActionResult> UploadTextImage(int id, IFormFile file, CancellationToken ct)
+    {
+        if (!IsImage(file)) return BadRequest("File must be an image.");
+
+        var entity = await db.TextDocuments.FirstOrDefaultAsync(text => text.Id == id, ct);
+        if (entity == null) return NotFound();
+
+        if (entity.ImageBlobId != null)
+            await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
+
+        await using var stream = file.OpenReadStream();
+        entity.ImageBlobId = await blobService.StoreBlobAsync(stream, file.ContentType, ct);
+        await db.SaveChangesAsync(ct);
+
+        return Ok(new { blobId = entity.ImageBlobId });
+    }
+
+    [HttpGet("texts/{id:int}/image")]
+    [RequiresPermission(Permissions.TextsRead)]
+    public async Task<IActionResult> GetTextImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
+    {
+        var entity = await db.TextDocuments.FirstOrDefaultAsync(text => text.Id == id, ct);
+        if (entity?.ImageBlobId == null) return NotFound();
+
+        return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
+    }
+
+    [HttpDelete("texts/{id:int}/image")]
+    [RequiresPermission(Permissions.TextsWrite)]
+    [RequiresEntityAccess(EntityKinds.Text, Permissions.TextsWrite)]
+    public async Task<IActionResult> DeleteTextImage(int id, CancellationToken ct)
+    {
+        var entity = await db.TextDocuments.FirstOrDefaultAsync(text => text.Id == id, ct);
+        if (entity?.ImageBlobId == null) return NotFound();
+
+        await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
+        entity.ImageBlobId = null;
+        await db.SaveChangesAsync(ct);
+
+        return NoContent();
+    }
+
     // ── Faces ──────────────────────────────────────────────────
 
     [HttpPost("faces/{id:int}/image")]

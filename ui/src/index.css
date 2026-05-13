@@ -1177,26 +1177,26 @@ html[data-style-animated-buttonglow="off"] .bg-accent:hover { animation: none; }
 
 @theme {
   /* Dark theme */
-  --color-plex-bg: #202b33;
-  --color-plex-surface: #283540;
-  --color-plex-card: #30404d;
-  --color-plex-card-hover: #394b59;
-  --color-plex-border: #394b59;
-  --color-plex-input: rgba(16, 22, 26, 0.3);
-  --color-plex-text: #f5f8fa;
-  --color-plex-text-secondary: #bfccd6;
-  --color-plex-text-muted: #8a9ba8;
-  --color-plex-accent: #137cbd;
-  --color-plex-accent-hover: #48aff0;
-  --color-plex-overlay: rgba(0, 0, 0, 0.6);
-  --color-plex-nav: #1a2329;
-  --color-plex-nav-active: #137cbd;
+  --color-shell-bg: #202b33;
+  --color-shell-surface: #283540;
+  --color-shell-card: #30404d;
+  --color-shell-card-hover: #394b59;
+  --color-shell-border: #394b59;
+  --color-shell-input: rgba(16, 22, 26, 0.3);
+  --color-shell-text: #f5f8fa;
+  --color-shell-text-secondary: #bfccd6;
+  --color-shell-text-muted: #8a9ba8;
+  --color-shell-accent: #137cbd;
+  --color-shell-accent-hover: #48aff0;
+  --color-shell-overlay: rgba(0, 0, 0, 0.6);
+  --color-shell-nav: #1a2329;
+  --color-shell-nav-active: #137cbd;
 }
 
 /* Base */
 body {
-  background-color: var(--color-plex-bg);
-  color: var(--color-plex-text);
+  background-color: var(--color-shell-bg);
+  color: var(--color-shell-text);
   font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -1215,7 +1215,7 @@ a, button { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, o
 
 /* Detail page hero section — theme-aware background that respects glass/gradient */
 .detail-hero-gradient {
-  background: linear-gradient(180deg, var(--color-plex-surface), var(--color-plex-bg));
+  background: linear-gradient(180deg, var(--color-shell-surface), var(--color-shell-bg));
 }
 
 /* Theater mode */
@@ -1354,31 +1354,31 @@ html[data-color-scheme="light"] select {
  * This makes glass apply EVERYWHERE consistently without per-element selectors.
  */
 html[data-component-style*="glass"] {
-  --color-plex-nav: rgba(18, 18, 24, 0.4);
-  --color-plex-surface: rgba(28, 28, 36, 0.3);
-  --color-plex-card: rgba(36, 36, 46, 0.25);
-  --color-plex-card-hover: rgba(48, 48, 58, 0.35);
-  --color-plex-input: rgba(12, 12, 18, 0.25);
-  --color-plex-border: rgba(255, 255, 255, 0.12);
-  --color-plex-overlay: rgba(0, 0, 0, 0.4);
+  --color-shell-nav: rgba(18, 18, 24, 0.4);
+  --color-shell-surface: rgba(28, 28, 36, 0.3);
+  --color-shell-card: rgba(36, 36, 46, 0.25);
+  --color-shell-card-hover: rgba(48, 48, 58, 0.35);
+  --color-shell-input: rgba(12, 12, 18, 0.25);
+  --color-shell-border: rgba(255, 255, 255, 0.12);
+  --color-shell-overlay: rgba(0, 0, 0, 0.4);
 }
 
 /* Light theme glass: use light translucent values instead */
 html[data-theme="light"][data-component-style*="glass"] {
-  --color-plex-nav: rgba(255, 255, 255, 0.6);
-  --color-plex-surface: rgba(255, 255, 255, 0.45);
-  --color-plex-card: rgba(255, 255, 255, 0.4);
-  --color-plex-card-hover: rgba(255, 255, 255, 0.55);
-  --color-plex-input: rgba(255, 255, 255, 0.3);
-  --color-plex-border: rgba(0, 0, 0, 0.1);
-  --color-plex-overlay: rgba(0, 0, 0, 0.2);
+  --color-shell-nav: rgba(255, 255, 255, 0.6);
+  --color-shell-surface: rgba(255, 255, 255, 0.45);
+  --color-shell-card: rgba(255, 255, 255, 0.4);
+  --color-shell-card-hover: rgba(255, 255, 255, 0.55);
+  --color-shell-input: rgba(255, 255, 255, 0.3);
+  --color-shell-border: rgba(0, 0, 0, 0.1);
+  --color-shell-overlay: rgba(0, 0, 0, 0.2);
 }
 
 /* Global glass: major surfaces get frosted glass blur.
  * PERF: Only apply blur to key structural elements. Blur is GPU-expensive;
  * limit to navigation, surfaces, and detail page panels. */
-html[data-component-style*="glass"] .bg-plex-surface,
-html[data-component-style*="glass"] .bg-plex-surface\/50 {
+html[data-component-style*="glass"] .bg-shell-surface,
+html[data-component-style*="glass"] .bg-shell-surface\/50 {
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   box-shadow:
@@ -1393,7 +1393,7 @@ html[data-component-style*="glass"] .detail-hero-gradient {
 }
 
 /* Detail page: metadata and info cards — no blur, just tinted translucent bg */
-html[data-component-style*="glass"] .rounded-xl.border.border-plex-border.bg-plex-card {
+html[data-component-style*="glass"] .rounded-xl.border.border-shell-border.bg-shell-card {
   border-color: rgba(255, 255, 255, 0.1);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
@@ -1401,7 +1401,7 @@ html[data-component-style*="glass"] .rounded-xl.border.border-plex-border.bg-ple
 }
 
 /* Navbar — one fixed element, OK to blur */
-html[data-component-style*="glass"] .bg-plex-nav {
+html[data-component-style*="glass"] .bg-shell-nav {
   -webkit-backdrop-filter: blur(24px);
   backdrop-filter: blur(24px);
   box-shadow:
@@ -1410,7 +1410,7 @@ html[data-component-style*="glass"] .bg-plex-nav {
 }
 
 /* Input fields — no blur, translucent bg is sufficient */
-html[data-component-style*="glass"] .bg-plex-input {
+html[data-component-style*="glass"] .bg-shell-input {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
@@ -1445,30 +1445,30 @@ html[data-style-glass-cardblur="full"][data-component-style*="glass"] .scene-car
 }
 
 /* Glass surface blur: configurable via data-style-glass-surfaceblur */
-html[data-style-glass-surfaceblur="low"][data-component-style*="glass"] .bg-plex-surface,
-html[data-style-glass-surfaceblur="low"][data-component-style*="glass"] .bg-plex-surface\/50 {
+html[data-style-glass-surfaceblur="low"][data-component-style*="glass"] .bg-shell-surface,
+html[data-style-glass-surfaceblur="low"][data-component-style*="glass"] .bg-shell-surface\/50 {
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
-html[data-style-glass-surfaceblur="high"][data-component-style*="glass"] .bg-plex-surface,
-html[data-style-glass-surfaceblur="high"][data-component-style*="glass"] .bg-plex-surface\/50 {
+html[data-style-glass-surfaceblur="high"][data-component-style*="glass"] .bg-shell-surface,
+html[data-style-glass-surfaceblur="high"][data-component-style*="glass"] .bg-shell-surface\/50 {
   -webkit-backdrop-filter: blur(32px);
   backdrop-filter: blur(32px);
 }
 
 /* Glass opacity: light (more see-through) */
 html[data-style-glass-opacity="light"][data-component-style*="glass"] {
-  --color-plex-nav: rgba(18, 18, 24, 0.25);
-  --color-plex-surface: rgba(28, 28, 36, 0.15);
-  --color-plex-card: rgba(36, 36, 46, 0.12);
-  --color-plex-card-hover: rgba(48, 48, 58, 0.2);
+  --color-shell-nav: rgba(18, 18, 24, 0.25);
+  --color-shell-surface: rgba(28, 28, 36, 0.15);
+  --color-shell-card: rgba(36, 36, 46, 0.12);
+  --color-shell-card-hover: rgba(48, 48, 58, 0.2);
 }
 /* Glass opacity: heavy (more opaque) */
 html[data-style-glass-opacity="heavy"][data-component-style*="glass"] {
-  --color-plex-nav: rgba(18, 18, 24, 0.65);
-  --color-plex-surface: rgba(28, 28, 36, 0.55);
-  --color-plex-card: rgba(36, 36, 46, 0.5);
-  --color-plex-card-hover: rgba(48, 48, 58, 0.6);
+  --color-shell-nav: rgba(18, 18, 24, 0.65);
+  --color-shell-surface: rgba(28, 28, 36, 0.55);
+  --color-shell-card: rgba(36, 36, 46, 0.5);
+  --color-shell-card-hover: rgba(48, 48, 58, 0.6);
 }
 
 html[data-component-style*="glass"] .entity-card:hover,
@@ -1497,7 +1497,7 @@ html[data-component-style*="glass"] [role="dialog"] {
  * Also exclude tab buttons, rating stars, and interactive inline buttons. */
 html[data-component-style*="glass"] button.no-glass,
 html[data-component-style*="glass"] button[class*="border-b-2"],
-html[data-component-style*="glass"] button[class*="text-plex-accent transition-transform"] {
+html[data-component-style*="glass"] button[class*="text-shell-accent transition-transform"] {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   box-shadow: none !important;
@@ -1571,14 +1571,14 @@ html[data-component-style*="glass"] .border-t {
 
 /* Liquid Glass: extremely translucent surfaces */
 html[data-theme="liquid-glass"][data-component-style*="glass"] {
-  --color-plex-bg: transparent;
-  --color-plex-nav: rgba(20, 20, 30, 0.12);
-  --color-plex-surface: rgba(24, 24, 36, 0.08);
-  --color-plex-card: rgba(30, 30, 42, 0.08);
-  --color-plex-card-hover: rgba(40, 40, 55, 0.15);
-  --color-plex-input: rgba(10, 10, 18, 0.12);
-  --color-plex-border: rgba(255, 255, 255, 0.2);
-  --color-plex-overlay: rgba(0, 0, 0, 0.25);
+  --color-shell-bg: transparent;
+  --color-shell-nav: rgba(20, 20, 30, 0.12);
+  --color-shell-surface: rgba(24, 24, 36, 0.08);
+  --color-shell-card: rgba(30, 30, 42, 0.08);
+  --color-shell-card-hover: rgba(40, 40, 55, 0.15);
+  --color-shell-input: rgba(10, 10, 18, 0.12);
+  --color-shell-border: rgba(255, 255, 255, 0.2);
+  --color-shell-overlay: rgba(0, 0, 0, 0.25);
 }
 
 /* Liquid Glass: static gradient background (no animation by default) */
@@ -1623,8 +1623,8 @@ html[data-theme="liquid-glass"] ::-webkit-scrollbar-thumb {
 }
 
 /* Liquid Glass: dramatically increased blur + bright glass edges */
-html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-plex-surface,
-html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-plex-surface\/50 {
+html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-shell-surface,
+html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-shell-surface\/50 {
   -webkit-backdrop-filter: blur(24px);
   backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -1635,7 +1635,7 @@ html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-plex-surface\
 }
 
 /* Liquid Glass: navbar */
-html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-plex-nav {
+html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-shell-nav {
   -webkit-backdrop-filter: blur(30px);
   backdrop-filter: blur(30px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.15);
@@ -1699,7 +1699,7 @@ html[data-theme="liquid-glass"][data-component-style*="glass"] .fixed.right-0 {
 }
 
 /* Liquid Glass: inputs */
-html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-plex-input {
+html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-shell-input {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -1759,7 +1759,7 @@ html[data-theme="liquid-glass"] .bg-gradient-to-t {
 }
 
 /* Liquid Glass: detail page metadata cards — no blur */
-html[data-theme="liquid-glass"][data-component-style*="glass"] .rounded-xl.border.border-plex-border {
+html[data-theme="liquid-glass"][data-component-style*="glass"] .rounded-xl.border.border-shell-border {
   border: 1px solid rgba(255, 255, 255, 0.15);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.2),
@@ -1767,12 +1767,12 @@ html[data-theme="liquid-glass"][data-component-style*="glass"] .rounded-xl.borde
 }
 
 /* Liquid Glass: tab navigation bar */
-html[data-theme="liquid-glass"][data-component-style*="glass"] .border-b.border-plex-border {
+html[data-theme="liquid-glass"][data-component-style*="glass"] .border-b.border-shell-border {
   border-color: rgba(255, 255, 255, 0.08);
 }
 
 /* Liquid Glass: detail page sidebar */
-html[data-theme="liquid-glass"][data-component-style*="glass"] .border-r.border-plex-border {
+html[data-theme="liquid-glass"][data-component-style*="glass"] .border-r.border-shell-border {
   border-color: rgba(255, 255, 255, 0.08);
 }
 
@@ -1798,7 +1798,7 @@ html[data-component-style*="gradient"] body {
   background:
     radial-gradient(ellipse 140% 100% at 10% 90%, rgba(var(--gradient-r1, 19), var(--gradient-g1, 124), var(--gradient-b1, 189), 0.45) 0%, transparent 55%),
     radial-gradient(ellipse 120% 90% at 90% 10%, rgba(var(--gradient-r2, 72), var(--gradient-g2, 175), var(--gradient-b2, 240), 0.35) 0%, transparent 50%),
-    var(--color-plex-bg);
+    var(--color-shell-bg);
   background-size: 200% 200%;
   background-attachment: fixed;
   animation: gradient-flow 30s ease-in-out infinite;
@@ -1839,17 +1839,17 @@ html[data-theme="dark-ocean"][data-component-style*="gradient"] {
   --gradient-r2: 2; --gradient-g2: 132; --gradient-b2: 199;
   --gradient-r3: 56; --gradient-g3: 189; --gradient-b3: 248;
 }
-html[data-theme="pornhub"][data-component-style*="gradient"] {
+html[data-theme="copper-noir"][data-component-style*="gradient"] {
   --gradient-r1: 255; --gradient-g1: 144; --gradient-b1: 0;
   --gradient-r2: 255; --gradient-g2: 182; --gradient-b2: 72;
   --gradient-r3: 200; --gradient-g3: 100; --gradient-b3: 0;
 }
-html[data-theme="plex"][data-component-style*="gradient"] {
+html[data-theme="golden-hour"][data-component-style*="gradient"] {
   --gradient-r1: 229; --gradient-g1: 160; --gradient-b1: 13;
   --gradient-r2: 204; --gradient-g2: 123; --gradient-b2: 25;
   --gradient-r3: 180; --gradient-g3: 130; --gradient-b3: 20;
 }
-html[data-theme="reddit"][data-component-style*="gradient"] {
+html[data-theme="signal-dark"][data-component-style*="gradient"] {
   --gradient-r1: 255; --gradient-g1: 69; --gradient-b1: 0;
   --gradient-r2: 255; --gradient-g2: 103; --gradient-b2: 51;
   --gradient-r3: 200; --gradient-g3: 50; --gradient-b3: 0;
@@ -1908,7 +1908,7 @@ html[data-component-style*="gradient"] nav.cove-navbar {
       transparent 70%,
       rgba(var(--gradient-r2, 72), var(--gradient-g2, 175), var(--gradient-b2, 240), 0.12) 100%
     ),
-    var(--color-plex-nav);
+    var(--color-shell-nav);
   border-bottom: 1px solid rgba(var(--gradient-r1, 19), var(--gradient-g1, 124), var(--gradient-b1, 189), 0.2);
 }
 
@@ -1919,9 +1919,9 @@ html[data-component-style*="gradient"] .scene-card {
 }
 
 /* Gradient card bodies: subtle accent-tinted background on card text areas.
- * Targets .card-body (entity cards) and .bg-plex-card inside scene cards. */
+ * Targets .card-body (entity cards) and .bg-shell-card inside scene cards. */
 html[data-component-style*="gradient"] .entity-card .card-body,
-html[data-component-style*="gradient"] .scene-card > div.bg-plex-card {
+html[data-component-style*="gradient"] .scene-card > div.bg-shell-card {
   background:
     linear-gradient(135deg,
       rgba(var(--gradient-r1, 19), var(--gradient-g1, 124), var(--gradient-b1, 189), var(--card-gradient-opacity, 0.08)) 0%,
@@ -1949,12 +1949,12 @@ html[data-style-gradient-cardstrength="strong"][data-component-style*="gradient"
 
 /* Gradient cards: disable card gradients when turned off */
 html[data-style-gradient-cards="off"][data-component-style*="gradient"] .entity-card .card-body,
-html[data-style-gradient-cards="off"][data-component-style*="gradient"] .scene-card > div.bg-plex-card {
+html[data-style-gradient-cards="off"][data-component-style*="gradient"] .scene-card > div.bg-shell-card {
   background: transparent;
 }
 html[data-style-gradient-cards="off"][data-component-style*="gradient"] .entity-card,
 html[data-style-gradient-cards="off"][data-component-style*="gradient"] .scene-card {
-  border-top-color: var(--color-plex-border);
+  border-top-color: var(--color-shell-border);
 }
 
 /* Gradient background strength: subtle */
@@ -1962,7 +1962,7 @@ html[data-style-gradient-bgstrength="subtle"][data-component-style*="gradient"] 
   background:
     radial-gradient(ellipse 140% 100% at 10% 90%, rgba(var(--gradient-r1, 19), var(--gradient-g1, 124), var(--gradient-b1, 189), 0.2) 0%, transparent 55%),
     radial-gradient(ellipse 120% 90% at 90% 10%, rgba(var(--gradient-r2, 72), var(--gradient-g2, 175), var(--gradient-b2, 240), 0.15) 0%, transparent 50%),
-    var(--color-plex-bg);
+    var(--color-shell-bg);
   background-size: 200% 200%;
   background-attachment: fixed;
 }
@@ -1971,7 +1971,7 @@ html[data-style-gradient-bgstrength="strong"][data-component-style*="gradient"] 
   background:
     radial-gradient(ellipse 140% 100% at 10% 90%, rgba(var(--gradient-r1, 19), var(--gradient-g1, 124), var(--gradient-b1, 189), 0.7) 0%, transparent 55%),
     radial-gradient(ellipse 120% 90% at 90% 10%, rgba(var(--gradient-r2, 72), var(--gradient-g2, 175), var(--gradient-b2, 240), 0.55) 0%, transparent 50%),
-    var(--color-plex-bg);
+    var(--color-shell-bg);
   background-size: 200% 200%;
   background-attachment: fixed;
 }
@@ -1986,13 +1986,13 @@ html[data-component-style*="gradient"] .card-popovers {
 }
 
 /* Gradient toolbar/filter bar: subtle accent wash */
-html[data-component-style*="gradient"] .bg-plex-surface {
+html[data-component-style*="gradient"] .bg-shell-surface {
   background:
     linear-gradient(135deg,
       rgba(var(--gradient-r1, 19), var(--gradient-g1, 124), var(--gradient-b1, 189), 0.1) 0%,
       transparent 100%
     ),
-    var(--color-plex-surface);
+    var(--color-shell-surface);
 }
 
 /* Liquid Glass + Gradient combined: vivid fixed background.
@@ -2053,22 +2053,22 @@ html[data-layout="compact"] .card-popovers {
 }
 
 /* ===== Text Readability: ensure text is always legible over glass/gradients ===== */
-html[data-component-style*="glass"] .text-plex-text,
+html[data-component-style*="glass"] .text-shell-text,
 html[data-component-style*="glass"] .card-title {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
-html[data-component-style*="glass"] .text-plex-text-secondary {
+html[data-component-style*="glass"] .text-shell-text-secondary {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 /* Light theme text readability: use white shadow instead */
-html[data-theme="light"][data-component-style*="glass"] .text-plex-text,
+html[data-theme="light"][data-component-style*="glass"] .text-shell-text,
 html[data-theme="light"][data-component-style*="glass"] .card-title {
   text-shadow: 0 1px 3px rgba(255, 255, 255, 0.5);
 }
 
-html[data-theme="light"][data-component-style*="glass"] .text-plex-text-secondary {
+html[data-theme="light"][data-component-style*="glass"] .text-shell-text-secondary {
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.3);
 }
 
@@ -2084,7 +2084,7 @@ html[data-theme="light"][data-component-style*="glass"] .border-t {
 }
 
 /* Ensure card text areas have enough contrast even with glass */
-html[data-component-style*="glass"] .scene-card > div.bg-plex-card,
+html[data-component-style*="glass"] .scene-card > div.bg-shell-card,
 html[data-component-style*="glass"] .entity-card > div:last-of-type {
   position: relative;
 }
@@ -2100,7 +2100,7 @@ html[data-theme="light"][data-component-style*="gradient"] body {
     radial-gradient(ellipse 140% 100% at 10% 90%, rgba(var(--gradient-r1), var(--gradient-g1), var(--gradient-b1), 0.15) 0%, transparent 55%),
     radial-gradient(ellipse 120% 90% at 90% 10%, rgba(var(--gradient-r2), var(--gradient-g2), var(--gradient-b2), 0.12) 0%, transparent 50%),
     radial-gradient(ellipse 100% 80% at 50% 50%, rgba(var(--gradient-r3), var(--gradient-g3), var(--gradient-b3), 0.1) 0%, transparent 60%),
-    var(--color-plex-bg);
+    var(--color-shell-bg);
   background-size: 200% 200%;
   animation: gradient-flow 20s ease-in-out infinite;
 }

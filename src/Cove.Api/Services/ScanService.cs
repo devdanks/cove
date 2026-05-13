@@ -1,4 +1,5 @@
 using System.IO.Enumeration;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -19,12 +20,12 @@ public class ScanService(
     IEventBus eventBus,
     IFingerprintService fingerprintService,
     IThumbnailService thumbnailService,
+    TextExtractionService textExtractionService,
     ZipGalleryReader zipGalleryReader,
     ExtensionManager extensionManager,
     ILogger<ScanService> logger) : IScanService
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> FolderCreationLocks = new(StringComparer.OrdinalIgnoreCase);
-
     /// <summary>
     /// Resolves the max degree of parallelism from config.
     /// -1 means use all processors; 0 or 1 means single-threaded; >1 means that many threads.
@@ -101,6 +102,48 @@ public class ScanService(
         return gallery.Id;
     }
 
+    public async Task<int> ImportDownloadedAudioAsync(string path, int? audioId, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException("Downloaded audio file not found", path);
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var audio = await ProcessAudioFileAsync(db, path, audioId, ct);
+        await db.SaveChangesAsync(ct);
+
+        if (audio.Id == 0)
+            throw new InvalidOperationException($"Imported audio file {path} was not attached to an audio item");
+
+        eventBus.Publish(new EntityEvent(
+            audioId.HasValue ? EventType.AudioUpdated : EventType.AudioCreated,
+            "Audio",
+            audio.Id));
+
+        return audio.Id;
+    }
+
+    public async Task<int> ImportDownloadedTextAsync(string path, int? textDocumentId, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException("Downloaded text file not found", path);
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var textDocument = await ProcessTextFileAsync(db, path, textDocumentId, ct);
+        await db.SaveChangesAsync(ct);
+
+        if (textDocument.Id == 0)
+            throw new InvalidOperationException($"Imported text file {path} was not attached to a text document");
+
+        eventBus.Publish(new EntityEvent(
+            textDocumentId.HasValue ? EventType.TextUpdated : EventType.TextCreated,
+            "Text",
+            textDocument.Id));
+
+        return textDocument.Id;
+    }
+
     public string StartScan(ScanOperationOptions? options = null)
     {
         options ??= new ScanOperationOptions();
@@ -119,9 +162,13 @@ public class ScanService(
             var videoExts = new HashSet<string>(cfg.VideoExtensions, StringComparer.OrdinalIgnoreCase);
             var imageExts = new HashSet<string>(cfg.ImageExtensions, StringComparer.OrdinalIgnoreCase);
             var galleryExts = new HashSet<string>(cfg.GalleryExtensions, StringComparer.OrdinalIgnoreCase);
-            var allExts = videoExts.Union(imageExts).Union(galleryExts).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var audioExts = new HashSet<string>(cfg.AudioExtensions, StringComparer.OrdinalIgnoreCase);
+            var textExts = new HashSet<string>(cfg.TextExtensions, StringComparer.OrdinalIgnoreCase);
+            var allExts = videoExts.Union(imageExts).Union(galleryExts).Union(audioExts).Union(textExts).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var processedVideoPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var processedImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var processedImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var processedAudioPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var processedTextPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var ignoreRuleCache = new Dictionary<string, List<IgnoreRule>>(StringComparer.OrdinalIgnoreCase);
 
             // Phase 1: Discover files
@@ -150,6 +197,14 @@ public class ScanService(
                     {
                         continue;
                     }
+                    if (scanTarget.ExcludeAudio && audioExts.Contains(ext))
+                    {
+                        continue;
+                    }
+                    if (scanTarget.ExcludeText && textExts.Contains(ext))
+                    {
+                        continue;
+                    }
                     if (IsExcluded(scanTarget.Path, cfg.ExcludePatterns)
                         || IsExcludedByFolderIgnore(scanTarget.Path, Path.GetDirectoryName(scanTarget.Path) ?? scanTarget.Path, ignoreRuleCache))
                     {
@@ -166,13 +221,15 @@ public class ScanService(
                     continue;
                 }
 
-                var dirFiles = Directory.EnumerateFiles(scanTarget.Path, "*", SearchOption.AllDirectories)
+                var dirFiles = EnumerateFilesSafely(scanTarget.Path)
                     .Where(f =>
                     {
                         var ext = Path.GetExtension(f);
                         if (!allExts.Contains(ext)) return false;
                         if (scanTarget.ExcludeVideo && videoExts.Contains(ext)) return false;
                         if (scanTarget.ExcludeImage && imageExts.Contains(ext)) return false;
+                        if (scanTarget.ExcludeAudio && audioExts.Contains(ext)) return false;
+                        if (scanTarget.ExcludeText && textExts.Contains(ext)) return false;
                         return !IsExcluded(f, cfg.ExcludePatterns)
                             && !IsExcludedByFolderIgnore(f, scanTarget.Path, ignoreRuleCache);
                     })
@@ -199,8 +256,9 @@ public class ScanService(
                     try
                     {
                         // Check if file already exists in DB by path
+                        var existingFolderPath = NormalizeStoredFolderPath(Path.GetDirectoryName(file.Path) ?? file.Path);
                         var existingFolder = await db.Folders
-                            .FirstOrDefaultAsync(f => f.Path == Path.GetDirectoryName(file.Path), ct);
+                            .FirstOrDefaultAsync(f => f.Path == existingFolderPath, ct);
 
                         if (existingFolder != null)
                         {
@@ -212,7 +270,13 @@ public class ScanService(
                             {
                                 // Check if file has been modified — but always re-process videos with missing metadata
                                 var fileInfo = new FileInfo(file.Path);
-                                var needsMetadata = existingFile is VideoFile vf && vf.Width == 0 && vf.Height == 0 && vf.Duration == 0;
+                                var needsMetadata = existingFile switch
+                                {
+                                    VideoFile vf => vf.Width == 0 && vf.Height == 0 && vf.Duration == 0,
+                                    AudioFile af => af.Duration == 0 && string.IsNullOrWhiteSpace(af.AudioCodec),
+                                    TextFile tf => !tf.WordCount.HasValue && string.IsNullOrWhiteSpace(tf.ExcerptText),
+                                    _ => false,
+                                };
                                 if (!options.Rescan && !needsMetadata && existingFile.ModTime >= fileInfo.LastWriteTimeUtc && existingFile.Size == fileInfo.Length)
                                 {
                                     if (existingFile is VideoFile)
@@ -239,6 +303,16 @@ public class ScanService(
                             processedImagePaths.Add(file.Path);
                             await ProcessImageFileAsync(db, file.Path, imageId: null, ct);
                         }
+                        else if (audioExts.Contains(file.Extension))
+                        {
+                            processedAudioPaths.Add(file.Path);
+                            await ProcessAudioFileAsync(db, file.Path, audioId: null, ct);
+                        }
+                        else if (textExts.Contains(file.Extension))
+                        {
+                            processedTextPaths.Add(file.Path);
+                            await ProcessTextFileAsync(db, file.Path, textDocumentId: null, ct);
+                        }
                         else if (galleryExts.Contains(file.Extension))
                             await ProcessGalleryFileAsync(db, file.Path, galleryId: null, ct);
                     }
@@ -257,7 +331,7 @@ public class ScanService(
                     await CreateGalleriesFromFoldersAsync(db, cfg.CreateGalleriesFromFolders, ct);
                 }
 
-                await GenerateRequestedAssetsAsync(db, progress, processedVideoPaths, processedImagePaths, options, thumbnailService, ct);
+                await GenerateRequestedAssetsAsync(db, progress, processedVideoPaths, processedImagePaths, processedAudioPaths, processedTextPaths, options, thumbnailService, ct);
             }
 
             // Phase 5: Extension scan participants
@@ -265,7 +339,7 @@ public class ScanService(
             if (participants.Count > 0)
             {
                 var scanPathInfos = scanTargets
-                    .Select(t => new ScanPathInfo(t.Path, t.ExcludeVideo, t.ExcludeImage, t.ExcludeAudio, t.IsFile))
+                    .Select(t => new ScanPathInfo(t.Path, t.ExcludeVideo, t.ExcludeImage, t.ExcludeAudio, t.IsFile, t.ExcludeText))
                     .ToList();
 
                 for (var i = 0; i < participants.Count; i++)
@@ -299,14 +373,19 @@ public class ScanService(
         Cove.Core.Interfaces.IJobProgress progress,
         HashSet<string> processedVideoPaths,
         HashSet<string> processedImagePaths,
+        HashSet<string> processedAudioPaths,
+        HashSet<string> processedTextPaths,
         ScanOperationOptions options,
         IThumbnailService thumbnailService,
         CancellationToken ct)
     {
         var generateSceneAssets = options.GenerateCovers || options.GeneratePreviews || options.GenerateSprites || options.GeneratePhashes || options.GenerateMd5;
         var generateImageAssets = options.GenerateImagePhashes || options.GenerateImageThumbnails || options.GenerateMd5;
+        var generateAudioAssets = options.GenerateAudioPhashes || options.GenerateMd5;
+        var generateTextAssets = options.GenerateTextPhashes || options.GenerateMd5;
 
-        if ((!generateSceneAssets && !generateImageAssets) || (processedVideoPaths.Count == 0 && processedImagePaths.Count == 0))
+        if ((!generateSceneAssets && !generateImageAssets && !generateAudioAssets && !generateTextAssets)
+            || (processedVideoPaths.Count == 0 && processedImagePaths.Count == 0 && processedAudioPaths.Count == 0 && processedTextPaths.Count == 0))
         {
             return;
         }
@@ -501,6 +580,132 @@ public class ScanService(
                 }
             });
         }
+
+        if (generateAudioAssets && processedAudioPaths.Count > 0)
+        {
+            progress.Report(0.99, "Generating audio fingerprints...");
+
+            var audioDirs = processedAudioPaths
+                .Select(path => Path.GetDirectoryName(path))
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Cast<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var candidateFiles = await db.AudioFiles
+                .Include(f => f.ParentFolder)
+                .Include(f => f.Fingerprints)
+                .Where(f => f.ParentFolder != null && audioDirs.Contains(f.ParentFolder.Path))
+                .ToListAsync(ct);
+
+            var audioFiles = candidateFiles
+                .Where(file => file.ParentFolder != null && processedAudioPaths.Contains(NormalizePath(Path.Combine(file.ParentFolder.Path, file.Basename))))
+                .ToList();
+
+            var total = Math.Max(audioFiles.Count, 1);
+            var completed = 0;
+            var maxParallelism = ResolveMaxParallelism();
+            await Parallel.ForEachAsync(audioFiles, new ParallelOptions { MaxDegreeOfParallelism = maxParallelism, CancellationToken = ct }, async (audioFile, token) =>
+            {
+                var done = Interlocked.Increment(ref completed);
+                progress.Report(0.99, $"Generating audio fingerprints ({done}/{audioFiles.Count})");
+
+                if (audioFile.ParentFolder == null)
+                    return;
+
+                var filePath = Path.Combine(audioFile.ParentFolder.Path, audioFile.Basename);
+                if (options.GenerateAudioPhashes)
+                {
+                    var phash = await fingerprintService.ComputeAudioPhashAsync(filePath, token);
+                    if (!string.IsNullOrWhiteSpace(phash))
+                    {
+                        using var innerScope = scopeFactory.CreateScope();
+                        var innerDb = innerScope.ServiceProvider.GetRequiredService<CoveContext>();
+                        var existing = await innerDb.FileFingerprints.FirstOrDefaultAsync(fp => fp.FileId == audioFile.Id && fp.Type == "phash", token);
+                        if (existing != null) existing.Value = phash;
+                        else innerDb.FileFingerprints.Add(new FileFingerprint { FileId = audioFile.Id, Type = "phash", Value = phash });
+                        await innerDb.SaveChangesAsync(token);
+                    }
+                }
+
+                if (options.GenerateMd5)
+                {
+                    var md5 = await fingerprintService.ComputeMd5Async(filePath, token);
+                    if (!string.IsNullOrWhiteSpace(md5))
+                    {
+                        using var innerScope = scopeFactory.CreateScope();
+                        var innerDb = innerScope.ServiceProvider.GetRequiredService<CoveContext>();
+                        var existing = await innerDb.FileFingerprints.FirstOrDefaultAsync(fp => fp.FileId == audioFile.Id && fp.Type == "md5", token);
+                        if (existing != null) existing.Value = md5;
+                        else innerDb.FileFingerprints.Add(new FileFingerprint { FileId = audioFile.Id, Type = "md5", Value = md5 });
+                        await innerDb.SaveChangesAsync(token);
+                    }
+                }
+            });
+        }
+
+        if (generateTextAssets && processedTextPaths.Count > 0)
+        {
+            progress.Report(0.99, "Generating text fingerprints...");
+
+            var textDirs = processedTextPaths
+                .Select(path => Path.GetDirectoryName(path))
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Cast<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var candidateFiles = await db.TextFiles
+                .Include(f => f.ParentFolder)
+                .Include(f => f.Fingerprints)
+                .Where(f => f.ParentFolder != null && textDirs.Contains(f.ParentFolder.Path))
+                .ToListAsync(ct);
+
+            var textFiles = candidateFiles
+                .Where(file => file.ParentFolder != null && processedTextPaths.Contains(NormalizePath(Path.Combine(file.ParentFolder.Path, file.Basename))))
+                .ToList();
+
+            var total = Math.Max(textFiles.Count, 1);
+            var completed = 0;
+            var maxParallelism = ResolveMaxParallelism();
+            await Parallel.ForEachAsync(textFiles, new ParallelOptions { MaxDegreeOfParallelism = maxParallelism, CancellationToken = ct }, async (textFile, token) =>
+            {
+                var done = Interlocked.Increment(ref completed);
+                progress.Report(0.99, $"Generating text fingerprints ({done}/{textFiles.Count})");
+
+                if (textFile.ParentFolder == null)
+                    return;
+
+                var filePath = Path.Combine(textFile.ParentFolder.Path, textFile.Basename);
+                if (options.GenerateTextPhashes)
+                {
+                    var phash = await fingerprintService.ComputeTextPhashAsync(filePath, token);
+                    if (!string.IsNullOrWhiteSpace(phash))
+                    {
+                        using var innerScope = scopeFactory.CreateScope();
+                        var innerDb = innerScope.ServiceProvider.GetRequiredService<CoveContext>();
+                        var existing = await innerDb.FileFingerprints.FirstOrDefaultAsync(fp => fp.FileId == textFile.Id && fp.Type == "phash", token);
+                        if (existing != null) existing.Value = phash;
+                        else innerDb.FileFingerprints.Add(new FileFingerprint { FileId = textFile.Id, Type = "phash", Value = phash });
+                        await innerDb.SaveChangesAsync(token);
+                    }
+                }
+
+                if (options.GenerateMd5)
+                {
+                    var md5 = await fingerprintService.ComputeMd5Async(filePath, token);
+                    if (!string.IsNullOrWhiteSpace(md5))
+                    {
+                        using var innerScope = scopeFactory.CreateScope();
+                        var innerDb = innerScope.ServiceProvider.GetRequiredService<CoveContext>();
+                        var existing = await innerDb.FileFingerprints.FirstOrDefaultAsync(fp => fp.FileId == textFile.Id && fp.Type == "md5", token);
+                        if (existing != null) existing.Value = md5;
+                        else innerDb.FileFingerprints.Add(new FileFingerprint { FileId = textFile.Id, Type = "md5", Value = md5 });
+                        await innerDb.SaveChangesAsync(token);
+                    }
+                }
+            });
+        }
     }
 
     /// <summary>
@@ -569,6 +774,7 @@ public class ScanService(
 
     private async Task<Folder> EnsureFolderAsync(CoveContext db, string dirPath, CancellationToken ct)
     {
+        dirPath = NormalizeStoredFolderPath(dirPath);
         var folder = await db.Folders.FirstOrDefaultAsync(f => f.Path == dirPath, ct);
         if (folder != null) return folder;
 
@@ -586,7 +792,7 @@ public class ScanService(
             };
 
             // Link parent folder if path has a parent
-            var parentDir = Path.GetDirectoryName(dirPath);
+            var parentDir = GetParentStoredFolderPath(dirPath);
             if (!string.IsNullOrEmpty(parentDir) && parentDir != dirPath)
             {
                 var parentFolder = await db.Folders.FirstOrDefaultAsync(f => f.Path == parentDir, ct);
@@ -619,7 +825,7 @@ public class ScanService(
     private async Task<VideoFile> ProcessVideoFileAsync(CoveContext db, string path, int? sceneId, CancellationToken ct)
     {
         var fileInfo = new FileInfo(path);
-        var dirPath = Path.GetDirectoryName(path) ?? path;
+        var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
         var folder = await EnsureFolderAsync(db, dirPath, ct);
 
         var basename = Path.GetFileName(path);
@@ -785,7 +991,7 @@ public class ScanService(
     private async Task<Image> ProcessImageFileAsync(CoveContext db, string path, int? imageId, CancellationToken ct)
     {
         var fileInfo = new FileInfo(path);
-        var dirPath = Path.GetDirectoryName(path) ?? path;
+        var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
         var folder = await EnsureFolderAsync(db, dirPath, ct);
 
         var basename = Path.GetFileName(path);
@@ -853,7 +1059,7 @@ public class ScanService(
     private async Task<Gallery> ProcessGalleryFileAsync(CoveContext db, string path, int? galleryId, CancellationToken ct)
     {
         var fileInfo = new FileInfo(path);
-        var dirPath = Path.GetDirectoryName(path) ?? path;
+        var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
         var folder = await EnsureFolderAsync(db, dirPath, ct);
 
         var basename = Path.GetFileName(path);
@@ -1002,6 +1208,371 @@ public class ScanService(
         return gallery;
     }
 
+    private async Task<Audio> ProcessAudioFileAsync(CoveContext db, string path, int? audioId, CancellationToken ct)
+    {
+        var fileInfo = new FileInfo(path);
+        var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
+        var folder = await EnsureFolderAsync(db, dirPath, ct);
+
+        var basename = Path.GetFileName(path);
+        var existing = await db.AudioFiles
+            .Include(file => file.Fingerprints)
+            .Include(file => file.Audio)
+            .ThenInclude(audio => audio!.Files)
+            .FirstOrDefaultAsync(file => file.ParentFolderId == folder.Id && file.Basename == basename, ct);
+
+        if (existing != null)
+        {
+            existing.Size = fileInfo.Length;
+            existing.ModTime = fileInfo.LastWriteTimeUtc;
+            existing.Path = BaseFileEntity.ComputePath(dirPath, basename);
+
+            var existingAudio = existing.Audio ?? throw new InvalidOperationException($"Audio file {path} is not attached to an audio entity");
+            await EnrichAudioFileAsync(existingAudio, existing, path, ct);
+            RefreshAudioSummary(existingAudio);
+            return existingAudio;
+        }
+
+        var audioFile = new AudioFile
+        {
+            Basename = basename,
+            ParentFolderId = folder.Id,
+            ParentFolder = folder,
+            Path = BaseFileEntity.ComputePath(dirPath, basename),
+            Size = fileInfo.Length,
+            ModTime = fileInfo.LastWriteTimeUtc,
+            Format = Path.GetExtension(path).TrimStart('.').ToLowerInvariant(),
+        };
+
+        Audio audio;
+        if (audioId.HasValue)
+        {
+            audio = await db.Audios
+                .Include(item => item.Files)
+                .FirstOrDefaultAsync(item => item.Id == audioId.Value, ct)
+                ?? throw new InvalidOperationException($"Audio {audioId.Value} was not found for downloaded media import");
+
+            audio.Files.Add(audioFile);
+        }
+        else
+        {
+            audio = new Audio
+            {
+                Title = Path.GetFileNameWithoutExtension(path),
+                Files = [audioFile],
+            };
+
+            db.Audios.Add(audio);
+        }
+
+        await EnrichAudioFileAsync(audio, audioFile, path, ct);
+        RefreshAudioSummary(audio);
+
+        logger.LogDebug("Added audio for: {Path}", path);
+        return audio;
+    }
+
+    private async Task<TextDocument> ProcessTextFileAsync(CoveContext db, string path, int? textDocumentId, CancellationToken ct)
+    {
+        var fileInfo = new FileInfo(path);
+        var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
+        var folder = await EnsureFolderAsync(db, dirPath, ct);
+
+        var basename = Path.GetFileName(path);
+        var existing = await db.TextFiles
+            .Include(file => file.Fingerprints)
+            .Include(file => file.TextDocument)
+            .ThenInclude(text => text!.Files)
+            .FirstOrDefaultAsync(file => file.ParentFolderId == folder.Id && file.Basename == basename, ct);
+
+        if (existing != null)
+        {
+            existing.Size = fileInfo.Length;
+            existing.ModTime = fileInfo.LastWriteTimeUtc;
+            existing.Path = BaseFileEntity.ComputePath(dirPath, basename);
+
+            var existingDocument = existing.TextDocument ?? throw new InvalidOperationException($"Text file {path} is not attached to a text document");
+            await EnrichTextFileAsync(existingDocument, existing, path, ct);
+            RefreshTextSummary(existingDocument);
+            return existingDocument;
+        }
+
+        var textFile = new TextFile
+        {
+            Basename = basename,
+            ParentFolderId = folder.Id,
+            ParentFolder = folder,
+            Path = BaseFileEntity.ComputePath(dirPath, basename),
+            Size = fileInfo.Length,
+            ModTime = fileInfo.LastWriteTimeUtc,
+            Format = Path.GetExtension(path).TrimStart('.').ToLowerInvariant(),
+        };
+
+        TextDocument textDocument;
+        if (textDocumentId.HasValue)
+        {
+            textDocument = await db.TextDocuments
+                .Include(item => item.Files)
+                .FirstOrDefaultAsync(item => item.Id == textDocumentId.Value, ct)
+                ?? throw new InvalidOperationException($"Text document {textDocumentId.Value} was not found for downloaded media import");
+
+            textDocument.Files.Add(textFile);
+        }
+        else
+        {
+            textDocument = new TextDocument
+            {
+                Title = Path.GetFileNameWithoutExtension(path),
+                Files = [textFile],
+            };
+
+            db.TextDocuments.Add(textDocument);
+        }
+
+        await EnrichTextFileAsync(textDocument, textFile, path, ct);
+        RefreshTextSummary(textDocument);
+
+        logger.LogDebug("Added text document for: {Path}", path);
+        return textDocument;
+    }
+
+    private async Task EnrichAudioFileAsync(Audio audio, AudioFile audioFile, string path, CancellationToken ct)
+    {
+        var metadata = await ProbeAudioAsync(audioFile, path, ct);
+        var fallbackTitle = Path.GetFileNameWithoutExtension(path);
+
+        if (string.IsNullOrWhiteSpace(audio.Title) || string.Equals(audio.Title, fallbackTitle, StringComparison.OrdinalIgnoreCase))
+            audio.Title = metadata.Title ?? fallbackTitle;
+
+        if (config.CalculateMd5)
+        {
+            var md5 = await fingerprintService.ComputeMd5Async(path, ct);
+            if (!string.IsNullOrWhiteSpace(md5))
+            {
+                UpsertFingerprint(audioFile, "md5", md5);
+            }
+        }
+    }
+
+    private async Task EnrichTextFileAsync(TextDocument textDocument, TextFile textFile, string path, CancellationToken ct)
+    {
+        try
+        {
+            var metadata = await textExtractionService.ExtractMetadataAsync(path, ct);
+            var fallbackTitle = Path.GetFileNameWithoutExtension(path);
+            textFile.PageCount = metadata.PageCount;
+            textFile.WordCount = metadata.WordCount;
+            textFile.ExcerptText = metadata.ExcerptText;
+
+            if (string.IsNullOrWhiteSpace(textDocument.Title) || string.Equals(textDocument.Title, fallbackTitle, StringComparison.OrdinalIgnoreCase))
+                textDocument.Title = metadata.Title ?? fallbackTitle;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to extract text metadata for {Path}", path);
+        }
+
+        if (config.CalculateMd5)
+        {
+            var md5 = await fingerprintService.ComputeMd5Async(path, ct);
+            if (!string.IsNullOrWhiteSpace(md5))
+            {
+                UpsertFingerprint(textFile, "md5", md5);
+            }
+        }
+    }
+
+    private async Task<AudioProbeMetadata> ProbeAudioAsync(AudioFile audioFile, string path, CancellationToken ct)
+    {
+        var ffprobePath = FindFfprobe();
+        if (ffprobePath == null)
+        {
+            logger.LogDebug("FFprobe not found, skipping audio metadata probe for {Path}", path);
+            return new AudioProbeMetadata(null);
+        }
+
+        audioFile.HasVideoTrack = false;
+        audioFile.AudioCodec = string.Empty;
+        audioFile.SampleRate = null;
+        audioFile.Channels = null;
+
+        try
+        {
+            using var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = ffprobePath,
+                    Arguments = $"-v quiet -print_format json -show_format -show_streams \"{path}\"",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                }
+            };
+
+            process.Start();
+            var json = await process.StandardOutput.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+
+            if (process.ExitCode != 0 || string.IsNullOrEmpty(json))
+                return new AudioProbeMetadata(null);
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            string? title = null;
+            if (root.TryGetProperty("format", out var format))
+            {
+                if (format.TryGetProperty("duration", out var dur))
+                {
+                    if (double.TryParse(dur.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var duration))
+                        audioFile.Duration = duration;
+                }
+                if (format.TryGetProperty("bit_rate", out var br))
+                {
+                    if (long.TryParse(br.GetString(), out var bitrate))
+                        audioFile.BitRate = bitrate;
+                }
+                if (format.TryGetProperty("tags", out var tags))
+                {
+                    if (tags.TryGetProperty("title", out var titleProp))
+                        title = titleProp.GetString();
+                }
+            }
+
+            if (root.TryGetProperty("streams", out var streams))
+            {
+                foreach (var stream in streams.EnumerateArray())
+                {
+                    var codecType = stream.TryGetProperty("codec_type", out var typeProp) ? typeProp.GetString() : null;
+                    if (codecType == "audio" && string.IsNullOrWhiteSpace(audioFile.AudioCodec))
+                    {
+                        if (stream.TryGetProperty("codec_name", out var codecName))
+                            audioFile.AudioCodec = codecName.GetString() ?? string.Empty;
+                        if (stream.TryGetProperty("sample_rate", out var sampleRateProp))
+                        {
+                            if (int.TryParse(sampleRateProp.GetString(), out var sampleRate))
+                                audioFile.SampleRate = sampleRate;
+                        }
+                        if (stream.TryGetProperty("channels", out var channelsProp) && channelsProp.TryGetInt32(out var channels))
+                            audioFile.Channels = channels;
+                        if (audioFile.BitRate == 0 && stream.TryGetProperty("bit_rate", out var streamBitrateProp))
+                        {
+                            if (long.TryParse(streamBitrateProp.GetString(), out var streamBitrate))
+                                audioFile.BitRate = streamBitrate;
+                        }
+                    }
+                    else if (codecType == "video")
+                    {
+                        audioFile.HasVideoTrack = true;
+                    }
+                }
+            }
+
+            return new AudioProbeMetadata(title);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "FFprobe failed for audio {Path}", path);
+            return new AudioProbeMetadata(null);
+        }
+    }
+
+    private static void RefreshAudioSummary(Audio audio)
+    {
+        var files = audio.Files.ToList();
+        audio.FileCount = files.Count;
+        if (files.Count == 0)
+        {
+            audio.MaxDuration = 0;
+            audio.MaxBitRate = 0;
+            audio.MaxFileSize = 0;
+            audio.MaxFileModTime = null;
+            audio.MinPath = null;
+            audio.MaxPath = null;
+            audio.FileSearchText = null;
+            audio.HasVideoFiles = false;
+            return;
+        }
+
+        var paths = files
+            .Select(file => string.IsNullOrWhiteSpace(file.Path) ? BaseFileEntity.ComputePath(file.ParentFolder?.Path, file.Basename) : file.Path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        audio.MaxDuration = files.Max(file => file.Duration);
+        audio.MaxBitRate = files.Max(file => file.BitRate);
+        audio.MaxFileSize = files.Max(file => file.Size);
+        audio.MaxFileModTime = files.Max(file => (DateTime?)file.ModTime);
+        audio.MinPath = paths.FirstOrDefault();
+        audio.MaxPath = paths.LastOrDefault();
+        audio.FileSearchText = BuildFileSearchText(paths);
+        audio.HasVideoFiles = files.Any(file => file.HasVideoTrack);
+    }
+
+    private static void RefreshTextSummary(TextDocument textDocument)
+    {
+        var files = textDocument.Files.ToList();
+        textDocument.FileCount = files.Count;
+        if (files.Count == 0)
+        {
+            textDocument.MaxWordCount = null;
+            textDocument.MaxPageCount = null;
+            textDocument.MaxFileSize = 0;
+            textDocument.MaxFileModTime = null;
+            textDocument.MinPath = null;
+            textDocument.MaxPath = null;
+            textDocument.FileSearchText = null;
+            return;
+        }
+
+        var paths = files
+            .Select(file => string.IsNullOrWhiteSpace(file.Path) ? BaseFileEntity.ComputePath(file.ParentFolder?.Path, file.Basename) : file.Path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        textDocument.MaxWordCount = files.Max(file => file.WordCount);
+        textDocument.MaxPageCount = files.Max(file => file.PageCount);
+        textDocument.MaxFileSize = files.Max(file => file.Size);
+        textDocument.MaxFileModTime = files.Max(file => (DateTime?)file.ModTime);
+        textDocument.MinPath = paths.FirstOrDefault();
+        textDocument.MaxPath = paths.LastOrDefault();
+        textDocument.FileSearchText = BuildFileSearchText(paths);
+    }
+
+    private static string? BuildFileSearchText(IEnumerable<string> paths)
+    {
+        var values = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path.Replace('\\', '/').Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return values.Length == 0 ? null : string.Join('\n', values);
+    }
+
+    private static void UpsertFingerprint(BaseFileEntity file, string type, string value)
+    {
+        var existing = file.Fingerprints.FirstOrDefault(fingerprint => string.Equals(fingerprint.Type, type, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            existing.Value = value;
+            return;
+        }
+
+        file.Fingerprints.Add(new FileFingerprint
+        {
+            Type = type,
+            Value = value,
+        });
+    }
+
     /// <summary>
     /// Compute OpenSubtitles hash (oshash) for a video file.
     /// Standard oshash algorithm.
@@ -1145,6 +1716,61 @@ public class ScanService(
         return false;
     }
 
+    private IEnumerable<string> EnumerateFilesSafely(string rootPath)
+    {
+        var pending = new Stack<string>();
+        pending.Push(rootPath);
+
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(directory).ToList();
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+            {
+                logger.LogWarning(ex, "Skipping files in unreadable scan directory: {Path}", directory);
+                continue;
+            }
+
+            foreach (var file in files)
+            {
+                yield return file;
+            }
+
+            IEnumerable<string> subdirectories;
+            try
+            {
+                subdirectories = Directory.EnumerateDirectories(directory).ToList();
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+            {
+                logger.LogWarning(ex, "Skipping nested scan directories under unreadable directory: {Path}", directory);
+                continue;
+            }
+
+            foreach (var subdirectory in subdirectories)
+            {
+                try
+                {
+                    if ((File.GetAttributes(subdirectory) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        continue;
+                    }
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+                {
+                    logger.LogWarning(ex, "Skipping unreadable scan directory: {Path}", subdirectory);
+                    continue;
+                }
+
+                pending.Push(subdirectory);
+            }
+        }
+    }
+
     private static bool IsExcludedByFolderIgnore(string path, string rootPath, Dictionary<string, List<IgnoreRule>> ruleCache)
     {
         if (string.IsNullOrWhiteSpace(rootPath))
@@ -1249,7 +1875,7 @@ public class ScanService(
         if (selectedPaths == null)
         {
             return cfg.CovePaths
-                .Select(path => new ScanTarget(NormalizePath(path.Path), path.ExcludeVideo, path.ExcludeImage, path.ExcludeAudio, false))
+                .Select(path => new ScanTarget(NormalizePath(path.Path), path.ExcludeVideo, path.ExcludeImage, path.ExcludeAudio, path.ExcludeText, false))
                 .ToList();
         }
 
@@ -1266,6 +1892,7 @@ public class ScanService(
             var excludeVideo = matchingConfig?.ExcludeVideo ?? false;
             var excludeImage = matchingConfig?.ExcludeImage ?? false;
             var excludeAudio = matchingConfig?.ExcludeAudio ?? false;
+            var excludeText = matchingConfig?.ExcludeText ?? false;
             var isFile = File.Exists(selectedPath);
 
             if (!isFile && !Directory.Exists(selectedPath))
@@ -1273,7 +1900,7 @@ public class ScanService(
                 continue;
             }
 
-            targets.Add(new ScanTarget(selectedPath, excludeVideo, excludeImage, excludeAudio, isFile));
+            targets.Add(new ScanTarget(selectedPath, excludeVideo, excludeImage, excludeAudio, excludeText, isFile));
         }
 
         return targets;
@@ -1293,12 +1920,31 @@ public class ScanService(
 
     private static string NormalizePath(string path) => Path.GetFullPath(path);
 
+    private static string NormalizeStoredFolderPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath);
+        var normalized = !string.IsNullOrEmpty(root) && string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase)
+            ? root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            : fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return normalized.Replace('\\', '/');
+    }
+
+    private static string? GetParentStoredFolderPath(string storedPath)
+    {
+        var nativePath = storedPath.Replace('/', Path.DirectorySeparatorChar);
+        var parentPath = Path.GetDirectoryName(nativePath);
+        return string.IsNullOrWhiteSpace(parentPath) ? null : NormalizeStoredFolderPath(parentPath);
+    }
+
     private static readonly string[] FolderIgnoreFileNames = [".coveignore", ".stashignore"];
 
     private record CaptionSidecar(string Filename, string LanguageCode, string CaptionType);
+    private sealed record AudioProbeMetadata(string? Title);
     private record DiscoveredFile(string Path, string Extension);
     private record IgnoreRule(string Pattern, bool Negated);
-    private record ScanTarget(string Path, bool ExcludeVideo, bool ExcludeImage, bool ExcludeAudio, bool IsFile);
+    private record ScanTarget(string Path, bool ExcludeVideo, bool ExcludeImage, bool ExcludeAudio, bool ExcludeText, bool IsFile);
 
     /// <summary>
     /// Wraps a progress reporter to map 0-100% into a sub-range of the parent progress.

@@ -10,6 +10,8 @@ public enum AffinityHostType
     Studio = 6,
     Gallery = 7,
     Group = 8,
+    Audio = 9,
+    Text = 10,
 }
 
 public class UserEntityAffinity : BaseEntity

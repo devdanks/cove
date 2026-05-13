@@ -11,13 +11,19 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/scrape-attempts")]
-[RequiresPermission(Permissions.ScenesScrape)]
+[RequiresPermission(Permissions.ScenesScrape, Permissions.ScenesWrite, Permissions.AudiosWrite, Permissions.TextsWrite, Permissions.ImagesWrite, Mode = PermissionMode.Any)]
 public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService, SceneBatchScrapeService sceneBatchScrapeService, IJobService jobService, ICurrentPrincipalAccessor principalAccessor, IAuthorizationService authorizationService) : ControllerBase
 {
     [HttpGet]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead, ActionArgumentName = "entityId")]
     public async Task<ActionResult<IReadOnlyList<ScrapeAttemptDto>>> List([FromQuery] string? entityType, [FromQuery] int? entityId, [FromQuery] int limit = 20, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(entityType) || !entityId.HasValue)
+            return BadRequest(new { error = "entityType and entityId are required." });
+
+        var authorizationError = await AuthorizeEntityAsync(entityType, entityId.Value, write: false, ct);
+        if (authorizationError != null)
+            return authorizationError;
+
         return Ok(await scrapeAttemptService.ListAttemptsAsync(entityType, entityId, limit, ct));
     }
 
@@ -28,31 +34,39 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
         if (attempt == null)
             return NotFound();
 
-        var forbidden = await AuthorizeSceneAttemptAsync(attempt, Permissions.ScenesRead, ct);
-        return forbidden ?? Ok(attempt);
+        var authorizationError = await AuthorizeAttemptAsync(attempt, write: false, ct);
+        if (authorizationError != null)
+            return authorizationError;
+
+        return Ok(attempt);
     }
 
     [HttpPost]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesRead, ActionArgumentName = "dto", PropertyName = "EntityId")]
     public async Task<ActionResult<ScrapeAttemptDto>> Create([FromBody] CreateScrapeAttemptDto dto, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(dto.EntityType) || dto.EntityId == null)
+            return BadRequest(new { error = "EntityType and EntityId are required." });
+
+        var authorizationError = await AuthorizeEntityAsync(dto.EntityType, dto.EntityId.Value, write: false, ct);
+        if (authorizationError != null)
+            return authorizationError;
+
         var attempt = await scrapeAttemptService.CreateAttemptAsync(dto, ct);
         return CreatedAtAction(nameof(Get), new { id = attempt.Id }, attempt);
     }
 
     [HttpPost("{id:guid}/apply")]
-    [RequiresPermission(Permissions.ScenesWrite)]
-    public async Task<ActionResult<ScrapeAttemptDto>> ApplyScene(Guid id, [FromBody] ApplySceneScrapeAttemptDto dto, CancellationToken ct)
+    public async Task<ActionResult<ScrapeAttemptDto>> Apply(Guid id, [FromBody] ApplySceneScrapeAttemptDto dto, CancellationToken ct)
     {
         var existingAttempt = await scrapeAttemptService.GetAttemptAsync(id, ct);
         if (existingAttempt == null)
             return NotFound();
 
-        var forbidden = await AuthorizeSceneAttemptAsync(existingAttempt, Permissions.ScenesWrite, ct);
-        if (forbidden != null)
-            return forbidden;
+        var authorizationError = await AuthorizeAttemptAsync(existingAttempt, write: true, ct);
+        if (authorizationError != null)
+            return authorizationError;
 
-        var attempt = await scrapeAttemptService.ApplySceneAttemptAsync(id, dto, ct);
+        var attempt = await scrapeAttemptService.ApplyAttemptAsync(id, dto, ct);
         return attempt == null ? NotFound() : Ok(attempt);
     }
 
@@ -96,21 +110,62 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
         return Accepted(new { jobId, queuedCount = dto.SceneIds.Count });
     }
 
-    private async Task<ActionResult<ScrapeAttemptDto>?> AuthorizeSceneAttemptAsync(ScrapeAttemptDto attempt, string permission, CancellationToken ct)
+    private async Task<ObjectResult?> AuthorizeAttemptAsync(ScrapeAttemptDto attempt, bool write, CancellationToken ct)
     {
-        if (!string.Equals(attempt.EntityType, EntityKinds.Scene, StringComparison.OrdinalIgnoreCase) || !attempt.EntityId.HasValue)
-            return null;
+        if (!attempt.EntityId.HasValue)
+            return BadRequest(new { error = "Scrape attempt is not attached to an entity." });
 
-        var result = await authorizationService.AuthorizeAsync(
-            principalAccessor.Current,
-            permission,
-            new EntityRef(EntityKinds.Scene, attempt.EntityId.Value.ToString(CultureInfo.InvariantCulture)),
-            ct);
+        return await AuthorizeEntityAsync(attempt.EntityType, attempt.EntityId.Value, write, ct);
+    }
 
-        if (result.Allowed)
-            return null;
+    private async Task<ObjectResult?> AuthorizeEntityAsync(string entityType, int entityId, bool write, CancellationToken ct)
+    {
+        if (!TryGetAttemptPermissions(entityType, write, out var entityKind, out var permissions))
+            return BadRequest(new { error = $"Scrape attempts are not supported for entity type '{entityType}'." });
 
-        return ForbiddenResult(result);
+        AuthorizationResult? denied = null;
+        foreach (var permission in permissions)
+        {
+            var result = await authorizationService.AuthorizeAsync(
+                principalAccessor.Current,
+                permission,
+                new EntityRef(entityKind, entityId.ToString(CultureInfo.InvariantCulture)),
+                ct);
+
+            if (result.Allowed)
+                return null;
+
+            denied = result;
+        }
+
+        return denied == null
+            ? BadRequest(new { error = $"Scrape attempts are not supported for entity type '{entityType}'." })
+            : ForbiddenResult(denied.Value);
+    }
+
+    private static bool TryGetAttemptPermissions(string entityType, bool write, out string entityKind, out IReadOnlyList<string> permissions)
+    {
+        entityKind = entityType.Trim().ToLowerInvariant();
+        switch (entityKind)
+        {
+            case EntityKinds.Scene:
+                permissions = write
+                    ? [Permissions.ScenesWrite]
+                    : [Permissions.ScenesScrape, Permissions.ScenesWrite];
+                return true;
+            case EntityKinds.Audio:
+                permissions = [Permissions.AudiosWrite];
+                return true;
+            case EntityKinds.Text:
+                permissions = [Permissions.TextsWrite];
+                return true;
+            case EntityKinds.Image:
+                permissions = [Permissions.ImagesWrite];
+                return true;
+            default:
+                permissions = [];
+                return false;
+        }
     }
 
     private static ObjectResult ForbiddenResult(AuthorizationResult result) => new(new

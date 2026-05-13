@@ -36,6 +36,18 @@ internal static class EntityImageUrls
     public static string Performer(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(context, $"/api/performers/{id}/image", updatedAt, maxDimension);
 
+    public static string Audio(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
+        => Build(null, $"/api/audios/{id}/image", updatedAt, maxDimension);
+
+    public static string Audio(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
+        => Build(context, $"/api/audios/{id}/image", updatedAt, maxDimension);
+
+    public static string Text(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
+        => Build(null, $"/api/texts/{id}/image", updatedAt, maxDimension);
+
+    public static string Text(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
+        => Build(context, $"/api/texts/{id}/image", updatedAt, maxDimension);
+
     public static string Face(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(null, $"/api/faces/{id}/image", updatedAt, maxDimension);
 

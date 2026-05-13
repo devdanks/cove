@@ -112,6 +112,7 @@ try
     builder.Services.AddScoped<IFieldProvenanceService, FieldProvenanceService>();
     builder.Services.AddScoped<TagApplicationService>();
     builder.Services.AddScoped<CustomFieldService>();
+    builder.Services.AddSingleton<TextExtractionService>();
     builder.Services.AddScoped<AiDataPurgeService>();
     builder.Services.AddScoped<DynamicGroupResolver>();
     builder.Services.AddScoped<IDynamicGroupSource, FilterDynamicGroupSource>();

@@ -1,9 +1,15 @@
 import { system, type GenerateOptions } from "../api/client";
+import { loadScrapeApplyPreferences } from "../components/sceneScrapeUtils";
 
-export type DownloadSelectionEntity = "Scene" | "Image" | "Gallery";
+export type DownloadSelectionEntity = "Scene" | "Image" | "Gallery" | "Audio" | "Text";
 
 export interface BatchDownloadOptions {
   scrapeScenes?: boolean;
+  scrapeMetadata?: boolean;
+  createMissingTags?: boolean;
+  createMissingPerformers?: boolean;
+  createMissingStudio?: boolean;
+  markOrganized?: boolean;
   allowDuplicateDownloads?: boolean;
   generate?: GenerateOptions;
 }
@@ -42,6 +48,8 @@ export const DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS: GenerateOptions = {
   md5: false,
   imageThumbnails: false,
   imagePhashes: false,
+  audioPhashes: false,
+  textPhashes: false,
   overwrite: false,
 };
 
@@ -80,8 +88,16 @@ export function saveStoredBatchDownloadOptions(storageKey: string, options: Batc
 }
 
 export function normalizeBatchDownloadOptions(options: BatchDownloadOptions = DEFAULT_BATCH_DOWNLOAD_OPTIONS): BatchDownloadOptions {
+  const preferences = loadScrapeApplyPreferences();
+  const scrapeMetadata = !!(options.scrapeMetadata ?? options.scrapeScenes);
+
   return {
-    scrapeScenes: !!options.scrapeScenes,
+    scrapeScenes: scrapeMetadata,
+    scrapeMetadata,
+    createMissingTags: options.createMissingTags ?? preferences.createMissingTags,
+    createMissingPerformers: options.createMissingPerformers ?? preferences.createMissingPerformers,
+    createMissingStudio: options.createMissingStudio ?? preferences.createMissingStudio,
+    markOrganized: options.markOrganized ?? preferences.markOrganized,
     allowDuplicateDownloads: !!options.allowDuplicateDownloads,
     generate: {
       ...DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS,
@@ -105,18 +121,20 @@ export async function queueBatchDownloads(
 
   for (const item of items) {
     const label = getItemLabel(item, entity);
-    const sourceUrl = item.urls.map((value) => value.trim()).find(Boolean);
-    if (!sourceUrl) {
+    const candidateUrls = getItemDownloadUrls(item.urls);
+    if (candidateUrls.length === 0) {
       issues.push({ kind: "skipped", label, reason: "No source URL is stored for this item." });
       continue;
     }
 
-    batchItems.push({
-      url: sourceUrl,
-      entity,
-      entityId: item.id,
-      label,
-    });
+    for (const candidateUrl of candidateUrls) {
+      batchItems.push({
+        url: candidateUrl,
+        entity,
+        entityId: item.id,
+        label,
+      });
+    }
   }
 
   if (batchItems.length === 0) {
@@ -148,7 +166,7 @@ export async function queueImportedUrlDownloads(
 
   const normalizedOptions = normalizeBatchDownloadOptions({
     ...options,
-    scrapeScenes: options.scrapeScenes ?? options.autoApplyMetadata,
+    scrapeMetadata: options.scrapeMetadata ?? options.scrapeScenes ?? options.autoApplyMetadata,
   });
 
   for (const sourceUrl of normalizeUrlLines(urls)) {
@@ -231,6 +249,10 @@ function normalizeUrlLines(urls: string[]) {
     .filter(Boolean);
 }
 
+function getItemDownloadUrls(urls: string[]) {
+  return [...new Set(normalizeUrlLines(urls))];
+}
+
 function deriveImportedItemTitle(url: string) {
   try {
     const parsed = new URL(url);
@@ -246,8 +268,14 @@ function deriveImportedItemTitle(url: string) {
 }
 
 function buildBatchFollowUp(entity: DownloadSelectionEntity, options: BatchDownloadOptions) {
+  const applyMetadata = entity !== "Gallery" && !!options.scrapeMetadata;
   return {
-    scrapeScenes: entity === "Scene" ? !!options.scrapeScenes : false,
+    scrapeScenes: entity === "Scene" ? applyMetadata : false,
+    autoApplyMetadata: applyMetadata,
+    createMissingTags: !!options.createMissingTags,
+    createMissingPerformers: !!options.createMissingPerformers,
+    createMissingStudio: !!options.createMissingStudio,
+    markOrganized: !!options.markOrganized,
     allowDuplicateDownloads: !!options.allowDuplicateDownloads,
     generate: options.generate,
   };

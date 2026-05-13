@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using Cove.Api.Extensions;
 using Cove.Plugins;
 using Microsoft.Extensions.Logging;
@@ -34,6 +35,16 @@ public class DirectFileDownloaderExtensionTests
     }
 
     [Fact]
+    public async Task MatchAllAsync_ExtensionlessUrl_OffersWebTextDownloader()
+    {
+        var extension = new DirectFileDownloaderExtension();
+
+        var matches = await extension.MatchAllAsync("https://example.com/story/chapter-1", CancellationToken.None);
+
+        Assert.Contains(matches, match => match.DownloaderId == "builtin.web-text-page/text");
+    }
+
+    [Fact]
     public async Task DownloadAsync_WritesFileToHostTempDirectory()
     {
         var extension = new DirectFileDownloaderExtension();
@@ -42,7 +53,7 @@ public class DirectFileDownloaderExtensionTests
 
         try
         {
-            var host = new FakeDownloaderHost(tempDirectory, new StubHttpClientFactory(new StubHttpMessageHandler()));
+            var host = new FakeDownloaderHost(tempDirectory, new StubHttpClientFactory(new BinaryHttpMessageHandler()));
             var result = await extension.DownloadAsync(
                 new DownloaderRequest(
                     "builtin.direct-file/scene",
@@ -57,6 +68,58 @@ public class DirectFileDownloaderExtensionTests
             Assert.True(File.Exists(localPath));
             Assert.Equal("test-scene.mp4", result.OriginalFilename);
             Assert.Equal("video/mp4", result.Headers!["Content-Type"]);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+                Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAsync_WebTextPage_WritesReadableHtmlWithParagraphs()
+    {
+        var extension = new DirectFileDownloaderExtension();
+        var tempDirectory = Path.Combine(Path.GetTempPath(), "cove-direct-text-tests", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            var html = """
+                <html>
+                                    <head><title>Example Story</title></head>
+                  <body>
+                                        <header>Site header junk</header>
+                    <nav>Navigation chrome</nav>
+                                                                                <div class="story-body">
+                                            First paragraph.
+
+                                            Second paragraph.
+                                        </div>
+                                        <section class="comments">Comment junk</section>
+                  </body>
+                </html>
+                """;
+            var host = new FakeDownloaderHost(tempDirectory, new StubHttpClientFactory(new TextHttpMessageHandler(html, "text/html")));
+
+            var result = await extension.DownloadAsync(
+                new DownloaderRequest(
+                    "builtin.web-text-page/text",
+                    "https://example.com/story/chapter-1",
+                    DownloaderEntity.Text,
+                    new DownloaderPermissions()),
+                host,
+                CancellationToken.None);
+
+            Assert.NotNull(result);
+            Assert.Equal("Example Story.html", result!.OriginalFilename);
+
+            var savedHtml = await File.ReadAllTextAsync(Path.Combine(tempDirectory, result.LocalPath));
+            Assert.Contains("<p>First paragraph.</p>", savedHtml);
+            Assert.Contains("<p>Second paragraph.</p>", savedHtml);
+            Assert.DoesNotContain("Site header junk", savedHtml);
+            Assert.DoesNotContain("Navigation chrome", savedHtml);
+            Assert.DoesNotContain("Comment junk", savedHtml);
         }
         finally
         {
@@ -80,7 +143,7 @@ public class DirectFileDownloaderExtensionTests
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
-    private sealed class StubHttpMessageHandler : HttpMessageHandler
+    private sealed class BinaryHttpMessageHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -88,8 +151,22 @@ public class DirectFileDownloaderExtensionTests
             {
                 Content = new ByteArrayContent([1, 2, 3, 4, 5]),
             };
-            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("video/mp4");
             response.Content.Headers.ContentLength = 5;
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class TextHttpMessageHandler(string content, string mediaType) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content),
+                RequestMessage = request,
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue(mediaType);
             return Task.FromResult(response);
         }
     }

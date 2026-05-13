@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { scenes, images, performers, galleries, studios, groups, entityImages } from "../api/client";
-import type { EntityEngagement, Gallery, Group, Image, Performer, Scene, Studio } from "../api/types";
+import type { EntityEngagement, Gallery, Group, GroupSummary, Image, Performer, PerformerSummary, Scene, Studio, Tag as TagType } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
 import { Building2, FolderOpen, Layers, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp } from "lucide-react";
@@ -77,6 +77,76 @@ export function GalleryPreviewList({ galleries: galleryItems, onNavigate }: { ga
           </a>
         );
       })}
+    </div>
+  );
+}
+
+function EntityLinkList({ items, page, onNavigate }: { items: Array<{ id: number; label: string; color?: string | null }>; page: string; onNavigate?: (route: any) => void }) {
+  return (
+    <div className="space-y-1">
+      {items.map((item) => {
+        const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page, id: item.id }, onNavigate);
+        return (
+          <a key={`${page}-${item.id}`} {...navigationHandlers} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs font-medium text-accent transition-colors hover:bg-card-hover hover:underline">
+            {item.color ? <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} /> : null}
+            <span className="min-w-0 truncate">{item.label}</span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+export function EntityReferencePopovers({
+  performers: performerItems = [],
+  tags: tagItems = [],
+  groups: groupItems = [],
+  studio,
+  onNavigate,
+  className = "",
+}: {
+  performers?: PerformerSummary[];
+  tags?: TagType[];
+  groups?: GroupSummary[];
+  studio?: { id?: number | null; name?: string | null } | null;
+  onNavigate?: (route: any) => void;
+  className?: string;
+}) {
+  const studioName = studio?.name?.trim();
+  const studioId = studio?.id ?? null;
+  const tagLinks = tagItems.map((tag) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }));
+  const groupLinks = groupItems.map((group) => ({ id: group.id, label: group.name }));
+
+  if (!studioName && performerItems.length === 0 && tagLinks.length === 0 && groupLinks.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={`relative z-[2] flex flex-wrap items-center gap-1 ${className}`} data-entity-reference-popovers>
+      {studioName ? (
+        <PopoverButton icon={<Building2 className="h-3.5 w-3.5" />} count={1} title="Studio" preferBelow>
+          {studioId ? (
+            <EntityLinkList items={[{ id: studioId, label: studioName }]} page="studio" onNavigate={onNavigate} />
+          ) : (
+            <div className="px-1 text-xs text-foreground">{studioName}</div>
+          )}
+        </PopoverButton>
+      ) : null}
+      {performerItems.length > 0 ? (
+        <PopoverButton icon={<User className="h-3.5 w-3.5" />} count={performerItems.length} title="Performers" wide preferBelow>
+          <PerformerPreviewGrid performers={performerItems} onNavigate={onNavigate} />
+        </PopoverButton>
+      ) : null}
+      {tagLinks.length > 0 ? (
+        <PopoverButton icon={<Tag className="h-3.5 w-3.5" />} count={tagLinks.length} title="Tags" preferBelow>
+          <EntityLinkList items={tagLinks} page="tag" onNavigate={onNavigate} />
+        </PopoverButton>
+      ) : null}
+      {groupLinks.length > 0 ? (
+        <PopoverButton icon={<Layers className="h-3.5 w-3.5" />} count={groupLinks.length} title="Groups" preferBelow>
+          <EntityLinkList items={groupLinks} page="group" onNavigate={onNavigate} />
+        </PopoverButton>
+      ) : null}
     </div>
   );
 }
@@ -873,10 +943,8 @@ interface GroupTileProps {
 }
 
 export function GroupTile({ group, engagement, onClick, selected, onSelect, selecting, bookmarkInitiallySaved }: GroupTileProps & { engagement?: EntityEngagement }) {
-  const count = group.kind === "dynamic" ? group.cachedItemCount ?? group.sceneCount : group.sceneCount;
-  const countLabel = group.kind === "dynamic"
-    ? `${count} item${count !== 1 ? "s" : ""}`
-    : `${count} scene${count !== 1 ? "s" : ""}`;
+  const count = group.itemCount ?? (group.kind === "dynamic" ? group.cachedItemCount ?? group.sceneCount : group.sceneCount);
+  const countLabel = `${count} item${count !== 1 ? "s" : ""}`;
 
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>

@@ -9,6 +9,8 @@ public static class InteractionValueMapper
         {
             "scene" => Assign(InteractionHostType.Scene, out parsed),
             "image" => Assign(InteractionHostType.Image, out parsed),
+            "audio" => Assign(InteractionHostType.Audio, out parsed),
+            "text" => Assign(InteractionHostType.Text, out parsed),
             "performer" => Assign(InteractionHostType.Performer, out parsed),
             "tag" => Assign(InteractionHostType.Tag, out parsed),
             "face" => Assign(InteractionHostType.Face, out parsed),
@@ -26,6 +28,8 @@ public static class InteractionValueMapper
     {
         InteractionHostType.Scene => "scene",
         InteractionHostType.Image => "image",
+        InteractionHostType.Audio => "audio",
+        InteractionHostType.Text => "text",
         InteractionHostType.Performer => "performer",
         InteractionHostType.Tag => "tag",
         InteractionHostType.Face => "face",

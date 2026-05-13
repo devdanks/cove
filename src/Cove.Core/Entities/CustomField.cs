@@ -10,8 +10,10 @@ public static class CustomFieldEntityTypes
     public const string Image = "image";
     public const string Group = "group";
     public const string Face = "face";
+    public const string Audio = "audio";
+    public const string Text = "text";
 
-    public static readonly string[] All = [Scene, Performer, Tag, Studio, Gallery, Image, Group, Face];
+    public static readonly string[] All = [Scene, Performer, Tag, Studio, Gallery, Image, Group, Face, Audio, Text];
 }
 
 public static class CustomFieldTypes

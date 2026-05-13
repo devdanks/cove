@@ -86,6 +86,8 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
         => hostType switch
         {
             AffinityHostType.Scene => await db.Scenes.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
+            AffinityHostType.Audio => await db.Audios.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
+            AffinityHostType.Text => await db.TextDocuments.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Image => await db.Images.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Performer => await db.Performers.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Face => await db.Faces.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
@@ -101,6 +103,8 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
         var permission = hostType switch
         {
             AffinityHostType.Scene => Permissions.ScenesRead,
+            AffinityHostType.Audio => Permissions.AudiosRead,
+            AffinityHostType.Text => Permissions.TextsRead,
             AffinityHostType.Image => Permissions.ImagesRead,
             AffinityHostType.Performer => Permissions.PerformersRead,
             AffinityHostType.Face => Permissions.FacesRead,

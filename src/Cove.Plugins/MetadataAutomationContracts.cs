@@ -35,6 +35,7 @@ public enum ScraperEntity
     Image,
     Group,
     Audio,
+    Text,
 }
 
 public sealed record ScraperPermissions(
@@ -64,6 +65,10 @@ public interface IScraperHost
     Task<GalleryScrapeInput?> GetGalleryAsync(int galleryId, CancellationToken ct = default);
     Task<ImageScrapeInput?> GetImageAsync(int imageId, CancellationToken ct = default);
     Task<GroupScrapeInput?> GetGroupAsync(int groupId, CancellationToken ct = default);
+    Task<AudioScrapeInput?> GetAudioAsync(int audioId, CancellationToken ct = default)
+        => Task.FromResult<AudioScrapeInput?>(null);
+    Task<TextScrapeInput?> GetTextAsync(int textId, CancellationToken ct = default)
+        => Task.FromResult<TextScrapeInput?>(null);
 }
 
 public interface IScraperProvider : IExtension
@@ -85,11 +90,32 @@ public interface IScraperProvider : IExtension
     Task<ScrapedGalleryDto?> ScrapeGalleryAsync(ScraperRequest<GalleryScrapeInput> request, CancellationToken ct)
         => Task.FromResult<ScrapedGalleryDto?>(null);
 
+    Task<IReadOnlyList<ScrapedGalleryDto>> SearchGalleriesAsync(ScraperRequest<string> request, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ScrapedGalleryDto>>([]);
+
     Task<ScrapedImageDto?> ScrapeImageAsync(ScraperRequest<ImageScrapeInput> request, CancellationToken ct)
         => Task.FromResult<ScrapedImageDto?>(null);
 
+    Task<IReadOnlyList<ScrapedImageDto>> SearchImagesAsync(ScraperRequest<string> request, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ScrapedImageDto>>([]);
+
     Task<ScrapedGroupDto?> ScrapeGroupAsync(ScraperRequest<GroupScrapeInput> request, CancellationToken ct)
         => Task.FromResult<ScrapedGroupDto?>(null);
+
+    Task<IReadOnlyList<ScrapedGroupDto>> SearchGroupsAsync(ScraperRequest<string> request, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ScrapedGroupDto>>([]);
+
+    Task<ScrapedAudioDto?> ScrapeAudioAsync(ScraperRequest<AudioScrapeInput> request, CancellationToken ct)
+        => Task.FromResult<ScrapedAudioDto?>(null);
+
+    Task<IReadOnlyList<ScrapedAudioDto>> SearchAudiosAsync(ScraperRequest<string> request, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ScrapedAudioDto>>([]);
+
+    Task<ScrapedTextDto?> ScrapeTextAsync(ScraperRequest<TextScrapeInput> request, CancellationToken ct)
+        => Task.FromResult<ScrapedTextDto?>(null);
+
+    Task<IReadOnlyList<ScrapedTextDto>> SearchTextsAsync(ScraperRequest<string> request, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ScrapedTextDto>>([]);
 }
 
 [Flags]
@@ -108,6 +134,7 @@ public enum DownloaderEntity
     Image,
     Gallery,
     Audio,
+    Text,
 }
 
 public sealed record DownloaderPermissions(IReadOnlyList<string>? AllowNetworkHosts = null);
@@ -125,14 +152,17 @@ public sealed record DownloaderUrlMatch(
     string DownloaderId,
     string NormalizedUrl,
     IReadOnlyList<DownloaderQualityOption>? QualityOptions = null,
-    string? Label = null);
+    string? Label = null,
+    string? SourceUrl = null,
+    bool Divert = false);
 
 public sealed record DownloaderRequest(
     string DownloaderId,
     string Url,
     DownloaderEntity Entity,
     DownloaderPermissions Permissions,
-    string? QualityId = null);
+    string? QualityId = null,
+    string? SourceUrl = null);
 
 public sealed record DownloaderResult(
     string LocalPath,
@@ -156,6 +186,12 @@ public interface IDownloaderProvider : IExtension
 
     Task<DownloaderUrlMatch?> MatchAsync(string url, CancellationToken ct)
         => Task.FromResult<DownloaderUrlMatch?>(null);
+
+    async Task<IReadOnlyList<DownloaderUrlMatch>> MatchAllAsync(string url, CancellationToken ct)
+    {
+        var match = await MatchAsync(url, ct);
+        return match == null ? [] : [match];
+    }
 
     Task<DownloaderResult?> DownloadAsync(DownloaderRequest request, IDownloaderHost host, CancellationToken ct)
         => Task.FromResult<DownloaderResult?>(null);

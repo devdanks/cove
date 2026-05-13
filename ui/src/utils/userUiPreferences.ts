@@ -1,7 +1,7 @@
 import { auth } from "../api/client";
 import { authStore } from "../auth/authStore";
 import type { AuthUser } from "../auth/authStore";
-import type { RatingSystemOptions, UserThemePreferences, UserTrackingPreferences, UserUiPreferences } from "../api/types";
+import type { RatingSystemOptions, UserPlaybackPreferences, UserThemePreferences, UserTrackingPreferences, UserUiPreferences } from "../api/types";
 
 const SAVE_DEBOUNCE_MS = 250;
 
@@ -124,6 +124,11 @@ function normalizeTrackingPreferences(
   };
 }
 
+function normalizePlaybackPreferences(preferences: UserPlaybackPreferences | null | undefined): UserPlaybackPreferences | null {
+  const skipSeconds = clampNumber(preferences?.skipSeconds, 1, 300);
+  return skipSeconds == null ? null : { skipSeconds: Math.round(skipSeconds) };
+}
+
 function normalizeUiPreferences(preferences: UserUiPreferences | null | undefined): UserUiPreferences | null {
   const theme = normalizeThemePreferences(preferences?.theme);
   const ratingSystemOptions = normalizeRatingSystemOptions(preferences?.ratingSystemOptions);
@@ -135,8 +140,9 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
   const scenes = typeof preferences?.scenes?.includeCompilationGroups === "boolean"
     ? { includeCompilationGroups: preferences.scenes.includeCompilationGroups }
     : null;
+  const playback = normalizePlaybackPreferences(preferences?.playback);
   const keybindingOverrides = normalizeKeybindingOverrides(preferences?.keybindingOverrides);
-  if (!theme && !ratingSystemOptions && !tracking && !scenes && !keybindingOverrides) {
+  if (!theme && !ratingSystemOptions && !tracking && !scenes && !playback && !keybindingOverrides) {
     return null;
   }
 
@@ -145,6 +151,7 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     ratingSystemOptions,
     tracking,
     scenes,
+    playback,
     keybindingOverrides,
   };
 }

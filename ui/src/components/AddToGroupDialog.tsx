@@ -79,7 +79,7 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
         if (!hostType || !hostId) continue;
         await groups.items.create(groupId, {
           orderIndex: 1_000_000,
-          kind: item.kind ?? (hostType === "image" ? "image" : hostType === "group" ? "group" : "scene"),
+          kind: item.kind ?? getGroupItemKind(hostType),
           hostType,
           hostId,
           sceneId: hostType === "scene" ? hostId : undefined,
@@ -200,4 +200,12 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
       </div>
     </EditModal>
   );
+}
+
+function getGroupItemKind(hostType: string): GroupItemKind {
+  if (hostType === "image" || hostType === "audio" || hostType === "text" || hostType === "group") {
+    return hostType;
+  }
+
+  return "scene";
 }

@@ -35,6 +35,26 @@ public class MetadataController(
     private const double SegmentPreviewMaxDuration = 5.0;
     private const double SegmentPreviewReuseOverlapRatio = 0.8;
 
+    private static List<string> NormalizeFilterPaths(IEnumerable<string> paths) => paths
+        .Where(path => !string.IsNullOrWhiteSpace(path))
+        .Select(NormalizePathForComparison)
+        .Where(path => path.Length > 0)
+        .ToList();
+
+    private static string NormalizePathForComparison(string path) => path
+        .Trim()
+        .Replace('\\', '/')
+        .TrimEnd('/');
+
+    private static bool IsUnderAnyPath(string candidatePath, IReadOnlyList<string> filterPaths)
+    {
+        if (filterPaths.Count == 0)
+            return true;
+
+        var normalizedCandidate = NormalizePathForComparison(candidatePath);
+        return filterPaths.Any(path => normalizedCandidate.StartsWith(path, StringComparison.OrdinalIgnoreCase));
+    }
+
     private readonly record struct SegmentPreviewClip(double StartSec, double EndSec, string Path);
 
     [HttpPost("scan")]
@@ -52,6 +72,8 @@ public class MetadataController(
             GenerateMd5 = enableAllGenerators || opts?.ScanGenerateMd5 == true,
             GenerateImageThumbnails = enableAllGenerators || opts?.ScanGenerateThumbnails == true,
             GenerateImagePhashes = enableAllGenerators || opts?.ScanGenerateImagePhashes == true,
+            GenerateAudioPhashes = enableAllGenerators || opts?.ScanGenerateAudioPhashes == true,
+            GenerateTextPhashes = enableAllGenerators || opts?.ScanGenerateTextPhashes == true,
             Rescan = opts?.Rescan == true,
         });
         return Ok(new { jobId });
@@ -90,12 +112,13 @@ public class MetadataController(
             // Filter by paths if specified
             if (opts?.Paths is { Count: > 0 } paths)
             {
+                var filterPaths = NormalizeFilterPaths(paths);
                 scenes = scenes.Where(s =>
                 {
                     var file = s.Files.FirstOrDefault();
                     if (file == null) return false;
                     var filePath = Path.Combine(file.ParentFolder?.Path ?? "", file.Basename);
-                    return paths.Any(p => filePath.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+                    return IsUnderAnyPath(filePath, filterPaths);
                 }).ToList();
             }
 
@@ -266,12 +289,13 @@ public class MetadataController(
 
                 if (opts?.Paths is { Count: > 0 } imagePaths)
                 {
+                    var filterPaths = NormalizeFilterPaths(imagePaths);
                     imageFiles = imageFiles.Where(imageFile =>
                     {
                         var imagePath = imageFile.ParentFolder != null
                             ? Path.Combine(imageFile.ParentFolder.Path, imageFile.Basename)
                             : imageFile.Basename;
-                        return imagePaths.Any(p => imagePath.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+                        return IsUnderAnyPath(imagePath, filterPaths);
                     }).ToList();
                 }
 
@@ -308,6 +332,110 @@ public class MetadataController(
 
                     var current = Interlocked.Increment(ref imageProcessed);
                     progress.Report((double)current / imageTotal, $"Generating image content ({current}/{imageTotal})");
+                });
+            }
+
+            if (!hasSceneSelection && (opts?.AudioPhashes == true || opts?.Md5 == true))
+            {
+                var audioFiles = await dbCtx.AudioFiles
+                    .Include(f => f.ParentFolder)
+                    .Include(f => f.Fingerprints)
+                    .ToListAsync(ct);
+
+                if (opts?.Paths is { Count: > 0 } audioPaths)
+                {
+                    var filterPaths = NormalizeFilterPaths(audioPaths);
+                    audioFiles = audioFiles.Where(audioFile =>
+                    {
+                        var audioPath = audioFile.ParentFolder != null
+                            ? Path.Combine(audioFile.ParentFolder.Path, audioFile.Basename)
+                            : audioFile.Basename;
+                        return IsUnderAnyPath(audioPath, filterPaths);
+                    }).ToList();
+                }
+
+                var audioTotal = audioFiles.Count;
+                var audioProcessed = 0;
+
+                await Parallel.ForEachAsync(audioFiles, new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = ct }, async (audioFile, token) =>
+                {
+                    var audioPath = audioFile.ParentFolder != null
+                        ? Path.Combine(audioFile.ParentFolder.Path, audioFile.Basename)
+                        : audioFile.Basename;
+
+                    if (System.IO.File.Exists(audioPath))
+                    {
+                        var hasPhash = audioFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value));
+                        if (opts?.AudioPhashes == true && (opts?.Overwrite == true || !hasPhash))
+                        {
+                            var phash = await fingerprintService.ComputeAudioPhashAsync(audioPath, token);
+                            if (!string.IsNullOrWhiteSpace(phash))
+                                await UpsertFingerprintAsync(audioFile.Id, "phash", phash, token);
+                        }
+
+                        var hasMd5 = audioFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
+                        if (opts?.Md5 == true && (opts?.Overwrite == true || !hasMd5))
+                        {
+                            var md5 = await fingerprintService.ComputeMd5Async(audioPath, token);
+                            if (!string.IsNullOrWhiteSpace(md5))
+                                await UpsertFingerprintAsync(audioFile.Id, "md5", md5, token);
+                        }
+                    }
+
+                    var current = Interlocked.Increment(ref audioProcessed);
+                    progress.Report(audioTotal == 0 ? 1d : (double)current / audioTotal, $"Generating audio content ({current}/{audioTotal})");
+                });
+            }
+
+            if (!hasSceneSelection && (opts?.TextPhashes == true || opts?.Md5 == true))
+            {
+                var textFiles = await dbCtx.TextFiles
+                    .Include(f => f.ParentFolder)
+                    .Include(f => f.Fingerprints)
+                    .ToListAsync(ct);
+
+                if (opts?.Paths is { Count: > 0 } textPaths)
+                {
+                    var filterPaths = NormalizeFilterPaths(textPaths);
+                    textFiles = textFiles.Where(textFile =>
+                    {
+                        var textPath = textFile.ParentFolder != null
+                            ? Path.Combine(textFile.ParentFolder.Path, textFile.Basename)
+                            : textFile.Basename;
+                        return IsUnderAnyPath(textPath, filterPaths);
+                    }).ToList();
+                }
+
+                var textTotal = textFiles.Count;
+                var textProcessed = 0;
+
+                await Parallel.ForEachAsync(textFiles, new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = ct }, async (textFile, token) =>
+                {
+                    var textPath = textFile.ParentFolder != null
+                        ? Path.Combine(textFile.ParentFolder.Path, textFile.Basename)
+                        : textFile.Basename;
+
+                    if (System.IO.File.Exists(textPath))
+                    {
+                        var hasPhash = textFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value));
+                        if (opts?.TextPhashes == true && (opts?.Overwrite == true || !hasPhash))
+                        {
+                            var phash = await fingerprintService.ComputeTextPhashAsync(textPath, token);
+                            if (!string.IsNullOrWhiteSpace(phash))
+                                await UpsertFingerprintAsync(textFile.Id, "phash", phash, token);
+                        }
+
+                        var hasMd5 = textFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
+                        if (opts?.Md5 == true && (opts?.Overwrite == true || !hasMd5))
+                        {
+                            var md5 = await fingerprintService.ComputeMd5Async(textPath, token);
+                            if (!string.IsNullOrWhiteSpace(md5))
+                                await UpsertFingerprintAsync(textFile.Id, "md5", md5, token);
+                        }
+                    }
+
+                    var current = Interlocked.Increment(ref textProcessed);
+                    progress.Report(textTotal == 0 ? 1d : (double)current / textTotal, $"Generating text content ({current}/{textTotal})");
                 });
             }
         });
@@ -407,6 +535,7 @@ public class MetadataController(
 
             var total = files.Count;
             var cleaned = 0;
+            var filterPaths = opts?.Paths?.Count > 0 ? NormalizeFilterPaths(opts.Paths) : [];
 
             for (var i = 0; i < files.Count; i++)
             {
@@ -416,7 +545,7 @@ public class MetadataController(
                 var file = files[i];
                 var filePath = Path.Combine(file.ParentFolder?.Path ?? "", file.Basename);
 
-                if (opts?.Paths?.Count > 0 && !opts.Paths.Any(p => filePath.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                if (filterPaths.Count > 0 && !IsUnderAnyPath(filePath, filterPaths))
                     continue;
 
                 if (!System.IO.File.Exists(filePath))

@@ -92,12 +92,16 @@ public sealed record UserTrackingPreferencesDto(
 public sealed record UserScenesPreferencesDto(
     bool? IncludeCompilationGroups);
 
+public sealed record UserPlaybackPreferencesDto(
+    int? SkipSeconds);
+
 public sealed record UserUiPreferencesDto(
     UserThemePreferencesDto? Theme,
     UserRatingSystemOptionsDto? RatingSystemOptions,
     UserTrackingPreferencesDto? Tracking,
     UserScenesPreferencesDto? Scenes,
-    Dictionary<string, string>? KeybindingOverrides);
+    Dictionary<string, string>? KeybindingOverrides,
+    UserPlaybackPreferencesDto? Playback = null);
 
 public sealed record CreateUserRequest(
     string Username,

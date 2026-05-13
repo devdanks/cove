@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups, scenes } from "../api/client";
 import type { FindFilter, Group, GroupItem, Image as ImageEntity, Scene, SegmentDerivedQueryDescriptor, SegmentSpanDerivedQuery } from "../api/types";
 import { formatDate, formatDuration, CustomFieldsDisplay } from "../components/shared";
-import { Clapperboard, ExternalLink, Film, GripVertical, Image as ImageIcon, Layers, Link as LinkIcon, Pencil, Play, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import { BookOpenText, Clapperboard, ExternalLink, Film, GripVertical, Headphones, Image as ImageIcon, Layers, Link as LinkIcon, Pencil, Play, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { GroupEditModal } from "./GroupEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -31,6 +31,10 @@ interface Props {
 
 type TabKey = "items" | "containingGroups" | "metadata" | "edit" | (string & {});
 type GroupItemsDisplayMode = "grid" | "list";
+
+function getGroupItemCount(group: Group) {
+  return group.itemCount ?? (group.kind === "dynamic" ? group.cachedItemCount ?? group.sceneCount : group.sceneCount);
+}
 
 export function GroupDetailPage({ id, onNavigate }: Props) {
   const { data: group, isLoading } = useQuery({
@@ -115,7 +119,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       ...tab,
       count:
         tab.key === "items"
-          ? groupItemsTotalCount + (group?.subGroupCount ?? 0)
+          ? groupItemsTotalCount
           : tab.key === "containingGroups"
             ? group?.containingGroupCount
             : undefined,
@@ -129,7 +133,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     }, hasPermission)
       .filter((tab) => tab.key !== "items" || canReadScenes || canReadGroups)
       .filter((tab) => !isBuiltInPersonalGroup || tab.key !== "edit");
-  }, [canReadGroups, canReadScenes, group?.containingGroupCount, group?.subGroupCount, groupItemsTotalCount, groupTabs, hasPermission, isBuiltInPersonalGroup]);
+  }, [canReadGroups, canReadScenes, group?.containingGroupCount, groupItemsTotalCount, groupTabs, hasPermission, isBuiltInPersonalGroup]);
 
   useEffect(() => {
     if (tabs.length > 0 && !tabs.some((tab) => tab.key === activeTab)) {
@@ -151,8 +155,8 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
 
   const itemsContent = (
     <div className="space-y-6">
-      {canReadScenes ? (
-        <GroupScenesPanel
+      {canReadGroups ? (
+        <GroupItemsPanel
           groupId={id}
           filter={sceneFilter}
           setFilter={setSceneFilter}
@@ -175,16 +179,12 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
           refreshingDynamic={groupItemsLoading || playbackManifestLoading}
           onSnapshotDynamic={() => snapshotMut.mutate()}
           snapshottingDynamic={snapshotMut.isPending}
+          canReadScenes={canReadScenes}
         />
       ) : (
-        <EmptyPanel icon={<Film className="h-12 w-12" />} message="Scene playback and scene list access are unavailable for this group." />
+        <EmptyPanel icon={<Layers className="h-12 w-12" />} message="Item access is unavailable for this group." />
       )}
 
-      {canReadGroups ? (
-        <section className="rounded-2xl border border-border bg-card/70 p-5">
-          <GroupSubGroupsPanel groupId={id} onNavigate={onNavigate} canWriteGroup={canModifyGroup} />
-        </section>
-      ) : null}
     </div>
   );
 
@@ -203,6 +203,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       <section className="rounded-2xl border border-border bg-card/70 p-5">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted">Metadata</h2>
         <dl className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <MetadataField label="Item Count" value={getGroupItemCount(group)} />
           <MetadataField label="Scene Count" value={group.sceneCount} />
           <MetadataField label="Sub-Group Count" value={group.subGroupCount} />
           <MetadataField label="Containing Groups" value={group.containingGroupCount} />
@@ -239,7 +240,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Edit Group</h2>
           <p className="mt-1 text-sm text-secondary">
             {canModifyGroup
-              ? "Open the group editor modal, adjust collection metadata, or remove the group entirely."
+              ? "Open the group editor, adjust collection metadata, or remove the group entirely."
               : isBuiltInPersonalGroup
                 ? "This built-in personal group is managed automatically."
                 : "You have read access to this group, but not write access."}
@@ -265,7 +266,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
             disabled={showInSceneListsMut.isPending}
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-wait disabled:opacity-60"
           >
-            {group.showInSceneLists ?? true ? "Hide from Scenes list" : "Show in Scenes list"}
+            {group.showInSceneLists ?? true ? "Hide from scene browsing" : "Show in scene browsing"}
           </button>
         ) : null}
         {canRemoveGroup ? (
@@ -310,7 +311,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         { key: "containing", label: "Containing", value: group.containingGroupCount, icon: <LinkIcon className="h-4 w-4" /> },
       ]
     : [
-        { key: "scenes", label: "Scenes", value: group.sceneCount, icon: <Film className="h-4 w-4" /> },
+        { key: "items", label: "Items", value: getGroupItemCount(group), icon: <Layers className="h-4 w-4" /> },
         { key: "subgroups", label: "Sub-groups", value: group.subGroupCount, icon: <Layers className="h-4 w-4" /> },
         { key: "containing", label: "Containing", value: group.containingGroupCount, icon: <LinkIcon className="h-4 w-4" /> },
       ];
@@ -386,6 +387,11 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
           </>
         }
       >
+        {canReadGroups ? (
+          <section className="mx-auto max-w-7xl pb-5">
+            <GroupSubGroupsPanel groupId={id} onNavigate={onNavigate} canWriteGroup={canModifyGroup} />
+          </section>
+        ) : null}
         <EntityDetailTabs tabs={tabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl" />
         <div className="py-6">
           {activeContent}
@@ -407,7 +413,7 @@ function MetadataField({ label, value }: { label: string; value: React.ReactNode
   );
 }
 
-function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, groupItemsLoading, groupItemsTotalCount, groupItemFilter, setGroupItemFilter, groupItemsDisplayMode, setGroupItemsDisplayMode, canWriteGroup, group, onRefreshDynamic, refreshingDynamic, onSnapshotDynamic, snapshottingDynamic }: {
+function GroupItemsPanel({ groupId, filter, setFilter, onNavigate, groupItems, groupItemsLoading, groupItemsTotalCount, groupItemFilter, setGroupItemFilter, groupItemsDisplayMode, setGroupItemsDisplayMode, canWriteGroup, group, onRefreshDynamic, refreshingDynamic, onSnapshotDynamic, snapshottingDynamic, canReadScenes }: {
   groupId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
@@ -425,6 +431,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
   refreshingDynamic?: boolean;
   onSnapshotDynamic?: () => void;
   snapshottingDynamic?: boolean;
+  canReadScenes: boolean;
 }) {
   const queryClient = useQueryClient();
   const [zoomLevel, setZoomLevel] = useState(0);
@@ -433,7 +440,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
   const { data: groupScenes, isLoading } = useQuery({
     queryKey: ["group-scenes", groupId, filter],
     queryFn: () => scenes.find(filter, { groupId: String(groupId) }),
-    enabled: !isDynamic,
+    enabled: !isDynamic && canReadScenes,
   });
   const deleteItemMutation = useMutation({
     mutationFn: (itemId: number) => groups.items.delete(groupId, itemId),
@@ -463,7 +470,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
   }, [groupId, groupItems, groupItemsLoading, isDynamic, queryClient]);
 
   if (groupItemsLoading) {
-    return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading group items..." />;
+    return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading items..." />;
   }
 
   if (isDynamic || (groupItemsTotalCount ?? 0) > 0 || (groupItems && groupItems.length > 0)) {
@@ -474,23 +481,18 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
     return (
       <div className="space-y-4">
         {isDynamic ? (
-          <DynamicGroupBanner
-            group={group}
-            resolvedCount={groupItemsTotalCount ?? orderedItems.length}
-            onRefresh={onRefreshDynamic}
-            refreshing={refreshingDynamic}
-            onSnapshot={onSnapshotDynamic}
-            snapshotting={snapshottingDynamic}
-            canWriteGroup={!!canWriteGroup}
-          />
+          <section className="mx-auto w-full max-w-7xl">
+            <DynamicGroupBanner
+              group={group}
+              resolvedCount={groupItemsTotalCount ?? orderedItems.length}
+              onRefresh={onRefreshDynamic}
+              refreshing={refreshingDynamic}
+              onSnapshot={onSnapshotDynamic}
+              snapshotting={snapshottingDynamic}
+              canWriteGroup={!!canWriteGroup}
+            />
+          </section>
         ) : null}
-
-        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-4">
-          <div>
-            <div className="text-sm font-semibold text-foreground">{isDynamic ? "Resolved Items" : "Group Items"}</div>
-          </div>
-          <div className="text-xs text-muted">{(isDynamic ? groupItemsTotalCount ?? orderedItems.length : orderedItems.length)} item{(isDynamic ? groupItemsTotalCount ?? orderedItems.length : orderedItems.length) === 1 ? "" : "s"}</div>
-        </div>
 
         {groupItemFilter && setGroupItemFilter ? (
           <DetailListToolbar
@@ -513,7 +515,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
         ) : null}
 
         {orderedItems.length === 0 ? (
-          <EmptyPanel icon={<Layers className="h-12 w-12" />} message={isDynamic ? "No items resolved for this dynamic group" : "No group items"} />
+          <EmptyPanel icon={<Layers className="h-12 w-12" />} message={isDynamic ? "No items resolved for this dynamic group" : "No items"} />
         ) : null}
 
         {groupItemsDisplayMode === "grid" ? (
@@ -558,8 +560,9 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
     );
   }
 
-  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!groupScenes || groupScenes.items.length === 0) return <EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes in this group" />;
+  if (!canReadScenes) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No visible items" />;
+  if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading items..." />;
+  if (!groupScenes || groupScenes.items.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No items in this group" />;
 
   return (
     <>
@@ -801,6 +804,7 @@ function groupItemToGroup(item: GroupItem): Group {
     urls: [],
     tags: [],
     sceneCount: 0,
+    itemCount: item.hostId || item.childGroupId ? 1 : 0,
     subGroupCount: 0,
     containingGroupCount: 0,
     createdAt: item.createdAt,
@@ -885,7 +889,7 @@ function DynamicGroupBanner({ group, resolvedCount, onRefresh, refreshing, onSna
 }
 
 function formatDynamicSourceLabel(sourceKey?: string | null): string {
-  if (sourceKey === "filter") return "filtered scenes";
+  if (sourceKey === "filter") return "filtered items";
   return sourceKey ? sourceKey.replaceAll("-", " ") : "dynamic";
 }
 
@@ -896,6 +900,8 @@ function isBuiltInPersonalDynamicSource(sourceKey?: string | null): boolean {
 function GroupItemKindIcon({ item }: { item: GroupItem }) {
   const className = "mt-0.5 h-4 w-4 shrink-0 text-muted";
   if (item.kind === "image") return <ImageIcon className={className} />;
+  if (item.kind === "audio") return <Headphones className={className} />;
+  if (item.kind === "text") return <BookOpenText className={className} />;
   if (item.kind === "group") return <Layers className={className} />;
   return <Film className={className} />;
 }
@@ -908,6 +914,8 @@ function getGroupItemMeta(item: GroupItem): string {
   if (item.kind === "sceneRange") return formatDurationRange(item.startSec, item.endSec);
   if (item.kind === "scene") return "Full scene";
   if (item.kind === "image") return "Image";
+  if (item.kind === "audio") return "Audio";
+  if (item.kind === "text") return "Text";
   if (item.kind === "group") return "Group";
   return item.hostType ? item.hostType : item.kind;
 }
@@ -917,6 +925,8 @@ function getGroupItemRoute(item: GroupItem): { label: string; route: any } | nul
   if (item.imageId) return { label: "Open image", route: { page: "image", id: item.imageId } };
   if (item.childGroupId) return { label: "Open group", route: { page: "group", id: item.childGroupId } };
   if (item.hostType === "image" && item.hostId) return { label: "Open image", route: { page: "image", id: item.hostId } };
+  if (item.hostType === "audio" && item.hostId) return { label: "Open audio", route: { page: "audio", id: item.hostId } };
+  if (item.hostType === "text" && item.hostId) return { label: "Open text", route: { page: "text", id: item.hostId } };
   if (item.hostType === "group" && item.hostId) return { label: "Open group", route: { page: "group", id: item.hostId } };
   if (item.hostType === "scene" && item.hostId) return { label: "Open scene", route: { page: "scene", id: item.hostId, seekTo: item.startSec ?? 0 } };
   return null;
@@ -1061,7 +1071,7 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
               ) : null}
               <span className="w-6 text-center text-xs text-muted">{index + 1}</span>
               <button onClick={() => onNavigate({ page: "group", id: g.id })} className="flex-1 text-left text-sm font-medium text-foreground hover:text-accent">{g.name}</button>
-              <span className="text-xs text-muted">{g.sceneCount} scenes</span>
+              <span className="text-xs text-muted">{getGroupItemCount(g)} item{getGroupItemCount(g) === 1 ? "" : "s"}</span>
               {canWriteGroup ? <button
                 onClick={() => { if (confirm(`Remove "${g.name}" from sub-groups?`)) removeMut.mutate(g.id); }}
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-900/20 text-muted hover:text-red-400"

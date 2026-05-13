@@ -91,7 +91,7 @@ public class PostgresManagerService : IHostedService
 
         // 4. Start PostgreSQL
         _logger.LogInformation("Starting PostgreSQL on port {Port}", _config.Port);
-        await PgCtlAsync($"start -D \"{DataDir}\" -l \"{LogFile}\" -w -o \"-p {_config.Port}\"", ct);
+        await PgCtlAsync($"start -D \"{DataDir}\" -l \"{LogFile}\" -w -t 300 -o \"-p {_config.Port}\"", ct);
         _started = true;
 
         // 5. Wait for ready
@@ -492,11 +492,26 @@ public class PostgresManagerService : IHostedService
         var exitCode = await RunAsync(Exe("pg_ctl"), args, BinDir, ct);
         if (exitCode != 0)
         {
-            // Read log for diagnostics
-            var logContent = File.Exists(LogFile) ? await File.ReadAllTextAsync(LogFile, ct) : "(no log file)";
-            var lastLines = string.Join('\n', logContent.Split('\n').TakeLast(20));
+            var lastLines = await ReadLogTailAsync(20, ct);
             throw new InvalidOperationException(
                 $"pg_ctl failed (exit code {exitCode}). Last log lines:\n{lastLines}");
+        }
+    }
+
+    private async Task<string> ReadLogTailAsync(int lineCount, CancellationToken ct)
+    {
+        if (!File.Exists(LogFile)) return "(no log file)";
+
+        try
+        {
+            await using var stream = new FileStream(LogFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            var logContent = await reader.ReadToEndAsync(ct);
+            return string.Join('\n', logContent.Split('\n').TakeLast(lineCount));
+        }
+        catch (IOException ex)
+        {
+            return $"(log unavailable: {ex.Message})";
         }
     }
 
@@ -519,7 +534,7 @@ public class PostgresManagerService : IHostedService
 
     private async Task WaitForReadyAsync(CancellationToken ct)
     {
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < 240; i++)
         {
             ct.ThrowIfCancellationRequested();
             var exitCode = await RunAsync(Exe("pg_isready"),
@@ -532,9 +547,9 @@ public class PostgresManagerService : IHostedService
             await Task.Delay(500, ct);
         }
 
-        var logContent = File.Exists(LogFile) ? await File.ReadAllTextAsync(LogFile, ct) : "(no log)";
+        var lastLines = await ReadLogTailAsync(30, ct);
         throw new TimeoutException(
-            $"PostgreSQL did not become ready within 15 seconds. Log:\n{string.Join('\n', logContent.Split('\n').TakeLast(30))}");
+            $"PostgreSQL did not become ready within 120 seconds. Log:\n{lastLines}");
     }
 
     private async Task EnsureDatabaseAsync(CancellationToken ct)

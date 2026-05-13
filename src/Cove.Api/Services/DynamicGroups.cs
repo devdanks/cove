@@ -73,7 +73,7 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
                     CacheTtlSec = 30,
                     AllowedHostTypes = sourceKey == ContinueWatchingSourceKey
                         ? ["scene"]
-                        : ["scene", "image", "performer", "studio", "tag", "gallery", "group", "face", "segment"],
+                        : ["scene", "audio", "text", "image", "performer", "studio", "tag", "gallery", "group", "face", "segment"],
                 });
                 continue;
             }
@@ -334,6 +334,8 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
     protected static GroupItemKind ToKind(AffinityHostType hostType) => hostType switch
     {
         AffinityHostType.Scene => GroupItemKind.Scene,
+        AffinityHostType.Audio => GroupItemKind.Audio,
+        AffinityHostType.Text => GroupItemKind.Text,
         AffinityHostType.Image => GroupItemKind.Image,
         AffinityHostType.Performer => GroupItemKind.Performer,
         AffinityHostType.Face => GroupItemKind.Face,
@@ -352,6 +354,8 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
         CancellationToken ct)
     {
         var sceneIds = rows.Where(row => row.HostType == AffinityHostType.Scene).Select(row => row.HostId).Distinct().ToArray();
+        var audioIds = rows.Where(row => row.HostType == AffinityHostType.Audio).Select(row => row.HostId).Distinct().ToArray();
+        var textIds = rows.Where(row => row.HostType == AffinityHostType.Text).Select(row => row.HostId).Distinct().ToArray();
         var imageIds = rows.Where(row => row.HostType == AffinityHostType.Image).Select(row => row.HostId).Distinct().ToArray();
         var performerIds = rows.Where(row => row.HostType == AffinityHostType.Performer).Select(row => row.HostId).Distinct().ToArray();
         var faceIds = rows.Where(row => row.HostType == AffinityHostType.Face).Select(row => row.HostId).Distinct().ToArray();
@@ -369,6 +373,8 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
         var sceneFileTitles = sceneFileRows
             .GroupBy(file => file.SceneId)
             .ToDictionary(group => group.Key, group => group.First().Basename);
+        var audios = await Db.Audios.AsNoTracking().Where(item => audioIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => !string.IsNullOrWhiteSpace(item.Title) ? item.Title! : item.MinPath ?? $"Audio {item.Id}", ct);
+        var texts = await Db.TextDocuments.AsNoTracking().Where(item => textIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => !string.IsNullOrWhiteSpace(item.Title) ? item.Title! : item.MinPath ?? $"Text {item.Id}", ct);
         var images = await Db.Images.AsNoTracking().Where(item => imageIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Title ?? $"Image {item.Id}", ct);
         var performers = await Db.Performers.AsNoTracking().Where(item => performerIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Name, ct);
         var faces = await Db.Faces.AsNoTracking().Where(item => faceIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Label ?? $"Face {item.Id}", ct);
@@ -382,6 +388,8 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
             AffinityHostType.Scene => !string.IsNullOrWhiteSpace(scenes.GetValueOrDefault(hostId))
                 ? scenes.GetValueOrDefault(hostId)
                 : sceneFileTitles.GetValueOrDefault(hostId) ?? $"Scene {hostId}",
+            AffinityHostType.Audio => audios.GetValueOrDefault(hostId),
+            AffinityHostType.Text => texts.GetValueOrDefault(hostId),
             AffinityHostType.Image => images.GetValueOrDefault(hostId),
             AffinityHostType.Performer => performers.GetValueOrDefault(hostId),
             AffinityHostType.Face => faces.GetValueOrDefault(hostId),

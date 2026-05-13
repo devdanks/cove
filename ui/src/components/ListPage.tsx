@@ -60,6 +60,8 @@ const MAX_ZOOM_LEVEL = 5;
 
 const CUSTOM_FIELD_ENTITY_BY_FILTER_MODE: Record<string, CustomFieldEntityType> = {
   scenes: "scene",
+  audios: "audio",
+  texts: "text",
   performers: "performer",
   tags: "tag",
   studios: "studio",

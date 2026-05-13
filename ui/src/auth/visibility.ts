@@ -4,11 +4,13 @@ export type NavVisibilityUser = {
   readGrantedEntityKinds?: string[];
 };
 
-export type EntityResource = "scene" | "image" | "performer" | "gallery" | "studio" | "tag" | "group" | "segment" | "face";
-export type NavPage = "scenes" | "segments" | "images" | "faces" | "galleries" | "performers" | "studios" | "tags" | "groups";
+export type EntityResource = "scene" | "audio" | "text" | "image" | "performer" | "gallery" | "studio" | "tag" | "group" | "segment" | "face";
+export type NavPage = "scenes" | "audios" | "texts" | "segments" | "images" | "faces" | "galleries" | "performers" | "studios" | "tags" | "groups";
 
 const READ_PERMISSIONS: Record<EntityResource, string> = {
   scene: "scenes.read",
+  audio: "audios.read",
+  text: "texts.read",
   image: "images.read",
   performer: "performers.read",
   face: "faces.read",
@@ -21,6 +23,8 @@ const READ_PERMISSIONS: Record<EntityResource, string> = {
 
 const WRITE_PERMISSIONS: Record<EntityResource, string> = {
   scene: "scenes.write",
+  audio: "audios.write",
+  text: "texts.write",
   image: "images.write",
   performer: "performers.write",
   face: "faces.write",
@@ -33,6 +37,8 @@ const WRITE_PERMISSIONS: Record<EntityResource, string> = {
 
 const DELETE_PERMISSIONS: Record<EntityResource, string> = {
   scene: "scenes.delete",
+  audio: "audios.delete",
+  text: "texts.delete",
   image: "images.delete",
   performer: "performers.delete",
   face: "faces.delete",
@@ -45,6 +51,8 @@ const DELETE_PERMISSIONS: Record<EntityResource, string> = {
 
 const NAV_PAGE_RESOURCE: Record<NavPage, EntityResource> = {
   scenes: "scene",
+  audios: "audio",
+  texts: "text",
   segments: "segment",
   images: "image",
   faces: "face",

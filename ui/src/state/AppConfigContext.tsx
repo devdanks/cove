@@ -4,11 +4,19 @@ import { system } from "../api/client";
 import { authStore, hasPermission } from "../auth/authStore";
 import type { CoveConfig, SystemStatus } from "../api/types";
 
-const defaultMenuItems = ["scenes", "images", "performers", "galleries", "studios", "tags", "groups"];
+const defaultMenuItems = ["scenes", "audios", "texts", "images", "performers", "galleries", "studios", "tags", "groups"];
 const defaultIdentifyDefaults = {
   createTags: true,
   createPerformers: true,
   createStudios: true,
+};
+
+const defaultScrapeApplyDefaults = {
+  createMissingTags: false,
+  createMissingPerformers: false,
+  createMissingStudio: false,
+  markOrganized: false,
+  hydratePerformers: false,
 };
 
 function normalizeRatingSystemType(value: string | undefined) {
@@ -49,6 +57,7 @@ function normalizeConfig(config: CoveConfig, userKeybindingOverrides?: Record<st
   const uiConfig = config.ui ?? ({} as CoveConfig["ui"]);
   const ratingOptions = uiConfig.ratingSystemOptions ?? { type: "stars", starPrecision: "full" };
   const identifyDefaults = config.scraping.identifyDefaults ?? defaultIdentifyDefaults;
+  const scrapeApplyDefaults = config.scraping.scrapeApplyDefaults ?? defaultScrapeApplyDefaults;
 
   return {
     ...config,
@@ -89,6 +98,13 @@ function normalizeConfig(config: CoveConfig, userKeybindingOverrides?: Record<st
         createStudios: identifyDefaults.createStudios ?? true,
         autoApplyMaxDurationDifferenceSeconds: identifyDefaults.autoApplyMaxDurationDifferenceSeconds,
         autoApplyMaxPhashDistance: identifyDefaults.autoApplyMaxPhashDistance,
+      },
+      scrapeApplyDefaults: {
+        createMissingTags: scrapeApplyDefaults.createMissingTags ?? false,
+        createMissingPerformers: scrapeApplyDefaults.createMissingPerformers ?? false,
+        createMissingStudio: scrapeApplyDefaults.createMissingStudio ?? false,
+        markOrganized: scrapeApplyDefaults.markOrganized ?? false,
+        hydratePerformers: scrapeApplyDefaults.hydratePerformers ?? false,
       },
     },
   };
@@ -142,7 +158,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       document.head.appendChild(link);
     }
 
-    link.href = config?.ui.faviconPath?.trim() || "/favicon.ico";
+    link.href = config?.ui.faviconPath?.trim() || "/favicon.svg";
   }, [config?.ui.faviconPath]);
 
   useEffect(() => {

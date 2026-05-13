@@ -146,10 +146,10 @@ export function GroupEditModal({ group, open, onClose }: Props) {
             ))}
           </div>
         </Field>
-        <Field label="Scenes list">
+        <Field label="Scene browsing">
           <label className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground">
             <input type="checkbox" checked={showInSceneLists} onChange={(event) => setShowInSceneLists(event.target.checked)} className="h-4 w-4 accent-accent" />
-            Show in Scenes list
+            Show in scene browsing
           </label>
         </Field>
       </div>

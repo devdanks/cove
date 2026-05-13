@@ -96,6 +96,12 @@ public sealed class CovePrincipal
             case PermissionKeys.ScenesRead:
                 entityKind = EntityKinds.Scene;
                 return true;
+            case PermissionKeys.AudiosRead:
+                entityKind = EntityKinds.Audio;
+                return true;
+            case PermissionKeys.TextsRead:
+                entityKind = EntityKinds.Text;
+                return true;
             case PermissionKeys.PerformersRead:
                 entityKind = EntityKinds.Performer;
                 return true;

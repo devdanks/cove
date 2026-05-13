@@ -51,7 +51,7 @@ export function DuplicateFinderPage({ onNavigate }: Props) {
   });
 
   const deleteMut = useMutation({
-    mutationFn: ({ ids, deleteFiles }: { ids: number[]; deleteFiles: boolean }) => scenes.bulkDelete(ids, deleteFiles),
+    mutationFn: ({ ids, options }: { ids: number[]; options?: { deleteFile?: boolean; deleteGenerated?: boolean } }) => scenes.bulkDelete(ids, options),
     onSuccess: () => {
       setPendingDelete(null);
       queryClient.invalidateQueries({ queryKey: ["scenes"] });
@@ -302,10 +302,11 @@ export function DuplicateFinderPage({ onNavigate }: Props) {
       confirmLabel={deleteMut.isPending ? "Deleting..." : "Delete duplicates"}
       onConfirm={(options) => {
         if (!pendingDelete || deleteMut.isPending) return;
-        deleteMut.mutate({ ids: pendingDelete.ids, deleteFiles: !!options?.deleteFile });
+        deleteMut.mutate({ ids: pendingDelete.ids, options });
       }}
       onCancel={() => setPendingDelete(null)}
       showDeleteFile
+      showDeleteGenerated
     />
     </>
   );

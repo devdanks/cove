@@ -19,6 +19,7 @@ import { scenes } from "../api/client";
 import type { Detection, Face, Segment } from "../api/types";
 import { createPlaybackTracker, type PlaybackTrackingTarget } from "../utils/interactionTracking";
 import { useAppConfig } from "../state/AppConfigContext";
+import { usePlaybackPreferences } from "../utils/playbackPreferences";
 
 type FaceOverlayInfo = Pick<Face, "id" | "label" | "performerName" | "performerId">;
 type DetectionOverlay = Detection & { overlayKey?: string };
@@ -120,6 +121,8 @@ export function VideoPlayer({
   onNext?: () => void;
 }) {
   const { config } = useAppConfig();
+  const playbackPreferences = usePlaybackPreferences();
+  const skipSeconds = playbackPreferences.skipSeconds;
   const maxLoopDuration = config?.ui.maxLoopDuration ?? 0;
   const effectiveShowAbLoop = showAbLoop ?? config?.ui.showAbLoopControls ?? true;
   const effectiveResumeTime = config?.ui.alwaysResumeOnPlayback === false ? undefined : resumeTime;
@@ -638,11 +641,11 @@ export function VideoPlayer({
           break;
         case "ArrowLeft":
           event.preventDefault();
-          v.currentTime = Math.max(0, v.currentTime - (event.shiftKey ? 10 : 5));
+          v.currentTime = Math.max(0, v.currentTime - (event.shiftKey ? skipSeconds : 5));
           break;
         case "ArrowRight":
           event.preventDefault();
-          v.currentTime = Math.min(v.duration, v.currentTime + (event.shiftKey ? 10 : 5));
+          v.currentTime = Math.min(v.duration, v.currentTime + (event.shiftKey ? skipSeconds : 5));
           break;
         case "ArrowUp":
           event.preventDefault();
@@ -675,7 +678,7 @@ export function VideoPlayer({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [playVideo, resetHideTimer]);
+  }, [playVideo, resetHideTimer, skipSeconds]);
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -967,10 +970,10 @@ export function VideoPlayer({
             </button>
           )}
 
-          <button onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10); }} className="hover:text-accent p-1" title="Back 10s">
+          <button onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - skipSeconds); }} className="hover:text-accent p-1" title={`Back ${skipSeconds}s`}>
             <SkipBack className="w-4 h-4" />
           </button>
-          <button onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration, v.currentTime + 10); }} className="hover:text-accent p-1" title="Forward 10s">
+          <button onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration, v.currentTime + skipSeconds); }} className="hover:text-accent p-1" title={`Forward ${skipSeconds}s`}>
             <SkipForward className="w-4 h-4" />
           </button>
 

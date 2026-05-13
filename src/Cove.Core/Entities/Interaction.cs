@@ -15,6 +15,8 @@ public enum InteractionHostType
     Group = 9,
     Search = 10,
     Collection = 11,
+    Audio = 12,
+    Text = 13,
 }
 
 public enum InteractionKind

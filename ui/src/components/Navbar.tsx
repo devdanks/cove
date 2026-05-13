@@ -1,4 +1,4 @@
-import { Film, Users, Building2, Tags, Image, ImageIcon, Layers, Settings, BarChart3, Activity, HelpCircle, Menu, X, Fingerprint, Bookmark } from "lucide-react";
+import { Film, Headphones, FileText, Users, Building2, Tags, Image, ImageIcon, Layers, Settings, BarChart3, Activity, HelpCircle, Menu, X, Fingerprint, Bookmark } from "lucide-react";
 import { useState } from "react";
 import { JobDrawer, useJobCount } from "./JobDrawer";
 import { GlobalSearch } from "./GlobalSearch";
@@ -16,6 +16,8 @@ interface NavbarProps {
 
 const navItems: { page: NavPage; label: string; icon: typeof Film }[] = [
   { page: "scenes", label: "Scenes", icon: Film },
+  { page: "audios", label: "Audios", icon: Headphones },
+  { page: "texts", label: "Texts", icon: FileText },
   { page: "segments", label: "Segments", icon: Bookmark },
   { page: "images", label: "Images", icon: ImageIcon },
   { page: "faces", label: "Faces", icon: Fingerprint },
@@ -28,6 +30,8 @@ const navItems: { page: NavPage; label: string; icon: typeof Film }[] = [
 
 const DETAIL_PARENT_PAGE: Record<string, string> = {
   scene: "scenes",
+  audio: "audios",
+  text: "texts",
   segment: "segments",
   image: "images",
   performer: "performers",

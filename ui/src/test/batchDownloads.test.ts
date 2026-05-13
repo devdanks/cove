@@ -41,6 +41,30 @@ describe("batchDownloads", () => {
     });
   });
 
+  it("queues every stored URL candidate for download-later items", async () => {
+    await queueBatchDownloads(
+      "Audio",
+      [{
+        id: 9,
+        title: "Specific Track",
+        urls: [
+          "https://reddit.com/r/example/comments/abc/post",
+          "https://audio.example.net/track/two",
+          "https://audio.example.net/track/two",
+        ],
+        files: [],
+      }],
+      {},
+    );
+
+    expect(mocks.systemStartBatchDownload).toHaveBeenCalledWith(expect.objectContaining({
+      items: [
+        expect.objectContaining({ url: "https://reddit.com/r/example/comments/abc/post", entity: "Audio", entityId: 9 }),
+        expect.objectContaining({ url: "https://audio.example.net/track/two", entity: "Audio", entityId: 9 }),
+      ],
+    }));
+  });
+
   it("queues imported urls for server-side placeholder creation", async () => {
     const result = await queueImportedUrlDownloads(
       "Scene",

@@ -9,6 +9,8 @@ public enum EventType
     StudioCreated, StudioUpdated, StudioDeleted,
     GalleryCreated, GalleryUpdated, GalleryDeleted,
     ImageCreated, ImageUpdated, ImageDeleted,
+    AudioCreated, AudioUpdated, AudioDeleted,
+    TextCreated, TextUpdated, TextDeleted,
     GroupCreated, GroupUpdated, GroupDeleted,
 
     // Jobs

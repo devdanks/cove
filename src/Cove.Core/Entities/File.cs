@@ -86,6 +86,33 @@ public class GalleryFile : BaseFileEntity
     public Gallery? Gallery { get; set; }
 }
 
+public class AudioFile : BaseFileEntity
+{
+    public string Format { get; set; } = string.Empty;
+    public double Duration { get; set; }
+    public string AudioCodec { get; set; } = string.Empty;
+    public long BitRate { get; set; }
+    public int? SampleRate { get; set; }
+    public int? Channels { get; set; }
+    public bool HasVideoTrack { get; set; }
+
+    // FK to Audio
+    public int? AudioId { get; set; }
+    public Audio? Audio { get; set; }
+}
+
+public class TextFile : BaseFileEntity
+{
+    public string Format { get; set; } = string.Empty;
+    public int? PageCount { get; set; }
+    public int? WordCount { get; set; }
+    public string? ExcerptText { get; set; }
+
+    // FK to Text document
+    public int? TextDocumentId { get; set; }
+    public TextDocument? TextDocument { get; set; }
+}
+
 public class FileFingerprint
 {
     public int Id { get; set; }

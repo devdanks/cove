@@ -470,7 +470,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         var wasCompleted = session.IsCompleted;
         var wasCountsAsView = session.CountsAsView;
         var completedByPosition = isFinalState
-            && hostType == InteractionHostType.Scene
+            && (hostType == InteractionHostType.Scene || hostType == InteractionHostType.Audio)
             && mediaDuration > 0
             && dto.CurrentPositionSec >= mediaDuration * tracking.ViewCompletionRatio;
         if (completedByPosition)
@@ -486,7 +486,9 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         var countsAsView = isFinalState && hostType switch
         {
             InteractionHostType.Image => session.TotalWatchedSec >= tracking.MinImageDetailViewSeconds,
+            InteractionHostType.Text => session.TotalWatchedSec >= tracking.MinImageDetailViewSeconds,
             InteractionHostType.Scene => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
+            InteractionHostType.Audio => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
             _ => false,
         };
 
@@ -505,7 +507,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 if (delta > 0d)
                     affinity.TotalConsumedSec = Math.Max(0d, affinity.TotalConsumedSec + delta);
 
-                if (hostType == InteractionHostType.Scene && dto.CurrentPositionSec >= 0)
+                if ((hostType == InteractionHostType.Scene || hostType == InteractionHostType.Audio) && dto.CurrentPositionSec >= 0)
                     affinity.LastPositionSec = dto.CurrentPositionSec;
 
                 if (delta > 0d || countsAsView)
@@ -775,6 +777,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         {
             InteractionHostType.Scene => AffinityHostType.Scene,
             InteractionHostType.Image => AffinityHostType.Image,
+            InteractionHostType.Audio => AffinityHostType.Audio,
+            InteractionHostType.Text => AffinityHostType.Text,
             InteractionHostType.Performer => AffinityHostType.Performer,
             InteractionHostType.Face => AffinityHostType.Face,
             InteractionHostType.Tag => AffinityHostType.Tag,
@@ -790,6 +794,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     {
         AffinityHostType.Scene => InteractionHostType.Scene,
         AffinityHostType.Image => InteractionHostType.Image,
+        AffinityHostType.Audio => InteractionHostType.Audio,
+        AffinityHostType.Text => InteractionHostType.Text,
         AffinityHostType.Performer => InteractionHostType.Performer,
         AffinityHostType.Face => InteractionHostType.Face,
         AffinityHostType.Tag => InteractionHostType.Tag,
@@ -818,6 +824,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         {
             AffinityHostType.Scene => await db.Scenes.AnyAsync(scene => scene.Id == hostId, cancellationToken),
             AffinityHostType.Image => await db.Images.AnyAsync(image => image.Id == hostId, cancellationToken),
+            AffinityHostType.Audio => await db.Audios.AnyAsync(audio => audio.Id == hostId, cancellationToken),
+            AffinityHostType.Text => await db.TextDocuments.AnyAsync(text => text.Id == hostId, cancellationToken),
             AffinityHostType.Performer => await db.Performers.AnyAsync(performer => performer.Id == hostId, cancellationToken),
             AffinityHostType.Face => await db.Faces.AnyAsync(face => face.Id == hostId, cancellationToken),
             AffinityHostType.Tag => await db.Tags.AnyAsync(tag => tag.Id == hostId, cancellationToken),
@@ -832,6 +840,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         {
             InteractionHostType.Scene => await db.Scenes.AnyAsync(scene => scene.Id == hostId, cancellationToken),
             InteractionHostType.Image => await db.Images.AnyAsync(image => image.Id == hostId, cancellationToken),
+            InteractionHostType.Audio => await db.Audios.AnyAsync(audio => audio.Id == hostId, cancellationToken),
+            InteractionHostType.Text => await db.TextDocuments.AnyAsync(text => text.Id == hostId, cancellationToken),
             InteractionHostType.Performer => await db.Performers.AnyAsync(performer => performer.Id == hostId, cancellationToken),
             InteractionHostType.Tag => await db.Tags.AnyAsync(tag => tag.Id == hostId, cancellationToken),
             InteractionHostType.Face => await db.Faces.AnyAsync(face => face.Id == hostId, cancellationToken),
@@ -866,6 +876,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     {
         AffinityHostType.Scene => RatingHostType.Scene,
         AffinityHostType.Image => RatingHostType.Image,
+        AffinityHostType.Audio => RatingHostType.Audio,
+        AffinityHostType.Text => RatingHostType.Text,
         AffinityHostType.Performer => RatingHostType.Performer,
         AffinityHostType.Face => RatingHostType.Face,
         AffinityHostType.Tag => RatingHostType.Tag,

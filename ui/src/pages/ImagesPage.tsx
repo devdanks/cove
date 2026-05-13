@@ -7,7 +7,7 @@ import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner } from "../components/Rating";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen, Search, Download } from "lucide-react";
+import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen, Search } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { GalleriesPopoverContent, LikeCounter, PerformerPreviewGrid, PopoverButton } from "../components/EntityCards";
@@ -20,24 +20,14 @@ import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { BookmarkButton } from "../components/BookmarkButton";
-import {
-  formatBatchDownloadSummary,
-  getBatchDownloadOptionsStorageKey,
-  getUndownloadedSelectionItems,
-  loadStoredBatchDownloadOptions,
-  queueBatchDownloads,
-  saveStoredBatchDownloadOptions,
-  type BatchDownloadOptions,
-} from "../utils/batchDownloads";
 
 const Lightbox = lazy(() => import("../components/Lightbox").then((module) => ({ default: module.Lightbox })));
 const ImageCreateModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageCreateModal })));
 const QuickViewDialog = lazy(() => import("../components/QuickViewDialog").then((module) => ({ default: module.QuickViewDialog })));
-const BatchDownloadOptionsDialog = lazy(() => import("../components/BatchDownloadOptionsDialog").then((module) => ({ default: module.BatchDownloadOptionsDialog })));
-const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
 
 const SEARCH_MODE_OPTIONS = [
   { value: "text", label: "Text", title: "Text search" },
@@ -90,13 +80,10 @@ export function ImagesPage({ onNavigate }: Props) {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [wallColumnCount, setWallColumnCount] = useState(6);
-  const [downloadTarget, setDownloadTarget] = useState<Image | "new" | null>(null);
-  const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWriteImage = canWriteEntity("image", hasPermission);
   const canDeleteImage = canDeleteEntity("image", hasPermission);
-  const canDownloadImage = hasPermission("jobs.run") && canWriteImage;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
@@ -147,11 +134,7 @@ export function ImagesPage({ onNavigate }: Props) {
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
-  const selectedImage = selectedIds.size === 1 ? items.find((image) => selectedIds.has(image.id)) : undefined;
-  const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
-  const canDownloadSelectedImage = canDownloadImage && selectedDownloadTargets.length > 0;
-  const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-images");
-  const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const lightboxImages: LightboxImage[] = useMemo(
     () => items.map((img) => ({
@@ -169,8 +152,8 @@ export function ImagesPage({ onNavigate }: Props) {
   }, [filter, setFilter]);
 
   const bulkDeleteMut = useMutation({
-    mutationFn: () => images.bulkDelete([...selectedIds]),
-    onSuccess: () => { selectNone(); queryClient.invalidateQueries({ queryKey: ["images"] }); },
+    mutationFn: (options?: { deleteFile?: boolean; deleteGenerated?: boolean }) => images.bulkDelete([...selectedIds], options),
+    onSuccess: () => { setShowDeleteConfirm(false); selectNone(); queryClient.invalidateQueries({ queryKey: ["images"] }); },
   });
 
   const bulkEditMut = useMutation({
@@ -183,49 +166,10 @@ export function ImagesPage({ onNavigate }: Props) {
     },
   });
 
-  const batchDownloadMut = useMutation({
-    mutationFn: async (options: BatchDownloadOptions) => queueBatchDownloads("Image", selectedDownloadTargets, options),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      queryClient.invalidateQueries({ queryKey: ["jobs-active"] });
-      queryClient.invalidateQueries({ queryKey: ["jobs-history"] });
-      queryClient.invalidateQueries({ queryKey: ["images"] });
-      window.alert(formatBatchDownloadSummary("image", result));
-      selectNone();
-    },
-    onError: (error: Error) => {
-      window.alert(error.message || "Failed to queue the selected downloads.");
-    },
-  });
-
   return (
     <>
     <Suspense fallback={null}>
       {showCreate ? <ImageCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "image", id })} /> : null}
-      {downloadTarget !== null ? (
-        <ImageDownloadDialog
-          open={downloadTarget !== null}
-          image={downloadTarget !== "new" ? downloadTarget : undefined}
-          onClose={() => setDownloadTarget(null)}
-          onNavigate={onNavigate}
-        />
-      ) : null}
-      {showBatchDownloadOptions ? (
-        <BatchDownloadOptionsDialog
-          open={showBatchDownloadOptions}
-          entity="Image"
-          itemCount={selectedDownloadTargets.length}
-          initialOptions={batchDownloadOptions}
-          isPending={batchDownloadMut.isPending}
-          onClose={() => setShowBatchDownloadOptions(false)}
-          onConfirm={(options) => {
-            setBatchDownloadOptions(options);
-            saveStoredBatchDownloadOptions(batchDownloadStorageKey, options);
-            setShowBatchDownloadOptions(false);
-            batchDownloadMut.mutate(options);
-          }}
-        />
-      ) : null}
     </Suspense>
     <ListPage
       title="Images"
@@ -243,14 +187,6 @@ export function ImagesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "wall"]}
-      renderOperations={canDownloadImage ? () => (
-        <button
-          onClick={() => setDownloadTarget("new")}
-          className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
-        >
-          From URL
-        </button>
-      ) : undefined}
       onNew={canWriteImage ? () => setShowCreate(true) : undefined}
       criteriaDefinitions={IMAGE_CRITERIA}
       objectFilter={objectFilter}
@@ -264,23 +200,6 @@ export function ImagesPage({ onNavigate }: Props) {
       onInvertSelection={invertSelection}
       selectionActions={
         <>
-          {canDownloadSelectedImage && (
-            <button
-              onClick={() => {
-                if (selectedDownloadTargets.length > 1 || !selectedImage) {
-                  setShowBatchDownloadOptions(true);
-                  return;
-                }
-
-                setDownloadTarget(selectedImage);
-              }}
-              disabled={batchDownloadMut.isPending}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-60"
-            >
-              {batchDownloadMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-              Download
-            </button>
-          )}
           {canWriteImage && (
             <button
               onClick={() => setShowBulkEdit(true)}
@@ -293,7 +212,7 @@ export function ImagesPage({ onNavigate }: Props) {
           <ExtensionSelectionActions entityType="image" selectedIds={selectedIds} />
           {canDeleteImage && (
             <button
-              onClick={() => { if (confirm(`Delete ${selectedIds.size} image(s)?`)) bulkDeleteMut.mutate(); }}
+              onClick={() => setShowDeleteConfirm(true)}
               disabled={bulkDeleteMut.isPending}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
             >
@@ -304,6 +223,16 @@ export function ImagesPage({ onNavigate }: Props) {
         </>
       }
     >
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title={`Delete ${selectedIds.size} image${selectedIds.size === 1 ? "" : "s"}`}
+        message={`Delete ${selectedIds.size} selected image${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`}
+        confirmLabel={bulkDeleteMut.isPending ? "Deleting..." : "Delete"}
+        onConfirm={(options) => bulkDeleteMut.mutate(options)}
+        onCancel={() => setShowDeleteConfirm(false)}
+        showDeleteFile
+        showDeleteGenerated
+      />
       {displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 140px)">
           {items.map((img, idx) => (

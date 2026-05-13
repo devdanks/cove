@@ -50,6 +50,7 @@ public class ConfigService
                 ExcludeVideo = p.ExcludeVideo,
                 ExcludeImage = p.ExcludeImage,
                 ExcludeAudio = p.ExcludeAudio,
+                ExcludeText = p.ExcludeText,
             }).ToList(),
             GeneratedPath = cfg.GeneratedPath,
             CachePath = cfg.CachePath,
@@ -70,6 +71,8 @@ public class ConfigService
             VideoExtensions = cfg.VideoExtensions,
             ImageExtensions = cfg.ImageExtensions,
             GalleryExtensions = cfg.GalleryExtensions,
+            AudioExtensions = cfg.AudioExtensions,
+            TextExtensions = cfg.TextExtensions,
             ExcludePatterns = cfg.ExcludePatterns,
             ExcludeImagePatterns = cfg.ExcludeImagePatterns,
             ExcludeGalleryPatterns = cfg.ExcludeGalleryPatterns,
@@ -168,6 +171,14 @@ public class ConfigService
                     AutoApplyMaxDurationDifferenceSeconds = cfg.Scraping.IdentifyDefaults.AutoApplyMaxDurationDifferenceSeconds,
                     AutoApplyMaxPhashDistance = cfg.Scraping.IdentifyDefaults.AutoApplyMaxPhashDistance,
                 },
+                ScrapeApplyDefaults = new ScrapeApplyDefaultsConfigDto
+                {
+                    CreateMissingTags = cfg.Scraping.ScrapeApplyDefaults.CreateMissingTags,
+                    CreateMissingPerformers = cfg.Scraping.ScrapeApplyDefaults.CreateMissingPerformers,
+                    CreateMissingStudio = cfg.Scraping.ScrapeApplyDefaults.CreateMissingStudio,
+                    MarkOrganized = cfg.Scraping.ScrapeApplyDefaults.MarkOrganized,
+                    HydratePerformers = cfg.Scraping.ScrapeApplyDefaults.HydratePerformers,
+                },
                 MetadataBatchDefaults = new MetadataBatchDefaultsConfigDto
                 {
                     RefreshAlreadyTagged = cfg.Scraping.MetadataBatchDefaults.RefreshAlreadyTagged,
@@ -248,6 +259,7 @@ public class ConfigService
             ExcludeVideo = p.ExcludeVideo,
             ExcludeImage = p.ExcludeImage,
             ExcludeAudio = p.ExcludeAudio,
+            ExcludeText = p.ExcludeText,
         }).ToList();
 
         if (!string.IsNullOrEmpty(dto.GeneratedPath))
@@ -277,6 +289,10 @@ public class ConfigService
             cfg.ImageExtensions = dto.ImageExtensions;
         if (dto.GalleryExtensions.Count > 0)
             cfg.GalleryExtensions = dto.GalleryExtensions;
+        if (dto.AudioExtensions.Count > 0)
+            cfg.AudioExtensions = dto.AudioExtensions;
+        if (dto.TextExtensions.Count > 0)
+            cfg.TextExtensions = dto.TextExtensions;
 
         cfg.ExcludePatterns = dto.ExcludePatterns;
         cfg.ExcludeImagePatterns = dto.ExcludeImagePatterns;
@@ -386,6 +402,14 @@ public class ConfigService
             CreateStudios = dto.Scraping.IdentifyDefaults.CreateStudios,
             AutoApplyMaxDurationDifferenceSeconds = dto.Scraping.IdentifyDefaults.AutoApplyMaxDurationDifferenceSeconds,
             AutoApplyMaxPhashDistance = dto.Scraping.IdentifyDefaults.AutoApplyMaxPhashDistance,
+        };
+        cfg.Scraping.ScrapeApplyDefaults = new ScrapeApplyDefaultsConfig
+        {
+            CreateMissingTags = dto.Scraping.ScrapeApplyDefaults.CreateMissingTags,
+            CreateMissingPerformers = dto.Scraping.ScrapeApplyDefaults.CreateMissingPerformers,
+            CreateMissingStudio = dto.Scraping.ScrapeApplyDefaults.CreateMissingStudio,
+            MarkOrganized = dto.Scraping.ScrapeApplyDefaults.MarkOrganized,
+            HydratePerformers = dto.Scraping.ScrapeApplyDefaults.HydratePerformers,
         };
         cfg.Scraping.MetadataBatchDefaults = new MetadataBatchDefaultsConfig
         {

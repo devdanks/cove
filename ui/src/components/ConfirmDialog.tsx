@@ -1,25 +1,47 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import type { DeleteEntityOptions } from "../api/types";
+import { useOptionalAppConfig } from "../state/AppConfigContext";
 
 interface Props {
   open: boolean;
   title: string;
   message: string;
   confirmLabel?: string;
-  onConfirm: (options?: { deleteFile?: boolean }) => void;
+  onConfirm: (options?: DeleteEntityOptions) => void | Promise<void>;
   onCancel: () => void;
   destructive?: boolean;
+  isPending?: boolean;
+  errorMessage?: string | null;
   /** Show a "Also delete file from disk" checkbox */
   showDeleteFile?: boolean;
+  showDeleteGenerated?: boolean;
 }
 
-export function ConfirmDialog({ open, title, message, confirmLabel = "Delete", onConfirm, onCancel, destructive = true, showDeleteFile }: Props) {
+export function ConfirmDialog({ open, title, message, confirmLabel = "Delete", onConfirm, onCancel, destructive = true, isPending = false, errorMessage = null, showDeleteFile, showDeleteGenerated }: Props) {
+  const appConfig = useOptionalAppConfig();
   const [deleteFile, setDeleteFile] = useState(false);
+  const [deleteGenerated, setDeleteGenerated] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setDeleteFile(showDeleteFile ? (appConfig?.config?.ui.deleteFileDefault ?? false) : false);
+    setDeleteGenerated(showDeleteGenerated ? (appConfig?.config?.deleteGeneratedDefault ?? false) : false);
+  }, [appConfig?.config?.deleteGeneratedDefault, appConfig?.config?.ui.deleteFileDefault, open, showDeleteFile, showDeleteGenerated]);
 
   if (!open) return null;
 
+  const resetOptions = () => {
+    setDeleteFile(false);
+    setDeleteGenerated(false);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/60" onClick={onCancel} />
+      <div className="fixed inset-0 bg-black/60" onClick={() => { if (!isPending) onCancel(); }} />
       <div className="relative bg-surface rounded-lg border border-border shadow-xl p-6 max-w-sm w-full mx-4">
         <h3 className="text-lg font-semibold mb-2">{title}</h3>
         <p className="text-sm text-secondary mb-4">{message}</p>
@@ -29,22 +51,46 @@ export function ConfirmDialog({ open, title, message, confirmLabel = "Delete", o
             Also delete file from disk
           </label>
         )}
+        {showDeleteGenerated && (
+          <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer mb-4">
+            <input type="checkbox" checked={deleteGenerated} onChange={(e) => setDeleteGenerated(e.target.checked)} className="rounded border-border bg-surface accent-accent" />
+            Also delete generated files
+          </label>
+        )}
+        {errorMessage ? (
+          <div className="mb-4 rounded border border-red-700 bg-red-950/60 px-3 py-2 text-sm text-red-200">
+            {errorMessage}
+          </div>
+        ) : null}
         <div className="flex justify-end gap-3">
           <button
-            onClick={() => { onCancel(); setDeleteFile(false); }}
-            className="px-4 py-2 text-sm text-secondary hover:text-white transition-colors"
+            onClick={() => { onCancel(); resetOptions(); }}
+            disabled={isPending}
+            className="px-4 py-2 text-sm text-secondary hover:text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           >
             Cancel
           </button>
           <button
-            onClick={() => { onConfirm(showDeleteFile ? { deleteFile } : undefined); setDeleteFile(false); }}
+            onClick={() => {
+              const options = showDeleteFile || showDeleteGenerated
+                ? {
+                    deleteFile: showDeleteFile ? deleteFile : false,
+                    deleteGenerated: showDeleteGenerated ? deleteGenerated : false,
+                  }
+                : undefined;
+              void onConfirm(options);
+            }}
+            disabled={isPending}
             className={`px-4 py-2 text-sm rounded-md transition-colors ${
               destructive
                 ? "bg-red-600 hover:bg-red-500 text-white"
                 : "bg-accent hover:bg-accent-hover text-white"
-            }`}
+            } disabled:cursor-not-allowed disabled:opacity-60`}
           >
-            {confirmLabel}
+            <span className="inline-flex items-center gap-2">
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {confirmLabel}
+            </span>
           </button>
         </div>
       </div>

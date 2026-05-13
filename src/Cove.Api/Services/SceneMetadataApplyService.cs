@@ -9,14 +9,15 @@ namespace Cove.Api.Services;
 
 public interface ISceneMetadataApplyService
 {
-    Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, CancellationToken ct = default);
+    Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, DownloaderMetadataApplyOptions? options = null, CancellationToken ct = default);
 }
 
 public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, ISceneCoverService sceneCoverService, ITagProvenanceService tagProvenanceService, IFieldProvenanceService? fieldProvenanceService = null) : ISceneMetadataApplyService
 {
-    public async Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, CancellationToken ct = default)
+    public async Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, DownloaderMetadataApplyOptions? options = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadata);
+        options ??= new DownloaderMetadataApplyOptions();
 
         var scene = await db.Scenes
             .Include(item => item.Urls)
@@ -60,6 +61,9 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
             fieldProvenance["date"] = parsedDate.ToString("yyyy-MM-dd");
         }
 
+        if (options.MarkOrganized)
+            scene.Organized = true;
+
         await sceneCoverService.TryApplyRemoteCoverAsync(scene, metadata.ImageUrl, ct);
         if (!string.IsNullOrWhiteSpace(metadata.ImageUrl))
             fieldProvenance["image_url"] = metadata.ImageUrl.Trim();
@@ -72,17 +76,17 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         var tagNames = NormalizeNames(metadata.TagNames);
         if (tagNames.Count > 0)
             fieldProvenance["tags"] = tagNames;
-        await ApplyTagsAsync(scene, tagNames, ct);
+        await ApplyTagsAsync(scene, tagNames, options.CreateMissingTags, ct);
 
         var performerNames = NormalizeNames(metadata.PerformerNames);
         if (performerNames.Count > 0)
             fieldProvenance["performers"] = performerNames;
-        await ApplyPerformersAsync(scene, performerNames, ct);
+        await ApplyPerformersAsync(scene, performerNames, options.CreateMissingPerformers, ct);
 
         var studioName = string.IsNullOrWhiteSpace(metadata.StudioName) ? null : metadata.StudioName.Trim();
         if (!string.IsNullOrWhiteSpace(studioName))
             fieldProvenance["studio"] = studioName;
-        await ApplyStudioAsync(scene, studioName, ct);
+        await ApplyStudioAsync(scene, studioName, options.CreateMissingStudio, ct);
 
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
             await fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, "scraper", cancellationToken: ct);
@@ -102,7 +106,7 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         }
     }
 
-    private async Task ApplyTagsAsync(Scene scene, IReadOnlyList<string> tagNames, CancellationToken ct)
+    private async Task ApplyTagsAsync(Scene scene, IReadOnlyList<string> tagNames, bool createMissing, CancellationToken ct)
     {
         var names = NormalizeNames(tagNames);
         if (names.Count == 0)
@@ -122,6 +126,9 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         {
             if (!tagLookup.TryGetValue(name, out var tag))
             {
+                if (!createMissing)
+                    continue;
+
                 tag = new Tag { Name = name };
                 db.Tags.Add(tag);
                 tagLookup[name] = tag;
@@ -135,7 +142,7 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         }
     }
 
-    private async Task ApplyPerformersAsync(Scene scene, IReadOnlyList<string> performerNames, CancellationToken ct)
+    private async Task ApplyPerformersAsync(Scene scene, IReadOnlyList<string> performerNames, bool createMissing, CancellationToken ct)
     {
         var names = NormalizeNames(performerNames);
         if (names.Count == 0)
@@ -155,6 +162,9 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         {
             if (!performerLookup.TryGetValue(name, out var performer))
             {
+                if (!createMissing)
+                    continue;
+
                 performer = new Performer { Name = name };
                 db.Performers.Add(performer);
                 performerLookup[name] = performer;
@@ -165,14 +175,17 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         }
     }
 
-    private async Task ApplyStudioAsync(Scene scene, string? studioName, CancellationToken ct)
+    private async Task ApplyStudioAsync(Scene scene, string? studioName, bool createMissing, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(studioName))
             return;
 
         var normalizedStudioName = studioName.Trim();
-        var studio = await db.Studios.FirstOrDefaultAsync(item => item.Name == normalizedStudioName, ct)
-            ?? new Studio { Name = normalizedStudioName };
+        var studio = await db.Studios.FirstOrDefaultAsync(item => item.Name == normalizedStudioName, ct);
+        if (studio == null && !createMissing)
+            return;
+
+        studio ??= new Studio { Name = normalizedStudioName };
 
         if (studio.Id == 0)
             db.Studios.Add(studio);

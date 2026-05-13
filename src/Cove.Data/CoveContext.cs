@@ -36,6 +36,8 @@ public partial class CoveContext : DbContext
     public DbSet<Studio> Studios => Set<Studio>();
     public DbSet<Gallery> Galleries => Set<Gallery>();
     public DbSet<Image> Images => Set<Image>();
+    public DbSet<Audio> Audios => Set<Audio>();
+    public DbSet<TextDocument> TextDocuments => Set<TextDocument>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
@@ -86,6 +88,8 @@ public partial class CoveContext : DbContext
     public DbSet<VideoFile> VideoFiles => Set<VideoFile>();
     public DbSet<ImageFile> ImageFiles => Set<ImageFile>();
     public DbSet<GalleryFile> GalleryFiles => Set<GalleryFile>();
+    public DbSet<AudioFile> AudioFiles => Set<AudioFile>();
+    public DbSet<TextFile> TextFiles => Set<TextFile>();
     public DbSet<FileFingerprint> FileFingerprints => Set<FileFingerprint>();
     public DbSet<VideoCaption> VideoCaptions => Set<VideoCaption>();
     public DbSet<GroupItem> GroupItems => Set<GroupItem>();
@@ -102,7 +106,9 @@ public partial class CoveContext : DbContext
             .HasDiscriminator<string>("FileType")
             .HasValue<VideoFile>("Video")
             .HasValue<ImageFile>("Image")
-            .HasValue<GalleryFile>("Gallery");
+            .HasValue<GalleryFile>("Gallery")
+            .HasValue<AudioFile>("Audio")
+            .HasValue<TextFile>("Text");
 
         modelBuilder.Entity<BaseFileEntity>()
             .HasMany(f => f.Fingerprints)
@@ -306,7 +312,9 @@ public partial class CoveContext : DbContext
         ComputeFilePaths();
         MaintainDenormalizedIdArrays();
         var derivedCountTargets = CollectDerivedCountTargets();
+        var postSaveDerivedCountTargets = CollectPostSaveDerivedCountTargets();
         var result = base.SaveChanges();
+        AddPostSaveDerivedCountTargets(derivedCountTargets, postSaveDerivedCountTargets);
         PersistDerivedCounts(derivedCountTargets);
         return result;
     }
@@ -320,12 +328,14 @@ public partial class CoveContext : DbContext
         ComputeFilePaths();
         MaintainDenormalizedIdArrays();
         var derivedCountTargets = CollectDerivedCountTargets();
-        return SaveChangesWithDerivedCountsAsync(derivedCountTargets, cancellationToken);
+        var postSaveDerivedCountTargets = CollectPostSaveDerivedCountTargets();
+        return SaveChangesWithDerivedCountsAsync(derivedCountTargets, postSaveDerivedCountTargets, cancellationToken);
     }
 
-    private async Task<int> SaveChangesWithDerivedCountsAsync(DerivedCountTargets derivedCountTargets, CancellationToken cancellationToken)
+    private async Task<int> SaveChangesWithDerivedCountsAsync(DerivedCountTargets derivedCountTargets, PostSaveDerivedCountTargets postSaveDerivedCountTargets, CancellationToken cancellationToken)
     {
         var result = await base.SaveChangesAsync(cancellationToken);
+        AddPostSaveDerivedCountTargets(derivedCountTargets, postSaveDerivedCountTargets);
         await PersistDerivedCountsAsync(derivedCountTargets, cancellationToken);
         return result;
     }
@@ -384,6 +394,40 @@ public partial class CoveContext : DbContext
             || GalleryIds.Count > 0
             || SceneIds.Count > 0
             || ImageIds.Count > 0;
+    }
+
+    private readonly record struct PostSaveDerivedCountTargets(
+        IReadOnlyList<VideoFile> VideoFilesWithDeferredSceneIds,
+        IReadOnlyList<ImageFile> ImageFilesWithDeferredImageIds);
+
+    private PostSaveDerivedCountTargets CollectPostSaveDerivedCountTargets()
+    {
+        var videoFiles = ChangeTracker.Entries<VideoFile>()
+            .Where(entry => entry.State == EntityState.Added && entry.Entity.SceneId is null or <= 0)
+            .Select(entry => entry.Entity)
+            .ToList();
+
+        var imageFiles = ChangeTracker.Entries<ImageFile>()
+            .Where(entry => entry.State == EntityState.Added && entry.Entity.ImageId is null or <= 0)
+            .Select(entry => entry.Entity)
+            .ToList();
+
+        return new PostSaveDerivedCountTargets(videoFiles, imageFiles);
+    }
+
+    private static void AddPostSaveDerivedCountTargets(DerivedCountTargets targets, PostSaveDerivedCountTargets postSaveTargets)
+    {
+        foreach (var videoFile in postSaveTargets.VideoFilesWithDeferredSceneIds)
+        {
+            AddIfPositive(targets.SceneIds, videoFile.SceneId);
+            AddIfPositive(targets.SceneIds, videoFile.Scene?.Id);
+        }
+
+        foreach (var imageFile in postSaveTargets.ImageFilesWithDeferredImageIds)
+        {
+            AddIfPositive(targets.ImageIds, imageFile.ImageId);
+            AddIfPositive(targets.ImageIds, imageFile.Image?.Id);
+        }
     }
 
     private DerivedCountTargets CollectDerivedCountTargets()

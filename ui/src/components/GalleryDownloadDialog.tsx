@@ -1,34 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Link2, Loader2, Search, X } from "lucide-react";
-import { galleries, system } from "../api/client";
+import { system } from "../api/client";
 import type { DownloaderMatch, Gallery } from "../api/types";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onNavigate: (route: any) => void;
-  gallery?: Pick<Gallery, "id" | "title" | "urls" | "files">;
-}
-
-function deriveGalleryTitle(url: string, fallback?: string) {
-  if (fallback?.trim()) {
-    return fallback.trim();
-  }
-
-  try {
-    const parsed = new URL(url);
-    const lastSegment = parsed.pathname.split("/").filter(Boolean).at(-1);
-    if (lastSegment) {
-      return decodeURIComponent(lastSegment)
-        .replace(/[._-]+/g, " ")
-        .trim();
-    }
-
-    return parsed.hostname;
-  } catch {
-    return url.trim();
-  }
+  gallery: Pick<Gallery, "id" | "title" | "urls" | "files">;
 }
 
 export function GalleryDownloadDialog({ open, onClose, onNavigate, gallery }: Props) {
@@ -99,7 +79,7 @@ export function GalleryDownloadDialog({ open, onClose, onNavigate, gallery }: Pr
         throw new Error("Select a downloader match first.");
       }
 
-      let galleryId = gallery?.id;
+      const galleryId = gallery.id;
       const normalizedUrl = selectedMatch.normalizedUrl || url.trim();
 
       if (!allowDuplicateDownload) {
@@ -112,15 +92,6 @@ export function GalleryDownloadDialog({ open, onClose, onNavigate, gallery }: Pr
         if (preflight.isDuplicate) {
           throw new Error(preflight.duplicateReason || "This URL is already downloaded.");
         }
-      }
-
-      if (!galleryId) {
-        const createdGallery = await galleries.create({
-          title: deriveGalleryTitle(normalizedUrl, selectedMatch.label),
-          organized: false,
-          urls: [normalizedUrl],
-        });
-        galleryId = createdGallery.id;
       }
 
       if (queueDownload) {
@@ -154,10 +125,8 @@ export function GalleryDownloadDialog({ open, onClose, onNavigate, gallery }: Pr
     return null;
   }
 
-  const title = gallery ? "Download Gallery Media" : "New Gallery From URL";
-  const subtitle = gallery
-    ? `Attach a downloader result to ${gallery.title || `Gallery ${gallery.id}`}.`
-    : "Create a gallery from a source URL now and choose whether to queue the media download immediately or later.";
+  const title = "Download Gallery Media";
+  const subtitle = `Attach a downloader result to ${gallery.title || `Gallery ${gallery.id}`}.`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -281,22 +250,12 @@ export function GalleryDownloadDialog({ open, onClose, onNavigate, gallery }: Pr
 
         <div className="flex items-center justify-between border-t border-border px-5 py-4">
           <div className="text-xs text-muted">
-            {gallery ? "The gallery stays editable while the download job runs." : "Cove checks for duplicate downloaded URLs before it creates a new gallery or queues the download."}
+            The gallery stays editable while the download job runs.
           </div>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="rounded-xl px-4 py-2 text-sm text-secondary hover:text-foreground">
               Cancel
             </button>
-            {!gallery ? (
-              <button
-                onClick={() => startDownloadMutation.mutate({ queueDownload: false })}
-                disabled={!selectedMatch || startDownloadMutation.isPending || matchMutation.isPending}
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:border-accent disabled:opacity-60"
-              >
-                {startDownloadMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-                Create Gallery Only
-              </button>
-            ) : null}
             <button
               onClick={() => startDownloadMutation.mutate({ queueDownload: true })}
               disabled={!selectedMatch || startDownloadMutation.isPending || matchMutation.isPending}

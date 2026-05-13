@@ -677,13 +677,14 @@ public sealed class UserService : IUserService
         var ratingSystemOptions = NormalizeRatingSystemOptions(preferences.RatingSystemOptions);
         var tracking = NormalizeTrackingPreferences(preferences.Tracking);
         var scenes = NormalizeScenesPreferences(preferences.Scenes);
+        var playback = NormalizePlaybackPreferences(preferences.Playback);
         var keybindingOverrides = NormalizeKeybindingOverrides(preferences.KeybindingOverrides);
-        if (theme is null && ratingSystemOptions is null && tracking is null && scenes is null && keybindingOverrides is null)
+        if (theme is null && ratingSystemOptions is null && tracking is null && scenes is null && playback is null && keybindingOverrides is null)
         {
             return null;
         }
 
-        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking, scenes, keybindingOverrides);
+        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking, scenes, keybindingOverrides, playback);
     }
 
     private static UserScenesPreferencesDto? NormalizeScenesPreferences(UserScenesPreferencesDto? scenes)
@@ -694,6 +695,16 @@ public sealed class UserService : IUserService
         }
 
         return new UserScenesPreferencesDto(includeCompilationGroups);
+    }
+
+    private static UserPlaybackPreferencesDto? NormalizePlaybackPreferences(UserPlaybackPreferencesDto? playback)
+    {
+        if (playback?.SkipSeconds is not int skipSeconds)
+        {
+            return null;
+        }
+
+        return new UserPlaybackPreferencesDto(Math.Clamp(skipSeconds, 1, 300));
     }
 
     private static Dictionary<string, string>? NormalizeKeybindingOverrides(Dictionary<string, string>? overrides)

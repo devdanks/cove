@@ -6,6 +6,10 @@ vi.mock("../state/AppConfigContext", () => ({
   useAppConfig: () => ({ config: { ui: {} } }),
 }));
 
+vi.mock("../auth/AuthContext", () => ({
+  useAuth: () => ({ user: { kind: "user", uiPreferences: {} } }),
+}));
+
 const playMock = vi.fn(() => Promise.resolve());
 const pauseMock = vi.fn();
 const loadMock = vi.fn();

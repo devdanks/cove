@@ -12,6 +12,10 @@ const { mockScenes } = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/client", () => ({
+  audios: {
+    get: vi.fn(),
+    streamUrl: vi.fn((id: number) => `/audio-${id}.mp3`),
+  },
   scenes: mockScenes,
 }));
 
@@ -35,12 +39,16 @@ function renderPlayer() {
         items={[
           {
             groupItemId: 1,
+            hostType: "scene",
+            hostId: 14,
             sceneId: 14,
+            audioId: null,
             title: "Clip One",
             src: "/scene-14.mp4",
             startSec: 5,
             endSec: 15,
             durationSec: 10,
+            hasVideoTrack: false,
           },
         ]}
         onNavigate={vi.fn()}

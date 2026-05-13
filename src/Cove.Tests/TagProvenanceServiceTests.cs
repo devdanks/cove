@@ -148,7 +148,7 @@ public sealed class TagProvenanceServiceTests
         Assert.Equal(secondTag.Id, updatedApplication.TagId);
         Assert.Equal("user", updatedApplication.SourceKey);
 
-        var deleteResult = await controller.Delete(createdScene.Id, false, CancellationToken.None);
+        var deleteResult = await controller.Delete(createdScene.Id, false, false, CancellationToken.None);
         Assert.IsType<NoContentResult>(deleteResult);
         Assert.Empty(await context.TagApplications.Where(application => application.HostType == AffinityHostType.Scene && application.HostId == createdScene.Id).ToListAsync());
     }
@@ -170,6 +170,7 @@ public sealed class TagProvenanceServiceTests
             {
                 TagNames = ["Body"],
             },
+            new DownloaderMetadataApplyOptions(CreateMissingTags: true),
             CancellationToken.None);
 
         Assert.True(applied);
@@ -228,6 +229,7 @@ public sealed class TagProvenanceServiceTests
                 Urls = ["https://example.com/watch/field-provenance"],
                 PerformerNames = ["Performer One"],
             },
+            new DownloaderMetadataApplyOptions(CreateMissingPerformers: true),
             CancellationToken.None);
 
         Assert.True(applied);

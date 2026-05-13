@@ -355,6 +355,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         g.Urls.Select(u => u.Url).ToList(),
         g.GroupTags.Where(gt => gt.Tag != null).Select(gt => TagDtoMapping.MapTagDto(gt.Tag!)).ToList(),
         g.Kind == GroupKind.Dynamic ? g.CachedItemCount ?? 0 : g.GroupItems.Where(item => item.SceneId.HasValue).Select(item => item.SceneId!.Value).Distinct().Count(),
+        g.Kind == GroupKind.Dynamic ? g.CachedItemCount ?? 0 : g.GroupItems.Count,
         g.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange),
         g.SubGroupRelations?.Count ?? 0,
         g.ContainingGroupRelations?.Count ?? 0,

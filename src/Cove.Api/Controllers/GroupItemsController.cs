@@ -150,7 +150,7 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
             ChildGroupId = host.ChildGroupId,
             StartSec = dto.Kind == GroupItemKind.Scene ? null : dto.StartSec,
             EndSec = dto.Kind == GroupItemKind.Scene ? null : dto.EndSec,
-            Title = NormalizeOptionalText(dto.Title),
+            Title = NormalizeOptionalText(dto.Title) ?? host.DisplayTitle,
             Notes = NormalizeOptionalText(dto.Notes),
             SourceSpanKey = NormalizeOptionalText(dto.SourceSpanKey),
             SourceProfileId = dto.SourceProfileId,
@@ -397,36 +397,23 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
         {
             var resolved = await dynamicGroups.ResolveAsync(groupId, forceRefresh: false, ct);
             var playable = resolved
-                .Where(item => item.SceneId.HasValue && (item.Kind == GroupItemKind.Scene || item.Kind == GroupItemKind.SceneRange))
+                .Where(IsPlayableManifestItem)
                 .ToList();
-            var sceneIds = playable.Select(item => item.SceneId!.Value).Distinct().ToArray();
+            var sceneIds = playable.Select(ResolveSceneId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+            var audioIds = playable.Where(IsAudioManifestItem).Select(item => item.HostId).Distinct().ToArray();
             var scenes = await db.Scenes.AsNoTracking()
                 .Where(scene => sceneIds.Contains(scene.Id))
                 .ToDictionaryAsync(scene => scene.Id, ct);
+            var audios = await db.Audios.AsNoTracking()
+                .Include(audio => audio.Files)
+                .Where(audio => audioIds.Contains(audio.Id))
+                .ToDictionaryAsync(audio => audio.Id, ct);
 
-            var dynamicManifest = playable.Select((item, index) =>
-            {
-                var sceneId = item.SceneId!.Value;
-                scenes.TryGetValue(sceneId, out var scene);
-                var startSec = item.Kind == GroupItemKind.SceneRange ? item.StartSec ?? 0 : 0;
-                var endSec = item.Kind == GroupItemKind.SceneRange ? item.EndSec : null;
-                double? durationSec = endSec.HasValue
-                    ? Math.Max(0, endSec.Value - startSec)
-                    : scene?.MaxDuration > 0
-                        ? scene.MaxDuration
-                        : null;
-
-                return new GroupPlaybackManifestItemDto(
-                    -(index + 1),
-                    sceneId,
-                    scene?.Title,
-                    $"/api/stream/scene/{sceneId}",
-                    startSec,
-                    endSec,
-                    durationSec,
-                    $"/api/stream/scene/{sceneId}/screenshot",
-                    item.Title ?? scene?.Title);
-            }).ToList();
+            var dynamicManifest = playable
+                .Select((item, index) => BuildManifestItem(item, -(index + 1), scenes, audios))
+                .Where(item => item is not null)
+                .Select(item => item!)
+                .ToList();
 
             return Ok(new GroupPlaybackManifestDto(dynamicManifest));
         }
@@ -434,33 +421,212 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
         var items = await db.GroupItems.AsNoTracking()
             .Include(item => item.Scene)
             .Where(item => item.GroupId == groupId)
-            .Where(item => (item.Kind == GroupItemKind.Scene || item.Kind == GroupItemKind.SceneRange) && item.SceneId != null)
+            .Where(item =>
+                ((item.Kind == GroupItemKind.Scene || item.Kind == GroupItemKind.SceneRange)
+                    && (item.SceneId != null || (item.HostType.ToLower() == "scene" && item.HostId > 0)))
+                || ((item.Kind == GroupItemKind.Audio || item.HostType.ToLower() == "audio") && item.HostId > 0))
             .OrderBy(item => item.OrderIndex)
             .ThenBy(item => item.Id)
             .ToListAsync(ct);
 
-        var manifest = items.Select(item =>
+        var staticSceneIds = items.Select(ResolveSceneId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        var staticAudioIds = items.Where(IsAudioManifestItem).Select(item => item.HostId).Distinct().ToArray();
+        var staticScenes = await db.Scenes.AsNoTracking()
+            .Where(scene => staticSceneIds.Contains(scene.Id))
+            .ToDictionaryAsync(scene => scene.Id, ct);
+        var staticAudios = await db.Audios.AsNoTracking()
+            .Include(audio => audio.Files)
+            .Where(audio => staticAudioIds.Contains(audio.Id))
+            .ToDictionaryAsync(audio => audio.Id, ct);
+
+        var manifest = items
+            .Select(item => BuildManifestItem(item, item.Id, staticScenes, staticAudios))
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .ToList();
+
+        return Ok(new GroupPlaybackManifestDto(manifest));
+    }
+
+    private static bool IsPlayableManifestItem(GroupItem item)
+        => IsSceneManifestItem(item) || IsAudioManifestItem(item);
+
+    private static bool IsPlayableManifestItem(DynamicGroupResolvedItem item)
+        => IsSceneManifestItem(item) || IsAudioManifestItem(item);
+
+    private static bool IsSceneManifestItem(DynamicGroupResolvedItem item)
+        => (item.Kind == GroupItemKind.Scene || item.Kind == GroupItemKind.SceneRange)
+            && (item.SceneId.HasValue || (string.Equals(item.HostType, "scene", StringComparison.OrdinalIgnoreCase) && item.HostId > 0));
+
+    private static bool IsAudioManifestItem(DynamicGroupResolvedItem item)
+        => (item.Kind == GroupItemKind.Audio || string.Equals(item.HostType, "audio", StringComparison.OrdinalIgnoreCase))
+            && item.HostId > 0;
+
+    private static int? ResolveSceneId(DynamicGroupResolvedItem item)
+        => item.SceneId ?? (string.Equals(item.HostType, "scene", StringComparison.OrdinalIgnoreCase) && item.HostId > 0 ? item.HostId : null);
+
+    private static bool IsSceneManifestItem(GroupItem item)
+        => (item.Kind == GroupItemKind.Scene || item.Kind == GroupItemKind.SceneRange)
+            && (item.SceneId.HasValue || (string.Equals(item.HostType, "scene", StringComparison.OrdinalIgnoreCase) && item.HostId > 0));
+
+    private static bool IsAudioManifestItem(GroupItem item)
+        => (item.Kind == GroupItemKind.Audio || string.Equals(item.HostType, "audio", StringComparison.OrdinalIgnoreCase))
+            && item.HostId > 0;
+
+    private static int? ResolveSceneId(GroupItem item)
+        => item.SceneId ?? (string.Equals(item.HostType, "scene", StringComparison.OrdinalIgnoreCase) && item.HostId > 0 ? item.HostId : null);
+
+    private static GroupPlaybackManifestItemDto? BuildManifestItem(
+        GroupItem item,
+        int manifestItemId,
+        IReadOnlyDictionary<int, Scene> scenes,
+        IReadOnlyDictionary<int, Audio> audios)
+    {
+        if (IsSceneManifestItem(item))
         {
+            var sceneId = ResolveSceneId(item);
+            if (!sceneId.HasValue)
+                return null;
+
+            scenes.TryGetValue(sceneId.Value, out var scene);
+            scene ??= item.Scene;
             var startSec = item.Kind == GroupItemKind.SceneRange ? item.StartSec ?? 0 : 0;
             var endSec = item.Kind == GroupItemKind.SceneRange ? item.EndSec : null;
             double? durationSec = endSec.HasValue
                 ? Math.Max(0, endSec.Value - startSec)
-                : item.Scene?.MaxDuration > 0
-                    ? item.Scene.MaxDuration
+                : scene?.MaxDuration > 0
+                    ? scene.MaxDuration
                     : null;
+
             return new GroupPlaybackManifestItemDto(
-                item.Id,
-                item.SceneId!.Value,
-                item.Scene?.Title,
-                $"/api/stream/scene/{item.SceneId.Value}",
+                manifestItemId,
+                "scene",
+                sceneId.Value,
+                sceneId.Value,
+                null,
+                scene?.Title,
+                $"/api/stream/scene/{sceneId.Value}",
                 startSec,
                 endSec,
                 durationSec,
-                $"/api/stream/scene/{item.SceneId.Value}/screenshot",
-                item.Title ?? item.Scene?.Title);
-        }).ToList();
+                $"/api/stream/scene/{sceneId.Value}/screenshot",
+                item.Title ?? scene?.Title,
+                null,
+                false);
+        }
 
-        return Ok(new GroupPlaybackManifestDto(manifest));
+        if (!IsAudioManifestItem(item) || !audios.TryGetValue(item.HostId, out var audio))
+            return null;
+
+        var file = audio.Files
+            .OrderByDescending(file => file.Duration)
+            .ThenBy(file => file.Id)
+            .FirstOrDefault();
+        var start = item.StartSec ?? 0;
+        var end = item.EndSec;
+        double? duration = end.HasValue
+            ? Math.Max(0, end.Value - start)
+            : file?.Duration > 0
+                ? file.Duration
+                : audio.MaxDuration > 0
+                    ? audio.MaxDuration
+                    : null;
+        var title = item.Title
+            ?? audio.Title
+            ?? audio.MinPath
+            ?? $"Audio {audio.Id}";
+
+        return new GroupPlaybackManifestItemDto(
+            manifestItemId,
+            "audio",
+            audio.Id,
+            null,
+            audio.Id,
+            null,
+            $"/api/audios/{audio.Id}/stream",
+            start,
+            end,
+            duration,
+            null,
+            title,
+            file?.Format,
+            file?.HasVideoTrack ?? audio.HasVideoFiles);
+    }
+
+    private static GroupPlaybackManifestItemDto? BuildManifestItem(
+        DynamicGroupResolvedItem item,
+        int manifestItemId,
+        IReadOnlyDictionary<int, Scene> scenes,
+        IReadOnlyDictionary<int, Audio> audios)
+    {
+        if (IsSceneManifestItem(item))
+        {
+            var sceneId = ResolveSceneId(item);
+            if (!sceneId.HasValue)
+                return null;
+
+            scenes.TryGetValue(sceneId.Value, out var scene);
+            var startSec = item.Kind == GroupItemKind.SceneRange ? item.StartSec ?? 0 : 0;
+            var endSec = item.Kind == GroupItemKind.SceneRange ? item.EndSec : null;
+            double? durationSec = endSec.HasValue
+                ? Math.Max(0, endSec.Value - startSec)
+                : scene?.MaxDuration > 0
+                    ? scene.MaxDuration
+                    : null;
+
+            return new GroupPlaybackManifestItemDto(
+                manifestItemId,
+                "scene",
+                sceneId.Value,
+                sceneId.Value,
+                null,
+                scene?.Title,
+                $"/api/stream/scene/{sceneId.Value}",
+                startSec,
+                endSec,
+                durationSec,
+                $"/api/stream/scene/{sceneId.Value}/screenshot",
+                item.Title ?? scene?.Title,
+                null,
+                false);
+        }
+
+        if (!IsAudioManifestItem(item) || !audios.TryGetValue(item.HostId, out var audio))
+            return null;
+
+        var file = audio.Files
+            .OrderByDescending(file => file.Duration)
+            .ThenBy(file => file.Id)
+            .FirstOrDefault();
+        var start = item.StartSec ?? 0;
+        var end = item.EndSec;
+        double? duration = end.HasValue
+            ? Math.Max(0, end.Value - start)
+            : file?.Duration > 0
+                ? file.Duration
+                : audio.MaxDuration > 0
+                    ? audio.MaxDuration
+                    : null;
+        var title = item.Title
+            ?? audio.Title
+            ?? audio.MinPath
+            ?? $"Audio {audio.Id}";
+
+        return new GroupPlaybackManifestItemDto(
+            manifestItemId,
+            "audio",
+            audio.Id,
+            null,
+            audio.Id,
+            null,
+            $"/api/audios/{audio.Id}/stream",
+            start,
+            end,
+            duration,
+            null,
+            title,
+            file?.Format,
+            file?.HasVideoTrack ?? audio.HasVideoFiles);
     }
 
     private Task<bool> GroupExistsAsync(int groupId, CancellationToken ct)
@@ -471,6 +637,24 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
 
     private Task<bool> ImageExistsAsync(int imageId, CancellationToken ct)
         => db.Images.AsNoTracking().AnyAsync(image => image.Id == imageId, ct);
+
+    private Task<string?> GalleryTitleAsync(int galleryId, CancellationToken ct)
+        => db.Galleries.AsNoTracking()
+            .Where(gallery => gallery.Id == galleryId)
+            .Select(gallery => gallery.Title ?? $"Gallery {gallery.Id}")
+            .FirstOrDefaultAsync(ct);
+
+    private Task<string?> AudioTitleAsync(int audioId, CancellationToken ct)
+        => db.Audios.AsNoTracking()
+            .Where(audio => audio.Id == audioId)
+            .Select(audio => audio.Title)
+            .FirstOrDefaultAsync(ct);
+
+    private Task<string?> TextTitleAsync(int textDocumentId, CancellationToken ct)
+        => db.TextDocuments.AsNoTracking()
+            .Where(text => text.Id == textDocumentId)
+            .Select(text => text.Title)
+            .FirstOrDefaultAsync(ct);
 
     private async Task LoadItemReferencesAsync(GroupItem item, CancellationToken ct)
     {
@@ -497,14 +681,38 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
         {
             if (!await SceneExistsAsync(hostId.Value, ct))
                 return GroupItemHostResolution.Fail("Scene was not found.");
-            return new GroupItemHostResolution(hostType, hostId.Value, hostId.Value, null, null, null);
+            return new GroupItemHostResolution(hostType, hostId.Value, hostId.Value, null, null, null, null);
         }
 
         if (hostType == "image")
         {
             if (!await ImageExistsAsync(hostId.Value, ct))
                 return GroupItemHostResolution.Fail("Image was not found.");
-            return new GroupItemHostResolution(hostType, hostId.Value, null, hostId.Value, null, null);
+            return new GroupItemHostResolution(hostType, hostId.Value, null, hostId.Value, null, null, null);
+        }
+
+        if (hostType == "gallery")
+        {
+            var title = await GalleryTitleAsync(hostId.Value, ct);
+            if (title is null)
+                return GroupItemHostResolution.Fail("Gallery was not found.");
+            return new GroupItemHostResolution(hostType, hostId.Value, null, null, null, NormalizeOptionalText(title), null);
+        }
+
+        if (hostType == "audio")
+        {
+            var title = await AudioTitleAsync(hostId.Value, ct);
+            if (title is null)
+                return GroupItemHostResolution.Fail("Audio was not found.");
+            return new GroupItemHostResolution(hostType, hostId.Value, null, null, null, NormalizeOptionalText(title), null);
+        }
+
+        if (hostType == "text")
+        {
+            var title = await TextTitleAsync(hostId.Value, ct);
+            if (title is null)
+                return GroupItemHostResolution.Fail("Text document was not found.");
+            return new GroupItemHostResolution(hostType, hostId.Value, null, null, null, NormalizeOptionalText(title), null);
         }
 
         if (hostType == "group")
@@ -513,7 +721,7 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
                 return GroupItemHostResolution.Fail("A group item cannot point to its containing group.");
             if (!await GroupExistsAsync(hostId.Value, ct))
                 return GroupItemHostResolution.Fail("Child group was not found.");
-            return new GroupItemHostResolution(hostType, hostId.Value, null, null, hostId.Value, null);
+            return new GroupItemHostResolution(hostType, hostId.Value, null, null, hostId.Value, null, null);
         }
 
         return GroupItemHostResolution.Fail($"Group items do not support host type '{hostType}'.");
@@ -568,6 +776,7 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
         return kind switch
         {
             GroupItemKind.Image => "image",
+            GroupItemKind.Gallery => "gallery",
             GroupItemKind.Group => "group",
             GroupItemKind.Audio => "audio",
             GroupItemKind.Text => "text",
@@ -605,8 +814,9 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
         int? SceneId,
         int? ImageId,
         int? ChildGroupId,
+        string? DisplayTitle,
         string? Error)
     {
-        public static GroupItemHostResolution Fail(string error) => new(string.Empty, 0, null, null, null, error);
+        public static GroupItemHostResolution Fail(string error) => new(string.Empty, 0, null, null, null, null, error);
     }
 }

@@ -203,6 +203,10 @@ function getRouteLabel(route: Route): string {
   switch (route.page) {
     case "home": return "Home";
     case "scene": return "Scene";
+    case "audio": return "Audio";
+    case "audios": return "Audios";
+    case "text": return "Text";
+    case "texts": return "Texts";
     case "scene-span": return "Span";
     case "scenes": return "Scenes";
     case "segment": return "Segment";

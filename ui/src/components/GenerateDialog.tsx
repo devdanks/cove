@@ -22,6 +22,8 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
     segmentPreviews: false,
     phashes: false,
     md5: false,
+    audioPhashes: false,
+    textPhashes: false,
     overwrite: false,
   });
   const [submitted, setSubmitted] = useState(false);
@@ -79,8 +81,26 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
             ["sprites", "Sprite Sheets"],
             ["segmentThumbnails", "Segment Thumbnails"],
             ["segmentPreviews", "Animated Segment Previews"],
-            ["phashes", "Perceptual Hashes"],
+            ["phashes", "Scene perceptual hashes"],
             ["md5", "MD5 Checksums"],
+          ] as const).map(([key, labelText]) => (
+            <label key={key} className="flex items-center gap-3 cursor-pointer group">
+              <input
+                type="checkbox"
+                checked={!!opts[key]}
+                onChange={() => toggle(key)}
+                className="w-4 h-4 rounded border-border accent-accent"
+              />
+              <span className="text-sm text-foreground group-hover:text-accent">{labelText}</span>
+            </label>
+          ))}
+
+          <div className="border-t border-border my-3" />
+
+          <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Audio and Text</h4>
+          {([
+            ["audioPhashes", "Audio perceptual hashes"],
+            ["textPhashes", "Text perceptual hashes"],
           ] as const).map(([key, labelText]) => (
             <label key={key} className="flex items-center gap-3 cursor-pointer group">
               <input

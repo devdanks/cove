@@ -28,6 +28,8 @@ public partial class CoveContext
     internal Guid? CurrentShareLinkIdForReadOptimization => CurrentShareLinkId;
 
     private bool CanReadScenes => CurrentPrincipal?.Has(PermissionKeys.ScenesRead) == true;
+    private bool CanReadAudios => CurrentPrincipal?.Has(PermissionKeys.AudiosRead) == true;
+    private bool CanReadTexts => CurrentPrincipal?.Has(PermissionKeys.TextsRead) == true;
     private bool CanReadPerformers => CurrentPrincipal?.Has(PermissionKeys.PerformersRead) == true;
     private bool CanReadTags => CurrentPrincipal?.Has(PermissionKeys.TagsRead) == true;
     private bool CanReadStudios => CurrentPrincipal?.Has(PermissionKeys.StudiosRead) == true;
@@ -39,6 +41,8 @@ public partial class CoveContext
     private bool CanReadEmbeddings => CurrentPrincipal?.Has(PermissionKeys.EmbeddingsRead) == true;
     private bool CanReadAiRuns => CurrentPrincipal?.Has(PermissionKeys.AiRunsRead) == true;
     private bool CanReadScenesByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Scene) == true;
+    private bool CanReadAudiosByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Audio) == true;
+    private bool CanReadTextsByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Text) == true;
     private bool CanReadPerformersByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Performer) == true;
     private bool CanReadTagsByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Tag) == true;
     private bool CanReadStudiosByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Studio) == true;
@@ -48,6 +52,8 @@ public partial class CoveContext
     private bool CanReadSegmentsByRule => CurrentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Marker) == true;
 
     private bool RequiresSceneReadScopeEvaluation => CurrentShareLinkId != null || CurrentPrincipal?.ReadRestrictedEntityKinds.Contains(EntityKinds.Scene) == true;
+    private bool RequiresAudioReadScopeEvaluation => CurrentShareLinkId != null || CurrentPrincipal?.ReadRestrictedEntityKinds.Contains(EntityKinds.Audio) == true;
+    private bool RequiresTextReadScopeEvaluation => CurrentShareLinkId != null || CurrentPrincipal?.ReadRestrictedEntityKinds.Contains(EntityKinds.Text) == true;
     private bool RequiresPerformerReadScopeEvaluation => CurrentShareLinkId != null || CurrentPrincipal?.ReadRestrictedEntityKinds.Contains(EntityKinds.Performer) == true;
     private bool RequiresTagReadScopeEvaluation => CurrentShareLinkId != null || CurrentPrincipal?.ReadRestrictedEntityKinds.Contains(EntityKinds.Tag) == true;
     private bool RequiresStudioReadScopeEvaluation => CurrentShareLinkId != null || CurrentPrincipal?.ReadRestrictedEntityKinds.Contains(EntityKinds.Studio) == true;
@@ -78,6 +84,20 @@ public partial class CoveContext
                 : !RequiresSceneReadScopeEvaluation
                     ? CanReadScenes
                     : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, scene.Id));
+
+        modelBuilder.Entity<Audio>().HasQueryFilter(audio =>
+            AuthorizationFiltersBypassed
+                ? true
+                : !RequiresAudioReadScopeEvaluation
+                    ? CanReadAudios
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadAudios, CanReadAudiosByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Audio, audio.Id));
+
+        modelBuilder.Entity<TextDocument>().HasQueryFilter(text =>
+            AuthorizationFiltersBypassed
+                ? true
+                : !RequiresTextReadScopeEvaluation
+                    ? CanReadTexts
+                    : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTexts, CanReadTextsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Text, text.Id));
 
         modelBuilder.Entity<Performer>().HasQueryFilter(performer =>
             AuthorizationFiltersBypassed
@@ -313,6 +333,14 @@ public partial class CoveContext
                     ? (!RequiresSceneReadScopeEvaluation
                         ? CanReadScenes
                         : item.SceneId != null && CanReadEntitySql(AuthorizationFiltersBypassed, CanReadScenes, CanReadScenesByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Scene, item.SceneId.Value))
+                    : item.HostType == "audio"
+                        ? (!RequiresAudioReadScopeEvaluation
+                            ? CanReadAudios
+                            : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadAudios, CanReadAudiosByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Audio, item.HostId))
+                    : item.HostType == "text"
+                        ? (!RequiresTextReadScopeEvaluation
+                            ? CanReadTexts
+                            : CanReadEntitySql(AuthorizationFiltersBypassed, CanReadTexts, CanReadTextsByRule, CurrentRoleNames, CurrentShareLinkId, EntityKinds.Text, item.HostId))
                     : item.HostType == "image"
                         ? (!RequiresImageReadScopeEvaluation
                             ? CanReadImages

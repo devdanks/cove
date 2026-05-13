@@ -18,6 +18,8 @@ public class CoveConfiguration
     public List<string> VideoExtensions { get; set; } = [".m4v", ".mp4", ".mov", ".wmv", ".avi", ".mpg", ".mpeg", ".rmvb", ".rm", ".flv", ".asf", ".mkv", ".webm", ".f4v"];
     public List<string> ImageExtensions { get; set; } = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"];
     public List<string> GalleryExtensions { get; set; } = [".zip", ".cbz"];
+    public List<string> AudioExtensions { get; set; } = [".mp3", ".m4a", ".m4b", ".flac", ".wav", ".ogg", ".oga", ".opus", ".aac", ".alac", ".aif", ".aiff", ".wma", ".mka", ".weba", ".amr"];
+    public List<string> TextExtensions { get; set; } = [".txt", ".md", ".markdown", ".pdf", ".epub", ".rtf", ".nfo", ".log", ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".html", ".htm"];
     public List<string> ExcludePatterns { get; set; } = [];
     public List<string> ExcludeImagePatterns { get; set; } = [];
     public List<string> ExcludeGalleryPatterns { get; set; } = [];
@@ -59,6 +61,7 @@ public class CovePath
     public bool ExcludeVideo { get; set; }
     public bool ExcludeImage { get; set; }
     public bool ExcludeAudio { get; set; }
+    public bool ExcludeText { get; set; }
 }
 
 public class DownloaderPathOverride
@@ -211,6 +214,7 @@ public class ScrapingConfig
     public List<MetadataServerInstance> MetadataServers { get; set; } = [];
     public List<ScraperPreference> ScraperPreferences { get; set; } = [];
     public IdentifyDefaultsConfig IdentifyDefaults { get; set; } = new();
+    public ScrapeApplyDefaultsConfig ScrapeApplyDefaults { get; set; } = new();
     public MetadataBatchDefaultsConfig MetadataBatchDefaults { get; set; } = new();
 }
 
@@ -227,6 +231,15 @@ public class IdentifyDefaultsConfig
     public bool CreateStudios { get; set; } = true;
     public int? AutoApplyMaxDurationDifferenceSeconds { get; set; }
     public int? AutoApplyMaxPhashDistance { get; set; }
+}
+
+public class ScrapeApplyDefaultsConfig
+{
+    public bool CreateMissingTags { get; set; }
+    public bool CreateMissingPerformers { get; set; }
+    public bool CreateMissingStudio { get; set; }
+    public bool MarkOrganized { get; set; }
+    public bool HydratePerformers { get; set; }
 }
 
 public class MetadataBatchDefaultsConfig

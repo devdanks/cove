@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type MediaDetailAspectRatio = "video" | "square" | "auto";
+export type MediaDetailAspectRatio = "video" | "square" | "auto" | "compact";
 export type MediaDetailTabPlacement = "sidebar" | "header";
 export type MediaDetailMediaPosition = "left" | "right";
 

@@ -110,6 +110,199 @@ namespace Cove.Data.Migrations
                     b.ToTable("ai_runs", (string)null);
                 });
 
+            modelBuilder.Entity("Cove.Core.Entities.Audio", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("text");
+
+                    b.Property<int>("FileCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("FileSearchText")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("HasVideoFiles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("ImageBlobId")
+                        .HasColumnType("text");
+
+                    b.Property<long>("MaxBitRate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<double>("MaxDuration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(0.0);
+
+                    b.Property<DateTime?>("MaxFileModTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("MaxFileSize")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<string>("MaxPath")
+                        .HasColumnType("text");
+
+                    b.Property<string>("MinPath")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Organized")
+                        .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<int[]>("PerformerIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]");
+
+                    b.Property<int?>("StudioId")
+                        .HasColumnType("integer");
+
+                    b.PrimitiveCollection<int[]>("TagIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]");
+
+                    b.Property<string>("Title")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Date");
+
+                    b.HasIndex("MaxDuration");
+
+                    b.HasIndex("PerformerIds");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("PerformerIds"), "gin");
+
+                    b.HasIndex("StudioId");
+
+                    b.HasIndex("TagIds");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("TagIds"), "gin");
+
+                    b.HasIndex("Title");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.ToTable("audios", (string)null);
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioPerformer", b =>
+                {
+                    b.Property<int>("AudioId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PerformerId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("AudioId", "PerformerId");
+
+                    b.HasIndex("PerformerId");
+
+                    b.ToTable("audio_performers", (string)null);
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioTag", b =>
+                {
+                    b.Property<int>("AudioId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TagId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("AudioId", "TagId");
+
+                    b.HasIndex("TagId");
+
+                    b.ToTable("audio_tags", (string)null);
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioTrack", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AudioId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("EndSec")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<double>("StartSec")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Title")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudioId", "OrderIndex");
+
+                    b.ToTable("audio_tracks", (string)null);
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioUrl", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AudioId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudioId");
+
+                    b.ToTable("audio_urls", (string)null);
+                });
+
             modelBuilder.Entity("Cove.Core.Entities.Auth.ApiToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3607,6 +3800,152 @@ namespace Cove.Data.Migrations
                     b.ToTable("TagRemoteId", (string)null);
                 });
 
+            modelBuilder.Entity("Cove.Core.Entities.TextDocument", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("text");
+
+                    b.Property<int>("FileCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("FileSearchText")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ImageBlobId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("MaxFileModTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("MaxFileSize")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<int?>("MaxPageCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MaxPath")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("MaxWordCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MinPath")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Organized")
+                        .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<int[]>("PerformerIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]");
+
+                    b.Property<int?>("StudioId")
+                        .HasColumnType("integer");
+
+                    b.PrimitiveCollection<int[]>("TagIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]");
+
+                    b.Property<string>("Title")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Date");
+
+                    b.HasIndex("PerformerIds");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("PerformerIds"), "gin");
+
+                    b.HasIndex("StudioId");
+
+                    b.HasIndex("TagIds");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("TagIds"), "gin");
+
+                    b.HasIndex("Title");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.ToTable("text_documents", (string)null);
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TextPerformer", b =>
+                {
+                    b.Property<int>("TextDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PerformerId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("TextDocumentId", "PerformerId");
+
+                    b.HasIndex("PerformerId");
+
+                    b.ToTable("text_performers", (string)null);
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TextTag", b =>
+                {
+                    b.Property<int>("TextDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TagId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("TextDocumentId", "TagId");
+
+                    b.HasIndex("TagId");
+
+                    b.ToTable("text_tags", (string)null);
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TextUrl", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("TextDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TextDocumentId");
+
+                    b.ToTable("text_urls", (string)null);
+                });
+
             modelBuilder.Entity("Cove.Core.Entities.UserBookmark", b =>
                 {
                     b.Property<int>("UserId")
@@ -3735,6 +4074,41 @@ namespace Cove.Data.Migrations
                     b.ToTable("VideoCaptions", (string)null);
                 });
 
+            modelBuilder.Entity("Cove.Core.Entities.AudioFile", b =>
+                {
+                    b.HasBaseType("Cove.Core.Entities.BaseFileEntity");
+
+                    b.Property<string>("AudioCodec")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("AudioId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("BitRate")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("Channels")
+                        .HasColumnType("integer");
+
+                    b.Property<double>("Duration")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("HasVideoTrack")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("SampleRate")
+                        .HasColumnType("integer");
+
+                    b.HasIndex("AudioId", "Path");
+
+                    b.HasDiscriminator().HasValue("Audio");
+                });
+
             modelBuilder.Entity("Cove.Core.Entities.GalleryFile", b =>
                 {
                     b.HasBaseType("Cove.Core.Entities.BaseFileEntity");
@@ -3766,7 +4140,44 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("ImageId", "Path");
 
+                    b.ToTable("files", t =>
+                        {
+                            t.Property("Format")
+                                .HasColumnName("ImageFile_Format");
+                        });
+
                     b.HasDiscriminator().HasValue("Image");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TextFile", b =>
+                {
+                    b.HasBaseType("Cove.Core.Entities.BaseFileEntity");
+
+                    b.Property<string>("ExcerptText")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("PageCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TextDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("WordCount")
+                        .HasColumnType("integer");
+
+                    b.HasIndex("TextDocumentId", "Path");
+
+                    b.ToTable("files", t =>
+                        {
+                            t.Property("Format")
+                                .HasColumnName("TextFile_Format");
+                        });
+
+                    b.HasDiscriminator().HasValue("Text");
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.VideoFile", b =>
@@ -3813,6 +4224,15 @@ namespace Cove.Data.Migrations
 
                     b.ToTable("files", t =>
                         {
+                            t.Property("AudioCodec")
+                                .HasColumnName("VideoFile_AudioCodec");
+
+                            t.Property("BitRate")
+                                .HasColumnName("VideoFile_BitRate");
+
+                            t.Property("Duration")
+                                .HasColumnName("VideoFile_Duration");
+
                             t.Property("Format")
                                 .HasColumnName("VideoFile_Format");
 
@@ -3824,6 +4244,76 @@ namespace Cove.Data.Migrations
                         });
 
                     b.HasDiscriminator().HasValue("Video");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.Audio", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Studio", "Studio")
+                        .WithMany()
+                        .HasForeignKey("StudioId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Studio");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioPerformer", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Audio", "Audio")
+                        .WithMany("AudioPerformers")
+                        .HasForeignKey("AudioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cove.Core.Entities.Performer", "Performer")
+                        .WithMany()
+                        .HasForeignKey("PerformerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Audio");
+
+                    b.Navigation("Performer");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioTag", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Audio", "Audio")
+                        .WithMany("AudioTags")
+                        .HasForeignKey("AudioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cove.Core.Entities.Tag", "Tag")
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Audio");
+
+                    b.Navigation("Tag");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioTrack", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Audio", "Audio")
+                        .WithMany("Tracks")
+                        .HasForeignKey("AudioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Audio");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioUrl", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Audio", "Audio")
+                        .WithMany("Urls")
+                        .HasForeignKey("AudioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Audio");
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.Auth.ApiToken", b =>
@@ -4656,6 +5146,65 @@ namespace Cove.Data.Migrations
                     b.Navigation("Tag");
                 });
 
+            modelBuilder.Entity("Cove.Core.Entities.TextDocument", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Studio", "Studio")
+                        .WithMany()
+                        .HasForeignKey("StudioId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Studio");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TextPerformer", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Performer", "Performer")
+                        .WithMany()
+                        .HasForeignKey("PerformerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cove.Core.Entities.TextDocument", "TextDocument")
+                        .WithMany("TextPerformers")
+                        .HasForeignKey("TextDocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Performer");
+
+                    b.Navigation("TextDocument");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TextTag", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Tag", "Tag")
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cove.Core.Entities.TextDocument", "TextDocument")
+                        .WithMany("TextTags")
+                        .HasForeignKey("TextDocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tag");
+
+                    b.Navigation("TextDocument");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TextUrl", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.TextDocument", "TextDocument")
+                        .WithMany("Urls")
+                        .HasForeignKey("TextDocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("TextDocument");
+                });
+
             modelBuilder.Entity("Cove.Core.Entities.VideoCaption", b =>
                 {
                     b.HasOne("Cove.Core.Entities.VideoFile", "File")
@@ -4665,6 +5214,16 @@ namespace Cove.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("File");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.AudioFile", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.Audio", "Audio")
+                        .WithMany("Files")
+                        .HasForeignKey("AudioId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Audio");
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.GalleryFile", b =>
@@ -4687,6 +5246,16 @@ namespace Cove.Data.Migrations
                     b.Navigation("Image");
                 });
 
+            modelBuilder.Entity("Cove.Core.Entities.TextFile", b =>
+                {
+                    b.HasOne("Cove.Core.Entities.TextDocument", "TextDocument")
+                        .WithMany("Files")
+                        .HasForeignKey("TextDocumentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("TextDocument");
+                });
+
             modelBuilder.Entity("Cove.Core.Entities.VideoFile", b =>
                 {
                     b.HasOne("Cove.Core.Entities.Scene", "Scene")
@@ -4695,6 +5264,19 @@ namespace Cove.Data.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Scene");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.Audio", b =>
+                {
+                    b.Navigation("AudioPerformers");
+
+                    b.Navigation("AudioTags");
+
+                    b.Navigation("Files");
+
+                    b.Navigation("Tracks");
+
+                    b.Navigation("Urls");
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.Auth.Role", b =>
@@ -4888,6 +5470,17 @@ namespace Cove.Data.Migrations
             modelBuilder.Entity("Cove.Core.Entities.TagGroup", b =>
                 {
                     b.Navigation("Tags");
+                });
+
+            modelBuilder.Entity("Cove.Core.Entities.TextDocument", b =>
+                {
+                    b.Navigation("Files");
+
+                    b.Navigation("TextPerformers");
+
+                    b.Navigation("TextTags");
+
+                    b.Navigation("Urls");
                 });
 
             modelBuilder.Entity("Cove.Core.Entities.VideoFile", b =>

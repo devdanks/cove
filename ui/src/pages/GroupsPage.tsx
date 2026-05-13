@@ -30,6 +30,10 @@ const SORT_OPTIONS = [
   { value: "created_at", label: "Created At" },
 ];
 
+function getGroupItemCount(group: Group) {
+  return group.itemCount ?? (group.kind === "dynamic" ? group.cachedItemCount ?? group.sceneCount : group.sceneCount);
+}
+
 interface Props {
   onNavigate: (r: any) => void;
 }
@@ -243,7 +247,7 @@ function GroupListTable({ groups: items, engagementById, onNavigate, selectedIds
           <th className="py-2 px-3">Studio</th>
           <th className="py-2 px-3">Director</th>
           <th className="py-2 px-3">Date</th>
-          <th className="py-2 px-3 text-right">Scenes</th>
+          <th className="py-2 px-3 text-right">Items</th>
           <th className="py-2 px-3 text-right">Rating</th>
         </tr>
       </thead>
@@ -259,7 +263,7 @@ function GroupListTable({ groups: items, engagementById, onNavigate, selectedIds
             <td className="py-2 px-3 text-secondary">{g.studioName ?? ""}</td>
             <td className="py-2 px-3 text-secondary">{g.director ?? ""}</td>
             <td className="py-2 px-3 text-secondary">{g.date ? formatDate(g.date) : ""}</td>
-            <td className="py-2 px-3 text-secondary text-right">{g.sceneCount}</td>
+            <td className="py-2 px-3 text-secondary text-right">{getGroupItemCount(g)}</td>
             <td className="py-2 px-3 text-secondary text-right">{engagementById.get(g.id)?.rating ?? ""}</td>
           </tr>
         ))}

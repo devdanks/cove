@@ -53,11 +53,12 @@ import type {
   DownloaderPathOverrideConfig,
   IdentifyDefaultsConfig,
   MetadataServerValidationResult,
+  ScrapeApplyDefaultsConfig,
   TagGroup,
   UserTrackingPreferences,
 } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
-import { getScraperSiteKey } from "../components/sceneScrapeUtils";
+import { getScraperSiteKey, loadScrapeApplyPreferences, saveScrapeApplyPreferences } from "../components/sceneScrapeUtils";
 import { useAppConfig } from "../state/AppConfigContext";
 import { LOCATION_CHANGE_EVENT, buildCurrentUrl, navigateToUrl } from "../router/location";
 import { DisplayProfilesSettingsPanel } from "./settings/DisplayProfilesSettingsPanel";
@@ -75,6 +76,7 @@ import { UsersTab, RolesTab, AuditTab, ContentRulesTab, ApiTokensTab, ShareLinks
 import { isLimitedPrimarySettingsTabVisible } from "./settings/tabVisibility";
 import { defaultRatingSystemOptions, normalizeRatingOptions } from "../components/Rating";
 import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
+import { DEFAULT_PLAYBACK_PREFERENCES, normalizePlaybackPreferences, type ResolvedPlaybackPreferences } from "../utils/playbackPreferences";
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 import { KEYBINDING_GROUPS, keybindingDefault } from "../keyboard/keybindings";
 import { readStoredKeybindingOverrides, writeStoredKeybindingOverrides } from "../hooks/useResolvedKeybindingOverrides";
@@ -176,6 +178,8 @@ const DEFAULT_SCAN_OPTIONS: ScanOptions = {
   scanGenerateMd5: false,
   scanGenerateThumbnails: false,
   scanGenerateImagePhashes: false,
+  scanGenerateAudioPhashes: false,
+  scanGenerateTextPhashes: false,
   rescan: false,
 };
 
@@ -190,6 +194,8 @@ const DEFAULT_GENERATE_OPTIONS: GenerateOptions = {
   md5: false,
   imageThumbnails: false,
   imagePhashes: false,
+  audioPhashes: false,
+  textPhashes: false,
   overwrite: false,
 };
 
@@ -292,6 +298,8 @@ const languageOptions = [
 
 const menuItems = [
   { value: "scenes", label: "Scenes" },
+  { value: "audios", label: "Audios" },
+  { value: "texts", label: "Texts" },
   { value: "segments", label: "Segments" },
   { value: "images", label: "Images" },
   { value: "faces", label: "Faces" },
@@ -300,7 +308,6 @@ const menuItems = [
   { value: "studios", label: "Studios" },
   { value: "tags", label: "Tags" },
   { value: "groups", label: "Groups" },
-  { value: "audios", label: "Audios" },
 ];
 
 const ratingSystemOptions: { value: RatingSystemType; label: string }[] = [
@@ -316,7 +323,7 @@ const starPrecisionOptions: { value: RatingStarPrecision; label: string }[] = [
 ];
 
 function emptyPath(): CovePathConfig {
-  return { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false };
+  return { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false, excludeText: false };
 }
 
 function emptyDownloaderPathOverride(): DownloaderPathOverrideConfig {
@@ -349,8 +356,27 @@ function defaultMetadataBatchDefaults() {
   };
 }
 
+function defaultScrapeApplyDefaults(): ScrapeApplyDefaultsConfig {
+  return {
+    createMissingTags: false,
+    createMissingPerformers: false,
+    createMissingStudio: false,
+    markOrganized: false,
+    hydratePerformers: false,
+  };
+}
+
 function defaultScraperPreferences(): ScraperPreference[] {
   return [];
+}
+
+function isGenericWildcardUrlPattern(pattern: string) {
+  const normalized = pattern.trim().toLowerCase();
+  return normalized === "http://*" || normalized === "https://*" || normalized === "http://*/*" || normalized === "https://*/*";
+}
+
+function hasOnlyGenericWildcardUrlPatterns(urls: string[]) {
+  return urls.length > 0 && urls.every(isGenericWildcardUrlPattern);
 }
 
 const METADATA_BATCH_EXCLUDE_OPTIONS = [
@@ -486,6 +512,8 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
     videoExtensions: config.videoExtensions.map((value) => value.trim()).filter(Boolean),
     imageExtensions: config.imageExtensions.map((value) => value.trim()).filter(Boolean),
     galleryExtensions: config.galleryExtensions.map((value) => value.trim()).filter(Boolean),
+    audioExtensions: (config.audioExtensions ?? []).map((value) => value.trim()).filter(Boolean),
+    textExtensions: (config.textExtensions ?? []).map((value) => value.trim()).filter(Boolean),
     excludePatterns: config.excludePatterns.map((value) => value.trim()).filter(Boolean),
     excludeImagePatterns: config.excludeImagePatterns.map((value) => value.trim()).filter(Boolean),
     excludeGalleryPatterns: config.excludeGalleryPatterns.map((value) => value.trim()).filter(Boolean),
@@ -535,6 +563,10 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
       identifyDefaults: {
         ...defaultIdentifyDefaults(),
         ...config.scraping.identifyDefaults,
+      },
+      scrapeApplyDefaults: {
+        ...defaultScrapeApplyDefaults(),
+        ...config.scraping.scrapeApplyDefaults,
       },
       metadataBatchDefaults: {
         ...defaultMetadataBatchDefaults(),
@@ -636,7 +668,7 @@ export function SettingsPage() {
         continue;
       }
 
-      const sites = new Set(scraper.urls.map((pattern) => getScraperSiteKey(pattern)).filter(Boolean));
+      const sites = new Set(scraper.urls.filter((pattern) => !isGenericWildcardUrlPattern(pattern)).map((pattern) => getScraperSiteKey(pattern)).filter(Boolean));
       for (const site of sites) {
         const siteScrapers = groups.get(site) ?? [];
         if (!siteScrapers.some((candidate) => candidate.id === scraper.id)) {
@@ -679,6 +711,10 @@ export function SettingsPage() {
     if (!nextDraft.scraping.identifyDefaults) {
       nextDraft.scraping.identifyDefaults = defaultIdentifyDefaults();
     }
+    nextDraft.scraping.scrapeApplyDefaults = {
+      ...defaultScrapeApplyDefaults(),
+      ...nextDraft.scraping.scrapeApplyDefaults,
+    };
     nextDraft.scraping.scraperPreferences = nextDraft.scraping.scraperPreferences ?? defaultScraperPreferences();
     nextDraft.scraping.metadataBatchDefaults = {
       ...defaultMetadataBatchDefaults(),
@@ -871,6 +907,20 @@ export function SettingsPage() {
   const activeTabDescription = resolvedActiveTab === "interface" && !canWriteSystemSettings
     ? "Theme and rating display preferences stored locally in this browser."
     : tabDescriptions[resolvedActiveTab];
+  const updateScrapeApplyDefault = (field: keyof ScrapeApplyDefaultsConfig, checked: boolean) => {
+    const nextPreferences = { ...loadScrapeApplyPreferences(draft.scraping.scrapeApplyDefaults), [field]: checked };
+    saveScrapeApplyPreferences(nextPreferences);
+    updateDraft((current) => ({
+      ...current,
+      scraping: {
+        ...current.scraping,
+        scrapeApplyDefaults: {
+          ...current.scraping.scrapeApplyDefaults,
+          [field]: checked,
+        },
+      },
+    }));
+  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
@@ -1002,6 +1052,18 @@ export function SettingsPage() {
                               ...current,
                               covePaths: current.covePaths.map((item, itemIndex) =>
                                 itemIndex === index ? { ...item, excludeAudio: checked } : item,
+                              ),
+                            }))
+                          }
+                        />
+                        <CheckboxLabel
+                          label="Exclude texts"
+                          checked={path.excludeText}
+                          onChange={(checked) =>
+                            updateDraft((current) => ({
+                              ...current,
+                              covePaths: current.covePaths.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, excludeText: checked } : item,
                               ),
                             }))
                           }
@@ -1154,6 +1216,18 @@ export function SettingsPage() {
                   label="Gallery extensions"
                   value={listToLines(draft.galleryExtensions)}
                   onChange={(value) => updateDraft((current) => ({ ...current, galleryExtensions: linesToList(value) }))}
+                  rows={7}
+                />
+                <TextAreaField
+                  label="Audio extensions"
+                  value={listToLines(draft.audioExtensions)}
+                  onChange={(value) => updateDraft((current) => ({ ...current, audioExtensions: linesToList(value) }))}
+                  rows={7}
+                />
+                <TextAreaField
+                  label="Text extensions"
+                  value={listToLines(draft.textExtensions)}
+                  onChange={(value) => updateDraft((current) => ({ ...current, textExtensions: linesToList(value) }))}
                   rows={7}
                 />
               </div>
@@ -2023,6 +2097,39 @@ export function SettingsPage() {
               </div>
             </SectionCard>
 
+            <SectionCard title="Scrape & Download Defaults" description="Defaults used when scraper or downloader metadata is applied from review dialogs, list actions, and detail actions.">
+              <div className="grid gap-3 md:grid-cols-2">
+                <CheckboxLabel
+                  label="Create missing tags by default"
+                  checked={draft.scraping.scrapeApplyDefaults.createMissingTags}
+                  onChange={(checked) => updateScrapeApplyDefault("createMissingTags", checked)}
+                />
+                <CheckboxLabel
+                  label="Create missing performers by default"
+                  checked={draft.scraping.scrapeApplyDefaults.createMissingPerformers}
+                  onChange={(checked) => updateScrapeApplyDefault("createMissingPerformers", checked)}
+                />
+                <CheckboxLabel
+                  label="Create missing studios by default"
+                  checked={draft.scraping.scrapeApplyDefaults.createMissingStudio}
+                  onChange={(checked) => updateScrapeApplyDefault("createMissingStudio", checked)}
+                />
+                <CheckboxLabel
+                  label="Mark applied media organized by default"
+                  checked={draft.scraping.scrapeApplyDefaults.markOrganized}
+                  onChange={(checked) => updateScrapeApplyDefault("markOrganized", checked)}
+                />
+                <CheckboxLabel
+                  label="Hydrate performers by default"
+                  checked={draft.scraping.scrapeApplyDefaults.hydratePerformers}
+                  onChange={(checked) => updateScrapeApplyDefault("hydratePerformers", checked)}
+                />
+              </div>
+              <p className="mt-3 text-xs text-muted">
+                Dialog changes still update the remembered choices for the next run.
+              </p>
+            </SectionCard>
+
             <SectionCard title="Default Batch Options" description="Defaults used to prefill MetadataServer batch-tag dialogs.">
               <div className="space-y-4">
                 <label className="flex items-center gap-2 text-sm text-secondary">
@@ -2709,6 +2816,7 @@ function UserSettingsPanel() {
   const accountBackedPreferences = supportsServerBackedUiPreferences(user);
   const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
   const [trackingPreferences, setTrackingPreferences] = useState<ResolvedTrackingPreferences>(() => resolveTrackingPreferences(user?.uiPreferences?.tracking));
+  const [playbackPreferences, setPlaybackPreferences] = useState<ResolvedPlaybackPreferences>(() => normalizePlaybackPreferences(user?.uiPreferences?.playback));
   const [keybindingOverrides, setKeybindingOverrides] = useState<Record<string, string>>(() => accountBackedPreferences
     ? normalizeUserKeybindingOverrides(user?.uiPreferences?.keybindingOverrides)
     : readStoredKeybindingOverrides());
@@ -2726,6 +2834,7 @@ function UserSettingsPanel() {
 
   useEffect(() => {
     setTrackingPreferences(resolveTrackingPreferences(user?.uiPreferences?.tracking));
+    setPlaybackPreferences(normalizePlaybackPreferences(user?.uiPreferences?.playback));
   }, [user]);
 
   useEffect(() => {
@@ -2744,6 +2853,19 @@ function UserSettingsPanel() {
     updateAuthenticatedUserUiPreferences((current) => ({
       ...(current ?? {}),
       tracking: nextTracking,
+    }));
+  };
+
+  const updatePlaybackPreferences = (patch: Partial<ResolvedPlaybackPreferences>) => {
+    const nextPlayback = normalizePlaybackPreferences({
+      ...DEFAULT_PLAYBACK_PREFERENCES,
+      ...playbackPreferences,
+      ...patch,
+    });
+    setPlaybackPreferences(nextPlayback);
+    updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      playback: nextPlayback,
     }));
   };
 
@@ -2853,6 +2975,23 @@ function UserSettingsPanel() {
               onChange={(value) => updateTrackingPreferences({ sessionIdleTimeoutSec: value ?? defaultTrackingPreferences.sessionIdleTimeoutSec })}
             />
           </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title={sharedProfilePreferences ? "Shared Playback Controls" : "Personal Playback Controls"}
+        description={sharedProfilePreferences
+          ? "These player controls are stored in Cove's shared built-in profile and apply across browsers."
+          : "These player controls follow your signed-in account and apply to audio and video playback."}
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <NumberField
+            label="Skip interval seconds"
+            value={playbackPreferences.skipSeconds ?? DEFAULT_PLAYBACK_PREFERENCES.skipSeconds}
+            min={1}
+            max={300}
+            onChange={(value) => updatePlaybackPreferences({ skipSeconds: value ?? DEFAULT_PLAYBACK_PREFERENCES.skipSeconds })}
+          />
         </div>
       </SectionCard>
 
@@ -3324,10 +3463,12 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             <CheckboxLabel label="Generate covers" checked={!!scanOpts.scanGenerateCovers} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateCovers: c })} />
             <CheckboxLabel label="Generate previews" checked={!!scanOpts.scanGeneratePreviews} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePreviews: c })} />
             <CheckboxLabel label="Generate sprites" checked={!!scanOpts.scanGenerateSprites} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateSprites: c })} />
-            <CheckboxLabel label="Generate perceptual hashes" checked={!!scanOpts.scanGeneratePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePhashes: c })} />
+            <CheckboxLabel label="Generate scene perceptual hashes" checked={!!scanOpts.scanGeneratePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePhashes: c })} />
             <CheckboxLabel label="Generate MD5 checksums" checked={!!scanOpts.scanGenerateMd5} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateMd5: c })} />
             <CheckboxLabel label="Generate image thumbnails" checked={!!scanOpts.scanGenerateThumbnails} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateThumbnails: c })} />
-            <CheckboxLabel label="Generate image phashes" checked={!!scanOpts.scanGenerateImagePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateImagePhashes: c })} />
+            <CheckboxLabel label="Generate image perceptual hashes" checked={!!scanOpts.scanGenerateImagePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateImagePhashes: c })} />
+            <CheckboxLabel label="Generate audio perceptual hashes" checked={!!scanOpts.scanGenerateAudioPhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateAudioPhashes: c })} />
+            <CheckboxLabel label="Generate text perceptual hashes" checked={!!scanOpts.scanGenerateTextPhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateTextPhashes: c })} />
             <CheckboxLabel label="Force rescan (ignore mtime)" checked={!!scanOpts.rescan} onChange={(c) => setScanOpts({ ...scanOpts, rescan: c })} />
             {selectablePaths.length > 0 && (
               <div className="sm:col-span-2 space-y-2 rounded-xl border border-border/60 bg-surface/60 p-3">
@@ -3393,13 +3534,18 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
                 checked={!!genOpts.segmentPreviews}
                 onChange={(c) => setGenOpts({ ...genOpts, segmentThumbnails: c ? true : genOpts.segmentThumbnails, segmentPreviews: c, markers: false })}
               />
-              <CheckboxLabel label="Perceptual hashes (phash)" checked={!!genOpts.phashes} onChange={(c) => setGenOpts({ ...genOpts, phashes: c })} />
+              <CheckboxLabel label="Scene perceptual hashes" checked={!!genOpts.phashes} onChange={(c) => setGenOpts({ ...genOpts, phashes: c })} />
               <CheckboxLabel label="MD5 checksums" checked={!!genOpts.md5} onChange={(c) => setGenOpts({ ...genOpts, md5: c })} />
             </div>
             <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Image options</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <CheckboxLabel label="Image thumbnails" checked={!!genOpts.imageThumbnails} onChange={(c) => setGenOpts({ ...genOpts, imageThumbnails: c })} />
-              <CheckboxLabel label="Image phashes" checked={!!genOpts.imagePhashes} onChange={(c) => setGenOpts({ ...genOpts, imagePhashes: c })} />
+              <CheckboxLabel label="Image perceptual hashes" checked={!!genOpts.imagePhashes} onChange={(c) => setGenOpts({ ...genOpts, imagePhashes: c })} />
+            </div>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Audio and text options</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CheckboxLabel label="Audio perceptual hashes" checked={!!genOpts.audioPhashes} onChange={(c) => setGenOpts({ ...genOpts, audioPhashes: c })} />
+              <CheckboxLabel label="Text perceptual hashes" checked={!!genOpts.textPhashes} onChange={(c) => setGenOpts({ ...genOpts, textPhashes: c })} />
             </div>
             <div className="pt-2">
               <CheckboxLabel label="Overwrite existing generated files" checked={!!genOpts.overwrite} onChange={(c) => setGenOpts({ ...genOpts, overwrite: c })} />
@@ -3509,6 +3655,8 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
                 <CheckboxLabel label="MD5 checksums" checked={!!downloadImportGenerateOpts.md5} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, md5: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Image thumbnails" checked={!!downloadImportGenerateOpts.imageThumbnails} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, imageThumbnails: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Image perceptual hashes" checked={!!downloadImportGenerateOpts.imagePhashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, imagePhashes: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Audio perceptual hashes" checked={!!downloadImportGenerateOpts.audioPhashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, audioPhashes: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Text perceptual hashes" checked={!!downloadImportGenerateOpts.textPhashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, textPhashes: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Overwrite generated files" checked={!!downloadImportGenerateOpts.overwrite} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, overwrite: checked })); setDownloadImportStatus(null); }} />
               </div>
             </div>
@@ -4846,7 +4994,13 @@ function ScraperTable({ entityType, scrapers }: { entityType: string; scrapers: 
                 <td className="px-4 py-3 font-medium text-foreground">{scraper.name}</td>
                 <td className="px-4 py-3 text-secondary">{scraper.supportedScrapes.join(", ")}</td>
                 <td className="px-4 py-3 text-secondary">
-                  {scraper.urls.length > 0 ? scraper.urls.join(", ") : <span className="text-muted">No URL matchers</span>}
+                  {scraper.urls.length === 0 ? (
+                    <span className="text-muted">No URL matchers</span>
+                  ) : hasOnlyGenericWildcardUrlPatterns(scraper.urls) ? (
+                    <span className="text-muted">Generic URL probe; provider checks support at run time</span>
+                  ) : (
+                    scraper.urls.join(", ")
+                  )}
                 </td>
                 <td className="px-4 py-3 text-xs text-muted">{scraper.sourcePath}</td>
               </tr>

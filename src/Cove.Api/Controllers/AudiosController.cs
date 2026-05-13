@@ -1,0 +1,603 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.EntityFrameworkCore;
+using Cove.Api.Services;
+using Cove.Core.Auth;
+using Cove.Core.DTOs;
+using Cove.Core.Entities;
+using Cove.Core.Interfaces;
+using Cove.Data;
+using Cove.Data.Repositories;
+
+namespace Cove.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[RequiresPermission(Permissions.AudiosRead)]
+public class AudiosController(CoveContext db, CustomFieldService customFields, IScanService scanService, IThumbnailService thumbnailService, IBlobService blobService, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+{
+    private static readonly FileExtensionContentTypeProvider ContentTypes = new();
+
+    private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
+
+    [HttpGet]
+    [OutputCache(PolicyName = "ShortCache")]
+    public async Task<ActionResult<PaginatedResponse<AudioDto>>> Find(
+        [FromQuery] string? q,
+        [FromQuery] int page = 1,
+        [FromQuery] int perPage = 25,
+        [FromQuery] string? sort = null,
+        [FromQuery] string? direction = null,
+        CancellationToken ct = default)
+    {
+        page = Math.Max(1, page);
+        perPage = Math.Clamp(perPage, 1, 250);
+        var descending = string.Equals(direction, "desc", StringComparison.OrdinalIgnoreCase);
+
+        var query = db.Audios.AsNoTracking()
+            .Include(audio => audio.Studio)
+            .Include(audio => audio.Urls)
+            .Include(audio => audio.Files)
+            .Include(audio => audio.AudioTags).ThenInclude(link => link.Tag)
+            .Include(audio => audio.AudioPerformers).ThenInclude(link => link.Performer)
+            .Include(audio => audio.Tracks)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var pattern = $"%{q.Trim()}%";
+            query = query.Where(audio =>
+                EF.Functions.ILike(audio.Title ?? string.Empty, pattern)
+                || EF.Functions.ILike(audio.Code ?? string.Empty, pattern)
+                || EF.Functions.ILike(audio.Details ?? string.Empty, pattern)
+                || EF.Functions.ILike(audio.FileSearchText ?? string.Empty, pattern));
+        }
+
+        query = ApplySort(query, sort, descending);
+
+        var totalCount = await query.CountAsync(ct);
+        var items = await query
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
+            .ToListAsync(ct);
+
+        var dtos = items.Select(audio => MapToDto(audio, null, null)).ToList();
+        return Ok(new PaginatedResponse<AudioDto>(dtos, totalCount, page, perPage));
+    }
+
+    [HttpPost("find")]
+    public async Task<ActionResult<PaginatedResponse<AudioDto>>> FindPost([FromBody] FilteredQueryRequest<AudioFilter> req, CancellationToken ct)
+    {
+        var findFilter = req.FindFilter ?? new FindFilter();
+        var page = Math.Max(1, findFilter.Page);
+        var perPage = Math.Clamp(findFilter.PerPage, 1, 250);
+        var descending = findFilter.Direction == Cove.Core.Enums.SortDirection.Desc;
+
+        var query = db.Audios.AsNoTracking()
+            .Include(audio => audio.Studio)
+            .Include(audio => audio.Urls)
+            .Include(audio => audio.Files)
+            .Include(audio => audio.AudioTags).ThenInclude(link => link.Tag)
+            .Include(audio => audio.AudioPerformers).ThenInclude(link => link.Performer)
+            .Include(audio => audio.Tracks)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(findFilter.Q))
+        {
+            var pattern = $"%{findFilter.Q.Trim()}%";
+            query = query.Where(audio =>
+                EF.Functions.ILike(audio.Title ?? string.Empty, pattern)
+                || EF.Functions.ILike(audio.Code ?? string.Empty, pattern)
+                || EF.Functions.ILike(audio.Details ?? string.Empty, pattern)
+                || EF.Functions.ILike(audio.FileSearchText ?? string.Empty, pattern));
+        }
+
+        query = ApplyFilter(query, req.ObjectFilter);
+        query = ApplySort(query, findFilter.Sort, descending);
+
+        var totalCount = await query.CountAsync(ct);
+        var items = await query
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
+            .ToListAsync(ct);
+
+        var dtos = items.Select(audio => MapToDto(audio, null, null)).ToList();
+        return Ok(new PaginatedResponse<AudioDto>(dtos, totalCount, page, perPage));
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<AudioDto>> GetById(int id, CancellationToken ct)
+    {
+        var audio = await db.Audios.AsNoTracking()
+            .Include(item => item.Studio)
+            .Include(item => item.Urls)
+            .Include(item => item.Files)
+            .Include(item => item.AudioTags).ThenInclude(link => link.Tag)
+            .Include(item => item.AudioPerformers).ThenInclude(link => link.Performer)
+            .Include(item => item.Tracks)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (audio == null)
+        {
+            return NotFound();
+        }
+
+        var groups = await GetGroupsAsync(id, ct);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, id, ct);
+        return Ok(MapToDto(audio, groups, customFieldValues));
+    }
+
+    [HttpGet("{id:int}/stream")]
+    [RequiresPermission(Permissions.StreamRead)]
+    public async Task<IActionResult> Stream(int id, CancellationToken ct)
+    {
+        var audio = await db.Audios.AsNoTracking()
+            .Include(item => item.Files)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        var file = audio?.Files
+            .OrderByDescending(item => item.Duration)
+            .ThenBy(item => item.Id)
+            .FirstOrDefault();
+        if (file == null || string.IsNullOrWhiteSpace(file.Path) || !System.IO.File.Exists(file.Path))
+        {
+            return NotFound();
+        }
+
+        if (!ContentTypes.TryGetContentType(file.Path, out var contentType))
+        {
+            contentType = file.HasVideoTrack ? "video/mp4" : "audio/mpeg";
+        }
+
+        Response.Headers["Accept-Ranges"] = "bytes";
+        var stream = new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920, useAsync: true);
+        return File(stream, contentType, enableRangeProcessing: true);
+    }
+
+    [HttpPost]
+    [RequiresPermission(Permissions.AudiosWrite)]
+    public async Task<ActionResult<AudioDto>> Create([FromBody] AudioCreateDto dto, CancellationToken ct)
+    {
+        var tagIds = dto.TagIds?.Where(tagId => tagId > 0).Distinct().ToArray() ?? [];
+        var performerIds = dto.PerformerIds?.Where(performerId => performerId > 0).Distinct().ToArray() ?? [];
+        var audio = new Audio
+        {
+            Title = NormalizeOptionalText(dto.Title),
+            Code = NormalizeOptionalText(dto.Code),
+            Details = NormalizeOptionalText(dto.Details),
+            Organized = dto.Organized,
+            StudioId = dto.StudioId,
+            Date = ParseDate(dto.Date),
+            TagIds = tagIds,
+            PerformerIds = performerIds,
+            Urls = dto.Urls?.Select(NormalizeOptionalText).Where(url => !string.IsNullOrWhiteSpace(url)).Select(url => new AudioUrl { Url = url! }).ToList() ?? [],
+            AudioTags = tagIds.Select(tagId => new AudioTag { TagId = tagId }).ToList(),
+            AudioPerformers = performerIds.Select(performerId => new AudioPerformer { PerformerId = performerId }).ToList(),
+        };
+
+        db.Audios.Add(audio);
+        await db.SaveChangesAsync(ct);
+
+        if (dto.GroupIds != null)
+        {
+            await ReplaceWholeAudioGroupItemsAsync(audio.Id, dto.GroupIds, audio.Title, ct);
+            await db.SaveChangesAsync(ct);
+        }
+
+        if (dto.CustomFields != null)
+        {
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Audio, audio.Id, dto.CustomFields, ct);
+        }
+
+        var created = await GetAudioForDtoAsync(audio.Id, ct);
+        if (created == null) return NotFound();
+        var groups = await GetGroupsAsync(audio.Id, ct);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, audio.Id, ct);
+        return CreatedAtAction(nameof(GetById), new { id = audio.Id }, MapToDto(created, groups, customFieldValues));
+    }
+
+    [HttpPost("from-file")]
+    [RequiresPermission(Permissions.AudiosWrite)]
+    public async Task<ActionResult<AudioDto>> CreateFromFile([FromBody] FileBackedCreateDto? dto, CancellationToken ct)
+    {
+        var filePath = dto?.FilePath?.Trim();
+        if (string.IsNullOrWhiteSpace(filePath) || !System.IO.File.Exists(filePath))
+            return BadRequest(new { error = "A valid file path is required." });
+
+        var audioId = await scanService.ImportDownloadedAudioAsync(filePath, audioId: null, ct);
+        var audio = await db.Audios.AsNoTracking()
+            .Include(item => item.Studio)
+            .Include(item => item.Urls)
+            .Include(item => item.Files)
+            .Include(item => item.AudioTags).ThenInclude(link => link.Tag)
+            .Include(item => item.AudioPerformers).ThenInclude(link => link.Performer)
+            .Include(item => item.Tracks)
+            .FirstOrDefaultAsync(item => item.Id == audioId, ct);
+        if (audio == null) return NotFound();
+
+        var groups = await GetGroupsAsync(audioId, ct);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, audioId, ct);
+        return CreatedAtAction(nameof(GetById), new { id = audioId }, MapToDto(audio, groups, customFieldValues));
+    }
+
+    [HttpPut("{id:int}")]
+    [RequiresPermission(Permissions.AudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Audio, Permissions.AudiosWrite)]
+    public async Task<ActionResult<AudioDto>> Update(int id, [FromBody] AudioUpdateDto dto, CancellationToken ct)
+    {
+        var audio = await db.Audios
+            .Include(item => item.Urls)
+            .Include(item => item.AudioTags)
+            .Include(item => item.AudioPerformers)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (audio == null)
+        {
+            return NotFound();
+        }
+
+        if (dto.Title != null) audio.Title = NormalizeOptionalText(dto.Title);
+        if (dto.Code != null) audio.Code = NormalizeOptionalText(dto.Code);
+        if (dto.Details != null) audio.Details = NormalizeOptionalText(dto.Details);
+        if (dto.Organized.HasValue) audio.Organized = dto.Organized.Value;
+        if (dto.StudioId.HasValue) audio.StudioId = dto.StudioId;
+        if (dto.Date != null) audio.Date = ParseDate(dto.Date);
+
+        if (dto.Urls != null)
+        {
+            audio.Urls.Clear();
+            audio.Urls = dto.Urls
+                .Select(url => NormalizeOptionalText(url))
+                .Where(url => !string.IsNullOrWhiteSpace(url))
+                .Select(url => new AudioUrl { AudioId = id, Url = url! })
+                .ToList();
+        }
+
+        if (dto.TagIds != null)
+        {
+            var tagIds = dto.TagIds.Where(tagId => tagId > 0).Distinct().ToArray();
+            audio.AudioTags.Clear();
+            audio.AudioTags = tagIds.Select(tagId => new AudioTag { AudioId = id, TagId = tagId }).ToList();
+            audio.TagIds = tagIds;
+        }
+
+        if (dto.PerformerIds != null)
+        {
+            var performerIds = dto.PerformerIds.Where(performerId => performerId > 0).Distinct().ToArray();
+            audio.AudioPerformers.Clear();
+            audio.AudioPerformers = performerIds.Select(performerId => new AudioPerformer { AudioId = id, PerformerId = performerId }).ToList();
+            audio.PerformerIds = performerIds;
+        }
+
+        if (dto.GroupIds != null)
+        {
+            await ReplaceWholeAudioGroupItemsAsync(id, dto.GroupIds, audio.Title, ct);
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        if (dto.CustomFields != null)
+        {
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Audio, id, dto.CustomFields, ct);
+        }
+
+        var updated = await db.Audios.AsNoTracking()
+            .Include(item => item.Studio)
+            .Include(item => item.Files)
+            .Include(item => item.AudioTags).ThenInclude(link => link.Tag)
+            .Include(item => item.AudioPerformers).ThenInclude(link => link.Performer)
+            .Include(item => item.Tracks)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (updated == null)
+        {
+            return NotFound();
+        }
+
+        var groups = await GetGroupsAsync(id, ct);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, id, ct);
+        return Ok(MapToDto(updated, groups, customFieldValues));
+    }
+
+    [HttpPost("bulk")]
+    [RequiresPermission(Permissions.AudiosWrite)]
+    [RequiresEntityAccess(EntityKinds.Audio, Permissions.AudiosWrite, ActionArgumentName = "dto", PropertyName = "Ids")]
+    public async Task<IActionResult> BulkUpdate([FromBody] BulkAudioUpdateDto dto, CancellationToken ct)
+    {
+        var items = await db.Audios
+            .Include(item => item.AudioTags)
+            .Include(item => item.AudioPerformers)
+            .Where(item => dto.Ids.Contains(item.Id))
+            .ToListAsync(ct);
+        var clearFields = dto.ClearFields?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+
+        foreach (var audio in items)
+        {
+            if (clearFields.Contains("studioId")) audio.StudioId = null;
+            if (clearFields.Contains("date")) audio.Date = null;
+            if (clearFields.Contains("code")) audio.Code = null;
+            if (clearFields.Contains("details")) audio.Details = null;
+            if (dto.Organized.HasValue) audio.Organized = dto.Organized.Value;
+            if (dto.StudioId.HasValue) audio.StudioId = dto.StudioId;
+            if (dto.Date != null) audio.Date = ParseDate(dto.Date);
+            if (dto.Code != null) audio.Code = NormalizeOptionalText(dto.Code);
+            if (dto.Details != null) audio.Details = NormalizeOptionalText(dto.Details);
+
+            if (dto.TagIds != null && dto.TagMode == BulkUpdateMode.Set)
+            {
+                audio.AudioTags.Clear();
+                audio.AudioTags = dto.TagIds.Where(tagId => tagId > 0).Distinct().Select(tagId => new AudioTag { AudioId = audio.Id, TagId = tagId }).ToList();
+            }
+            else if (dto.TagIds != null && dto.TagMode == BulkUpdateMode.Add)
+            {
+                var existing = audio.AudioTags.Select(link => link.TagId).ToHashSet();
+                foreach (var tagId in dto.TagIds.Where(tagId => tagId > 0).Distinct().Where(tagId => !existing.Contains(tagId)))
+                    audio.AudioTags.Add(new AudioTag { AudioId = audio.Id, TagId = tagId });
+            }
+            else if (dto.TagIds != null && dto.TagMode == BulkUpdateMode.Remove)
+            {
+                audio.AudioTags = audio.AudioTags.Where(link => !dto.TagIds.Contains(link.TagId)).ToList();
+            }
+
+            if (dto.PerformerIds != null && dto.PerformerMode == BulkUpdateMode.Set)
+            {
+                audio.AudioPerformers.Clear();
+                audio.AudioPerformers = dto.PerformerIds.Where(performerId => performerId > 0).Distinct().Select(performerId => new AudioPerformer { AudioId = audio.Id, PerformerId = performerId }).ToList();
+            }
+            else if (dto.PerformerIds != null && dto.PerformerMode == BulkUpdateMode.Add)
+            {
+                var existing = audio.AudioPerformers.Select(link => link.PerformerId).ToHashSet();
+                foreach (var performerId in dto.PerformerIds.Where(performerId => performerId > 0).Distinct().Where(performerId => !existing.Contains(performerId)))
+                    audio.AudioPerformers.Add(new AudioPerformer { AudioId = audio.Id, PerformerId = performerId });
+            }
+            else if (dto.PerformerIds != null && dto.PerformerMode == BulkUpdateMode.Remove)
+            {
+                audio.AudioPerformers = audio.AudioPerformers.Where(link => !dto.PerformerIds.Contains(link.PerformerId)).ToList();
+            }
+
+            if (dto.TagIds != null) audio.TagIds = audio.AudioTags.Select(link => link.TagId).Distinct().ToArray();
+            if (dto.PerformerIds != null) audio.PerformerIds = audio.AudioPerformers.Select(link => link.PerformerId).Distinct().ToArray();
+        }
+
+        await db.SaveChangesAsync(ct);
+        return Ok(new { updated = items.Count });
+    }
+
+    [HttpDelete("bulk")]
+    [RequiresPermission(Permissions.AudiosDelete)]
+    [RequiresEntityAccess(EntityKinds.Audio, Permissions.AudiosDelete, ActionArgumentName = "dto", PropertyName = "Ids")]
+    public async Task<IActionResult> BulkDelete([FromBody] BatchDeleteDto dto, CancellationToken ct)
+    {
+        var ids = dto.Ids.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length == 0) return NoContent();
+
+        var idsToDelete = ids.ToHashSet();
+        var deletedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var items = await db.Audios.Include(item => item.Files).Where(item => ids.Contains(item.Id)).ToListAsync(ct);
+        var groupItems = await db.GroupItems.Where(item => item.HostType == "audio" && ids.Contains(item.HostId)).ToListAsync(ct);
+        db.GroupItems.RemoveRange(groupItems);
+        try
+        {
+            foreach (var item in items)
+                await DeleteAudioArtifactsAsync(item, idsToDelete, deletedPaths, dto.DeleteFiles, dto.DeleteGenerated, ct);
+        }
+        catch (AudioFileDeleteException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+        foreach (var id in ids)
+        {
+            await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Audio, id, ct);
+        }
+        db.Audios.RemoveRange(items);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpDelete("{id:int}")]
+    [RequiresPermission(Permissions.AudiosDelete)]
+    [RequiresEntityAccess(EntityKinds.Audio, Permissions.AudiosDelete)]
+    public async Task<IActionResult> Delete(int id, [FromQuery] bool deleteFile = false, [FromQuery] bool deleteGenerated = false, CancellationToken ct = default)
+    {
+        var audio = await db.Audios.Include(item => item.Files).FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (audio == null) return NotFound();
+
+        var groupItems = await db.GroupItems.Where(item => item.HostType == "audio" && item.HostId == id).ToListAsync(ct);
+        db.GroupItems.RemoveRange(groupItems);
+        try
+        {
+            await DeleteAudioArtifactsAsync(audio, new HashSet<int> { id }, new HashSet<string>(StringComparer.OrdinalIgnoreCase), deleteFile, deleteGenerated, ct);
+        }
+        catch (AudioFileDeleteException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+        await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Audio, id, ct);
+        db.Audios.Remove(audio);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    private async Task DeleteAudioArtifactsAsync(Audio audio, IReadOnlySet<int> idsToDelete, HashSet<string> deletedPaths, bool deleteFiles, bool deleteGenerated, CancellationToken ct)
+    {
+        if (deleteFiles)
+        {
+            foreach (var file in audio.Files)
+            {
+                var path = file.Path;
+                if (string.IsNullOrWhiteSpace(path) || !deletedPaths.Add(path))
+                    continue;
+
+                var referencedByKeptAudio = await db.Set<AudioFile>()
+                    .AnyAsync(audioFile => audioFile.Path == path && audioFile.AudioId.HasValue && !idsToDelete.Contains(audioFile.AudioId.Value), ct);
+                if (!referencedByKeptAudio && System.IO.File.Exists(path))
+                    DeleteAudioFile(path);
+            }
+        }
+
+        if (audio.Files.Count > 0)
+            db.AudioFiles.RemoveRange(audio.Files);
+
+        if (!string.IsNullOrWhiteSpace(audio.ImageBlobId))
+        {
+            if (deleteGenerated)
+                await thumbnailService.DeleteBlobGeneratedFilesAsync(audio.ImageBlobId, ct);
+            await blobService.DeleteBlobAsync(audio.ImageBlobId, ct);
+        }
+    }
+
+    private static void DeleteAudioFile(string path)
+    {
+        try
+        {
+            System.IO.File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new AudioFileDeleteException($"Could not delete audio file from disk because it is currently locked or unavailable: {path}", ex);
+        }
+    }
+
+    private sealed class AudioFileDeleteException(string message, Exception innerException) : Exception(message, innerException);
+
+    private IQueryable<Audio> ApplySort(IQueryable<Audio> query, string? sort, bool descending)
+    {
+        return (sort ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "title" => descending ? query.OrderByDescending(audio => audio.Title).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.Title).ThenBy(audio => audio.Id),
+            "date" => descending ? query.OrderByDescending(audio => audio.Date).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.Date).ThenBy(audio => audio.Id),
+            "duration" => descending ? query.OrderByDescending(audio => audio.MaxDuration).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.MaxDuration).ThenBy(audio => audio.Id),
+            "updatedat" or "updated_at" => descending ? query.OrderByDescending(audio => audio.UpdatedAt).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.UpdatedAt).ThenBy(audio => audio.Id),
+            "createdat" => descending ? query.OrderByDescending(audio => audio.CreatedAt).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.CreatedAt).ThenBy(audio => audio.Id),
+            "created_at" => descending ? query.OrderByDescending(audio => audio.CreatedAt).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.CreatedAt).ThenBy(audio => audio.Id),
+            _ => descending ? query.OrderByDescending(audio => audio.UpdatedAt).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.UpdatedAt).ThenBy(audio => audio.Id),
+        };
+    }
+
+    private IQueryable<Audio> ApplyFilter(IQueryable<Audio> query, AudioFilter? filter)
+    {
+        if (filter == null)
+            return query;
+
+        query = FilterHelpers.ApplyString(query, filter.TitleCriterion, audio => audio.Title);
+        query = FilterHelpers.ApplyString(query, filter.CodeCriterion, audio => audio.Code);
+        query = FilterHelpers.ApplyString(query, filter.DetailsCriterion, audio => audio.Details);
+        query = FilterHelpers.ApplyFilePath(query, filter.PathCriterion, audio => audio.Files);
+        query = FilterHelpers.ApplyString(query, filter.UrlCriterion, audio => audio.Urls.Select(url => url.Url).FirstOrDefault());
+        query = FilterHelpers.ApplyBool(query, filter.OrganizedCriterion, audio => audio.Organized);
+        query = FilterHelpers.ApplyDate(query, filter.DateCriterion, audio => audio.Date);
+        query = FilterHelpers.ApplyInt(query, filter.DurationCriterion, audio => (int)audio.MaxDuration);
+        query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, audio => audio.FileCount);
+        query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, audio => audio.AudioTags.Count);
+        query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, audio => audio.AudioPerformers.Count);
+        query = FilterHelpers.ApplyMultiId(query, filter.TagsCriterion, audio => audio.AudioTags.Select(link => link.TagId));
+        query = FilterHelpers.ApplyMultiId(query, filter.PerformersCriterion, audio => audio.AudioPerformers.Select(link => link.PerformerId));
+        query = FilterHelpers.ApplyStudioCriterion(query, filter.StudiosCriterion, audio => audio.StudioId);
+        query = FilterHelpers.ApplyMultiId(query, filter.GroupsCriterion, audio => db.GroupItems
+            .Where(item => item.HostType == "audio" && item.HostId == audio.Id && item.Kind == GroupItemKind.Audio)
+            .Select(item => item.GroupId));
+        query = FilterHelpers.ApplyTimestamp(query, filter.CreatedAtCriterion, audio => audio.CreatedAt);
+        query = FilterHelpers.ApplyTimestamp(query, filter.UpdatedAtCriterion, audio => audio.UpdatedAt);
+        query = query.ApplyCustomFieldCriteria(db, CustomFieldEntityTypes.Audio, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
+
+        return query;
+    }
+
+    private AudioDto MapToDto(Audio audio, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues) => new(
+        audio.Id,
+        audio.Title,
+        audio.Code,
+        audio.Details,
+        audio.Organized,
+        audio.StudioId,
+        audio.Studio?.Name,
+        audio.Date?.ToString("yyyy-MM-dd"),
+        audio.Urls.Select(url => url.Url).ToList(),
+        audio.AudioTags.Where(link => link.Tag != null).Select(link => TagDtoMapping.MapTagDto(link.Tag!)).ToList(),
+        audio.AudioPerformers.Where(link => link.Performer != null).Select(link => new PerformerSummaryDto(
+            link.Performer!.Id,
+            link.Performer.Name,
+            link.Performer.Disambiguation,
+            link.Performer.Gender?.ToString(),
+            link.Performer.Birthdate?.ToString("yyyy-MM-dd"),
+            link.Performer.Favorite,
+            link.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, link.Performer.Id, link.Performer.UpdatedAt) : null)).ToList(),
+        audio.Tracks.OrderBy(track => track.OrderIndex).ThenBy(track => track.Id).Select(track => new AudioTrackDto(track.Id, track.OrderIndex, track.Title, track.StartSec, track.EndSec)).ToList(),
+        audio.Files.OrderBy(file => file.Id).Select(file => new AudioFileDto(
+            file.Id,
+            CanReadFiles ? file.Path : string.Empty,
+            GetVisibleBasename(file.Path, file.Basename),
+            file.Format,
+            file.Duration,
+            file.AudioCodec,
+            file.BitRate,
+            file.SampleRate,
+            file.Channels,
+            file.Size,
+            file.HasVideoTrack)).ToList(),
+        groups ?? [],
+        customFieldValues,
+        audio.CreatedAt.ToString("o"),
+        audio.UpdatedAt.ToString("o"),
+        audio.FileCount,
+        audio.MaxDuration,
+        audio.HasVideoFiles,
+        audio.ImageBlobId != null ? EntityImageUrls.Audio(ControllerContext.HttpContext, audio.Id, audio.UpdatedAt) : null);
+
+    private async Task<Audio?> GetAudioForDtoAsync(int id, CancellationToken ct)
+        => await db.Audios.AsNoTracking()
+            .Include(item => item.Studio)
+            .Include(item => item.Urls)
+            .Include(item => item.Files)
+            .Include(item => item.AudioTags).ThenInclude(link => link.Tag)
+            .Include(item => item.AudioPerformers).ThenInclude(link => link.Performer)
+            .Include(item => item.Tracks)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+
+    private async Task<List<GroupSummaryDto>> GetGroupsAsync(int audioId, CancellationToken ct)
+        => await db.GroupItems.AsNoTracking()
+            .Where(item => item.HostType == "audio" && item.HostId == audioId && item.Kind == GroupItemKind.Audio)
+            .OrderBy(item => item.OrderIndex)
+            .ThenBy(item => item.Id)
+            .Select(item => new GroupSummaryDto(item.GroupId, item.Group!.Name, 0))
+            .ToListAsync(ct);
+
+    private async Task ReplaceWholeAudioGroupItemsAsync(int audioId, IReadOnlyCollection<SceneGroupInputDto> groups, string? audioTitle, CancellationToken ct)
+    {
+        var existing = await db.GroupItems
+            .Where(item => item.HostType == "audio" && item.HostId == audioId && item.Kind == GroupItemKind.Audio)
+            .ToListAsync(ct);
+
+        if (existing.Count > 0)
+        {
+            db.GroupItems.RemoveRange(existing);
+        }
+
+        var normalizedGroups = groups
+            .Where(group => group is { GroupId: > 0 })
+            .GroupBy(group => group.GroupId)
+            .Select((group, index) => new { GroupId = group.Key, OrderIndex = index })
+            .ToList();
+
+        if (normalizedGroups.Count == 0)
+        {
+            return;
+        }
+
+        db.GroupItems.AddRange(normalizedGroups.Select(group => new GroupItem
+        {
+            GroupId = group.GroupId,
+            OrderIndex = group.OrderIndex,
+            Kind = GroupItemKind.Audio,
+            HostType = "audio",
+            HostId = audioId,
+            Title = NormalizeOptionalText(audioTitle),
+        }));
+    }
+
+    private static DateOnly? ParseDate(string? value)
+        => DateOnly.TryParse(value, out var parsed) ? parsed : null;
+
+    private static string? NormalizeOptionalText(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string GetVisibleBasename(string path, string basename)
+        => string.IsNullOrWhiteSpace(basename) ? Path.GetFileName(path) : basename;
+}

@@ -293,16 +293,21 @@ public class SystemController(
             async (progress, ct) =>
             {
                 var (result, importedEntityId) = await downloaderService.DownloadAndIngestAsync(
-                    new DownloaderRequest(dto.DownloaderId, dto.Url, entity, permissions, dto.QualityId),
+                    new DownloaderRequest(dto.DownloaderId, dto.Url, entity, permissions, dto.QualityId, dto.SourceUrl),
                     dto.EntityId,
                     progress,
                     ct,
                     autoApplyMetadata: dto.AutoApplyMetadata,
+                    metadataApplyOptions: new DownloaderMetadataApplyOptions(
+                        dto.CreateMissingTags,
+                        dto.CreateMissingPerformers,
+                        dto.CreateMissingStudio,
+                        dto.MarkOrganized),
                     allowDuplicateDownload: dto.AllowDuplicateDownload);
 
                 var completionMessage = result == null
                     ? "Downloader returned no result"
-                    : importedEntityId.HasValue && entity is DownloaderEntity.Scene or DownloaderEntity.Image or DownloaderEntity.Gallery
+                    : importedEntityId.HasValue && entity is DownloaderEntity.Scene or DownloaderEntity.Image or DownloaderEntity.Gallery or DownloaderEntity.Audio or DownloaderEntity.Text
                         ? $"Imported into {entity.ToString().ToLowerInvariant()} {importedEntityId.Value}"
                         : $"Downloaded to {result.LocalPath}";
 
@@ -405,6 +410,8 @@ public class SystemController(
             DownloaderEntity.Scene => (EntityKinds.Scene, writeAccess ? Permissions.ScenesWrite : Permissions.ScenesRead),
             DownloaderEntity.Image => (EntityKinds.Image, writeAccess ? Permissions.ImagesWrite : Permissions.ImagesRead),
             DownloaderEntity.Gallery => (EntityKinds.Gallery, writeAccess ? Permissions.GalleriesWrite : Permissions.GalleriesRead),
+            DownloaderEntity.Audio => (EntityKinds.Audio, writeAccess ? Permissions.AudiosWrite : Permissions.AudiosRead),
+            DownloaderEntity.Text => (EntityKinds.Text, writeAccess ? Permissions.TextsWrite : Permissions.TextsRead),
             _ => ((string EntityKind, string Permission)?)null,
         };
 

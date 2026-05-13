@@ -11,6 +11,8 @@ public enum RatingHostType
     Studio = 7,
     Gallery = 8,
     Group = 9,
+    Audio = 10,
+    Text = 11,
 }
 
 public class Rating : BaseEntity

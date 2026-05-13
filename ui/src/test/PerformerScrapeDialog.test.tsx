@@ -23,7 +23,7 @@ vi.mock("../state/AppConfigContext", () => ({
   useAppConfig: () => ({
     config: {
       scraping: {
-        scraperPreferences: [{ site: "pornhub.com", scraperId: "pornhub-performer" }],
+        scraperPreferences: [{ site: "performers.example", scraperId: "example-performer" }],
       },
     },
   }),
@@ -52,7 +52,7 @@ describe("PerformerScrapeDialog", () => {
       sourceValue: "Jane Doe",
       scraped: {
         name: "Jane Doe",
-        urls: ["https://www.pornhub.com/pornstar/jane-doe"],
+        urls: ["https://performers.example/profile/jane-doe"],
         aliases: ["JD"],
         tagNames: ["Example Tag"],
       },
@@ -60,21 +60,21 @@ describe("PerformerScrapeDialog", () => {
     mocks.performersApplyScraped.mockResolvedValue({});
     mocks.systemListScrapers.mockResolvedValue([
       {
-        id: "pornhub-performer",
-        name: "Pornhub",
+        id: "example-performer",
+        name: "Example Performer",
         entityType: "performer",
         supportedScrapes: ["URL", "Name"],
-        urls: ["pornhub.com/pornstar/"],
-        sourcePath: "Pornhub.yml",
+        urls: ["performers.example/profile/"],
+        sourcePath: "ExamplePerformer.yml",
       } satisfies ScraperSummary,
     ]);
   });
 
   it("submits performer name scrape requests with the selected scraper", async () => {
     const user = userEvent.setup();
-    renderDialog({ id: 9, name: "Jane Doe", urls: ["https://www.pornhub.com/pornstar/jane-doe"] });
+    renderDialog({ id: 9, name: "Jane Doe", urls: ["https://performers.example/profile/jane-doe"] });
 
-    await waitFor(() => expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("pornhub-performer"));
+    await waitFor(() => expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("example-performer"));
 
     await user.click(screen.getByRole("button", { name: "name" }));
     const nameInput = screen.getByPlaceholderText("Performer name");
@@ -85,7 +85,7 @@ describe("PerformerScrapeDialog", () => {
     await waitFor(() => {
       expect(mocks.performersPreviewScrape).toHaveBeenCalledWith(9, {
         inputKind: "name",
-        scraperId: "pornhub-performer",
+        scraperId: "example-performer",
         name: "Jane Doe",
         url: undefined,
         createMissingTags: true,

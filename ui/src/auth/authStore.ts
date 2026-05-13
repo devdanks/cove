@@ -20,6 +20,8 @@ export interface AuthUser {
 
 const READ_PERMISSION_GRANTS: Record<string, string> = {
   "scenes.read": "scene",
+  "audios.read": "audio",
+  "texts.read": "text",
   "images.read": "image",
   "faces.read": "face",
   "performers.read": "performer",

@@ -28,6 +28,10 @@ function normalizeRoute(route: Route): Route {
 const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
   scenes: "scenes.read",
   scene: "scenes.read",
+  audios: "audios.read",
+  audio: "audios.read",
+  texts: "texts.read",
+  text: "texts.read",
   "scene-span": "segments.read",
   segments: "segments.read",
   segment: "segments.read",
@@ -54,6 +58,8 @@ const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
 
 // Lazy-loaded page components for code splitting
 const ScenesPage = lazy(() => import("./pages/ScenesPage").then(m => ({ default: m.ScenesPage })));
+const AudiosPage = lazy(() => import("./pages/AudiosPage").then(m => ({ default: m.AudiosPage })));
+const TextsPage = lazy(() => import("./pages/TextsPage").then(m => ({ default: m.TextsPage })));
 const SegmentsPage = lazy(() => import("./pages/SegmentsPage").then(m => ({ default: m.SegmentsPage })));
 const PerformersPage = lazy(() => import("./pages/PerformersPage").then(m => ({ default: m.PerformersPage })));
 const StudiosPage = lazy(() => import("./pages/StudiosPage").then(m => ({ default: m.StudiosPage })));
@@ -64,6 +70,8 @@ const ImagesPage = lazy(() => import("./pages/ImagesPage").then(m => ({ default:
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
 const SceneDetailPage = lazy(() => import("./pages/SceneDetailPage").then(m => ({ default: m.SceneDetailPage })));
+const AudioDetailPage = lazy(() => import("./pages/AudioDetailPage").then(m => ({ default: m.AudioDetailPage })));
+const TextDetailPage = lazy(() => import("./pages/TextDetailPage").then(m => ({ default: m.TextDetailPage })));
 const SegmentDetailPage = lazy(() => import("./pages/SegmentDetailPage").then(m => ({ default: m.SegmentDetailPage })));
 const ResolvedSpanPlayPage = lazy(() => import("./pages/ResolvedSpanPlayPage").then(m => ({ default: m.ResolvedSpanPlayPage })));
 const PerformerDetailPage = lazy(() => import("./pages/PerformerDetailPage").then(m => ({ default: m.PerformerDetailPage })));
@@ -181,6 +189,8 @@ function AppKeyboardShortcuts({ navigate, onShowShortcuts }: { navigate: (route:
   const globalBindings = useMemo(() => [
     { keys: resolveKeybinding(overrides, "global.home", "g h"), action: () => navigate({ page: "home" }) },
     { keys: resolveKeybinding(overrides, "global.scenes", "g s"), action: () => navigate({ page: "scenes" }) },
+    { keys: resolveKeybinding(overrides, "global.audios", "g a"), action: () => navigate({ page: "audios" }) },
+    { keys: resolveKeybinding(overrides, "global.texts", "g x"), action: () => navigate({ page: "texts" }) },
     { keys: resolveKeybinding(overrides, "global.segments", "g m"), action: () => navigate({ page: "segments" }) },
     { keys: resolveKeybinding(overrides, "global.faces", "g f"), action: () => navigate({ page: "faces" }) },
     { keys: resolveKeybinding(overrides, "global.images", "g i"), action: () => navigate({ page: "images" }) },
@@ -389,6 +399,10 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
       {route.page === "home" && <HomePage onNavigate={navigate} />}
       {route.page === "scenes" && <ScenesPage onNavigate={navigate} />}
       {route.page === "scene" && route.id !== undefined && <SceneDetailPage id={route.id} initialSeekTo={route.seekTo} onNavigate={navigate} />}
+      {route.page === "audios" && <AudiosPage onNavigate={navigate} />}
+      {route.page === "audio" && route.id !== undefined && <AudioDetailPage id={route.id} onNavigate={navigate} />}
+      {route.page === "texts" && <TextsPage onNavigate={navigate} />}
+      {route.page === "text" && route.id !== undefined && <TextDetailPage id={route.id} onNavigate={navigate} />}
       {route.page === "scene-span" && route.id !== undefined && route.spanKey !== undefined && (
         <ResolvedSpanPlayPage sceneId={route.id} spanKey={route.spanKey} profileId={route.profileId} derivedQueryDescriptor={route.derivedQueryDescriptor} onNavigate={navigate} />
       )}

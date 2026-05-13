@@ -20,6 +20,9 @@ public interface IThumbnailService
     Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetImageStreamAsync(int imageId, CancellationToken ct = default);
     Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetImageThumbnailStreamAsync(int imageId, int maxDimension = 640, CancellationToken ct = default);
     Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetBlobImageThumbnailStreamAsync(string blobId, int maxDimension = 640, CancellationToken ct = default);
+    Task DeleteSceneGeneratedFilesAsync(int sceneId, CancellationToken ct = default);
+    Task DeleteImageGeneratedFilesAsync(int imageId, CancellationToken ct = default);
+    Task DeleteBlobGeneratedFilesAsync(string blobId, CancellationToken ct = default);
     Task GenerateSceneThumbnailAsync(int sceneId, double? atSeconds = null, CancellationToken ct = default);
     Task GenerateImageThumbnailAsync(int imageId, int maxDimension = 640, bool overwrite = false, CancellationToken ct = default);
     Task GenerateScenePreviewAsync(int sceneId, CancellationToken ct = default);
@@ -166,6 +169,29 @@ public class ThumbnailService(
         if (imageFile == null) return null;
 
         return await OpenImageSourceStreamAsync(imageFile, ct);
+    }
+
+    public Task DeleteSceneGeneratedFilesAsync(int sceneId, CancellationToken ct = default)
+    {
+        DeleteFileIfExists(GetThumbnailPath(sceneId));
+        DeleteFileIfExists(GetPreviewPath(sceneId));
+        DeleteFileIfExists(GetSpritePath(sceneId));
+        DeleteFileIfExists(GetSpriteVttPath(sceneId));
+        DeleteFilesByPattern(Path.GetDirectoryName(GetTimestampedThumbnailPath(sceneId, 0))!, $"{sceneId}_t*.jpg");
+        DeleteFilesByPattern(Path.GetDirectoryName(GetSegmentAnimatedPreviewPath(sceneId, 0))!, $"{sceneId}_t*.webp");
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteImageGeneratedFilesAsync(int imageId, CancellationToken ct = default)
+    {
+        DeleteFilesByPattern(Path.GetDirectoryName(GetImageThumbnailBasePath(imageId, 1))!, $"{imageId}_m*.*");
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteBlobGeneratedFilesAsync(string blobId, CancellationToken ct = default)
+    {
+        DeleteFilesByPattern(Path.GetDirectoryName(GetBlobImageThumbnailBasePath(blobId, 1))!, $"{blobId}_m*.*");
+        return Task.CompletedTask;
     }
 
     public async Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetImageThumbnailStreamAsync(int imageId, int maxDimension, CancellationToken ct)
@@ -1493,6 +1519,24 @@ public class ThumbnailService(
         var hash = Convert.ToHexStringLower(SHA256.HashData(BitConverter.GetBytes(sceneId)));
         var subDir = hash[..2];
         return Path.Combine(ThumbnailDir, subDir, $"{sceneId}.jpg");
+    }
+
+    private void DeleteFilesByPattern(string directory, string searchPattern)
+    {
+        if (!Directory.Exists(directory))
+            return;
+
+        foreach (var path in Directory.EnumerateFiles(directory, searchPattern))
+            DeleteFileIfExists(path);
+    }
+
+    private void DeleteFileIfExists(string path)
+    {
+        if (!File.Exists(path))
+            return;
+
+        File.Delete(path);
+        logger.LogDebug("Deleted generated asset at {Path}", path);
     }
 
     private string GetImageThumbnailBasePath(int imageId, int maxDimension)

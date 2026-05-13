@@ -4,7 +4,7 @@ namespace Cove.Sdk;
 
 /// <summary>
 /// Implemented by extensions that declare permissions. Returned permission keys
-/// MUST be namespaced with the extension id (e.g. "ytdlp-pornhub.download").
+/// MUST be namespaced with the extension id (e.g. "official-downloaders.download").
 /// Unprefixed keys, the wildcard "*", and core namespace prefixes are silently
 /// rejected by the PermissionRegistry on registration.
 /// </summary>

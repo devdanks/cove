@@ -134,7 +134,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const sceneResumeTime = sceneEngagement?.resumeTime;
   const sceneLikeCount = sceneEngagement?.likeCount ?? 0;
   const sceneDerivedLikeCount = sceneEngagement?.derivedLikeCount ?? 0;
-  const scenePageVisitCount = sceneEngagement?.pageVisitCount ?? 0;
   const effectiveResumeTime = initialSeekTo ?? sceneResumeTime;
 
   useEffect(() => {
@@ -184,7 +183,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   }, [videoFilters]);
 
   const deleteMut = useMutation({
-    mutationFn: (deleteFile?: boolean) => scenes.delete(id, deleteFile),
+    mutationFn: (options?: { deleteFile?: boolean; deleteGenerated?: boolean }) => scenes.delete(id, options),
     onSuccess: () => { 
       queryClient.invalidateQueries({ queryKey: ["scenes"] }); 
       goBack(); 
@@ -549,6 +548,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       favoritePending={sceneFavoritePending}
       setFavorite={setSceneFavorite}
       likeCount={sceneLikeCount}
+      derivedLikeCount={sceneDerivedLikeCount}
       canEngageScene={canEngageScene}
     />
   ) : activeTab === "edit" ? (
@@ -670,9 +670,11 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         open={confirmDelete}
         title="Delete Scene"
         message={`Are you sure you want to delete "${scene.title || "Untitled"}"? This cannot be undone.`}
-        onConfirm={(opts) => deleteMut.mutate(opts?.deleteFile)}
+        confirmLabel={deleteMut.isPending ? "Deleting..." : "Delete Scene"}
+        onConfirm={(opts) => deleteMut.mutate(opts)}
         onCancel={() => setConfirmDelete(false)}
         showDeleteFile
+        showDeleteGenerated
       />
       <MediaDetailLayout
         title={sceneTitle}
@@ -702,19 +704,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
               title: "Add like",
               onClick: canEngageScene ? () => incrementLikeMut.mutate() : undefined,
               active: sceneLikeCount > 0,
-            },
-            {
-              label: "Derived Likes",
-              value: sceneDerivedLikeCount,
-              icon: <ThumbsUp className={["h-4 w-4", sceneDerivedLikeCount > 0 ? "text-accent" : ""].join(" ")} />,
-              title: "Derived likes",
-              active: sceneDerivedLikeCount > 0,
-            },
-            {
-              label: "Page Visits",
-              value: scenePageVisitCount,
-              icon: <Eye className="h-4 w-4" />,
-              title: "Page visits",
             },
           ],
         }}
@@ -1221,6 +1210,7 @@ function HistoryTab({
   favoritePending,
   setFavorite,
   likeCount,
+  derivedLikeCount,
   canEngageScene,
 }: {
   scene: Scene;
@@ -1230,6 +1220,7 @@ function HistoryTab({
   favoritePending: boolean;
   setFavorite: (isFavorite: boolean) => void;
   likeCount: number;
+  derivedLikeCount: number;
   canEngageScene: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -1330,6 +1321,9 @@ function HistoryTab({
         </div>
         <div className="mb-2">
           <span className="text-muted">Count:</span> <span className="text-foreground">{likeCount}</span>
+        </div>
+        <div className="mb-2">
+          <span className="text-muted">Derived likes:</span> <span className="text-foreground">{derivedLikeCount}</span>
         </div>
         {history?.likeHistory && history.likeHistory.length > 0 && (
           <div className="max-h-40 overflow-y-auto space-y-0.5 border-t border-border pt-2">

@@ -14,7 +14,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.ImagesRead)]
-public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, IUserEngagementService engagementService, CustomFieldService customFields, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, IUserEngagementService engagementService, CustomFieldService customFields, IScanService scanService, IThumbnailService thumbnailService, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
 {
     private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
     private static string GetVisibleBasename(string path, string basename) => string.IsNullOrWhiteSpace(basename) ? System.IO.Path.GetFileName(path) : basename;
@@ -112,6 +112,21 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         return CreatedAtAction(nameof(GetById), new { id = image.Id }, await MapToDtoWithProvenanceAsync(result!, ct));
     }
 
+    [HttpPost("from-file")]
+    [RequiresPermission(Permissions.ImagesWrite)]
+    public async Task<ActionResult<ImageDto>> CreateFromFile([FromBody] FileBackedCreateDto? dto, CancellationToken ct)
+    {
+        var filePath = dto?.FilePath?.Trim();
+        if (string.IsNullOrWhiteSpace(filePath) || !System.IO.File.Exists(filePath))
+            return BadRequest(new { error = "A valid file path is required." });
+
+        var imageId = await scanService.ImportDownloadedImageAsync(filePath, imageId: null, ct);
+        var image = await imageRepo.GetByIdWithRelationsAsync(imageId, ct);
+        if (image == null) return NotFound();
+
+        return CreatedAtAction(nameof(GetById), new { id = imageId }, await MapToDtoWithProvenanceAsync(image, ct));
+    }
+
     [HttpPut("{id:int}")]
     [RequiresPermission(Permissions.ImagesWrite)]
     [RequiresEntityAccess(EntityKinds.Image, Permissions.ImagesWrite)]
@@ -173,10 +188,13 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.ImagesDelete)]
     [RequiresEntityAccess(EntityKinds.Image, Permissions.ImagesDelete)]
-    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    public async Task<IActionResult> Delete(int id, [FromQuery] bool deleteFile = false, [FromQuery] bool deleteGenerated = false, CancellationToken ct = default)
     {
-        var img = await imageRepo.GetByIdAsync(id, ct);
+        var img = await imageRepo.GetByIdWithRelationsAsync(id, ct);
         if (img == null) return NotFound();
+        var groupItems = await db.GroupItems.Where(item => item.HostType == "image" && item.HostId == id).ToListAsync(ct);
+        db.GroupItems.RemoveRange(groupItems);
+        await DeleteImageArtifactsAsync(img, new HashSet<int> { id }, new HashSet<string>(StringComparer.OrdinalIgnoreCase), deleteFile, deleteGenerated, ct);
         if (tagProvenanceService != null)
             await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Image, id, ct);
         await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Image, id, ct);
@@ -275,6 +293,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             db.GroupItems.RemoveRange(existing);
 
         var normalizedGroups = groups
+            .Where(group => group is { GroupId: > 0 })
             .GroupBy(group => group.GroupId)
             .Select((group, index) => new { GroupId = group.Key, OrderIndex = index })
             .ToList();
@@ -426,6 +445,57 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
                 await engagementService.SetRatingAsync(AffinityHostType.Image, image.Id, dto.Rating, cancellationToken: ct);
         }
         return Ok(new { updated = images.Count });
+    }
+
+    [HttpDelete("bulk")]
+    [RequiresPermission(Permissions.ImagesDelete)]
+    [RequiresEntityAccess(EntityKinds.Image, Permissions.ImagesDelete, ActionArgumentName = "dto", PropertyName = "Ids")]
+    public async Task<IActionResult> BulkDelete([FromBody] BatchDeleteDto dto, CancellationToken ct)
+    {
+        var ids = dto.Ids.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length == 0) return NoContent();
+
+        var idsToDelete = ids.ToHashSet();
+        var deletedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var images = await db.Images.Include(item => item.Files).Where(item => ids.Contains(item.Id)).ToListAsync(ct);
+        var groupItems = await db.GroupItems.Where(item => item.HostType == "image" && ids.Contains(item.HostId)).ToListAsync(ct);
+        db.GroupItems.RemoveRange(groupItems);
+        foreach (var image in images)
+            await DeleteImageArtifactsAsync(image, idsToDelete, deletedPaths, dto.DeleteFiles, dto.DeleteGenerated, ct);
+        foreach (var id in ids)
+            await customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Image, id, ct);
+        if (tagProvenanceService != null)
+        {
+            foreach (var id in ids)
+                await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Image, id, ct);
+        }
+        db.Images.RemoveRange(images);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    private async Task DeleteImageArtifactsAsync(Image image, IReadOnlySet<int> idsToDelete, HashSet<string> deletedPaths, bool deleteFiles, bool deleteGenerated, CancellationToken ct)
+    {
+        if (deleteFiles)
+        {
+            foreach (var file in image.Files)
+            {
+                var path = file.Path;
+                if (string.IsNullOrWhiteSpace(path) || !deletedPaths.Add(path))
+                    continue;
+
+                var referencedByKeptImage = await db.Set<ImageFile>()
+                    .AnyAsync(imageFile => imageFile.Path == path && imageFile.ImageId.HasValue && !idsToDelete.Contains(imageFile.ImageId.Value), ct);
+                if (!referencedByKeptImage && System.IO.File.Exists(path))
+                    System.IO.File.Delete(path);
+            }
+        }
+
+        if (image.Files.Count > 0)
+            db.ImageFiles.RemoveRange(image.Files);
+
+        if (deleteGenerated)
+            await thumbnailService.DeleteImageGeneratedFilesAsync(image.Id, ct);
     }
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;

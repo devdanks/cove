@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Eye, FolderOpen, FolderPlus, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, ExternalLink, FolderOpen, ImageOff, Link as LinkIcon, Maximize, MoreVertical, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -20,17 +20,17 @@ import type { FaceHostFace } from "../api/types";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 import { ImageVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 import { BookmarkButton } from "../components/BookmarkButton";
-import { AddToGroupDialog } from "../components/AddToGroupDialog";
+import { ImageEditPanel } from "./ImageEditPanel";
 
-const ImageEditModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageEditModal })));
 const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
+const MediaScrapeDialog = lazy(() => import("../components/MediaScrapeDialog").then((module) => ({ default: module.MediaScrapeDialog })));
 
 interface Props {
   id: number;
   onNavigate: (r: any) => void;
 }
 
-type ImageTab = "details" | "file-info" | "similar" | "detections" | "related";
+type ImageTab = "details" | "file-info" | "history" | "similar" | "detections" | "related" | "edit";
 
 export function ImageDetailPage({ id, onNavigate }: Props) {
   const { data: image, isLoading } = useQuery({
@@ -38,19 +38,17 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     queryFn: () => images.get(id),
   });
   const { hasPermission, user } = useAuth();
-  const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
-  const [showAddToGroup, setShowAddToGroup] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [showScrapeDialog, setShowScrapeDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<ImageTab>("details");
   const queryClient = useQueryClient();
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const { backLabel, goBack } = useBackNavigation({ page: "images" }, onNavigate);
   const canWriteImage = canWriteEntity("image", hasPermission);
-  const canWriteGroups = canWriteEntity("group", hasPermission);
   const canDeleteImage = canDeleteEntity("image", hasPermission);
   const canDownloadImage = hasPermission("jobs.run") && canWriteImage;
   const canEngageImage = canReadEntity("image", hasPermission) && (user?.kind === "user" || user?.kind === "system");
@@ -73,8 +71,9 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     queryKey: ["image", id, "faces"],
     queryFn: () => faces.imageFaces(id),
     enabled: canReadFaces,
-  });  const deleteMut = useMutation({
-    mutationFn: () => images.delete(id),
+  });
+  const deleteMut = useMutation({
+    mutationFn: (options?: { deleteFile?: boolean; deleteGenerated?: boolean }) => images.delete(id, options),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["images"] }); goBack(); },
   });
   const updateMut = useMutation({
@@ -92,12 +91,12 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const canRevealFiles = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
   const imageLikeCount = imageEngagement?.likeCount ?? 0;
   const imageDerivedLikeCount = imageEngagement?.derivedLikeCount ?? 0;
-  const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
   const displayTitle = image ? getImageDisplayTitle(image) : `Image ${id}`;
   const tabs = useMemo(() => {
     const nextTabs = [
       { key: "details", label: "Details" },
       ...(canReadFiles ? [{ key: "file-info", label: "File Info", count: image?.files.length ?? 0 }] : []),
+      { key: "history", label: "History" },
       { key: "similar", label: "Similar" },
       { key: "detections", label: "Faces", count: imageFaces.length },
       {
@@ -105,9 +104,10 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         label: "Related",
         count: (image?.performers.length ?? 0) + (image?.tags.length ?? 0) + (image?.studioId ? 1 : 0),
       },
+      ...(canWriteImage ? [{ key: "edit", label: "Edit" }] : []),
     ];
     return nextTabs;
-  }, [canReadFiles, image?.files.length, image?.performers.length, image?.studioId, image?.tags.length, imageFaces.length]);
+  }, [canReadFiles, canWriteImage, image?.files.length, image?.performers.length, image?.studioId, image?.tags.length, imageFaces.length]);
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
@@ -211,7 +211,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       description: "Edit image",
       handler: () => {
         if (canWriteImage) {
-          setEditing(true);
+          setActiveTab("edit");
         }
       },
     },
@@ -437,20 +437,36 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     </div>
   );
 
+  const historyContent = (
+    <section>
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">History</h2>
+      <dl className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        <DetailField label="Likes" value={String(imageLikeCount)} />
+        <DetailField label="Derived Likes" value={String(imageDerivedLikeCount)} />
+        <DetailField label="Page Visits" value={String(imageEngagement?.pageVisitCount ?? 0)} />
+        <DetailField label="Created" value={formatDate(image.createdAt)} />
+        <DetailField label="Updated" value={formatDate(image.updatedAt)} />
+      </dl>
+    </section>
+  );
+
   const activeContent = activeTab === "file-info"
     ? fileInfoContent
+    : activeTab === "history"
+      ? historyContent
     : activeTab === "similar"
       ? <ImageVisualSimilarityPanel imageId={image.id} onNavigate={onNavigate} />
     : activeTab === "detections"
       ? detectionsContent
       : activeTab === "related"
         ? relatedContent
+        : activeTab === "edit" && canWriteImage
+          ? <ImageEditPanel image={image} onSaved={() => setActiveTab("details")} />
         : detailsContent;
 
   return (
     <>
       <Suspense fallback={null}>
-        {editing ? <ImageEditModal image={image} open={editing} onClose={() => setEditing(false)} /> : null}
         {showDownloadDialog ? (
           <ImageDownloadDialog
             open={showDownloadDialog}
@@ -459,13 +475,38 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             onNavigate={onNavigate}
           />
         ) : null}
+        {showScrapeDialog ? (
+          <MediaScrapeDialog
+            open={showScrapeDialog}
+            onClose={() => setShowScrapeDialog(false)}
+            entityType="image"
+            entity={{
+              id: image.id,
+              title: image.title,
+              code: image.code,
+              details: image.details,
+              creator: image.photographer,
+              date: image.date,
+              studioName: image.studioName,
+              urls: image.urls,
+              tags: image.tags,
+              performers: image.performers,
+              files: image.files,
+              organized: image.organized,
+            }}
+          />
+        ) : null}
       </Suspense>
-      <AddToGroupDialog
-        open={showAddToGroup}
-        onClose={() => setShowAddToGroup(false)}
-        items={[{ key: `image-${image.id}`, kind: "image", hostType: "image", hostId: image.id, title: displayTitle }]}
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete Image"
+        message={`Delete "${displayTitle}"? This cannot be undone.`}
+        confirmLabel={deleteMut.isPending ? "Deleting..." : "Delete Image"}
+        onConfirm={(options) => deleteMut.mutate(options)}
+        onCancel={() => setConfirmDelete(false)}
+        showDeleteFile
+        showDeleteGenerated
       />
-      <ConfirmDialog open={confirmDelete} title="Delete Image" message={`Delete "${displayTitle}"? This cannot be undone.`} onConfirm={() => deleteMut.mutate()} onCancel={() => setConfirmDelete(false)} />
 
       {/* Lightbox overlay */}
       {lightboxOpen && (
@@ -553,35 +594,12 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
               onClick: canEngageImage ? () => incrementLikeMut.mutate() : undefined,
               active: imageLikeCount > 0,
             },
-            {
-              label: "Derived Likes",
-              value: imageDerivedLikeCount,
-              icon: <ThumbsUp className={["h-4 w-4", imageDerivedLikeCount > 0 ? "text-accent" : ""].join(" ")} />,
-              title: "Derived likes",
-              active: imageDerivedLikeCount > 0,
-            },
-            {
-              label: "Page Visits",
-              value: imagePageVisitCount,
-              icon: <Eye className="h-4 w-4" />,
-              title: "Page visits",
-            },
           ],
         }}
         actions={
           <>
             <ExtensionSlot slot="image-detail-actions" context={{ image, onNavigate }} />
             <BookmarkButton hostType="image" hostId={image.id} compact />
-            {canWriteGroups ? (
-              <button
-                type="button"
-                onClick={() => setShowAddToGroup(true)}
-                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
-                title="Add to group"
-              >
-                <FolderPlus className="h-4 w-4" />
-              </button>
-            ) : null}
             {canWriteImage ? (
               <button
                 type="button"
@@ -590,26 +608,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                 title={image.organized ? "Organized" : "Mark organized"}
               >
                 <Check className="h-4 w-4" />
-              </button>
-            ) : null}
-            {canWriteImage ? (
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
-                title="Edit"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-            ) : null}
-            {canDeleteImage ? (
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(true)}
-                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-red-300"
-                title="Delete"
-              >
-                <Trash2 className="h-4 w-4" />
               </button>
             ) : null}
             <div className="relative" ref={opsMenuRef}>
@@ -623,6 +621,18 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
               </button>
               {showOpsMenu ? (
                 <div className="absolute right-0 top-full z-50 mt-1 min-w-[220px] rounded border border-border bg-card py-1 shadow-lg">
+                  {canWriteImage ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowScrapeDialog(true);
+                        setShowOpsMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" /> Scrape...
+                    </button>
+                  ) : null}
                   <ExtensionEntityActions entityType="image" entityId={image.id} renderMode="menu" onInvoked={() => setShowOpsMenu(false)} />
                   {image.files.length === 0 && canDownloadImage ? (
                     <button
@@ -631,6 +641,19 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
                     >
                       <Download className="h-3.5 w-3.5" /> Download Media...
+                    </button>
+                  ) : null}
+                  {canDeleteImage ? <div className="my-1 border-t border-border" /> : null}
+                  {canDeleteImage ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmDelete(true);
+                        setShowOpsMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 transition-colors hover:bg-surface"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>
                   ) : null}
                 </div>

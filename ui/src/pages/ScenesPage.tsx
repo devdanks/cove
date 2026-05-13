@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { aiVisual, scenes, tags, performers, galleries } from "../api/client";
-import type { EntityEngagement, FindFilter, Group, Scene, SceneCreate, SceneFilterCriteria, SceneListEntry } from "../api/types";
+import type { BoolCriterion, EntityEngagement, FindFilter, Group, Scene, SceneCreate, SceneFilterCriteria, SceneListEntry } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
@@ -27,8 +27,11 @@ import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
-import { updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 import { BookmarkButton } from "../components/BookmarkButton";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { FileBackedCreateSource, type CreateSourceMode } from "../components/FileBackedCreateSource";
+import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundError, type UrlDownloadMode } from "../utils/createFromUrlDownload";
+import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -55,6 +58,15 @@ const SEARCH_MODE_OPTIONS = [
 ];
 
 const VISUAL_MATCH_SORT_OPTION = { value: "visual_match", label: "Visual Match" };
+const INCLUDE_COMPILATIONS_FILTER_KEY = "includeCompilationGroups";
+
+function isIncludeCompilationGroupsEnabled(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return (value as BoolCriterion | undefined)?.value === true;
+}
 
 interface Props {
   onNavigate: (r: any) => void;
@@ -90,14 +102,26 @@ export function ScenesPage({ onNavigate }: Props) {
   const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
   const queryClient = useQueryClient();
   const { setQueue } = useSceneQueue();
-  const { hasPermission, user } = useAuth();
+  const { hasPermission } = useAuth();
   const canWriteScene = canWriteEntity("scene", hasPermission);
   const canDeleteScene = canDeleteEntity("scene", hasPermission);
   const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
   const canIdentifyScene = hasPermission("library.autotag") && canWriteScene;
   const canDownloadScene = hasPermission("jobs.run") && canWriteScene;
 
-  const hasObjectFilter = Object.keys(objectFilter).length > 0;
+  const normalizedObjectFilter = useMemo(() => {
+    const includeValue = objectFilter[INCLUDE_COMPILATIONS_FILTER_KEY];
+    if (typeof includeValue !== "boolean") {
+      return objectFilter;
+    }
+
+    return { ...objectFilter, [INCLUDE_COMPILATIONS_FILTER_KEY]: { value: includeValue } satisfies BoolCriterion };
+  }, [objectFilter]);
+
+  const backendObjectFilter = useMemo(() => Object.fromEntries(
+    Object.entries(normalizedObjectFilter).filter(([key]) => key !== INCLUDE_COMPILATIONS_FILTER_KEY),
+  ), [normalizedObjectFilter]);
+  const hasObjectFilter = Object.keys(backendObjectFilter).length > 0;
   const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
   const sortOptions = useMemo(
     () => searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SCENE_SORT_OPTIONS] : SCENE_SORT_OPTIONS,
@@ -125,21 +149,21 @@ export function ScenesPage({ onNavigate }: Props) {
     setFilter({ ...filter, page: 1 });
   }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
 
-  const includeCompilationGroups = user?.uiPreferences?.scenes?.includeCompilationGroups ?? false;
+  const includeCompilationGroups = isIncludeCompilationGroupsEnabled(normalizedObjectFilter[INCLUDE_COMPILATIONS_FILTER_KEY]);
   const canShowCompilationGroups = includeCompilationGroups && searchMode === "text" && !hasObjectFilter && (displayMode === "grid" || displayMode === "list");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["scenes", filter, objectFilter, searchMode],
+    queryKey: ["scenes", filter, backendObjectFilter, searchMode],
     queryFn: () => {
       if (visualSearchActive) {
         return aiVisual.searchScenes({
           findFilter: filter,
-          objectFilter: hasObjectFilter ? objectFilter as SceneFilterCriteria : undefined,
+          objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
         });
       }
 
       return hasObjectFilter
-        ? scenes.findFiltered({ findFilter: filter, objectFilter: objectFilter as SceneFilterCriteria })
+        ? scenes.findFiltered({ findFilter: filter, objectFilter: backendObjectFilter as SceneFilterCriteria })
         : scenes.find(filter);
     },
     enabled: !canShowCompilationGroups,
@@ -166,6 +190,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const canDownloadSelectedScene = canDownloadScene && selectedDownloadTargets.length > 0;
   const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-scenes");
   const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     setBatchDownloadOptions(loadStoredBatchDownloadOptions(batchDownloadStorageKey));
@@ -184,8 +209,9 @@ export function ScenesPage({ onNavigate }: Props) {
 
   // Bulk delete
   const bulkDeleteMut = useMutation({
-    mutationFn: () => scenes.bulkDelete([...selectedIds]),
+    mutationFn: (options?: { deleteFile?: boolean; deleteGenerated?: boolean }) => scenes.bulkDelete([...selectedIds], options),
     onSuccess: () => {
+      setShowDeleteConfirm(false);
       selectNone();
       queryClient.invalidateQueries({ queryKey: ["scenes"] });
     },
@@ -283,33 +309,9 @@ export function ScenesPage({ onNavigate }: Props) {
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall", "tagger"]}
-      renderOperations={() => (
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground">
-            <input
-              type="checkbox"
-              checked={includeCompilationGroups}
-              onChange={(event) => updateAuthenticatedUserUiPreferences((current) => ({
-                ...(current ?? {}),
-                scenes: { ...(current?.scenes ?? {}), includeCompilationGroups: event.target.checked },
-              }))}
-              className="h-3.5 w-3.5 accent-accent"
-            />
-            Include compilations
-          </label>
-          {canDownloadScene ? (
-            <button
-              onClick={() => setDownloadTarget("new")}
-              className="rounded-lg border border-border px-3 py-1 text-xs font-medium text-foreground hover:border-accent hover:text-accent"
-            >
-              From URL
-            </button>
-          ) : null}
-        </div>
-      )}
       metadataByline={byline}
       criteriaDefinitions={SCENE_CRITERIA}
-      objectFilter={objectFilter}
+      objectFilter={normalizedObjectFilter}
       onObjectFilterChange={setObjectFilter}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
@@ -383,7 +385,7 @@ export function ScenesPage({ onNavigate }: Props) {
           <ExtensionSelectionActions entityType="scene" selectedIds={selectedIds} />
           {canDeleteScene && (
             <button
-              onClick={() => { if (confirm(`Delete ${selectedIds.size} scene(s)?`)) bulkDeleteMut.mutate(); }}
+              onClick={() => setShowDeleteConfirm(true)}
               disabled={bulkDeleteMut.isPending}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
             >
@@ -394,6 +396,16 @@ export function ScenesPage({ onNavigate }: Props) {
         </>
       }
     >
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title={`Delete ${selectedIds.size} scene${selectedIds.size === 1 ? "" : "s"}`}
+        message={`Delete ${selectedIds.size} selected scene${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`}
+        confirmLabel={bulkDeleteMut.isPending ? "Deleting..." : "Delete"}
+        onConfirm={(options) => bulkDeleteMut.mutate(options)}
+        onCancel={() => setShowDeleteConfirm(false)}
+        showDeleteFile
+        showDeleteGenerated
+      />
       {displayMode === "grid" && (
         <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {listEntries.map((entry) => entry.kind === "compilation" && entry.group ? (
@@ -507,6 +519,11 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   const [studioId, setStudioId] = useState<number | undefined>(undefined);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [createAnother, setCreateAnother] = useState(false);
+  const [sourceMode, setSourceMode] = useState<CreateSourceMode>("metadata");
+  const [filePath, setFilePath] = useState("");
+  const [url, setUrl] = useState("");
+  const { urlDownloadMode, setUrlDownloadMode, scrapeMetadata, setScrapeMetadata } = useFileBackedCreatePreferences("Scene");
+  const [noDownloaderFound, setNoDownloaderFound] = useState(false);
 
   const [tagSearch, setTagSearch] = useState("");
   const [selectedTags, setSelectedTags] = useState<{ id: number; name: string }[]>([]);
@@ -544,6 +561,10 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     setUrls([""]);
     setStudioId(undefined);
     setCustomFields({});
+    setSourceMode("metadata");
+    setFilePath("");
+    setUrl("");
+    setNoDownloaderFound(false);
     setSelectedTags([]);
     setSelectedPerformers([]);
     setSelectedGalleries([]);
@@ -563,27 +584,108 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     },
   });
 
-  const handleSave = () => {
-    const urlList = urls.map((url) => url.trim()).filter(Boolean);
-    createMut.mutate({
-      title: title || undefined,
-      code: code || undefined,
-      date: date || undefined,
-      details: details || undefined,
-      director: director || undefined,
-      rating,
-      organized,
-      studioId,
-      urls: urlList,
-      tagIds: selectedTags.map((t) => t.id),
-      performerIds: selectedPerformers.map((p) => p.id),
-      galleryIds: selectedGalleries.map((g) => g.id),
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
-    });
+  const createFromFileMut = useMutation({
+    mutationFn: async ({ path, data }: { path: string; data: SceneCreate }) => {
+      const created = await scenes.createFromFile({ filePath: path });
+      return created?.id ? scenes.update(created.id, data) : created;
+    },
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ["scenes"] });
+      resetForm();
+      if (createAnother) return;
+      onClose();
+      if (created?.id) onCreated(created.id);
+    },
+  });
+
+  const createFromUrlMut = useMutation({
+    mutationFn: ({ requestedUrl, data, downloadMode, scrapeMetadata }: { requestedUrl: string; data: SceneCreate; downloadMode: UrlDownloadMode; scrapeMetadata: boolean }) =>
+      createFromUrlWithOptionalDownload({ requestedUrl, data, entity: "Scene", downloadMode, scrapeMetadata, create: scenes.create }),
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ["scenes"] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      resetForm();
+      if (createAnother) return;
+      onClose();
+      if (created?.id) onCreated(created.id);
+    },
+    onError: (err) => {
+      if (err instanceof NoDownloaderFoundError) setNoDownloaderFound(true);
+    },
+  });
+
+  const buildPayload = (extraUrls: string[] = []): SceneCreate => ({
+    title: title || undefined,
+    code: code || undefined,
+    date: date || undefined,
+    details: details || undefined,
+    director: director || undefined,
+    rating,
+    organized,
+    studioId,
+    urls: mergeUrlLists(urls, extraUrls),
+    tagIds: selectedTags.map((t) => t.id),
+    performerIds: selectedPerformers.map((p) => p.id),
+    galleryIds: selectedGalleries.map((g) => g.id),
+    customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+  });
+
+  const handleSourceModeChange = (mode: CreateSourceMode) => {
+    setSourceMode(mode);
+    setNoDownloaderFound(false);
   };
+
+  const handleUrlChange = (value: string) => {
+    setUrl(value);
+    setNoDownloaderFound(false);
+  };
+
+  const handleCreateWithoutDownload = () => {
+    const requestedUrl = url.trim();
+    if (requestedUrl) createMut.mutate(buildPayload([requestedUrl]));
+  };
+
+  const handleSave = () => {
+    if (sourceMode === "file") {
+      const trimmedPath = filePath.trim();
+      if (trimmedPath) createFromFileMut.mutate({ path: trimmedPath, data: buildPayload() });
+      return;
+    }
+
+    if (sourceMode === "url") {
+      const requestedUrl = url.trim();
+      if (requestedUrl) createFromUrlMut.mutate({ requestedUrl, data: buildPayload(), downloadMode: urlDownloadMode, scrapeMetadata });
+      return;
+    }
+
+    createMut.mutate(buildPayload());
+  };
+
+  const pending = createMut.isPending || createFromFileMut.isPending || createFromUrlMut.isPending;
+  const error = (createMut.error ?? createFromFileMut.error ?? createFromUrlMut.error) as Error | null;
 
   return (
     <EditModal title="Create Scene" open={open} onClose={onClose}>
+      <FileBackedCreateSource
+        mode={sourceMode}
+        onModeChange={handleSourceModeChange}
+        filePath={filePath}
+        onFilePathChange={setFilePath}
+        url={url}
+        onUrlChange={handleUrlChange}
+        urlDownloadMode={urlDownloadMode}
+        onUrlDownloadModeChange={setUrlDownloadMode}
+        scrapeMetadata={scrapeMetadata}
+        onScrapeMetadataChange={setScrapeMetadata}
+        noDownloaderFound={noDownloaderFound}
+        onCreateWithoutDownload={handleCreateWithoutDownload}
+        onDismissNoDownloader={() => setNoDownloaderFound(false)}
+        modes={["metadata", "file", "url"]}
+        filePlaceholder="C:\\Media\\scene.mp4"
+        urlPlaceholder="https://example.com/scene"
+      />
+
+      <>
       <div className="grid grid-cols-2 gap-4">
         <Field label="Title">
           <TextInput value={title} onChange={setTitle} placeholder="Scene title" />
@@ -730,12 +832,13 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
       </Field>
 
       <CreateModalActions
-        loading={createMut.isPending}
+        loading={pending}
         onCancel={onClose}
         onSave={handleSave}
         createAnother={createAnother}
         onCreateAnotherChange={setCreateAnother}
       />
+      </>
     </EditModal>
   );
 }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -16,6 +17,8 @@ public interface IFingerprintService
     Task<string?> ComputeMd5Async(string path, CancellationToken ct = default);
     Task<string?> ComputeImagePhashAsync(string path, CancellationToken ct = default);
     Task<string?> ComputeVideoPhashAsync(string path, double duration, CancellationToken ct = default);
+    Task<string?> ComputeAudioPhashAsync(string path, CancellationToken ct = default);
+    Task<string?> ComputeTextPhashAsync(string path, CancellationToken ct = default);
     string StartGenerateScenePhashes();
     string StartGenerateImagePhashes();
 }
@@ -43,6 +46,135 @@ public class FingerprintService(
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
         var hash = await MD5.HashDataAsync(stream, ct);
         return Convert.ToHexStringLower(hash);
+    }
+
+    public async Task<string?> ComputeAudioPhashAsync(string path, CancellationToken ct = default)
+    {
+        return await ComputeSampledBinaryHashAsync(path, ct);
+    }
+
+    public async Task<string?> ComputeTextPhashAsync(string path, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+            return null;
+
+        const int maxBytes = 2 * 1024 * 1024;
+        var bytes = await ReadFilePrefixAsync(path, maxBytes, ct);
+        if (bytes.Length == 0)
+            return null;
+
+        var text = Encoding.UTF8.GetString(bytes);
+        var weights = new int[64];
+        var token = new StringBuilder(64);
+        var tokenCount = 0;
+
+        void AddToken()
+        {
+            if (token.Length < 2)
+            {
+                token.Clear();
+                return;
+            }
+
+            var tokenBytes = Encoding.UTF8.GetBytes(token.ToString().ToLowerInvariant());
+            var hash = SHA256.HashData(tokenBytes);
+            for (var bit = 0; bit < 64; bit++)
+            {
+                var set = (hash[bit / 8] & (1 << (bit % 8))) != 0;
+                weights[bit] += set ? 1 : -1;
+            }
+
+            token.Clear();
+            tokenCount++;
+        }
+
+        foreach (var ch in text)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (char.IsLetterOrDigit(ch))
+            {
+                if (token.Length < 64)
+                    token.Append(ch);
+            }
+            else
+            {
+                AddToken();
+            }
+        }
+        AddToken();
+
+        if (tokenCount == 0)
+            return await ComputeSampledBinaryHashAsync(path, ct);
+
+        ulong value = 0;
+        for (var bit = 0; bit < 64; bit++)
+        {
+            if (weights[bit] > 0)
+                value |= 1UL << (63 - bit);
+        }
+
+        return value.ToString("x16", CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<byte[]> ReadFilePrefixAsync(string path, int maxBytes, CancellationToken ct)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        var length = (int)Math.Min(maxBytes, stream.Length);
+        var buffer = new byte[length];
+        var totalRead = 0;
+        while (totalRead < length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(totalRead, length - totalRead), ct);
+            if (read == 0)
+                break;
+            totalRead += read;
+        }
+
+        return totalRead == buffer.Length ? buffer : buffer[..totalRead];
+    }
+
+    private static async Task<string?> ComputeSampledBinaryHashAsync(string path, CancellationToken ct)
+    {
+        if (!File.Exists(path))
+            return null;
+
+        const int bucketCount = 64;
+        const int sampleSize = 4096;
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        if (stream.Length == 0)
+            return null;
+
+        var buffer = new byte[Math.Min(sampleSize, (int)Math.Min(stream.Length, sampleSize))];
+        var buckets = new double[bucketCount];
+        for (var bucket = 0; bucket < bucketCount; bucket++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var ratio = bucketCount == 1 ? 0d : bucket / (double)(bucketCount - 1);
+            var centerOffset = (long)Math.Round((stream.Length - 1) * ratio);
+            var offset = Math.Clamp(centerOffset - buffer.Length / 2, 0, Math.Max(0, stream.Length - buffer.Length));
+            stream.Seek(offset, SeekOrigin.Begin);
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+            if (read == 0)
+            {
+                buckets[bucket] = 0;
+                continue;
+            }
+
+            double total = 0;
+            for (var i = 0; i < read; i++)
+                total += buffer[i];
+            buckets[bucket] = total / read;
+        }
+
+        var median = MedianQuickSelect(buckets);
+        ulong value = 0;
+        for (var bucket = 0; bucket < bucketCount; bucket++)
+        {
+            if (buckets[bucket] > median)
+                value |= 1UL << (63 - bucket);
+        }
+
+        return value.ToString("x16", CultureInfo.InvariantCulture);
     }
 
     public async Task<string?> ComputeImagePhashAsync(string path, CancellationToken ct = default)

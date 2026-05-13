@@ -441,6 +441,26 @@ export const IMAGE_BULK_FIELDS: BulkEditField[] = [
   { key: "galleryIds", label: "Galleries", type: "multiId", entityType: "galleries", modeKey: "galleryMode" },
 ];
 
+export const AUDIO_BULK_FIELDS: BulkEditField[] = [
+  { key: "organized", label: "Organized", type: "bool" },
+  { key: "studioId", label: "Studio", type: "select", entityType: "studios", nullable: true },
+  { key: "date", label: "Date", type: "date" },
+  { key: "code", label: "Studio Code", type: "string" },
+  { key: "details", label: "Details", type: "string" },
+  { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
+  { key: "performerIds", label: "Performers", type: "multiId", entityType: "performers", modeKey: "performerMode" },
+];
+
+export const TEXT_BULK_FIELDS: BulkEditField[] = [
+  { key: "organized", label: "Organized", type: "bool" },
+  { key: "studioId", label: "Studio", type: "select", entityType: "studios", nullable: true },
+  { key: "date", label: "Date", type: "date" },
+  { key: "code", label: "Studio Code", type: "string" },
+  { key: "details", label: "Details", type: "string" },
+  { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
+  { key: "performerIds", label: "Performers", type: "multiId", entityType: "performers", modeKey: "performerMode" },
+];
+
 export const TAG_BULK_FIELDS: BulkEditField[] = [
   { key: "description", label: "Description", type: "string" },
   { key: "color", label: "Badge Color", type: "string" },

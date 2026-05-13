@@ -385,6 +385,7 @@ WHERE files.zip_file_id IS NOT NULL";
                     ExcludeImage = excludeImage,
                     ExcludeVideo = excludeVideo,
                     ExcludeAudio = false,
+                    ExcludeText = false,
                 });
             }
 

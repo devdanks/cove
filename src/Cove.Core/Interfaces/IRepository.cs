@@ -376,6 +376,53 @@ public class ImageFilter
     public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }
 
+public class AudioFilter
+{
+    public StringCriterion? TitleCriterion { get; set; }
+    public StringCriterion? CodeCriterion { get; set; }
+    public StringCriterion? DetailsCriterion { get; set; }
+    public StringCriterion? PathCriterion { get; set; }
+    public StringCriterion? UrlCriterion { get; set; }
+    public BoolCriterion? OrganizedCriterion { get; set; }
+    public DateCriterion? DateCriterion { get; set; }
+    public IntCriterion? DurationCriterion { get; set; }
+    public IntCriterion? FileCountCriterion { get; set; }
+    public IntCriterion? TagCountCriterion { get; set; }
+    public IntCriterion? PerformerCountCriterion { get; set; }
+    public MultiIdCriterion? TagsCriterion { get; set; }
+    public MultiIdCriterion? PerformersCriterion { get; set; }
+    public MultiIdCriterion? StudiosCriterion { get; set; }
+    public MultiIdCriterion? GroupsCriterion { get; set; }
+    public TimestampCriterion? CreatedAtCriterion { get; set; }
+    public TimestampCriterion? UpdatedAtCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
+}
+
+public class TextDocumentFilter
+{
+    public StringCriterion? TitleCriterion { get; set; }
+    public StringCriterion? CodeCriterion { get; set; }
+    public StringCriterion? DetailsCriterion { get; set; }
+    public StringCriterion? PathCriterion { get; set; }
+    public StringCriterion? UrlCriterion { get; set; }
+    public BoolCriterion? OrganizedCriterion { get; set; }
+    public DateCriterion? DateCriterion { get; set; }
+    public IntCriterion? WordCountCriterion { get; set; }
+    public IntCriterion? PageCountCriterion { get; set; }
+    public IntCriterion? FileCountCriterion { get; set; }
+    public IntCriterion? TagCountCriterion { get; set; }
+    public IntCriterion? PerformerCountCriterion { get; set; }
+    public MultiIdCriterion? TagsCriterion { get; set; }
+    public MultiIdCriterion? PerformersCriterion { get; set; }
+    public MultiIdCriterion? StudiosCriterion { get; set; }
+    public MultiIdCriterion? GroupsCriterion { get; set; }
+    public TimestampCriterion? CreatedAtCriterion { get; set; }
+    public TimestampCriterion? UpdatedAtCriterion { get; set; }
+    public CustomFieldCriterion? CustomFieldCriterion { get; set; }
+    public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
+}
+
 public class GroupFilter
 {
     public string? Name { get; set; }
