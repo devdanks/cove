@@ -196,7 +196,10 @@ describe("Audio and text detail pages", () => {
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
     fireEvent.click(within(tabs).getByRole("tab", { name: /related/i }));
-    expect(await screen.findByText("Late Night Mix")).toBeInTheDocument();
+    const relatedSection = (await screen.findByText("Related Entities")).closest("section");
+    expect(relatedSection).not.toBeNull();
+    expect(within(relatedSection!).getByTitle("Groups")).toBeInTheDocument();
+    expect(within(relatedSection!).getByTitle("Performers")).toBeInTheDocument();
 
     fireEvent.click(within(tabs).getByRole("tab", { name: /tracks/i }));
 
@@ -234,7 +237,10 @@ describe("Audio and text detail pages", () => {
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
     fireEvent.click(within(tabs).getByRole("tab", { name: /related/i }));
-    expect(await screen.findByText("Dana Lee")).toBeInTheDocument();
+    const relatedSection = (await screen.findByText("Related Entities")).closest("section");
+    expect(relatedSection).not.toBeNull();
+    expect(within(relatedSection!).getByTitle("Performers")).toBeInTheDocument();
+    expect(within(relatedSection!).getByTitle("Groups")).toBeInTheDocument();
 
     view.unmount();
 

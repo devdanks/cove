@@ -185,7 +185,7 @@ describe("GroupDetailPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "Summer Compilation" })).toBeInTheDocument();
-    expect(await screen.findByText("Group Items")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^items$/i })).toBeInTheDocument();
     expect(screen.queryByTestId("compilation-player")).not.toBeInTheDocument();
     expect(screen.getByTitle("Standalone Compilation")).toBeInTheDocument();
 

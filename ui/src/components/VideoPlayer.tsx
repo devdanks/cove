@@ -40,6 +40,25 @@ const MUTED_KEY = "cove-video-player-muted";
 const FACE_OVERLAY_KEY = "cove.player.faceOverlay";
 const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
+function getVideoSourceMimeType(format?: string) {
+  switch (format?.trim().toLowerCase()) {
+    case "mp4":
+      return "video/mp4";
+    case "webm":
+      return "video/webm";
+    case "ogg":
+    case "ogv":
+      return "video/ogg";
+    case "mpeg":
+    case "mpg":
+      return "video/mpeg";
+    case "mov":
+      return "video/quicktime";
+    default:
+      return undefined;
+  }
+}
+
 function usePersistedFlag(key: string, defaultValue: boolean): [boolean, (next: boolean | ((prev: boolean) => boolean)) => void] {
   const [value, setValue] = useState<boolean>(() => {
     if (typeof window === "undefined") return defaultValue;
@@ -873,7 +892,7 @@ export function VideoPlayer({
           onEndedProp?.();
         }}
       >
-        <source src={effectiveStreamUrl} type={`video/${format || "mp4"}`} />
+        <source src={effectiveStreamUrl} type={getVideoSourceMimeType(format)} />
         {captions?.map((cap, idx) => (
           <track
             key={cap.id}
