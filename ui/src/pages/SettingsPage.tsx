@@ -11,6 +11,7 @@ import {
   Info,
   Loader2,
   LogOut,
+  MoreHorizontal,
   Monitor,
   Power,
   Plug,
@@ -4866,6 +4867,7 @@ function ExtensionsPanel() {
     categories: string[];
     dependencies: Record<string, string>;
     source: "native" | "legacy";
+    installSource?: string;
     hasUI: boolean;
     hasApi: boolean;
     hasJobs: boolean;
@@ -4893,6 +4895,7 @@ function ExtensionsPanel() {
         categories: ext.categories,
         dependencies: ext.dependencies,
         source: "native",
+        installSource: ext.source,
         hasUI: ext.hasUI,
         hasApi: ext.hasApi,
         hasJobs: ext.hasJobs,
@@ -4917,6 +4920,7 @@ function ExtensionsPanel() {
         categories: [],
         dependencies: {},
         source: "legacy",
+        installSource: "legacy",
         hasUI: false,
         hasApi: false,
         hasJobs: p.tasks.length > 0,
@@ -5025,6 +5029,11 @@ function ExtensionsPanel() {
                             Bundle
                           </span>
                         )}
+                        {ext.installSource === "url" && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-300 border border-yellow-500/25">
+                            Unverified
+                          </span>
+                        )}
                         {ext.author && <span className="text-xs text-muted">by {ext.author}</span>}
                       </div>
                       {ext.description && (
@@ -5068,6 +5077,7 @@ function ExtensionsPanel() {
                         <> · <a href={ext.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{ext.url}</a></>
                       )}
                       {isBundle && <> · <span className="text-sky-300">Bundle package</span></>}
+                      {ext.installSource === "url" && <> · <span className="text-yellow-300">Installed from URL</span></>}
                       {ext.source === "legacy" && <> · <span className="text-yellow-500">Python extension</span></>}
                     </div>
 
@@ -5180,6 +5190,11 @@ function FindAndInstallExtensions() {
   const [selectedExtension, setSelectedExtension] = useState<import("../api/types").RegistryExtensionDetail | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string>("");
   const [pendingDeps, setPendingDeps] = useState<import("../api/types").DependencyInfo[] | null>(null);
+  const [showMoreActions, setShowMoreActions] = useState(false);
+  const [showUrlInstallForm, setShowUrlInstallForm] = useState(false);
+  const [urlInstallUrl, setUrlInstallUrl] = useState("");
+  const [confirmUrlInstall, setConfirmUrlInstall] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
 
   const { data: searchResults, isLoading: searching, refetch: doSearch } = useQuery({
     queryKey: ["registry-search", searchQuery, category],
@@ -5208,6 +5223,7 @@ function FindAndInstallExtensions() {
     mutationFn: (args: { extensionId: string; version: string; installDependencies?: boolean }) =>
       import("../api/client").then(m => m.extensions.registryInstall(args.extensionId, args.version, args.installDependencies)),
     onSuccess: (data) => {
+      setInstallError(null);
       if (data.requiresDependencies && data.missingDependencies) {
         setPendingDeps(data.missingDependencies);
         return;
@@ -5217,6 +5233,23 @@ function FindAndInstallExtensions() {
       queryClient.invalidateQueries({ queryKey: ["registry-search"] });
       queryClient.invalidateQueries({ queryKey: ["registry-updates"] });
     },
+    onError: (error) => setInstallError(error instanceof Error ? error.message : "Extension install failed."),
+  });
+
+  const urlInstallMut = useMutation({
+    mutationFn: () => import("../api/client").then(m =>
+      m.extensions.installFromUrl(urlInstallUrl.trim(), true)
+    ),
+    onSuccess: () => {
+      setInstallError(null);
+      setConfirmUrlInstall(false);
+      setShowUrlInstallForm(false);
+      setUrlInstallUrl("");
+      queryClient.invalidateQueries({ queryKey: ["extensions-list"] });
+      queryClient.invalidateQueries({ queryKey: ["registry-search"] });
+      queryClient.invalidateQueries({ queryKey: ["registry-updates"] });
+    },
+    onError: (error) => setInstallError(error instanceof Error ? error.message : "Extension install failed."),
   });
 
   const uninstallMut = useMutation({
@@ -5228,9 +5261,10 @@ function FindAndInstallExtensions() {
     },
   });
 
-  const installedIds = new Set((installedList ?? []).map(e => e.id));
+  const installedMap = new Map((installedList ?? []).map(e => [e.id, e]));
+  const installedIds = new Set(installedMap.keys());
   const updateMap = new Map((updates ?? []).map(u => [u.extensionId, u]));
-  const availableResults = (searchResults?.items ?? []).filter((ext) => !installedIds.has(ext.id));
+  const registryItems = searchResults?.items ?? [];
 
   const viewDetail = async (id: string) => {
     const detail = await import("../api/client").then(m => m.extensions.registryGetExtension(id));
@@ -5238,6 +5272,9 @@ function FindAndInstallExtensions() {
     setSelectedVersion(detail.version);
     setPendingDeps(null);
   };
+
+  const selectedInstalledVersion = selectedExtension ? installedMap.get(selectedExtension.id)?.version : undefined;
+  const selectedRequestedVersion = selectedExtension ? (selectedVersion || selectedExtension.version) : "";
 
   return (
     <SectionCard title="Find and Install Extensions" description="Browse and install extensions from the official Cove extension registry.">
@@ -5250,7 +5287,7 @@ function FindAndInstallExtensions() {
               <div key={u.extensionId} className="flex items-center justify-between text-xs">
                 <span className="text-secondary">{u.extensionId}: v{u.currentVersion} → v{u.latestVersion}</span>
                 <button
-                  onClick={() => installMut.mutate({ extensionId: u.extensionId, version: u.latestVersion })}
+                  onClick={() => installMut.mutate({ extensionId: u.extensionId, version: u.latestVersion, installDependencies: true })}
                   disabled={installMut.isPending}
                   className="px-2 py-0.5 bg-yellow-600 hover:bg-yellow-500 text-white rounded text-xs disabled:opacity-50"
                 >
@@ -5261,6 +5298,28 @@ function FindAndInstallExtensions() {
           </div>
         </div>
       )}
+
+      {installError && !confirmUrlInstall && !selectedExtension && (
+        <div className="mb-4 rounded border border-red-700 bg-red-950/60 px-3 py-2 text-sm text-red-200">
+          {installError}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmUrlInstall}
+        title="Install Unverified Extension"
+        message="Extensions installed from a URL are unsafe unless you trust the author and this exact package. Cove cannot verify this source."
+        confirmLabel="Install"
+        destructive
+        isPending={urlInstallMut.isPending}
+        errorMessage={installError}
+        onConfirm={() => urlInstallMut.mutate()}
+        onCancel={() => {
+          if (urlInstallMut.isPending) return;
+          setConfirmUrlInstall(false);
+          setInstallError(null);
+        }}
+      />
 
       {/* Search and filter */}
       <div className="flex items-center gap-3 mb-4">
@@ -5286,7 +5345,79 @@ function FindAndInstallExtensions() {
             ))}
           </select>
         )}
+        <div className="relative">
+          <button
+            type="button"
+            title="More extension actions"
+            onClick={() => setShowMoreActions((open) => !open)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded border border-border bg-card text-secondary hover:text-foreground"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+          {showMoreActions && (
+            <div className="absolute right-0 z-20 mt-1 w-44 rounded border border-border bg-surface p-1 shadow-lg">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMoreActions(false);
+                  setShowUrlInstallForm(true);
+                  setInstallError(null);
+                }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-secondary hover:bg-card hover:text-foreground"
+              >
+                <Shield className="h-3.5 w-3.5" />
+                Install from URL...
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+
+      {showUrlInstallForm && (
+        <form
+          className="mb-4 rounded border border-border bg-card/60 p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setInstallError(null);
+            if (urlInstallUrl.trim()) setConfirmUrlInstall(true);
+          }}
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-secondary">
+              <Shield className="h-4 w-4" /> Install from URL
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowUrlInstallForm(false);
+                setUrlInstallUrl("");
+                setInstallError(null);
+              }}
+              disabled={urlInstallMut.isPending}
+              className="text-secondary hover:text-foreground disabled:opacity-50"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+            <input
+              type="url"
+              value={urlInstallUrl}
+              onChange={(e) => setUrlInstallUrl(e.target.value)}
+              placeholder="https://example.com/extension.zip"
+              className="min-w-0 rounded border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent"
+            />
+            <button
+              type="submit"
+              disabled={!urlInstallUrl.trim() || urlInstallMut.isPending}
+              className="inline-flex items-center justify-center gap-1 rounded bg-card-hover px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {urlInstallMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+              Install
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* Extension detail modal */}
       {selectedExtension && (
@@ -5409,17 +5540,23 @@ function FindAndInstallExtensions() {
               {selectedExtension.readme}
             </div>
           )}
+          {installError && !pendingDeps && (
+            <div className="mb-3 rounded border border-red-700 bg-red-950/60 px-3 py-2 text-sm text-red-200">
+              {installError}
+            </div>
+          )}
           <div className="flex gap-2">
-            {!installedIds.has(selectedExtension.id) ? (
-              <button
-                onClick={() => installMut.mutate({ extensionId: selectedExtension.id, version: selectedVersion || selectedExtension.version })}
-                disabled={installMut.isPending}
-                className="px-4 py-1.5 text-sm bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {installMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                {selectedExtension.kind === "bundle" ? "Install Bundle" : `Install v${selectedVersion || selectedExtension.version}`}
-              </button>
-            ) : (
+            <button
+              onClick={() => installMut.mutate({ extensionId: selectedExtension.id, version: selectedRequestedVersion, installDependencies: false })}
+              disabled={installMut.isPending}
+              className="px-4 py-1.5 text-sm bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {installMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              {!selectedInstalledVersion
+                ? selectedExtension.kind === "bundle" ? "Install Bundle" : `Install v${selectedRequestedVersion}`
+                : selectedInstalledVersion === selectedRequestedVersion ? `Reinstall v${selectedRequestedVersion}` : `Install v${selectedRequestedVersion}`}
+            </button>
+            {selectedInstalledVersion ? (
               <button
                 onClick={() => uninstallMut.mutate(selectedExtension.id)}
                 disabled={uninstallMut.isPending}
@@ -5428,7 +5565,7 @@ function FindAndInstallExtensions() {
                 {uninstallMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                 {selectedExtension.kind === "bundle" ? "Uninstall Bundle" : "Uninstall"}
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       )}
@@ -5438,13 +5575,13 @@ function FindAndInstallExtensions() {
         <div className="flex items-center justify-center py-8">
           <Loader2 className="w-5 h-5 animate-spin text-muted" />
         </div>
-      ) : !searchResults || availableResults.length === 0 ? (
+      ) : !searchResults || registryItems.length === 0 ? (
         <div className="text-sm text-muted text-center py-6">
-          {searchQuery ? "No uninstalled extensions found matching your search." : "No uninstalled extensions available in the registry yet."}
+          {searchQuery ? "No extensions found matching your search." : "No extensions available in the registry yet."}
         </div>
       ) : (
         <div className="space-y-2">
-          {availableResults.map((ext) => {
+          {registryItems.map((ext) => {
             const isInstalled = installedIds.has(ext.id);
             const update = updateMap.get(ext.id);
             return (
@@ -5484,7 +5621,7 @@ function FindAndInstallExtensions() {
                 <div className="flex gap-2 ml-3 flex-shrink-0">
                   {!isInstalled ? (
                     <button
-                      onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: ext.version }); }}
+                      onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: ext.version, installDependencies: true }); }}
                       disabled={installMut.isPending}
                       className="px-3 py-1.5 text-xs bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 flex items-center gap-1"
                     >
@@ -5493,7 +5630,7 @@ function FindAndInstallExtensions() {
                     </button>
                   ) : update ? (
                     <button
-                      onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: update.latestVersion }); }}
+                      onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: update.latestVersion, installDependencies: true }); }}
                       disabled={installMut.isPending}
                       className="px-3 py-1.5 text-xs bg-yellow-600 hover:bg-yellow-500 text-white rounded disabled:opacity-50 flex items-center gap-1"
                     >

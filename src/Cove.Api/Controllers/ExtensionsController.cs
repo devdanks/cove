@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Cove.Plugins;
 using Cove.Core.Interfaces;
 using System.IO;
+using System.IO.Compression;
+using System.Text.Json;
 
 namespace Cove.Api.Controllers;
 
@@ -122,11 +124,14 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var items = extensionManager.Extensions
-            .Where(e => category == null || e.Categories.Any(c => string.Equals(c, category, StringComparison.OrdinalIgnoreCase)))
             .Select(e =>
             {
                 var install = extensionManager.GetInstallation(e.Id);
                 var manifest = extensionManager.GetManifestFile(e.Id);
+                var categories = ResolveCategories(e.Categories, manifest?.Categories, install?.Categories);
+                if (!MatchesCategory(categories, category))
+                    return null;
+
                 return new ExtensionInfo(
                     e.Id,
                     e.Name,
@@ -144,7 +149,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
                     e is IDataExtension,
                     e is IMiddlewareExtension,
                     e is IActionExtension,
-                    e.Categories.ToList(),
+                    categories,
                     e.MinCoveVersion,
                     e.Dependencies.ToDictionary(kv => kv.Key, kv => kv.Value),
                     GetExternalDependencies(manifest, e.Id),
@@ -154,6 +159,8 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
                     install?.InstalledAt,
                     e is IJobExtension je ? je.Jobs.Select(j => new JobInfo(j.Id, j.Name, j.Description)).ToList() : []);
             })
+                .Where(info => info != null)
+                .Cast<ExtensionInfo>()
             .ToList();
 
         items.AddRange(extensionManager.Installations.Values
@@ -164,7 +171,8 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
                 if (manifest == null)
                     return null;
 
-                if (category != null && !manifest.Categories.Any(c => string.Equals(c, category, StringComparison.OrdinalIgnoreCase)))
+                var categories = ResolveCategories(null, manifest.Categories, install.Categories);
+                if (!MatchesCategory(categories, category))
                     return null;
 
                 return new ExtensionInfo(
@@ -184,7 +192,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
                     false,
                     false,
                     false,
-                    manifest.Categories.ToList(),
+                    categories,
                     manifest.MinCoveVersion,
                     manifest.Dependencies,
                     GetExternalDependencies(manifest, manifest.Id),
@@ -211,6 +219,34 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         || extensionIds.Count == 0
         || extensionIds.Any(id => string.Equals(id, extensionId, StringComparison.OrdinalIgnoreCase));
 
+    private static bool MatchesCategory(IReadOnlyList<string> categories, string? category)
+    {
+        if (string.IsNullOrWhiteSpace(category))
+            return true;
+
+        var requestedCategory = category.Trim();
+        return categories.Any(categoryName => string.Equals(categoryName, requestedCategory, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static List<string> ResolveCategories(
+        IReadOnlyList<string>? runtimeCategories,
+        IReadOnlyList<string>? manifestCategories,
+        string? persistedCategories)
+    {
+        return (runtimeCategories ?? [])
+            .Concat(manifestCategories ?? [])
+            .Concat(SplitPersistedCategories(persistedCategories))
+            .Where(category => !string.IsNullOrWhiteSpace(category))
+            .Select(category => category.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IEnumerable<string> SplitPersistedCategories(string? categories) =>
+        string.IsNullOrWhiteSpace(categories)
+            ? []
+            : categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
     /// <summary>Get all available extension categories (from loaded extensions + registry).</summary>
     [HttpGet("categories")]
     public ActionResult<IEnumerable<string>> GetCategories() =>
@@ -235,7 +271,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
     public async Task<IActionResult> Enable(string id, CancellationToken ct)
     {
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id);
-        if (ext == null) return NotFound();
+        if (ext == null && extensionManager.GetInstallation(id) == null) return NotFound();
         await extensionManager.EnableExtensionAsync(id, ct);
         return Ok();
     }
@@ -245,7 +281,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
     public async Task<IActionResult> Disable(string id, CancellationToken ct)
     {
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id);
-        if (ext == null) return NotFound();
+        if (ext == null && extensionManager.GetInstallation(id) == null) return NotFound();
         await extensionManager.DisableExtensionAsync(id, ct);
         return Ok();
     }
@@ -339,6 +375,103 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         return PhysicalFile(fullPath, contentType);
     }
 
+    /// <summary>Install an extension package from a user-provided URL after explicit trust confirmation.</summary>
+    [HttpPost("install-from-url")]
+    public async Task<IActionResult> InstallFromUrl(
+        [FromBody] InstallExtensionFromUrlRequest request,
+        [FromServices] IHttpClientFactory httpClientFactory,
+        CancellationToken ct)
+    {
+        if (!request.TrustUnverified)
+            return BadRequest("Installing an extension from a URL requires explicit trust confirmation.");
+
+        if (!Uri.TryCreate(request.Url?.Trim(), UriKind.Absolute, out var packageUri) || packageUri.Scheme is not ("http" or "https"))
+            return BadRequest("Extension package URL must be an absolute http or https URL.");
+
+        var extensionsDir = Path.Combine(extensionManager.Context.DataDirectory, "..", "extensions");
+        extensionsDir = Path.GetFullPath(extensionsDir);
+        Directory.CreateDirectory(extensionsDir);
+
+        var tempRoot = Path.Combine(extensionsDir, $".url-install-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var http = httpClientFactory.CreateClient("ExtensionRegistry");
+            using var response = await http.GetAsync(packageUri, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+                return BadRequest($"Extension package download failed with HTTP {(int)response.StatusCode}.");
+
+            var zipPath = Path.Combine(tempRoot, "package.zip");
+            await using (var zipFile = System.IO.File.Create(zipPath))
+            await using (var input = await response.Content.ReadAsStreamAsync(ct))
+            {
+                await input.CopyToAsync(zipFile, ct);
+            }
+
+            var extractDir = Path.Combine(tempRoot, "extract");
+            Directory.CreateDirectory(extractDir);
+            await using (var stream = System.IO.File.OpenRead(zipPath))
+            {
+                try
+                {
+                    ExtractZipSafely(stream, extractDir);
+                }
+                catch (Exception ex) when (ex is InvalidDataException || ex is InvalidOperationException)
+                {
+                    return BadRequest(ex.Message);
+                }
+            }
+
+            var packageRoot = FindExtensionPackageRoot(extractDir);
+            if (packageRoot == null)
+                return BadRequest("The package must contain an extension.json manifest at the root or in one top-level directory.");
+
+            var manifestPath = Path.Combine(packageRoot, "extension.json");
+            var manifestJson = await System.IO.File.ReadAllTextAsync(manifestPath, ct);
+            var manifest = JsonSerializer.Deserialize<ExtensionManifestFile>(manifestJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (manifest == null || string.IsNullOrWhiteSpace(manifest.Id))
+                return BadRequest("The package extension.json manifest is missing a valid id.");
+
+            if (!IsSafeExtensionId(manifest.Id))
+                return BadRequest("The package extension id contains invalid path characters.");
+
+            if (!IsCoveVersionCompatible(manifest.MinCoveVersion))
+                return BadRequest($"Extension '{manifest.Id}' requires Cove >= {manifest.MinCoveVersion}; this instance is {extensionManager.Context.CoveVersion}.");
+
+            var extensionDir = Path.Combine(extensionsDir, manifest.Id);
+            if (Directory.Exists(extensionDir))
+            {
+                await extensionManager.UnloadExtensionAsync(manifest.Id, HttpContext.RequestServices, ct);
+                var deleteError = await DeleteDirectoryWithRetriesAsync(extensionDir, ct);
+                if (deleteError != null)
+                    return Conflict(new { message = $"Existing extension '{manifest.Id}' could not be replaced because files are locked.", detail = deleteError.Message, path = extensionDir });
+            }
+
+            Directory.Move(packageRoot, extensionDir);
+
+            extensionManager.DiscoverExtensions(extensionsDir);
+            var initialized = await extensionManager.InitializeExtensionAsync(manifest.Id, HttpContext.RequestServices, ct);
+            if (!initialized)
+                return StatusCode(500, new { message = $"Extension '{manifest.Id}' was downloaded but failed to initialize.", path = extensionDir });
+
+            await extensionManager.SetInstallationSourceAsync(manifest.Id, "url", ct);
+
+            return Ok(new
+            {
+                message = $"Extension '{manifest.Id}' v{manifest.Version} installed from URL.",
+                extensionId = manifest.Id,
+                version = manifest.Version,
+                path = extensionDir,
+            });
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                await DeleteDirectoryWithRetriesAsync(tempRoot, ct);
+        }
+    }
+
     // ========================================================================
     // REGISTRY ENDPOINTS
     // ========================================================================
@@ -357,7 +490,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         var result = await registry.SearchAsync(new RegistrySearchRequest
         {
             Query = q,
-            Categories = category != null ? [category] : null,
+            Categories = !string.IsNullOrWhiteSpace(category) ? [category.Trim()] : null,
             SortBy = sort ?? "relevance",
             Page = page,
             PageSize = pageSize,
@@ -414,51 +547,62 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         if (detail == null)
             return NotFound($"Extension '{request.ExtensionId}' not found in registry.");
 
-        // Find the specific version's details (or use latest if no deps differ per version)
-        var missingDeps = new List<DependencyInfo>();
-        var installedIds = new HashSet<string>(extensionManager.Installations.Keys, StringComparer.OrdinalIgnoreCase);
+        var selectedVersion = SelectRegistryVersion(detail, request.Version, null, out var selectedVersionError);
+        if (selectedVersion == null)
+            return BadRequest(selectedVersionError ?? $"No compatible version is available for '{request.ExtensionId}'.");
+
+        var installedVersions = extensionManager.Installations.Values
+            .ToDictionary(i => i.ExtensionId, i => i.Version, StringComparer.OrdinalIgnoreCase);
         var installDependencies = request.InstallDependencies || string.Equals(detail.Kind, "bundle", StringComparison.OrdinalIgnoreCase);
+        var dependencyPlan = new List<RegistryInstallPlanItem>();
+        var dependencyInfos = new List<DependencyInfo>();
+        var missingDeps = new Dictionary<string, DependencyInfo>(StringComparer.OrdinalIgnoreCase);
 
-        if (detail.Dependencies.Count > 0)
+        try
         {
-            foreach (var (depId, versionConstraint) in detail.Dependencies)
-            {
-                if (installedIds.Contains(depId)) continue;
-
-                var depDetail = await registry.GetExtensionAsync(depId, ct);
-                if (depDetail == null)
-                {
-                    missingDeps.Add(new DependencyInfo(depId, versionConstraint, null, null, false));
-                    continue;
-                }
-
-                missingDeps.Add(new DependencyInfo(depId, versionConstraint, depDetail.Name, depDetail.Version, true));
-            }
+            await ResolveDependencyPlanAsync(
+                registry,
+                detail,
+                installedVersions,
+                dependencyPlan,
+                dependencyInfos,
+                missingDeps,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
 
         // If there are missing deps and the client didn't opt in to auto-install, return them
-        if (missingDeps.Count > 0 && !installDependencies)
+        if (dependencyInfos.Count > 0 && !installDependencies)
         {
             return Ok(new
             {
                 requiresDependencies = true,
-                extension = new { detail.Id, detail.Name, detail.Version },
-                missingDependencies = missingDeps,
+                extension = new { detail.Id, detail.Name, Version = selectedVersion.Version },
+                missingDependencies = dependencyInfos,
             });
         }
 
+        if (missingDeps.Count > 0)
+            return BadRequest(new { message = "One or more required dependencies are not available from the registry.", missingDependencies = missingDeps.Values });
+
         // Install missing dependencies first
         var installedExtensions = new List<string>();
-        foreach (var dep in missingDeps.Where(d => d.Available))
+        foreach (var dep in dependencyPlan)
         {
-            await registry.DownloadAsync(dep.Id, dep.ResolvedVersion!, extensionsDir, ct);
+            await registry.DownloadAsync(dep.Id, dep.Version, extensionsDir, ct);
             extensionManager.DiscoverExtensions(extensionsDir);
             await extensionManager.InitializeExtensionAsync(dep.Id, HttpContext.RequestServices, ct);
+            await extensionManager.SetInstallationSourceAsync(dep.Id, "registry", ct);
             installedExtensions.Add(dep.Id);
         }
 
         // Install the requested extension
-        var installPath = await registry.DownloadAsync(request.ExtensionId, request.Version, extensionsDir, ct);
+        var installPath = await registry.DownloadAsync(request.ExtensionId, selectedVersion.Version, extensionsDir, ct);
 
         // Reload discovered extensions and hot-initialize the newly installed one.
         extensionManager.DiscoverExtensions(extensionsDir);
@@ -472,9 +616,11 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
             });
         }
 
+        await extensionManager.SetInstallationSourceAsync(request.ExtensionId, "registry", ct);
+
         return Ok(new
         {
-            message = $"Extension '{request.ExtensionId}' v{request.Version} installed.",
+            message = $"Extension '{request.ExtensionId}' v{selectedVersion.Version} installed.",
             path = installPath,
             installedDependencies = installedExtensions,
         });
@@ -490,20 +636,19 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         var detail = await registry.GetExtensionAsync(extensionId, ct);
         if (detail == null) return NotFound();
 
-        var installedIds = new HashSet<string>(extensionManager.Extensions.Select(e => e.Id), StringComparer.OrdinalIgnoreCase);
+        var installedVersions = extensionManager.Installations.Values
+            .ToDictionary(i => i.ExtensionId, i => i.Version, StringComparer.OrdinalIgnoreCase);
+        var plan = new List<RegistryInstallPlanItem>();
         var deps = new List<DependencyInfo>();
+        var missing = new Dictionary<string, DependencyInfo>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (depId, versionConstraint) in detail.Dependencies)
+        try
         {
-            var isInstalled = installedIds.Contains(depId);
-            var depDetail = await registry.GetExtensionAsync(depId, ct);
-            deps.Add(new DependencyInfo(
-                depId,
-                versionConstraint,
-                depDetail?.Name,
-                depDetail?.Version,
-                depDetail != null,
-                isInstalled));
+            await ResolveDependencyPlanAsync(registry, detail, installedVersions, plan, deps, missing, new HashSet<string>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase), ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
 
         return Ok(deps);
@@ -570,6 +715,251 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
 
         rootInfo.Attributes = FileAttributes.Normal;
     }
+
+    private async Task ResolveDependencyPlanAsync(
+        IExtensionRegistry registry,
+        RegistryExtensionDetail detail,
+        Dictionary<string, string> installedVersions,
+        List<RegistryInstallPlanItem> plan,
+        List<DependencyInfo> dependencyInfos,
+        Dictionary<string, DependencyInfo> missingDependencies,
+        HashSet<string> visiting,
+        HashSet<string> visited,
+        CancellationToken ct)
+    {
+        if (!visiting.Add(detail.Id))
+            throw new InvalidOperationException($"Extension dependency cycle detected at '{detail.Id}'.");
+
+        foreach (var (depId, versionConstraint) in detail.Dependencies)
+        {
+            if (installedVersions.TryGetValue(depId, out var installedVersion) && VersionSatisfies(installedVersion, versionConstraint))
+                continue;
+
+            var depDetail = await registry.GetExtensionAsync(depId, ct);
+            if (depDetail == null)
+            {
+                missingDependencies[depId] = new DependencyInfo(depId, versionConstraint, null, null, false, installedVersions.ContainsKey(depId));
+                dependencyInfos.Add(missingDependencies[depId]);
+                continue;
+            }
+
+            var depVersion = SelectRegistryVersion(depDetail, null, versionConstraint, out _);
+            if (depVersion == null)
+            {
+                missingDependencies[depId] = new DependencyInfo(depId, versionConstraint, depDetail.Name, null, false, installedVersions.ContainsKey(depId));
+                dependencyInfos.Add(missingDependencies[depId]);
+                continue;
+            }
+
+            if (!visited.Contains(depId))
+                await ResolveDependencyPlanAsync(registry, depDetail, installedVersions, plan, dependencyInfos, missingDependencies, visiting, visited, ct);
+
+            if (!plan.Any(item => string.Equals(item.Id, depId, StringComparison.OrdinalIgnoreCase)))
+                plan.Add(new RegistryInstallPlanItem(depId, depVersion.Version, depDetail.Name, installedVersions.ContainsKey(depId)));
+
+            dependencyInfos.Add(new DependencyInfo(depId, versionConstraint, depDetail.Name, depVersion.Version, true, installedVersions.ContainsKey(depId)));
+        }
+
+        visiting.Remove(detail.Id);
+        visited.Add(detail.Id);
+    }
+
+    private RegistryVersionInfo? SelectRegistryVersion(RegistryExtensionDetail detail, string? requestedVersion, string? versionConstraint, out string? error)
+    {
+        error = null;
+        var compatibleVersions = detail.Versions
+            .Where(v => IsCoveVersionCompatible(v.MinCoveVersion))
+            .Where(v => string.IsNullOrWhiteSpace(versionConstraint) || VersionSatisfies(v.Version, versionConstraint))
+            .OrderByDescending(v => ParseVersionOrZero(v.Version))
+            .ThenByDescending(v => v.ReleasedAt ?? DateTime.MinValue)
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(requestedVersion))
+        {
+            var requested = detail.Versions.FirstOrDefault(v => string.Equals(v.Version, requestedVersion, StringComparison.OrdinalIgnoreCase));
+            if (requested == null)
+            {
+                error = $"Version '{requestedVersion}' was not found for extension '{detail.Id}'.";
+                return null;
+            }
+
+            if (!IsCoveVersionCompatible(requested.MinCoveVersion))
+            {
+                error = $"Extension '{detail.Id}' v{requested.Version} requires Cove >= {requested.MinCoveVersion}; this instance is {extensionManager.Context.CoveVersion}.";
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(versionConstraint) && !VersionSatisfies(requested.Version, versionConstraint))
+            {
+                error = $"Extension '{detail.Id}' v{requested.Version} does not satisfy required version '{versionConstraint}'.";
+                return null;
+            }
+
+            return requested;
+        }
+
+        var selected = compatibleVersions.FirstOrDefault();
+        if (selected == null)
+            error = $"No compatible version of '{detail.Id}' satisfies '{versionConstraint ?? "any version"}' for Cove {extensionManager.Context.CoveVersion}.";
+        return selected;
+    }
+
+    private bool IsCoveVersionCompatible(string? minCoveVersion)
+    {
+        if (string.IsNullOrWhiteSpace(minCoveVersion))
+            return true;
+
+        if (!TryParseVersion(extensionManager.Context.CoveVersion, out var coveVersion) || !TryParseVersion(minCoveVersion, out var minimumVersion))
+            return true;
+
+        return coveVersion >= minimumVersion;
+    }
+
+    private static bool VersionSatisfies(string version, string? constraint)
+    {
+        if (string.IsNullOrWhiteSpace(constraint) || constraint.Trim() == "*")
+            return true;
+
+        var range = constraint.Trim();
+        string op;
+        string target;
+
+        if (range.StartsWith(">=", StringComparison.Ordinal))
+        {
+            op = ">=";
+            target = range[2..].Trim();
+        }
+        else if (range.StartsWith("<=", StringComparison.Ordinal))
+        {
+            op = "<=";
+            target = range[2..].Trim();
+        }
+        else if (range.StartsWith('>'))
+        {
+            op = ">";
+            target = range[1..].Trim();
+        }
+        else if (range.StartsWith('<'))
+        {
+            op = "<";
+            target = range[1..].Trim();
+        }
+        else if (range.StartsWith('='))
+        {
+            op = "=";
+            target = range[1..].Trim();
+        }
+        else
+        {
+            op = "=";
+            target = range;
+        }
+
+        if (!TryParseVersion(version, out var current) || !TryParseVersion(target, out var required))
+            return false;
+
+        var comparison = current.CompareTo(required);
+        return op switch
+        {
+            ">=" => comparison >= 0,
+            "<=" => comparison <= 0,
+            ">" => comparison > 0,
+            "<" => comparison < 0,
+            "=" => comparison == 0,
+            _ => false,
+        };
+    }
+
+    private static Version ParseVersionOrZero(string version) =>
+        TryParseVersion(version, out var parsed) ? parsed : new Version(0, 0, 0, 0);
+
+    private static bool TryParseVersion(string value, out Version version)
+    {
+        var normalized = value.Trim().TrimStart('v');
+        var separator = normalized.IndexOfAny(new[] { '-', '+' });
+        if (separator >= 0)
+            normalized = normalized[..separator];
+
+        if (Version.TryParse(normalized, out var parsed))
+        {
+            version = parsed;
+            return true;
+        }
+
+        version = new Version(0, 0, 0, 0);
+        return false;
+    }
+
+    private static void ExtractZipSafely(Stream zipStream, string destinationDirectory)
+    {
+        var destinationRoot = Path.GetFullPath(destinationDirectory);
+        var destinationRootWithSeparator = destinationRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? destinationRoot
+            : destinationRoot + Path.DirectorySeparatorChar;
+        using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read);
+        foreach (var entry in archive.Entries)
+        {
+            var destinationPath = Path.GetFullPath(Path.Combine(destinationRoot, entry.FullName));
+            if (!string.Equals(destinationPath, destinationRoot, StringComparison.OrdinalIgnoreCase)
+                && !destinationPath.StartsWith(destinationRootWithSeparator, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Extension package contains a path outside the extraction directory.");
+
+            if (string.IsNullOrEmpty(entry.Name))
+            {
+                Directory.CreateDirectory(destinationPath);
+                continue;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            entry.ExtractToFile(destinationPath, overwrite: true);
+        }
+    }
+
+    private static string? FindExtensionPackageRoot(string extractDir)
+    {
+        if (System.IO.File.Exists(Path.Combine(extractDir, "extension.json")))
+            return extractDir;
+
+        var candidates = Directory.GetDirectories(extractDir)
+            .Where(dir => System.IO.File.Exists(Path.Combine(dir, "extension.json")))
+            .ToList();
+
+        return candidates.Count == 1 ? candidates[0] : null;
+    }
+
+    private static bool IsSafeExtensionId(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id) || Path.IsPathRooted(id) || id.Contains("..", StringComparison.Ordinal))
+            return false;
+
+        return id.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+    }
+
+    private static async Task<Exception?> DeleteDirectoryWithRetriesAsync(string directoryPath, CancellationToken ct)
+    {
+        if (!Directory.Exists(directoryPath))
+            return null;
+
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= 8; attempt++)
+        {
+            try
+            {
+                RemoveReadOnlyAttributes(directoryPath);
+                Directory.Delete(directoryPath, recursive: true);
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                lastError = ex;
+                await Task.Delay(TimeSpan.FromMilliseconds(150 * attempt), ct);
+            }
+        }
+
+        return lastError;
+    }
+
+    private sealed record RegistryInstallPlanItem(string Id, string Version, string Name, bool Installed);
 }
 
 public record ExtensionInfo(
@@ -607,6 +997,12 @@ public record RegistryInstallRequest
     public required string Version { get; init; }
     /// <summary>When true, automatically install missing dependencies.</summary>
     public bool InstallDependencies { get; init; }
+}
+
+public record InstallExtensionFromUrlRequest
+{
+    public required string Url { get; init; }
+    public bool TrustUnverified { get; init; }
 }
 
 public record RegistryUninstallRequest

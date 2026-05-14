@@ -60,6 +60,7 @@ public interface IExtension
 /// </summary>
 public static class ExtensionCategories
 {
+    public const string AI = "ai";
     public const string Theme = "theme";
     public const string ColorPalette = "color-palette";
     public const string Style = "style";
@@ -69,6 +70,7 @@ public static class ExtensionCategories
     public const string Library = "library";
     public const string Scraper = "scraper";
     public const string Metadata = "metadata";
+    public const string MetadataConsumer = "metadata-consumer";
     public const string Integration = "integration";
     public const string Automation = "automation";
     public const string UI = "ui";
@@ -341,7 +343,7 @@ public class ExtensionManifestFile
     public string? Author { get; set; }
     public string? Url { get; set; }
     public string? IconUrl { get; set; }
-    /// <summary>Manifest type: "extension" or metadata-only "bundle".</summary>
+    /// <summary>Manifest type: "extension" or metadata-only kinds such as "bundle" and "scraper-pack".</summary>
     public string Kind { get; set; } = "extension";
     /// <summary>Minimum Cove version required (semver).</summary>
     public string? MinCoveVersion { get; set; }

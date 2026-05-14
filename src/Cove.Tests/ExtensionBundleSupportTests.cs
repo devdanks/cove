@@ -11,6 +11,48 @@ namespace Cove.Tests;
 public class ExtensionBundleSupportTests
 {
     [Fact]
+    public void GetExtensions_UsesManifestCategoriesForLoadedExtensions()
+    {
+        var manager = new ExtensionManager(new ExtensionContext
+        {
+            Configuration = new ConfigurationBuilder().Build(),
+            DataDirectory = Path.GetTempPath(),
+            CoveVersion = "1.0.0",
+        });
+
+        manager.Register(new RuntimeCategoryFallbackExtension(), "local");
+
+        var manifest = new ExtensionManifestFile
+        {
+            Id = RuntimeCategoryFallbackExtension.ExtensionId,
+            Name = "Runtime Category Fallback",
+            Version = "1.0.0",
+            Categories = ["scraper", "metadata"],
+        };
+
+        var install = manager.GetInstallation(RuntimeCategoryFallbackExtension.ExtensionId);
+        Assert.NotNull(install);
+        install!.ManifestJson = JsonSerializer.Serialize(manifest);
+        install.Categories = null;
+
+        var controller = new ExtensionsController(manager);
+
+        var allResult = controller.GetExtensions();
+        var allOk = Assert.IsType<OkObjectResult>(allResult.Result);
+        var extension = Assert.Single(Assert.IsAssignableFrom<IEnumerable<ExtensionInfo>>(allOk.Value));
+        Assert.Contains("scraper", extension.Categories);
+
+        var filteredResult = controller.GetExtensions("scraper");
+        var filteredOk = Assert.IsType<OkObjectResult>(filteredResult.Result);
+        var filteredExtension = Assert.Single(Assert.IsAssignableFrom<IEnumerable<ExtensionInfo>>(filteredOk.Value));
+        Assert.Equal(RuntimeCategoryFallbackExtension.ExtensionId, filteredExtension.Id);
+
+        var unmatchedResult = controller.GetExtensions("theme");
+        var unmatchedOk = Assert.IsType<OkObjectResult>(unmatchedResult.Result);
+        Assert.Empty(Assert.IsAssignableFrom<IEnumerable<ExtensionInfo>>(unmatchedOk.Value));
+    }
+
+    [Fact]
     public async Task ManifestOnlyBundles_AreDiscoverableListableAndUninstallable()
     {
         var root = Path.Combine(Path.GetTempPath(), $"cove-bundle-{Guid.NewGuid():N}");
@@ -85,6 +127,23 @@ public class ExtensionBundleSupportTests
             {
                 Directory.Delete(root, recursive: true);
             }
+        }
+    }
+
+    private sealed class RuntimeCategoryFallbackExtension : IExtension
+    {
+        public const string ExtensionId = "com.example.runtime-category-fallback";
+
+        public string Id => ExtensionId;
+        public string Name => "Runtime Category Fallback";
+        public string Version => "1.0.0";
+        public string? Description => null;
+        public string? Author => null;
+        public string? Url => null;
+        public string? IconUrl => null;
+
+        public void ConfigureServices(IServiceCollection services, ExtensionContext context)
+        {
         }
     }
 }

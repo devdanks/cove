@@ -2897,10 +2897,37 @@ export interface ExtensionInfo {
   categories: string[];
   minCoveVersion?: string;
   dependencies: Record<string, string>;
+  externalDependencies: ExtensionExternalDependency[];
+  settings: ExtensionSettingManifest[];
   kind: string;
   source: string;
   installedAt?: string;
   jobs: { id: string; name: string; description?: string }[];
+}
+
+export interface ExtensionExternalDependency {
+  id: string;
+  name: string;
+  kind: string;
+  required: boolean;
+  description?: string;
+  versionRequirement?: string;
+  executables: string[];
+  environmentVariables: string[];
+  configurationKeys: string[];
+  installHint?: string;
+  nativeHint?: string;
+  dockerHint?: string;
+  url?: string;
+  extensionIds: string[];
+}
+
+export interface ExtensionSettingManifest {
+  name: string;
+  type: string;
+  displayName?: string;
+  description?: string;
+  extensionIds: string[];
 }
 
 // ===== Registry Types =====
@@ -2930,12 +2957,14 @@ export interface RegistryExtensionDetail extends RegistryExtensionSummary {
   changelog?: string;
   screenshots: string[];
   dependencies: Record<string, string>;
+  externalDependencies: ExtensionExternalDependency[];
+  settings: ExtensionSettingManifest[];
   versions: RegistryVersionInfo[];
 }
 
 export interface RegistryVersionInfo {
   version: string;
-  releasedAt: string;
+  releasedAt?: string;
   changelog?: string;
   minCoveVersion?: string;
   checksum?: string;

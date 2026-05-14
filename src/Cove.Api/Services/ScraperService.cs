@@ -16,6 +16,8 @@ namespace Cove.Api.Services;
 public class ScraperService
 {
     private static readonly string[] SupportedExtensions = [".yml", ".yaml"];
+    private const string ScraperPackKind = "scraper-pack";
+    private const string ScraperPackPayloadDirectoryName = "scrapers";
 
     private readonly CoveConfiguration _config;
     private readonly ILogger<ScraperService> _logger;
@@ -161,19 +163,7 @@ public class ScraperService
             if (!Directory.Exists(directory))
                 continue;
 
-            IEnumerable<string> files;
-            try
-            {
-                files = Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories)
-                    .Where(file => SupportedExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to enumerate scraper directory {Directory}", directory);
-                continue;
-            }
-
-            foreach (var file in files)
+            foreach (var file in EnumerateScraperFiles(directory))
             {
                 if (!seenFiles.Add(file))
                     continue;
@@ -185,6 +175,28 @@ public class ScraperService
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to load scraper definition from {File}", file);
+                }
+            }
+        }
+
+        foreach (var (extensionId, directory) in _extensionManager.GetEnabledManifestDirectories(ScraperPackKind))
+        {
+            var scraperDirectory = Path.Combine(directory, ScraperPackPayloadDirectoryName);
+            if (!Directory.Exists(scraperDirectory))
+                continue;
+
+            foreach (var file in EnumerateScraperFiles(scraperDirectory))
+            {
+                if (!seenFiles.Add(file))
+                    continue;
+
+                try
+                {
+                    summaries.AddRange(ParseScraperFile(file, BuildPackScraperId(extensionId, scraperDirectory, file)));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to load installed scraper definition from {File}", file);
                 }
             }
         }
@@ -226,13 +238,45 @@ public class ScraperService
         ];
     }
 
-    private IReadOnlyList<ScraperSummaryDto> ParseScraperFile(string file)
+    private IEnumerable<string> EnumerateScraperFiles(string directory)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories)
+                .Where(file => SupportedExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to enumerate scraper directory {Directory}", directory);
+            return [];
+        }
+    }
+
+    private static string BuildPackScraperId(string extensionId, string scraperDirectory, string file)
+    {
+        var relativePath = Path.GetRelativePath(scraperDirectory, file);
+        var relativeWithoutExtension = Path.Combine(
+            Path.GetDirectoryName(relativePath) ?? string.Empty,
+            Path.GetFileNameWithoutExtension(relativePath));
+
+        var normalizedRelativePath = relativeWithoutExtension
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/')
+            .Trim('/');
+
+        return $"{extensionId}/{normalizedRelativePath}";
+    }
+
+    private IReadOnlyList<ScraperSummaryDto> ParseScraperFile(string file, string? scraperIdOverride = null)
     {
         using var stream = File.OpenRead(file);
         using var reader = new StreamReader(stream);
         var definition = _deserializer.Deserialize<ScraperManifest>(reader);
 
-        var scraperId = Path.GetFileNameWithoutExtension(file);
+        var scraperId = string.IsNullOrWhiteSpace(scraperIdOverride)
+            ? Path.GetFileNameWithoutExtension(file)
+            : scraperIdOverride.Trim();
         var scraperName = string.IsNullOrWhiteSpace(definition.Name)
             ? scraperId
             : definition.Name.Trim();
@@ -502,8 +546,7 @@ public class ScraperService
         if (TryGetExtensionScraperRegistration(scraperId, entityType, out var extensionRegistration))
             return await ScrapeUrlWithExtensionAsync(extensionRegistration, url, ct);
 
-        // Parse the base scraper id (format: "scraperId:entityType")
-        var baseId = scraperId.Contains(':') ? scraperId.Split(':')[0] : scraperId;
+        var baseId = GetBaseScraperId(scraperId);
 
         if (!_manifestCache.TryGetValue(baseId, out var manifest))
         {
@@ -714,7 +757,7 @@ public class ScraperService
         if (TryGetExtensionScraperRegistration(scraperId, entityType, out var extensionRegistration))
             return await ScrapeNameWithExtensionAsync(extensionRegistration, name, ct);
 
-        var baseId = scraperId.Contains(':') ? scraperId.Split(':')[0] : scraperId;
+        var baseId = GetBaseScraperId(scraperId);
 
         if (!_manifestCache.TryGetValue(baseId, out var manifest))
             return null;
@@ -765,7 +808,7 @@ public class ScraperService
         if (TryGetExtensionScraperRegistration(scraperId, entityType, out var extensionRegistration))
             return await ScrapeFragmentWithExtensionAsync(extensionRegistration, fragment, ct);
 
-        var baseId = scraperId.Contains(':') ? scraperId.Split(':')[0] : scraperId;
+        var baseId = GetBaseScraperId(scraperId);
 
         if (!_manifestCache.TryGetValue(baseId, out var manifest))
             return null;
@@ -1010,6 +1053,12 @@ public class ScraperService
 
         var decodedUrl = Uri.UnescapeDataString(url);
         return Uri.TryCreate(decodedUrl, UriKind.Absolute, out _) ? decodedUrl : url;
+    }
+
+    private static string GetBaseScraperId(string scraperId)
+    {
+        var separatorIndex = scraperId.LastIndexOf(':');
+        return separatorIndex > 0 ? scraperId[..separatorIndex] : scraperId;
     }
 
     private static string ApplyQueryUrlReplacements(string value, string fieldName, IReadOnlyDictionary<string, List<RegexReplaceDefinition>>? replacements)

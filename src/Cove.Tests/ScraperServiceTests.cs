@@ -13,6 +13,8 @@ namespace Cove.Tests;
 
 public class ScraperServiceTests
 {
+    private const string YamlScraperPackId = "cove.official.scrapers.yaml-sites";
+
     [Fact]
     public void FindScrapersForUrl_ReturnsGenericTextFallbackForHttpUrls()
     {
@@ -103,18 +105,115 @@ public class ScraperServiceTests
     }
 
     [Fact]
-        public async Task ScrapeUrlAutoAsync_AudioUrlWithoutExtensionScraper_ReturnsNull()
+    public async Task ScrapeUrlAutoAsync_AudioUrlWithoutExtensionScraper_ReturnsNull()
     {
-                var service = CreateService();
+        var service = CreateService();
 
-                var result = await service.ScrapeUrlAutoAsync("https://audio.example.net/track/example", "audio");
+        var result = await service.ScrapeUrlAutoAsync("https://audio.example.net/track/example", "audio");
 
-                Assert.Null(result);
+        Assert.Null(result);
     }
 
-    private static ScraperService CreateService(IReadOnlyDictionary<string, string>? responses = null, IScraperProvider? scraperProvider = null)
+    [Fact]
+    public async Task GetScrapers_LoadsEnabledYamlScraperPackFromInstalledExtension()
     {
+        var root = Path.Combine(Path.GetTempPath(), $"cove-yaml-scraper-pack-{Guid.NewGuid():N}");
+
+        try
+        {
+            var extensionManager = await CreateYamlScraperPackExtensionManagerAsync(root);
+            var service = CreateService(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["https://example.com/watch/123"] = "<html><head><title>Pack Scene</title></head></html>",
+                },
+                extensionManager: extensionManager);
+
+            var scraper = Assert.Single(service.GetScrapers(), scraper => scraper.Id == $"{YamlScraperPackId}/Example:scene");
+            Assert.Equal("Example YAML", scraper.Name);
+            Assert.Equal("scene", scraper.EntityType);
+            Assert.Contains("URL", scraper.SupportedScrapes);
+            Assert.Equal(["example.com/watch/"], scraper.Urls);
+
+            var result = await service.ScrapeUrlAsync($"{YamlScraperPackId}/Example:scene", "scene", "https://example.com/watch/123");
+
+            Assert.NotNull(result);
+            Assert.Equal("Pack Scene", Assert.IsType<string>(result?["Title"]));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetScrapers_SkipsDisabledYamlScraperPack()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"cove-yaml-scraper-pack-{Guid.NewGuid():N}");
+
+        try
+        {
+            var extensionManager = await CreateYamlScraperPackExtensionManagerAsync(root);
+            await extensionManager.DisableExtensionAsync(YamlScraperPackId);
+
+            var service = CreateService(extensionManager: extensionManager);
+
+            Assert.DoesNotContain(service.GetScrapers(), scraper => scraper.Id.StartsWith($"{YamlScraperPackId}/", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static async Task<ExtensionManager> CreateYamlScraperPackExtensionManagerAsync(string root)
+    {
+        var dataDir = Path.Combine(root, "data");
+        var extensionsDir = Path.Combine(root, "extensions");
+        var extensionDir = Path.Combine(extensionsDir, YamlScraperPackId);
+        var scraperDir = Path.Combine(extensionDir, "scrapers");
+
+        Directory.CreateDirectory(scraperDir);
+        await File.WriteAllTextAsync(Path.Combine(extensionDir, "extension.json"), JsonSerializer.Serialize(new ExtensionManifestFile
+        {
+            Id = YamlScraperPackId,
+            Name = "YAML Site Scrapers",
+            Version = "1.0.0",
+            Kind = "scraper-pack",
+            MinCoveVersion = "0.0.16",
+            Categories = ["scraper", "metadata", "yaml-scraper"],
+        }));
+        await File.WriteAllTextAsync(Path.Combine(scraperDir, "Example.yml"), """
+            name: Example YAML
+            sceneByURL:
+              - action: scrapeXPath
+                url:
+                  - example.com/watch/
+                scraper: sceneScraper
+            xPathScrapers:
+              sceneScraper:
+                scene:
+                  Title: //title
+            """);
+
         var extensionManager = new ExtensionManager(new ExtensionContext
+        {
+            Configuration = new ConfigurationBuilder().Build(),
+            DataDirectory = dataDir,
+            CoveVersion = "test",
+        });
+        extensionManager.DiscoverExtensions(extensionsDir);
+        return extensionManager;
+    }
+
+    private static ScraperService CreateService(
+        IReadOnlyDictionary<string, string>? responses = null,
+        IScraperProvider? scraperProvider = null,
+        ExtensionManager? extensionManager = null)
+    {
+        extensionManager ??= new ExtensionManager(new ExtensionContext
         {
             Configuration = new ConfigurationBuilder().Build(),
             DataDirectory = Path.GetTempPath(),

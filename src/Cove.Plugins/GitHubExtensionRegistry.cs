@@ -14,10 +14,7 @@ namespace Cove.Plugins;
 /// Registry repo structure (yourcove/officialextensionregistry):
 ///   index.json          — master index of all extensions
 ///   extensions/
-///     {extensionId}/
-///       metadata.json   — full extension metadata
-///       icon.png        — optional icon
-///       README.md       — optional readme
+///     {extensionId}.json — full extension metadata and version history
 ///
 /// Extension releases are GitHub releases on the extension's own repository.
 /// The registry just indexes metadata; actual packages are downloaded from
@@ -29,6 +26,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
     private readonly string _registryOwner;
     private readonly string _registryRepo;
     private readonly string _branch;
+    private readonly string? _coveVersion;
 
     // Cache the index for 5 minutes to avoid hammering GitHub
     private RegistryIndex? _cachedIndex;
@@ -39,12 +37,14 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         HttpClient http,
         string registryOwner = "yourcove",
         string registryRepo = "officialextensionregistry",
-        string branch = "main")
+        string branch = "main",
+        string? coveVersion = null)
     {
         _http = http;
         _registryOwner = registryOwner;
         _registryRepo = registryRepo;
         _branch = branch;
+        _coveVersion = coveVersion;
     }
 
     private string RawUrl(string path) =>
@@ -67,7 +67,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
 
     private async Task<RegistryExtensionMetadata?> GetMetadataAsync(string extensionId, CancellationToken ct)
     {
-        var url = RawUrl($"extensions/{extensionId}/metadata.json");
+        var url = RawUrl($"extensions/{extensionId}.json");
         try
         {
             var response = await _http.GetAsync(url, ct);
@@ -103,20 +103,13 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             meta.Name ??= source.Name;
             meta.Description ??= source.Description;
             meta.Author ??= source.Author;
-            meta.Url ??= source.Url;
+            meta.HomepageUrl ??= source.Url;
             meta.IconUrl ??= source.IconUrl;
             meta.Kind ??= source.Kind;
             meta.Categories ??= source.Categories;
-            meta.MinCoveVersion ??= source.MinCoveVersion;
             meta.Dependencies ??= source.Dependencies;
-
-            if (meta.Versions != null)
-            {
-                foreach (var version in meta.Versions)
-                {
-                    version.MinCoveVersion ??= source.MinCoveVersion;
-                }
-            }
+            meta.ExternalDependencies ??= source.ExternalDependencies;
+            meta.Settings ??= source.Settings;
         }
         catch
         {
@@ -144,8 +137,8 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         if (request.Categories is { Count: > 0 })
         {
             items = items.Where(e =>
-                request.Categories.All(c =>
-                    e.Categories?.Contains(c, StringComparer.OrdinalIgnoreCase) ?? false));
+                request.Categories.All(requestedCategory =>
+                    e.Categories?.Any(category => string.Equals(category.Trim(), requestedCategory.Trim(), StringComparison.OrdinalIgnoreCase)) ?? false));
         }
 
         var list = items.ToList();
@@ -179,7 +172,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         if (meta == null) return null;
 
         var validVersions = (meta.Versions ?? [])
-            .Where(v => IsInstallableVersion(v))
+            .Where(v => IsInstallableVersion(v) && IsCompatibleWithCove(v))
             .ToList();
         if (validVersions.Count == 0)
             return null;
@@ -189,16 +182,20 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             .ThenByDescending(v => v.ReleasedAt ?? DateTime.MinValue)
             .First();
 
-        // Try to load README
+        // Try to load README from an explicit external URL. The registry keeps
+        // extension metadata as one JSON file per extension; docs live with the
+        // extension source repo unless a registry entry points elsewhere.
         string? readme = null;
-        try
+        if (!string.IsNullOrWhiteSpace(meta.ReadmeUrl))
         {
-            var readmeUrl = RawUrl($"extensions/{extensionId}/README.md");
-            var resp = await _http.GetAsync(readmeUrl, ct);
-            if (resp.IsSuccessStatusCode)
-                readme = await resp.Content.ReadAsStringAsync(ct);
+            try
+            {
+                var resp = await _http.GetAsync(meta.ReadmeUrl, ct);
+                if (resp.IsSuccessStatusCode)
+                    readme = await resp.Content.ReadAsStringAsync(ct);
+            }
+            catch { /* ignore */ }
         }
-        catch { /* ignore */ }
 
         return new RegistryExtensionDetail
         {
@@ -209,11 +206,13 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             Author = meta.Author,
             IconUrl = meta.IconUrl,
             Kind = meta.Kind ?? "extension",
-            Url = meta.Url,
+            Url = meta.HomepageUrl ?? meta.Url ?? meta.RepositoryUrl,
             Categories = meta.Categories ?? [],
-            UpdatedAt = validVersions.Max(v => v.ReleasedAt) ?? meta.UpdatedAt,
-            MinCoveVersion = latestVersion.MinCoveVersion ?? meta.MinCoveVersion,
+            UpdatedAt = validVersions.Max(v => v.ReleasedAt),
+            MinCoveVersion = latestVersion.MinCoveVersion,
             Dependencies = meta.Dependencies ?? [],
+            ExternalDependencies = meta.ExternalDependencies ?? [],
+            Settings = meta.Settings ?? [],
             Readme = readme,
             Changelog = latestVersion.Changelog ?? meta.Changelog,
             Screenshots = meta.Screenshots ?? [],
@@ -344,6 +343,8 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         var summaries = await ResolveSummariesAsync(ct);
         return summaries
             .SelectMany(e => e.Categories)
+            .Where(category => !string.IsNullOrWhiteSpace(category))
+            .Select(category => category.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(c => c)
             .ToList();
@@ -363,7 +364,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             if (meta?.Versions == null)
                 continue;
 
-            var validVersions = meta.Versions.Where(IsInstallableVersion).ToList();
+            var validVersions = meta.Versions.Where(v => IsInstallableVersion(v) && IsCompatibleWithCove(v)).ToList();
             if (validVersions.Count == 0)
                 continue;
 
@@ -382,8 +383,8 @@ public class GitHubExtensionRegistry : IExtensionRegistry
                 IconUrl = meta.IconUrl,
                 Kind = meta.Kind ?? "extension",
                 Categories = meta.Categories ?? [],
-                UpdatedAt = latest.ReleasedAt ?? meta.UpdatedAt,
-                MinCoveVersion = latest.MinCoveVersion ?? meta.MinCoveVersion,
+                UpdatedAt = latest.ReleasedAt,
+                MinCoveVersion = latest.MinCoveVersion,
             });
         }
 
@@ -413,6 +414,39 @@ public class GitHubExtensionRegistry : IExtensionRegistry
 
         var normalized = NormalizeChecksum(version.Checksum);
         return Regex.IsMatch(normalized, "^[a-fA-F0-9]{64}$");
+    }
+
+    private bool IsCompatibleWithCove(RegistryVersionEntry version)
+    {
+        if (string.IsNullOrWhiteSpace(version.MinCoveVersion) || string.IsNullOrWhiteSpace(_coveVersion))
+            return true;
+
+        return IsVersionAtLeast(_coveVersion, version.MinCoveVersion);
+    }
+
+    private static bool IsVersionAtLeast(string current, string minimum)
+    {
+        if (!TryParseVersion(current, out var currentVersion) || !TryParseVersion(minimum, out var minimumVersion))
+            return true;
+
+        return currentVersion >= minimumVersion;
+    }
+
+    private static bool TryParseVersion(string value, out Version version)
+    {
+        var normalized = value.Trim().TrimStart('v');
+        var separator = normalized.IndexOfAny(new[] { '-', '+' });
+        if (separator >= 0)
+            normalized = normalized[..separator];
+
+        if (Version.TryParse(normalized, out var parsed))
+        {
+            version = parsed;
+            return true;
+        }
+
+        version = new Version(0, 0, 0, 0);
+        return false;
     }
 
     private static string NormalizeChecksum(string checksum)
@@ -494,12 +528,14 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         public string? Author { get; set; }
         public string? IconUrl { get; set; }
         public string? Kind { get; set; }
+        public string? HomepageUrl { get; set; }
         public string? Url { get; set; }
         public string? RepositoryUrl { get; set; }
+        public string? ReadmeUrl { get; set; }
         public List<string>? Categories { get; set; }
-        public DateTime? UpdatedAt { get; set; }
-        public string? MinCoveVersion { get; set; }
         public Dictionary<string, string>? Dependencies { get; set; }
+        public List<ExtensionExternalDependency>? ExternalDependencies { get; set; }
+        public List<ExtensionSettingManifest>? Settings { get; set; }
         public string? Changelog { get; set; }
         public List<string>? Screenshots { get; set; }
         public List<RegistryVersionEntry>? Versions { get; set; }
@@ -518,6 +554,8 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         public string? MinCoveVersion { get; set; }
         public List<string>? Categories { get; set; }
         public Dictionary<string, string>? Dependencies { get; set; }
+        public List<ExtensionExternalDependency>? ExternalDependencies { get; set; }
+        public List<ExtensionSettingManifest>? Settings { get; set; }
     }
 
     private class RegistryVersionEntry

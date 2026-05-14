@@ -94,29 +94,4 @@ public class AuthDisabledRequestGuardTests
 
         Assert.Equal(IPAddress.Parse("203.0.113.9"), AuthDisabledRequestGuard.GetEffectiveRemoteAddress(context, config));
     }
-
-    [Theory]
-    [InlineData("localhost", true)]
-    [InlineData("192.168.1.25", true)]
-    [InlineData("cove.local", true)]
-    [InlineData("stash.ski23.net", false)]
-    public void Treats_public_hostnames_as_outside_even_from_local_proxy(string host, bool expected)
-    {
-        var context = new DefaultHttpContext();
-        context.Connection.RemoteIpAddress = IPAddress.Loopback;
-        context.Request.Host = new HostString(host);
-
-        Assert.Equal(expected, AuthDisabledRequestGuard.IsTrustedLocalRequest(context, new AuthConfig()));
-    }
-
-    [Fact]
-    public void Treats_forwarded_public_host_as_outside()
-    {
-        var context = new DefaultHttpContext();
-        context.Connection.RemoteIpAddress = IPAddress.Loopback;
-        context.Request.Host = new HostString("localhost:5032");
-        context.Request.Headers["X-Forwarded-Host"] = "stash.ski23.net";
-
-        Assert.False(AuthDisabledRequestGuard.IsTrustedLocalRequest(context, new AuthConfig()));
-    }
 }

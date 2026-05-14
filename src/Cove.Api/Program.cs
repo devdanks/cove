@@ -141,18 +141,18 @@ try
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "cove", "extensions");
     Directory.CreateDirectory(extensionsDataDir);
+    var coveVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.1";
     var extensionContext = new ExtensionContext
     {
         Configuration = builder.Configuration,
         DataDirectory = extensionsDataDir,
-        CoveVersion = "0.0.1"
+        CoveVersion = coveVersion
     };
     var extensionManager = new ExtensionManager(extensionContext);
     // Discover .NET plugin DLLs from extensions directory
     extensionManager.DiscoverExtensions(extensionsDataDir);
     // Register built-in extensions
     extensionManager.Register(new Cove.Api.Extensions.ThemeCollectionExtension());
-    extensionManager.Register(new Cove.Api.Extensions.AuditLogExtension());
     extensionManager.Register(new Cove.Api.Extensions.DirectFileDownloaderExtension());
     CoveContext.SetDataExtensions(extensionManager.Extensions.OfType<IDataExtension>());
     builder.Services.AddSingleton(extensionManager);
@@ -162,7 +162,7 @@ try
         var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
         var http = httpFactory.CreateClient("ExtensionRegistry");
         http.DefaultRequestHeaders.UserAgent.ParseAdd("Cove/1.0");
-        return new GitHubExtensionRegistry(http);
+        return new GitHubExtensionRegistry(http, coveVersion: extensionContext.CoveVersion);
     });
     builder.Services.AddHttpClient("ExtensionRegistry");
     builder.Services.AddHostedService<ExtensionEventBridge>();

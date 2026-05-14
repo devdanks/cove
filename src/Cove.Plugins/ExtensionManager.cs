@@ -20,9 +20,10 @@ public class ExtensionManager
     private readonly ExtensionContext _context;
     private readonly Dictionary<string, AssemblyLoadContext> _loadContexts = [];
     private readonly Dictionary<string, string> _shadowDirectories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _extensionDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionManifestFile> _manifestFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionInstallation> _installations = new(StringComparer.OrdinalIgnoreCase);
-    private IServiceProvider? _lastServiceProvider;
+    private IServiceScopeFactory? _scopeFactory;
     private ILogger<ExtensionManager>? _logger;
     private List<IExtension>? _initOrder;
 
@@ -84,8 +85,9 @@ public class ExtensionManager
                     if (manifestFile != null)
                     {
                         _manifestFiles[manifestFile.Id] = manifestFile;
+                        _extensionDirectories[manifestFile.Id] = dir;
 
-                        if (string.Equals(manifestFile.Kind, "bundle", StringComparison.OrdinalIgnoreCase))
+                        if (IsManifestOnlyKind(manifestFile.Kind))
                         {
                             var source = manifestFile.RegistryUrl != null ? "registry" : "local";
                             var existingInstall = _installations.GetValueOrDefault(manifestFile.Id);
@@ -140,20 +142,21 @@ public class ExtensionManager
                                 _extensionMap[ext.Id] = ext;
                                 _loadContexts[ext.Id] = loadContext;
                                 _shadowDirectories[ext.Id] = shadowDir;
+                                _extensionDirectories[ext.Id] = dir;
                                 _initOrder = null;
 
-                                var source = manifestFile?.RegistryUrl != null ? "registry" : "local";
                                 var existingInstall = _installations.GetValueOrDefault(ext.Id);
+                                var source = manifestFile?.RegistryUrl != null ? "registry" : existingInstall?.Source ?? "local";
                                 _installations[ext.Id] = new ExtensionInstallation
                                 {
                                     ExtensionId = ext.Id,
                                     Version = ext.Version,
-                                    Enabled = true,
+                                    Enabled = existingInstall?.Enabled ?? true,
                                     Source = source,
                                     InstalledAt = existingInstall?.InstalledAt ?? DateTime.UtcNow,
                                     UpdatedAt = DateTime.UtcNow,
                                     ManifestJson = manifestFile != null ? File.ReadAllText(manifestPath) : null,
-                                    Categories = ext.Categories.Count > 0 ? string.Join(",", ext.Categories) : null,
+                                    Categories = SerializeCategories(ext.Categories, manifestFile),
                                 };
 
                                 if (manifestFile != null)
@@ -325,7 +328,7 @@ public class ExtensionManager
     /// </summary>
     public async Task InitializeAllAsync(IServiceProvider services, CancellationToken ct = default)
     {
-        _lastServiceProvider = services;
+        CaptureScopeFactory(services);
         _logger = services.GetService<ILogger<ExtensionManager>>();
 
         // Load installation state from DB
@@ -390,7 +393,7 @@ public class ExtensionManager
     /// </summary>
     public async Task<bool> InitializeExtensionAsync(string id, IServiceProvider services, CancellationToken ct = default)
     {
-        _lastServiceProvider = services;
+        CaptureScopeFactory(services);
         _logger ??= services.GetService<ILogger<ExtensionManager>>();
 
         if (!_extensionMap.TryGetValue(id, out var ext))
@@ -447,7 +450,7 @@ public class ExtensionManager
     /// </summary>
     public async Task<bool> UnloadExtensionAsync(string id, IServiceProvider services, CancellationToken ct = default)
     {
-        _lastServiceProvider = services;
+        CaptureScopeFactory(services);
         _logger ??= services.GetService<ILogger<ExtensionManager>>();
 
         if (!_extensionMap.TryGetValue(id, out var ext))
@@ -582,14 +585,26 @@ public class ExtensionManager
     /// <summary>Enable an extension by ID. Persists the state to DB.</summary>
     public async Task EnableExtensionAsync(string id, CancellationToken ct = default)
     {
-        if (_installations.TryGetValue(id, out var inst)) inst.Enabled = true;
+        var inst = EnsureInstallationRecord(id);
+        if (inst != null) inst.Enabled = true;
         await PersistInstallationStateAsync(id, ct);
     }
 
     /// <summary>Disable an extension by ID. Persists the state to DB.</summary>
     public async Task DisableExtensionAsync(string id, CancellationToken ct = default)
     {
-        if (_installations.TryGetValue(id, out var inst)) inst.Enabled = false;
+        var inst = EnsureInstallationRecord(id);
+        if (inst != null) inst.Enabled = false;
+        await PersistInstallationStateAsync(id, ct);
+    }
+
+    /// <summary>Update persisted install metadata for extensions installed after startup.</summary>
+    public async Task SetInstallationSourceAsync(string id, string source, CancellationToken ct = default)
+    {
+        var inst = EnsureInstallationRecord(id);
+        if (inst == null) return;
+        inst.Source = source;
+        inst.UpdatedAt = DateTime.UtcNow;
         await PersistInstallationStateAsync(id, ct);
     }
 
@@ -626,10 +641,38 @@ public class ExtensionManager
 
     /// <summary>Returns true when the installation is metadata-only and has no runtime DLL.</summary>
     public bool IsManifestOnlyExtension(string id) =>
-        string.Equals(GetManifestFile(id)?.Kind, "bundle", StringComparison.OrdinalIgnoreCase);
+        IsManifestOnlyKind(GetManifestFile(id)?.Kind);
+
+    /// <summary>Get installed manifest-only package directories for enabled packages of a specific kind.</summary>
+    public IReadOnlyList<(string ExtensionId, string Directory)> GetEnabledManifestDirectories(string kind)
+    {
+        if (string.IsNullOrWhiteSpace(kind))
+            return [];
+
+        return _manifestFiles.Values
+            .Where(manifest => string.Equals(manifest.Kind, kind, StringComparison.OrdinalIgnoreCase))
+            .Where(manifest => IsEnabled(manifest.Id))
+            .Select(manifest => (manifest.Id, Directory: ResolveExtensionDirectory(manifest.Id)))
+            .Where(item => item.Directory != null)
+            .Select(item => (item.Id, item.Directory!))
+            .ToList();
+    }
 
     /// <summary>Get all installation records.</summary>
     public IReadOnlyDictionary<string, ExtensionInstallation> Installations => _installations;
+
+    private static bool IsManifestOnlyKind(string? kind) =>
+        string.Equals(kind, "bundle", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(kind, "scraper-pack", StringComparison.OrdinalIgnoreCase);
+
+    private string? ResolveExtensionDirectory(string id)
+    {
+        if (_extensionDirectories.TryGetValue(id, out var directory) && Directory.Exists(directory))
+            return directory;
+
+        var conventionalDirectory = Path.Combine(_context.DataDirectory, id);
+        return Directory.Exists(conventionalDirectory) ? conventionalDirectory : null;
+    }
 
     // ========================================================================
     // EVENTS
@@ -726,9 +769,11 @@ public class ExtensionManager
     {
         return _extensions
             .SelectMany(e => e.Categories)
+            .Concat(_manifestFiles.Values.SelectMany(manifest => manifest.Categories))
             .Concat(_installations.Values
                 .Where(i => i.Categories != null)
-                .SelectMany(i => i.Categories!.Split(',', StringSplitOptions.RemoveEmptyEntries)))
+                .SelectMany(i => i.Categories!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)))
+            .Where(category => !string.IsNullOrWhiteSpace(category))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(c => c)
             .ToList();
@@ -739,8 +784,21 @@ public class ExtensionManager
     {
         var catSet = new HashSet<string>(categories, StringComparer.OrdinalIgnoreCase);
         return _extensions
-            .Where(e => e.Categories.Any(c => catSet.Contains(c)))
+            .Where(e => e.Categories.Any(catSet.Contains)
+                || (_manifestFiles.TryGetValue(e.Id, out var manifest) && manifest.Categories.Any(catSet.Contains)))
             .ToList();
+    }
+
+    private static string? SerializeCategories(IReadOnlyList<string> runtimeCategories, ExtensionManifestFile? manifestFile)
+    {
+        var categories = runtimeCategories
+            .Concat(manifestFile?.Categories ?? [])
+            .Where(category => !string.IsNullOrWhiteSpace(category))
+            .Select(category => category.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return categories.Count > 0 ? string.Join(",", categories) : null;
     }
 
     // ========================================================================
@@ -859,8 +917,8 @@ public class ExtensionManager
                 {
                     // Merge DB state with in-memory (DB wins for enabled state)
                     existing.Enabled = reader.GetBoolean(2);
-                    existing.InstalledAt = reader.GetDateTime(3);
-                    existing.UpdatedAt = reader.GetDateTime(4);
+                    existing.InstalledAt = EnsureUtc(reader.GetDateTime(3));
+                    existing.UpdatedAt = EnsureUtc(reader.GetDateTime(4));
                     existing.ManifestJson = reader.IsDBNull(5) ? null : reader.GetString(5);
                     existing.Source = reader.GetString(6);
                     if (!reader.IsDBNull(7)) existing.Categories = reader.GetString(7);
@@ -873,8 +931,8 @@ public class ExtensionManager
                         ExtensionId = id,
                         Version = reader.GetString(1),
                         Enabled = reader.GetBoolean(2),
-                        InstalledAt = reader.GetDateTime(3),
-                        UpdatedAt = reader.GetDateTime(4),
+                        InstalledAt = EnsureUtc(reader.GetDateTime(3)),
+                        UpdatedAt = EnsureUtc(reader.GetDateTime(4)),
                         ManifestJson = reader.IsDBNull(5) ? null : reader.GetString(5),
                         Source = reader.GetString(6),
                         Categories = reader.IsDBNull(7) ? null : reader.GetString(7),
@@ -911,7 +969,7 @@ public class ExtensionManager
                     categories = EXCLUDED.categories
                 """,
                 install.ExtensionId, install.Version, install.Enabled,
-                install.InstalledAt, DateTime.UtcNow, (object?)install.ManifestJson ?? DBNull.Value,
+                EnsureUtc(install.InstalledAt), DateTime.UtcNow, (object?)install.ManifestJson ?? DBNull.Value,
                 install.Source, (object?)install.Categories ?? DBNull.Value);
         }
         catch (Exception ex)
@@ -922,17 +980,18 @@ public class ExtensionManager
 
     private async Task PersistInstallationStateAsync(string extensionId, CancellationToken ct)
     {
-        if (_lastServiceProvider == null) return;
-        await SaveInstallationAsync(_lastServiceProvider, extensionId, ct);
+        if (_scopeFactory == null) return;
+        using var scope = _scopeFactory.CreateScope();
+        await SaveInstallationAsync(scope.ServiceProvider, extensionId, ct);
     }
 
     private async Task RemoveInstallationStateAsync(string extensionId, CancellationToken ct)
     {
-        if (_lastServiceProvider == null) return;
+        if (_scopeFactory == null) return;
 
         try
         {
-            using var scope = _lastServiceProvider.CreateScope();
+            using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetService<DbContext>();
             if (db?.Database is null) return;
 
@@ -946,6 +1005,42 @@ public class ExtensionManager
         }
     }
 
+    private void CaptureScopeFactory(IServiceProvider services)
+    {
+        _scopeFactory ??= services.GetService<IServiceScopeFactory>();
+    }
+
+    private static DateTime EnsureUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+    };
+
+    private ExtensionInstallation? EnsureInstallationRecord(string id)
+    {
+        if (_installations.TryGetValue(id, out var existing))
+            return existing;
+
+        if (!_extensionMap.TryGetValue(id, out var ext))
+            return null;
+
+        var manifest = GetManifestFile(id);
+        var install = new ExtensionInstallation
+        {
+            ExtensionId = id,
+            Version = ext.Version,
+            Enabled = true,
+            Source = manifest?.RegistryUrl != null ? "registry" : "local",
+            InstalledAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            ManifestJson = manifest != null ? JsonSerializer.Serialize(manifest, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }) : null,
+            Categories = ext.Categories.Count > 0 ? string.Join(",", ext.Categories) : null,
+        };
+        _installations[id] = install;
+        return install;
+    }
+
     private void RemoveExtensionFromMemory(string id)
     {
         if (_extensionMap.TryGetValue(id, out var existing))
@@ -955,6 +1050,7 @@ public class ExtensionManager
         }
 
         _manifestFiles.Remove(id);
+        _extensionDirectories.Remove(id);
         _initOrder = null;
 
         if (_loadContexts.TryGetValue(id, out var context))

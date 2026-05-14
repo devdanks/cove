@@ -1252,9 +1252,15 @@ export const extensions = {
   registryGetCategories: () => request<string[]>("/extensions/registry/categories"),
   /** Registry: install an extension. */
   registryInstall: (extensionId: string, version: string, installDependencies = false) =>
-    request<{ message: string; path: string; requiresDependencies?: boolean; missingDependencies?: DependencyInfo[]; installedDependencies?: string[] }>("/extensions/registry/install", {
+    request<{ message?: string; path?: string; requiresDependencies?: boolean; missingDependencies?: DependencyInfo[]; installedDependencies?: string[] }>("/extensions/registry/install", {
       method: "POST",
       body: JSON.stringify({ extensionId, version, installDependencies }),
+    }),
+  /** Install an extension package from a user-provided URL. */
+  installFromUrl: (url: string, trustUnverified = false) =>
+    request<{ message: string; extensionId: string; version: string; path: string }>("/extensions/install-from-url", {
+      method: "POST",
+      body: JSON.stringify({ url, trustUnverified }),
     }),
   /** Registry: resolve dependencies for an extension. */
   registryResolveDependencies: (extensionId: string) =>
