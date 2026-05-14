@@ -1,6 +1,6 @@
 import type {
   MeResponse,
-  Scene, SceneCreate, SceneUpdate,
+  Scene, SceneCreate, SceneUpdate, SceneListEntry,
   Performer, PerformerCreate, PerformerUpdate,
   Tag, TagDetail, TagCreate, TagUpdate, TagSegmentWall,
   TagApplication, TagApplicationCreate, TagGroup, TagGroupCreate, TagGroupUpdate,
@@ -8,9 +8,14 @@ import type {
   Studio, StudioCreate, StudioUpdate,
   Gallery, GalleryCreate, GalleryUpdate, GalleryChapter, GalleryChapterCreate, GalleryChapterUpdate,
   Image, ImageCreate, ImageUpdate,
+  Audio, AudioCreate, AudioUpdate,
+  TextDocument, TextCreate, TextUpdate, TextContent,
   Group, GroupCreate, GroupUpdate,
+  GroupReorder,
   GroupItem, GroupItemCreate, GroupItemsFromSpans, GroupItemsReorder, GroupItemUpdate,
   GroupPlaybackManifest,
+  BookmarkDto, BookmarkToggle, BookmarkState, BookmarkBatchRequest,
+  DynamicGroupSource,
   AiDataPurgeRequest,
   AiDataPurgeResult,
   AiDataSelector,
@@ -51,6 +56,9 @@ import type {
   MetadataServerStudioImportRequest,
   MetadataServerValidationResult,
   FindFilter,
+  FileBackedCreate,
+  DeleteEntityOptions,
+  CustomFieldDefinition, CustomFieldDefinitionCreate, CustomFieldDefinitionUpdate,
   SavedFilter,
   SavedFilterCreate,
   SavedFilterUpdate,
@@ -62,6 +70,8 @@ import type {
   StudioFilterCriteria,
   GalleryFilterCriteria,
   ImageFilterCriteria,
+  AudioFilterCriteria,
+  TextFilterCriteria,
   GroupFilterCriteria,
   ScrapeAttempt,
   CreateScrapeAttemptRequest,
@@ -73,6 +83,8 @@ import type {
   BulkStudioUpdate,
   BulkGalleryUpdate,
   BulkImageUpdate,
+  BulkAudioUpdate,
+  BulkTextUpdate,
   BulkGroupUpdate,
   Plugin,
   PluginTask,
@@ -313,15 +325,27 @@ function buildMediaUrl(
 export const scenes = {
   find: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
     request<PaginatedResponse<Scene>>(`/scenes${buildQuery(filter, extra)}`),
+  findWithCompilations: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
+    request<PaginatedResponse<SceneListEntry>>(`/scenes/with-compilations${buildQuery(filter, extra)}`),
   findFiltered: (req: FilteredQueryRequest<SceneFilterCriteria>) =>
     request<PaginatedResponse<Scene>>("/scenes/find", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
   get: (id: number) => request<Scene>(`/scenes/${id}`),
   create: (data: SceneCreate) => request<Scene>("/scenes", { method: "POST", body: JSON.stringify(data) }),
+  createFromFile: (data: FileBackedCreate) => request<Scene>("/scenes/from-file", { method: "POST", body: JSON.stringify(data) }),
+  createSubScene: (parentSceneId: number, data: SceneCreate) =>
+    request<Scene>("/scenes", { method: "POST", body: JSON.stringify({ ...data, parentSceneId }) }),
   update: (id: number, data: SceneUpdate) => request<Scene>(`/scenes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkSceneUpdate) => request<void>("/scenes/bulk", { method: "POST", body: JSON.stringify(data) }),
-  delete: (id: number, deleteFile?: boolean) => request<void>(`/scenes/${id}${deleteFile ? "?deleteFile=true" : ""}`, { method: "DELETE" }),
-  bulkDelete: (ids: number[], deleteFiles = false) =>
-    request<{ deleted: number }>("/scenes/destroy", { method: "POST", body: JSON.stringify({ ids, deleteFiles }) }),
+  delete: (id: number, options?: boolean | DeleteEntityOptions) => {
+    const deleteFile = typeof options === "boolean" ? options : options?.deleteFile;
+    const deleteGenerated = typeof options === "boolean" ? undefined : options?.deleteGenerated;
+    return request<void>(`/scenes/${id}${buildQuery(undefined, { deleteFile, deleteGenerated })}`, { method: "DELETE" });
+  },
+  bulkDelete: (ids: number[], options?: boolean | DeleteEntityOptions) => {
+    const deleteFiles = typeof options === "boolean" ? options : options?.deleteFile ?? false;
+    const deleteGenerated = typeof options === "boolean" ? false : options?.deleteGenerated ?? false;
+    return request<{ deleted: number }>("/scenes/destroy", { method: "POST", body: JSON.stringify({ ids, deleteFiles, deleteGenerated }) });
+  },
   merge: (targetId: number, sourceIds: number[]) =>
     request<Scene>("/scenes/merge", { method: "POST", body: JSON.stringify({ targetId, sourceIds }) }),
   recordPlay: (id: number) => request<void>(`/scenes/${id}/play`, { method: "POST" }),
@@ -347,6 +371,7 @@ export const scenes = {
   screenshotUrl: (id: number, version?: string, seconds?: number) => buildMediaUrl(`/stream/scene/${id}/screenshot`, version, undefined, { seconds }),
   segmentPreviewUrl: (id: number, seconds: number, version?: string) => buildMediaUrl(`/stream/scene/${id}/segment-preview`, version, undefined, { seconds }),
   previewUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview`),
+  previewStatusUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview/status`),
   captionUrl: (sceneId: number, captionId: number) => buildMediaUrl(`/stream/scene/${sceneId}/caption/${captionId}`),
   transcodeUrl: (id: number, resolution?: string) => buildMediaUrl(`/stream/scene/${id}/transcode`, undefined, undefined, { resolution }),
   hlsMasterUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/hls/master.m3u8`),
@@ -376,10 +401,14 @@ export const scenes = {
     delete: (sceneId: number, id: number) =>
       request<void>(`/scenes/${sceneId}/detections/${id}`, { method: "DELETE" }),
   },
-  findDuplicates: (distance = 0, durationDiff?: number) => {
+  findDuplicates: (options?: number | { matchType?: string; distance?: number; durationDiff?: number }) => {
     const params = new URLSearchParams();
+    const distance = typeof options === "number" ? options : options?.distance ?? 0;
+    const durationDiff = typeof options === "number" ? undefined : options?.durationDiff;
+    const matchType = typeof options === "number" ? undefined : options?.matchType;
     params.set("distance", String(distance));
     if (durationDiff !== undefined) params.set("durationDiff", String(durationDiff));
+    if (matchType) params.set("matchType", matchType);
     return request<Scene[][]>(`/scenes/duplicates?${params.toString()}`);
   },
 };
@@ -668,6 +697,7 @@ export const images = {
     request<PaginatedResponse<Image>>("/images/find", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
   get: (id: number) => request<Image>(`/images/${id}`),
   create: (data: ImageCreate) => request<Image>("/images", { method: "POST", body: JSON.stringify(data) }),
+  createFromFile: (data: FileBackedCreate) => request<Image>("/images/from-file", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: ImageUpdate) => request<Image>(`/images/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkImageUpdate) => request<void>("/images/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/images/${id}`, { method: "DELETE" }),
@@ -688,6 +718,43 @@ export const images = {
   thumbnailUrl: (id: number, max?: number) => buildMediaUrl(`/stream/image/${id}/thumbnail`, undefined, max),
 };
 
+// ===== Audios =====
+export const audios = {
+  find: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
+    request<PaginatedResponse<Audio>>(`/audios${buildQuery(filter, extra)}`),
+  findFiltered: (req: FilteredQueryRequest<AudioFilterCriteria>) =>
+    request<PaginatedResponse<Audio>>("/audios/find", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
+  get: (id: number) => request<Audio>(`/audios/${id}`),
+  create: (data: AudioCreate) => request<Audio>("/audios", { method: "POST", body: JSON.stringify(data) }),
+  createFromFile: (data: FileBackedCreate) => request<Audio>("/audios/from-file", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: AudioUpdate) => request<Audio>(`/audios/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  bulkUpdate: (data: BulkAudioUpdate) => request<void>("/audios/bulk", { method: "POST", body: JSON.stringify(data) }),
+  delete: (id: number, options?: DeleteEntityOptions) =>
+    request<void>(`/audios/${id}${buildQuery(undefined, { deleteFile: options?.deleteFile, deleteGenerated: options?.deleteGenerated })}`, { method: "DELETE" }),
+  bulkDelete: (ids: number[], options?: DeleteEntityOptions) =>
+    request<void>("/audios/bulk", { method: "DELETE", body: JSON.stringify({ ids, deleteFiles: options?.deleteFile ?? false, deleteGenerated: options?.deleteGenerated ?? false }) }),
+  streamUrl: (id: number) => buildMediaUrl(`/audios/${id}/stream`),
+};
+
+// ===== Texts =====
+export const texts = {
+  find: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
+    request<PaginatedResponse<TextDocument>>(`/texts${buildQuery(filter, extra)}`),
+  findFiltered: (req: FilteredQueryRequest<TextFilterCriteria>) =>
+    request<PaginatedResponse<TextDocument>>("/texts/find", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
+  get: (id: number) => request<TextDocument>(`/texts/${id}`),
+  content: (id: number) => request<TextContent>(`/texts/${id}/content`),
+  create: (data: TextCreate) => request<TextDocument>("/texts", { method: "POST", body: JSON.stringify(data) }),
+  createFromFile: (data: FileBackedCreate) => request<TextDocument>("/texts/from-file", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: TextUpdate) => request<TextDocument>(`/texts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  bulkUpdate: (data: BulkTextUpdate) => request<void>("/texts/bulk", { method: "POST", body: JSON.stringify(data) }),
+  delete: (id: number, options?: DeleteEntityOptions) =>
+    request<void>(`/texts/${id}${buildQuery(undefined, { deleteFile: options?.deleteFile, deleteGenerated: options?.deleteGenerated })}`, { method: "DELETE" }),
+  bulkDelete: (ids: number[], options?: DeleteEntityOptions) =>
+    request<void>("/texts/bulk", { method: "DELETE", body: JSON.stringify({ ids, deleteFiles: options?.deleteFile ?? false, deleteGenerated: options?.deleteGenerated ?? false }) }),
+  fileUrl: (id: number) => buildMediaUrl(`/texts/${id}/file`),
+};
+
 // ===== Groups =====
 export const groups = {
   find: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
@@ -700,6 +767,8 @@ export const groups = {
   bulkUpdate: (data: BulkGroupUpdate) => request<void>("/groups/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/groups/${id}`, { method: "DELETE" }),
   bulkDelete: (ids: number[]) => request<void>("/groups/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  reorder: (data: GroupReorder) => request<void>("/groups/reorder", { method: "PUT", body: JSON.stringify(data) }),
+  dynamicSources: () => request<DynamicGroupSource[]>("/groups/dynamic-sources"),
   subGroups: (id: number) => request<Group[]>(`/groups/${id}/subgroups`),
   containingGroups: (id: number) => request<Group[]>(`/groups/${id}/containinggroups`),
   addSubGroup: (id: number, subGroupId: number, orderIndex?: number) =>
@@ -775,6 +844,14 @@ export const entityImages = {
   uploadPerformerImage: (id: number, file: File) => uploadImage(`/performers/${id}/image`, file),
   deletePerformerImage: (id: number) => deleteImage(`/performers/${id}/image`),
 
+  audioImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/audios/${id}/image`, version, max),
+  uploadAudioImage: (id: number, file: File) => uploadImage(`/audios/${id}/image`, file),
+  deleteAudioImage: (id: number) => deleteImage(`/audios/${id}/image`),
+
+  textImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/texts/${id}/image`, version, max),
+  uploadTextImage: (id: number, file: File) => uploadImage(`/texts/${id}/image`, file),
+  deleteTextImage: (id: number) => deleteImage(`/texts/${id}/image`),
+
   studioImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/studios/${id}/image`, version, max),
   uploadStudioImage: (id: number, file: File) => uploadImage(`/studios/${id}/image`, file),
   deleteStudioImage: (id: number) => deleteImage(`/studios/${id}/image`),
@@ -843,10 +920,25 @@ export const scrapeAttempts = {
   get: (id: string) => request<ScrapeAttempt>(`/scrape-attempts/${id}`),
   create: (data: CreateScrapeAttemptRequest) =>
     request<ScrapeAttempt>("/scrape-attempts", { method: "POST", body: JSON.stringify(data) }),
+  apply: (id: string, data: ApplySceneScrapeAttemptRequest) =>
+    request<ScrapeAttempt>(`/scrape-attempts/${id}/apply`, { method: "POST", body: JSON.stringify(data) }),
   applyScene: (id: string, data: ApplySceneScrapeAttemptRequest) =>
     request<ScrapeAttempt>(`/scrape-attempts/${id}/apply`, { method: "POST", body: JSON.stringify(data) }),
   startSceneBatch: (data: BatchSceneScrapeStartRequest) =>
     request<{ jobId: string; queuedCount: number }>("/scrape-attempts/batch-scenes", { method: "POST", body: JSON.stringify(data) }),
+};
+
+export const bookmarks = {
+  list: () => request<BookmarkDto[]>("/me/bookmarks"),
+  batch: (data: BookmarkBatchRequest) => request<BookmarkState[]>("/me/bookmarks/batch", { method: "POST", body: JSON.stringify(data) }),
+  toggle: (data: BookmarkToggle) => request<BookmarkState>("/me/bookmarks", { method: "POST", body: JSON.stringify(data) }),
+};
+
+export const customFields = {
+  list: (entityType?: string) => request<CustomFieldDefinition[]>(`/custom-fields${buildQuery(undefined, { entityType })}`),
+  create: (data: CustomFieldDefinitionCreate) => request<CustomFieldDefinition>("/custom-fields", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: CustomFieldDefinitionUpdate) => request<CustomFieldDefinition>(`/custom-fields/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: number) => request<void>(`/custom-fields/${id}`, { method: "DELETE" }),
 };
 
 // ===== Jobs =====
@@ -876,6 +968,8 @@ export interface ScanOptions {
   scanGenerateMd5?: boolean;
   scanGenerateThumbnails?: boolean;
   scanGenerateImagePhashes?: boolean;
+  scanGenerateAudioPhashes?: boolean;
+  scanGenerateTextPhashes?: boolean;
   rescan?: boolean;
 }
 
@@ -890,6 +984,8 @@ export interface GenerateOptions {
   md5?: boolean;
   imageThumbnails?: boolean;
   imagePhashes?: boolean;
+  audioPhashes?: boolean;
+  textPhashes?: boolean;
   overwrite?: boolean;
   sceneIds?: number[];
   paths?: string[];

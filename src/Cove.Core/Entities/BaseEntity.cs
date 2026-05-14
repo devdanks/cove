@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace Cove.Core.Entities;
 
 public abstract class BaseEntity
@@ -5,4 +7,7 @@ public abstract class BaseEntity
     public int Id { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    [NotMapped]
+    public Dictionary<string, object>? CustomFields { get; set; }
 }

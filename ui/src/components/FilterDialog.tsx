@@ -28,6 +28,8 @@ import type {
   StudioFilterCriteria,
   GalleryFilterCriteria,
   ImageFilterCriteria,
+  AudioFilterCriteria,
+  TextFilterCriteria,
   GroupFilterCriteria,
 } from "../api/types";
 import { RESOLUTION_FILTER_OPTIONS } from "../utils/resolutionBuckets";
@@ -431,6 +433,47 @@ export const IMAGE_CRITERIA: CriteriaDefinitionList<ImageFilterCriteria> = [
     { value: "square", label: "Square" },
   ] },
   { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
+  { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
+  { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
+];
+
+export const AUDIO_CRITERIA: CriteriaDefinitionList<AudioFilterCriteria> = [
+  { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
+  { id: "code", label: "Code", type: "string", filterKey: "codeCriterion" },
+  { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
+  { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
+  { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
+  { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
+  { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
+  { id: "duration", label: "Duration", type: "number", filterKey: "durationCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
+  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
+  { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
+  { id: "groups", label: "Groups", type: "multiId", entityType: "groups", filterKey: "groupsCriterion" },
+  { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
+  { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
+];
+
+export const TEXT_CRITERIA: CriteriaDefinitionList<TextFilterCriteria> = [
+  { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
+  { id: "code", label: "Code", type: "string", filterKey: "codeCriterion" },
+  { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
+  { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
+  { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
+  { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
+  { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
+  { id: "wordCount", label: "Word Count", type: "number", filterKey: "wordCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "pageCount", label: "Page Count", type: "number", filterKey: "pageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
+  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
+  { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
+  { id: "groups", label: "Groups", type: "multiId", entityType: "groups", filterKey: "groupsCriterion" },
   { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
   { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
 ];

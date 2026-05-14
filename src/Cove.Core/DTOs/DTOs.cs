@@ -23,7 +23,16 @@ public record SceneDto(
     List<VideoFileDto> Files,
     List<GroupSummaryDto> Groups, List<GallerySummaryDto> Galleries,
     List<SceneRemoteIdDto> RemoteIds, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    List<TagApplicationDto>? ContextTagApplications = null);
+    List<TagApplicationDto>? ContextTagApplications = null,
+    List<FieldProvenanceDto>? FieldProvenance = null,
+    int? ParentSceneId = null,
+    string? ParentSceneTitle = null,
+    double? ClipStartSec = null,
+    double? ClipEndSec = null,
+    int ChildSceneCount = 0,
+    string? ImagePath = null);
+
+public record SceneListEntryDto(string Kind, int Id, SceneDto? Scene = null, GroupDto? Group = null);
 
 public record SceneRemoteIdDto(string Endpoint, string RemoteId);
 
@@ -33,14 +42,16 @@ public record SceneCreateDto(
     string? Date, int? Rating, bool Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields = null);
+    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields = null,
+    int? ParentSceneId = null, double? ClipStartSec = null, double? ClipEndSec = null);
 
 public record SceneUpdateDto(
     string? Title, string? Code, string? Details, string? Director,
     string? Date, int? Rating, bool? Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields);
+    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields,
+    double? ClipStartSec = null, double? ClipEndSec = null);
 
 // ===== PERFORMER DTOs =====
 public record PerformerDto(
@@ -90,6 +101,15 @@ public record TagProvenanceDto(
     int? ContextId = null,
     double? TotalDurationSec = null,
     double? HostDurationSec = null);
+
+public record FieldProvenanceDto(
+    string FieldKey,
+    string SourceKey,
+    string? SourceRunId,
+    string? ModelKey,
+    JsonElement? Value,
+    float? Confidence,
+    string CreatedAt);
 
 public record TagDto(
     int Id,
@@ -288,12 +308,72 @@ public record ImageUpdateDto(string? Title, string? Code, string? Details, strin
     int? Rating, bool? Organized, int? StudioId, string? Date,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, Dictionary<string, object>? CustomFields);
 
+// ===== AUDIO DTOs =====
+public record AudioDto(
+    int Id, string? Title, string? Code, string? Details, bool Organized,
+    int? StudioId, string? StudioName, string? Date,
+    List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
+    List<AudioTrackDto> Tracks, List<AudioFileDto> Files, List<GroupSummaryDto> Groups,
+    Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
+    int FileCount, double MaxDuration, bool HasVideoFiles, string? ImagePath = null);
+
+public record AudioFileDto(
+    int Id, string Path, string Basename, string Format, double Duration,
+    string AudioCodec, long BitRate, int? SampleRate, int? Channels, long Size,
+    bool HasVideoTrack);
+
+public record AudioTrackDto(int Id, int OrderIndex, string? Title, double StartSec, double? EndSec);
+
+public record AudioCreateDto(
+    string? Title, string? Code, string? Details, bool Organized, int? StudioId,
+    string? Date, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds,
+    List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
+
+public record AudioUpdateDto(
+    string? Title, string? Code, string? Details, bool? Organized, int? StudioId,
+    string? Date, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds,
+    List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
+
+// ===== TEXT DTOs =====
+public record TextDocumentDto(
+    int Id, string? Title, string? Code, string? Details, bool Organized,
+    int? StudioId, string? StudioName, string? Date,
+    List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
+    List<TextFileDto> Files, List<GroupSummaryDto> Groups,
+    Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
+    int FileCount, int? MaxWordCount, int? MaxPageCount, string? ImagePath = null);
+
+public record TextFileDto(
+    int Id, string Path, string Basename, string Format, int? PageCount,
+    int? WordCount, string? ExcerptText, long Size);
+
+public record TextContentDto(string Format, string RenderMode, string Content);
+
+public record TextDocumentCreateDto(
+    string? Title, string? Code, string? Details, bool Organized, int? StudioId,
+    string? Date, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds,
+    List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
+
+public record TextDocumentUpdateDto(
+    string? Title, string? Code, string? Details, bool? Organized, int? StudioId,
+    string? Date, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds,
+    List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
+
 // ===== GROUP DTOs =====
 public record GroupDto(int Id, string Name, string? Aliases, int? Duration, string? Date,
     int? StudioId, string? StudioName, string? Director, string? Synopsis,
-    List<string> Urls, List<TagDto> Tags, int SceneCount, bool IsCompilation, int SubGroupCount, int ContainingGroupCount,
+    List<string> Urls, List<TagDto> Tags, int SceneCount, int ItemCount, bool IsCompilation, int SubGroupCount, int ContainingGroupCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    string? FrontImagePath, string? BackImagePath);
+    string? FrontImagePath, string? BackImagePath,
+    GroupKind Kind = GroupKind.Static,
+    string? QuerySourceKey = null,
+    string? QueryJson = null,
+    string? LastResolvedAt = null,
+    int? CachedItemCount = null,
+    int CacheTtlSec = 30,
+    bool ShowInSceneLists = false,
+    List<string>? AllowedHostTypes = null,
+    int SortOrder = 0);
 
 public record GroupSummaryDto(int Id, string Name, int SceneIndex);
 
@@ -302,8 +382,14 @@ public record GroupItemDto(
     int GroupId,
     int OrderIndex,
     GroupItemKind Kind,
-    int SceneId,
+    int? SceneId,
     string? SceneTitle,
+    string HostType,
+    int HostId,
+    int? ImageId,
+    string? ImageTitle,
+    int? ChildGroupId,
+    string? ChildGroupName,
     double? StartSec,
     double? EndSec,
     string? Title,
@@ -318,7 +404,9 @@ public record GroupItemDto(
 public record GroupItemCreateDto(
     int OrderIndex,
     GroupItemKind Kind,
-    int SceneId,
+    int? SceneId,
+    string? HostType,
+    int? HostId,
     double? StartSec,
     double? EndSec,
     string? Title,
@@ -335,7 +423,7 @@ public record GroupItemUpdateDto(
     string? Title,
     string? Notes);
 
-public record GroupItemsReorderDto(List<int> Ids);
+public record GroupItemsReorderDto(List<int> Ids, int StartIndex = 0);
 
 public record GroupItemSpanInputDto(
     string? SpanKey,
@@ -350,14 +438,19 @@ public record GroupItemsFromSpansDto(List<GroupItemSpanInputDto> Spans);
 
 public record GroupPlaybackManifestItemDto(
     int GroupItemId,
-    int SceneId,
+    string HostType,
+    int HostId,
+    int? SceneId,
+    int? AudioId,
     string? SceneTitle,
     string Src,
     double StartSec,
     double? EndSec,
     double? DurationSec,
     string? PosterPath,
-    string? Title);
+    string? Title,
+    string? Format = null,
+    bool HasVideoTrack = false);
 
 public record GroupPlaybackManifestDto(List<GroupPlaybackManifestItemDto> Items);
 
@@ -378,6 +471,8 @@ public record VideoFileDto(int Id, string Path, string Basename, string Format,
 public record CaptionDto(int Id, string LanguageCode, string CaptionType, string Filename);
 
 public record FingerprintDto(string Type, string Value);
+
+public record FileBackedCreateDto(string FilePath);
 
 public record TagSummaryDto(int Id, string Name);
 
@@ -959,6 +1054,8 @@ public record CoveConfigDto
     public List<string> VideoExtensions { get; init; } = [];
     public List<string> ImageExtensions { get; init; } = [];
     public List<string> GalleryExtensions { get; init; } = [];
+    public List<string> AudioExtensions { get; init; } = [];
+    public List<string> TextExtensions { get; init; } = [];
     public List<string> ExcludePatterns { get; init; } = [];
     public List<string> ExcludeImagePatterns { get; init; } = [];
     public List<string> ExcludeGalleryPatterns { get; init; } = [];
@@ -978,6 +1075,7 @@ public record CoveConfigDto
 
 public record CustomFieldDefinitionDto
 {
+    public int Id { get; init; }
     public string Key { get; init; } = string.Empty;
     public string Label { get; init; } = string.Empty;
     public string Type { get; init; } = "text";
@@ -985,7 +1083,44 @@ public record CustomFieldDefinitionDto
     public List<string> Options { get; init; } = [];
     public bool Filterable { get; init; } = true;
     public bool Sortable { get; init; }
+    public bool IsMultiValue { get; init; }
+    public int DisplayOrder { get; init; }
+    public string? CreatedAt { get; init; }
+    public string? UpdatedAt { get; init; }
 }
+
+public record CustomFieldDefinitionCreateDto
+{
+    public string? Key { get; init; }
+    public string Label { get; init; } = string.Empty;
+    public string Type { get; init; } = "text";
+    public List<string> EntityTypes { get; init; } = [];
+    public List<string> Options { get; init; } = [];
+    public bool Filterable { get; init; } = true;
+    public bool Sortable { get; init; }
+    public bool IsMultiValue { get; init; }
+    public int? DisplayOrder { get; init; }
+}
+
+public record CustomFieldDefinitionUpdateDto
+{
+    public string? Key { get; init; }
+    public string? Label { get; init; }
+    public string? Type { get; init; }
+    public List<string>? EntityTypes { get; init; }
+    public List<string>? Options { get; init; }
+    public bool? Filterable { get; init; }
+    public bool? Sortable { get; init; }
+    public bool? IsMultiValue { get; init; }
+    public int? DisplayOrder { get; init; }
+}
+
+public record BookmarkDto(AffinityHostType HostType, int HostId, string CreatedAt);
+public record BookmarkBatchRequestDto(AffinityHostType HostType, List<int> HostIds);
+public record BookmarkToggleDto(AffinityHostType HostType, int HostId, bool Saved);
+public record BookmarkStateDto(AffinityHostType HostType, int HostId, bool Saved, string? CreatedAt);
+
+public record DynamicGroupSourceDto(string Key, string DisplayName);
 
 public record CovePathDto
 {
@@ -993,6 +1128,7 @@ public record CovePathDto
     public bool ExcludeVideo { get; init; }
     public bool ExcludeImage { get; init; }
     public bool ExcludeAudio { get; init; }
+    public bool ExcludeText { get; init; }
 }
 
 public record DownloaderPathOverrideDto
@@ -1071,7 +1207,17 @@ public record ScrapingConfigDto
     public List<MetadataServerDto> MetadataServers { get; init; } = [];
     public List<ScraperPreferenceDto> ScraperPreferences { get; init; } = [];
     public IdentifyDefaultsConfigDto IdentifyDefaults { get; init; } = new();
+    public ScrapeApplyDefaultsConfigDto ScrapeApplyDefaults { get; init; } = new();
     public MetadataBatchDefaultsConfigDto MetadataBatchDefaults { get; init; } = new();
+}
+
+public record ScrapeApplyDefaultsConfigDto
+{
+    public bool CreateMissingTags { get; init; } = true;
+    public bool CreateMissingPerformers { get; init; } = true;
+    public bool CreateMissingStudio { get; init; } = true;
+    public bool MarkOrganized { get; init; }
+    public bool HydratePerformers { get; init; }
 }
 
 public record ScraperPreferenceDto
@@ -1308,7 +1454,11 @@ public record ApplySceneScrapeAttemptDto(
     bool CreateMissingStudio = true,
     bool MarkOrganized = false,
     bool HydratePerformers = false,
-    int? SelectedCandidateIndex = null);
+    int? SelectedCandidateIndex = null,
+    List<ScrapeCollectionItemSelectionDto>? TagSelections = null,
+    List<ScrapeCollectionItemSelectionDto>? PerformerSelections = null);
+
+public record ScrapeCollectionItemSelectionDto(string? Name, string? Action);
 
 public record BatchSceneScrapeStartRequestDto(
     string ScraperId,
@@ -1345,7 +1495,8 @@ public record DownloaderMatchDto(
     string SupportedEntity,
     string NormalizedUrl,
     string? Label,
-    List<DownloaderQualityOptionDto> QualityOptions
+    List<DownloaderQualityOptionDto> QualityOptions,
+    string? SourceUrl = null
 );
 
 public record DownloaderMatchRequestDto(string Url);
@@ -1363,17 +1514,23 @@ public record DownloaderStartRequestDto
 {
     public string DownloaderId { get; init; } = string.Empty;
     public string Url { get; init; } = string.Empty;
+    public string? SourceUrl { get; init; }
     public string Entity { get; init; } = string.Empty;
     public int? EntityId { get; init; }
     public string? QualityId { get; init; }
     public bool AutoApplyMetadata { get; init; }
     public bool AllowDuplicateDownload { get; init; }
+    public bool CreateMissingTags { get; init; } = true;
+    public bool CreateMissingPerformers { get; init; } = true;
+    public bool CreateMissingStudio { get; init; } = true;
+    public bool MarkOrganized { get; init; }
 }
 
 public record DownloaderBatchItemDto
 {
     public string? DownloaderId { get; init; }
     public string Url { get; init; } = string.Empty;
+    public string? SourceUrl { get; init; }
     public string Entity { get; init; } = string.Empty;
     public int? EntityId { get; init; }
     public string? QualityId { get; init; }
@@ -1381,12 +1538,25 @@ public record DownloaderBatchItemDto
     public string? Title { get; init; }
     public bool CreateEntityIfMissing { get; init; }
     public bool AutoApplyMetadata { get; init; }
+    public bool CreateMissingTags { get; init; }
+    public bool CreateMissingPerformers { get; init; }
+    public bool CreateMissingStudio { get; init; }
+    public bool MarkOrganized { get; init; }
+    public List<int>? GalleryIds { get; init; }
+    public List<SceneGroupInputDto>? GroupIds { get; init; }
 }
+
+public record DownloaderBatchStartIssueDto(string Kind, string Label, string Reason);
 
 public record DownloaderBatchFollowUpDto
 {
     public bool ScrapeScenes { get; init; }
+    public bool AutoApplyMetadata { get; init; }
     public bool AllowDuplicateDownloads { get; init; }
+    public bool CreateMissingTags { get; init; }
+    public bool CreateMissingPerformers { get; init; }
+    public bool CreateMissingStudio { get; init; }
+    public bool MarkOrganized { get; init; }
     public GenerateOptionsDto? Generate { get; init; }
 }
 
@@ -1478,6 +1648,7 @@ public enum BulkUpdateMode { Set, Add, Remove }
 public record BulkSceneUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Organized { get; init; }
     public int? StudioId { get; init; }
@@ -1538,6 +1709,36 @@ public record BulkGalleryUpdateDto
     public BulkUpdateMode PerformerMode { get; init; } = BulkUpdateMode.Add;
 }
 
+public record BulkAudioUpdateDto
+{
+    public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
+    public bool? Organized { get; init; }
+    public int? StudioId { get; init; }
+    public string? Date { get; init; }
+    public string? Code { get; init; }
+    public string? Details { get; init; }
+    public List<int>? TagIds { get; init; }
+    public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
+    public List<int>? PerformerIds { get; init; }
+    public BulkUpdateMode PerformerMode { get; init; } = BulkUpdateMode.Add;
+}
+
+public record BulkTextDocumentUpdateDto
+{
+    public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
+    public bool? Organized { get; init; }
+    public int? StudioId { get; init; }
+    public string? Date { get; init; }
+    public string? Code { get; init; }
+    public string? Details { get; init; }
+    public List<int>? TagIds { get; init; }
+    public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
+    public List<int>? PerformerIds { get; init; }
+    public BulkUpdateMode PerformerMode { get; init; } = BulkUpdateMode.Add;
+}
+
 public record BulkStudioUpdateDto
 {
     public List<int> Ids { get; init; } = [];
@@ -1589,7 +1790,7 @@ public record AddSubGroupDto(int SubGroupId, int? OrderIndex = null, string? Des
 public record ReorderSubGroupsDto(List<int> SubGroupIds);
 
 // ===== BATCH/BULK DTOs =====
-public record BatchDeleteDto(List<int> Ids, bool DeleteFiles = false);
+public record BatchDeleteDto(List<int> Ids, bool DeleteFiles = false, bool DeleteGenerated = false);
 
 // ===== FILE OPERATION DTOs =====
 public record MoveFilesDto(List<int> FileIds, string DestinationPath);
@@ -1622,6 +1823,8 @@ public record ScanOptionsDto
     public bool ScanGenerateMd5 { get; init; }
     public bool ScanGenerateThumbnails { get; init; }
     public bool ScanGenerateImagePhashes { get; init; }
+    public bool ScanGenerateAudioPhashes { get; init; }
+    public bool ScanGenerateTextPhashes { get; init; }
     public bool Rescan { get; init; }
 }
 
@@ -1637,6 +1840,8 @@ public record GenerateOptionsDto
     public bool Md5 { get; init; }
     public bool ImageThumbnails { get; init; }
     public bool ImagePhashes { get; init; }
+    public bool AudioPhashes { get; init; }
+    public bool TextPhashes { get; init; }
     public bool Overwrite { get; init; }
     public List<int>? SceneIds { get; init; }
     public List<string>? Paths { get; init; }
@@ -1771,6 +1976,32 @@ public record ScrapedImageDto
     public string? GalleryTitle { get; init; }
 }
 
+public record ScrapedAudioDto
+{
+    public string? Title { get; init; }
+    public string? Code { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+    public string? ImageUrl { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? StudioName { get; init; }
+    public List<string> PerformerNames { get; init; } = [];
+    public List<string> TagNames { get; init; } = [];
+}
+
+public record ScrapedTextDto
+{
+    public string? Title { get; init; }
+    public string? Code { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+    public string? ImageUrl { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? StudioName { get; init; }
+    public List<string> PerformerNames { get; init; } = [];
+    public List<string> TagNames { get; init; } = [];
+}
+
 public record ScrapedGroupDto
 {
     public string? Name { get; init; }
@@ -1853,6 +2084,28 @@ public record ImageScrapeInput
     public string? Date { get; init; }
     public string? Details { get; init; }
     public string? Photographer { get; init; }
+}
+
+public record AudioScrapeInput
+{
+    public int? LocalAudioId { get; init; }
+    public string? Url { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? Title { get; init; }
+    public string? Code { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
+}
+
+public record TextScrapeInput
+{
+    public int? LocalTextId { get; init; }
+    public string? Url { get; init; }
+    public List<string> Urls { get; init; } = [];
+    public string? Title { get; init; }
+    public string? Code { get; init; }
+    public string? Date { get; init; }
+    public string? Details { get; init; }
 }
 
 public record GroupScrapeInput
