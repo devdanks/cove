@@ -202,8 +202,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const text = await res.text();
     throw new Error(`API Error ${res.status}: ${text}`);
   }
-  if (res.status === 204) return undefined as T;
-  return res.json();
+  if (res.status === 204 || res.status === 205) return undefined as T;
+  return readResponseBody<T>(res);
 }
 
 function normalizeApiPath(path: string): string {
@@ -230,8 +230,17 @@ async function requestOptional<T>(path: string, options?: RequestInit): Promise<
     const text = await res.text();
     throw new Error(`API Error ${res.status}: ${text}`);
   }
-  if (res.status === 204) return undefined as T;
-  return res.json();
+  if (res.status === 204 || res.status === 205) return undefined as T;
+  return readResponseBody<T>(res);
+}
+
+async function readResponseBody<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  if (text.trim() === "") {
+    return undefined as T;
+  }
+
+  return JSON.parse(text) as T;
 }
 
 function buildQuery(filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>): string {

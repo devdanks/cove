@@ -1237,6 +1237,8 @@ public class SegmentCoreControllerTests
             sceneA.Id,
             null,
             null,
+            null,
+            null,
             "Full scene",
             null,
             null,
@@ -1249,6 +1251,8 @@ public class SegmentCoreControllerTests
             1,
             GroupItemKind.SceneRange,
             sceneB.Id,
+            null,
+            null,
             5,
             17,
             "Clip",
@@ -1299,15 +1303,15 @@ public class SegmentCoreControllerTests
             0,
             GroupItemKind.Audio,
             null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
             "audio",
-            audio.Id), CancellationToken.None);
+            audio.Id,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null), CancellationToken.None);
         var createAudioCreated = Assert.IsType<CreatedAtActionResult>(createAudioResult.Result);
         var audioItem = Assert.IsType<GroupItemDto>(createAudioCreated.Value);
         Assert.Equal(GroupItemKind.Audio, audioItem.Kind);
@@ -1319,15 +1323,15 @@ public class SegmentCoreControllerTests
             1,
             GroupItemKind.Text,
             null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
             "text",
-            text.Id), CancellationToken.None);
+            text.Id,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null), CancellationToken.None);
         var createTextCreated = Assert.IsType<CreatedAtActionResult>(createTextResult.Result);
         var textItem = Assert.IsType<GroupItemDto>(createTextCreated.Value);
         Assert.Equal(GroupItemKind.Text, textItem.Kind);

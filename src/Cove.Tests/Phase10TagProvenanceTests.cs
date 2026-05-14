@@ -97,7 +97,6 @@ public sealed class Phase10TagProvenanceTests
             new GalleryRepository(context),
             context,
             new NoOpUserEngagementService(),
-            new CustomFieldService(context),
             new TagProvenanceService(context));
 
         var result = await controller.GetById(gallery.Id, CancellationToken.None);

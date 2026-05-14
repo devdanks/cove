@@ -652,6 +652,8 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
     setEditFilter({});
   };
 
+  const hasWideCustomFieldLayout = (customSections ?? []).some((section) => section.id === "custom-fields");
+
   if (!open) return null;
 
   return (
@@ -669,7 +671,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
       }}
     >
       <div
-        className="bg-surface border border-border sm:rounded-lg shadow-xl w-full sm:max-w-lg h-[85vh] sm:h-auto sm:max-h-[80vh] flex flex-col rounded-t-lg"
+        className={`bg-surface border border-border sm:rounded-lg shadow-xl w-full ${hasWideCustomFieldLayout ? "sm:w-[min(92vw,56rem)] sm:max-w-none" : "sm:max-w-lg"} h-[85vh] sm:h-auto sm:max-h-[80vh] flex flex-col rounded-t-lg`}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
