@@ -1,10 +1,13 @@
 using System.Text.Json;
 using Cove.Api.Controllers;
+using Cove.Api.Services;
+using Cove.Core.Interfaces;
 using Cove.Plugins;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Cove.Tests;
 
@@ -35,7 +38,7 @@ public class ExtensionBundleSupportTests
         install!.ManifestJson = JsonSerializer.Serialize(manifest);
         install.Categories = null;
 
-        var controller = new ExtensionsController(manager);
+        var controller = CreateController(manager);
 
         var allResult = controller.GetExtensions();
         var allOk = Assert.IsType<OkObjectResult>(allResult.Result);
@@ -97,16 +100,7 @@ public class ExtensionBundleSupportTests
             var install = Assert.IsType<ExtensionInstallation>(manager.GetInstallation("ai.full"));
             Assert.Equal("1.2.3", install.Version);
 
-            var controller = new ExtensionsController(manager)
-            {
-                ControllerContext = new ControllerContext
-                {
-                    HttpContext = new DefaultHttpContext
-                    {
-                        RequestServices = new ServiceCollection().BuildServiceProvider(),
-                    },
-                },
-            };
+            var controller = CreateController(manager, new ServiceCollection().BuildServiceProvider());
 
             var listResult = controller.GetExtensions();
             var ok = Assert.IsType<OkObjectResult>(listResult.Result);
@@ -145,5 +139,30 @@ public class ExtensionBundleSupportTests
         public void ConfigureServices(IServiceCollection services, ExtensionContext context)
         {
         }
+    }
+
+    private static ExtensionsController CreateController(ExtensionManager manager, IServiceProvider? requestServices = null)
+    {
+        var controller = new ExtensionsController(
+            manager,
+            new ScraperService(new CoveConfiguration(), NullLogger<ScraperService>.Instance, new TestHttpClientFactory(), manager));
+
+        if (requestServices != null)
+        {
+            controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    RequestServices = requestServices,
+                },
+            };
+        }
+
+        return controller;
+    }
+
+    private sealed class TestHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new();
     }
 }

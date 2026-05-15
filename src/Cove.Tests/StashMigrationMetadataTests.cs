@@ -94,6 +94,63 @@ INSERT INTO performers_tags (performer_id, tag_id) VALUES (1, 7);
         Assert.Equal([tag.Id], performer.PerformerTags.Select(pt => pt.TagId).ToArray());
     }
 
+    [Fact]
+    public async Task ImportPerformersAsync_AllowsMissingCareerLengthColumn()
+    {
+        await using var context = CreateContext();
+
+        await using var stash = new SqliteConnection("Data Source=:memory:");
+        await stash.OpenAsync();
+        await ExecuteSqlAsync(stash, @"
+CREATE TABLE performers (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  disambiguation TEXT,
+  gender TEXT,
+  birthdate TEXT,
+  ethnicity TEXT,
+  country TEXT,
+  eye_color TEXT,
+  hair_color TEXT,
+  height INTEGER,
+  weight INTEGER,
+  measurements TEXT,
+  fake_tits TEXT,
+  penis_length REAL,
+  circumcised TEXT,
+  death_date TEXT,
+  tattoos TEXT,
+  piercings TEXT,
+  favorite INTEGER NOT NULL,
+  rating INTEGER,
+  details TEXT,
+  ignore_auto_tag INTEGER NOT NULL,
+  image_blob TEXT
+);
+CREATE TABLE performer_urls (performer_id INTEGER NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE performer_aliases (performer_id INTEGER NOT NULL, alias TEXT NOT NULL);
+CREATE TABLE performers_tags (performer_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+INSERT INTO performers (id, name, favorite, ignore_auto_tag) VALUES (1, 'Legacy Performer', 0, 0);
+");
+
+        var service = CreateService(context);
+        await InvokePrivateAsync(
+            service,
+            "ImportPerformersAsync",
+            stash,
+            new Dictionary<string, string>(),
+            new Dictionary<int, int>(),
+            NullJobProgress.Instance,
+            0d,
+            1d,
+            CancellationToken.None);
+
+        var performer = await context.Performers.SingleAsync();
+        Assert.Equal("Legacy Performer", performer.Name);
+        Assert.Null(performer.CareerStart);
+        Assert.Null(performer.CareerEnd);
+    }
+
         [Fact]
         public async Task ImportPerformersAsync_ImportsMultiplePerformersWithUrls()
         {

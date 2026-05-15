@@ -15,10 +15,12 @@ public partial class StashMigrationService
             string? CareerLength, string? DeathDate,
             string? Tattoos, string? Piercings, bool Favorite, int? Rating, string? Details,
             bool IgnoreAutoTag, string? ImageBlob)>();
+        var hasCareerLength = await ColumnExistsAsync(conn, "performers", "career_length", ct);
         await using (var cmd = conn.CreateCommand())
         {
+            var careerLengthExpr = hasCareerLength ? "career_length" : "NULL";
             cmd.CommandText = @"SELECT id, name, disambiguation, gender, birthdate, ethnicity, country, eye_color,
-                hair_color, height, weight, measurements, fake_tits, penis_length, circumcised, career_length,
+                hair_color, height, weight, measurements, fake_tits, penis_length, circumcised, " + careerLengthExpr + @" AS career_length,
                 death_date, tattoos, piercings, favorite, rating, details, ignore_auto_tag, image_blob
                 FROM performers";
             await using var r = await cmd.ExecuteReaderAsync(ct);
