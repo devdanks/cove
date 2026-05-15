@@ -4849,6 +4849,21 @@ function ExtensionsPanel() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["extensions-list"] }),
   });
 
+  const { data: registryUpdates } = useQuery({
+    queryKey: ["registry-updates"],
+    queryFn: () => import("../api/client").then(m => m.extensions.registryCheckUpdates()),
+  });
+
+  const upgradeMut = useMutation({
+    mutationFn: (args: { id: string; version: string }) =>
+      import("../api/client").then(m => m.extensions.registryInstall(args.id, args.version, true)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["extensions-list"] });
+      queryClient.invalidateQueries({ queryKey: ["registry-search"] });
+      queryClient.invalidateQueries({ queryKey: ["registry-updates"] });
+    },
+  });
+
   const runJobMut = useMutation({
     mutationFn: (args: { id: string; jobId: string }) =>
       import("../api/client").then(m => m.extensions.runJob(args.id, args.jobId)),
@@ -4935,6 +4950,11 @@ function ExtensionsPanel() {
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [extList, legacyList]);
 
+  const installedUpdateMap = useMemo(
+    () => new Map((registryUpdates ?? []).map(update => [update.extensionId, update])),
+    [registryUpdates],
+  );
+
   // Derive categories from loaded extensions
   const allCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -5012,6 +5032,7 @@ function ExtensionsPanel() {
           {filtered.map((ext) => {
             const isExpanded = expandedId === ext.id;
             const isBundle = ext.kind === "bundle";
+            const update = installedUpdateMap.get(ext.id);
             return (
               <div key={ext.id} className="bg-card/50 rounded-lg border border-border/50 overflow-hidden">
                 <div
@@ -5024,6 +5045,11 @@ function ExtensionsPanel() {
                       <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
                         {ext.name}
                         <span className="text-xs text-muted">v{ext.version}</span>
+                        {update && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-600/20 text-yellow-400 border border-yellow-600/30">
+                            Upgrade: v{update.latestVersion}
+                          </span>
+                        )}
                         {isBundle && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25">
                             Bundle
@@ -5049,6 +5075,19 @@ function ExtensionsPanel() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
+                    {update && ext.source !== "legacy" && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          upgradeMut.mutate({ id: ext.id, version: update.latestVersion });
+                        }}
+                        disabled={upgradeMut.isPending}
+                        className="px-3 py-1 text-xs rounded font-medium bg-yellow-600 text-white hover:bg-yellow-500 disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {upgradeMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        Upgrade
+                      </button>
+                    )}
                     {isBundle ? (
                       <span className="px-3 py-1 text-xs rounded font-medium bg-sky-500/15 text-sky-300 border border-sky-500/25">
                         Bundle
@@ -5080,6 +5119,22 @@ function ExtensionsPanel() {
                       {ext.installSource === "url" && <> · <span className="text-yellow-300">Installed from URL</span></>}
                       {ext.source === "legacy" && <> · <span className="text-yellow-500">Python extension</span></>}
                     </div>
+
+                    {update && ext.source !== "legacy" && (
+                      <div className="flex items-center justify-between gap-3 rounded border border-yellow-600/30 bg-yellow-600/10 px-3 py-2">
+                        <div className="text-xs text-yellow-100">
+                          Update available: v{ext.version} to v{update.latestVersion}
+                        </div>
+                        <button
+                          onClick={() => upgradeMut.mutate({ id: ext.id, version: update.latestVersion })}
+                          disabled={upgradeMut.isPending}
+                          className="px-3 py-1 text-xs rounded font-medium bg-yellow-600 text-white hover:bg-yellow-500 disabled:opacity-50 flex items-center gap-1"
+                        >
+                          {upgradeMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                          Upgrade
+                        </button>
+                      </div>
+                    )}
 
                     {/* Capability badges */}
                     <div className="flex gap-1.5 flex-wrap">

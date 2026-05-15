@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Cove.Plugins;
 using Cove.Core.Interfaces;
+using Cove.Api.Services;
 using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
@@ -14,7 +15,7 @@ internal static class FrontendRuntimeContract
 
 [ApiController]
 [Route("api/[controller]")]
-public class ExtensionsController(ExtensionManager extensionManager) : ControllerBase
+public class ExtensionsController(ExtensionManager extensionManager, ScraperService scraperService) : ControllerBase
 {
     /// <summary>Returns the aggregated UI manifest from all registered extensions.</summary>
     [HttpGet("manifest")]
@@ -135,7 +136,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
                 return new ExtensionInfo(
                     e.Id,
                     e.Name,
-                    e.Version,
+                    install?.Version ?? manifest?.Version ?? e.Version,
                     e.Description,
                     e.Author,
                     e.Url,
@@ -273,6 +274,8 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id);
         if (ext == null && extensionManager.GetInstallation(id) == null) return NotFound();
         await extensionManager.EnableExtensionAsync(id, ct);
+        await extensionManager.InitializeExtensionAsync(id, HttpContext.RequestServices, ct);
+        scraperService.ReloadScrapers();
         return Ok();
     }
 
@@ -283,6 +286,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id);
         if (ext == null && extensionManager.GetInstallation(id) == null) return NotFound();
         await extensionManager.DisableExtensionAsync(id, ct);
+        scraperService.ReloadScrapers();
         return Ok();
     }
 
@@ -456,6 +460,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
                 return StatusCode(500, new { message = $"Extension '{manifest.Id}' was downloaded but failed to initialize.", path = extensionDir });
 
             await extensionManager.SetInstallationSourceAsync(manifest.Id, "url", ct);
+            scraperService.ReloadScrapers();
 
             return Ok(new
             {
@@ -597,7 +602,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
             await registry.DownloadAsync(dep.Id, dep.Version, extensionsDir, ct);
             extensionManager.DiscoverExtensions(extensionsDir);
             await extensionManager.InitializeExtensionAsync(dep.Id, HttpContext.RequestServices, ct);
-            await extensionManager.SetInstallationSourceAsync(dep.Id, "registry", ct);
+            await extensionManager.SetInstallationMetadataAsync(dep.Id, "registry", dep.Version, ct);
             installedExtensions.Add(dep.Id);
         }
 
@@ -616,7 +621,8 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
             });
         }
 
-        await extensionManager.SetInstallationSourceAsync(request.ExtensionId, "registry", ct);
+        await extensionManager.SetInstallationMetadataAsync(request.ExtensionId, "registry", selectedVersion.Version, ct);
+        scraperService.ReloadScrapers();
 
         return Ok(new
         {
@@ -701,6 +707,7 @@ public class ExtensionsController(ExtensionManager extensionManager) : Controlle
             }
         }
 
+        scraperService.ReloadScrapers();
         return Ok(new { message = $"Extension '{request.ExtensionId}' uninstalled." });
     }
 

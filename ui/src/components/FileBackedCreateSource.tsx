@@ -40,39 +40,42 @@ export function FileBackedCreateSource({
   urlPlaceholder?: string;
 }) {
   return (
-    <div className="mb-4 rounded-lg border border-border bg-card/50 p-3">
+    <div className="mb-5 rounded-2xl border border-border bg-card/50 p-4 sm:p-5">
       {modes.length > 1 ? (
-        <div className="inline-flex rounded-lg border border-border bg-surface p-1" role="group" aria-label="Create source">
-          {modes.includes("metadata") ? (
-            <button
-              type="button"
-              onClick={() => onModeChange("metadata")}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${mode === "metadata" ? "bg-accent text-white" : "text-secondary hover:text-foreground"}`}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Metadata
-            </button>
-          ) : null}
-          {modes.includes("file") ? (
-            <button
-              type="button"
-              onClick={() => onModeChange("file")}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${mode === "file" ? "bg-accent text-white" : "text-secondary hover:text-foreground"}`}
-            >
-              <FilePlus2 className="h-3.5 w-3.5" />
-              File
-            </button>
-          ) : null}
-          {modes.includes("url") ? (
-            <button
-              type="button"
-              onClick={() => onModeChange("url")}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${mode === "url" ? "bg-accent text-white" : "text-secondary hover:text-foreground"}`}
-            >
-              <Link2 className="h-3.5 w-3.5" />
-              URL
-            </button>
-          ) : null}
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Create From</div>
+          <div className="mt-2 inline-flex rounded-lg border border-border bg-surface p-1" role="group" aria-label="Create source">
+            {modes.includes("metadata") ? (
+              <button
+                type="button"
+                onClick={() => onModeChange("metadata")}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${mode === "metadata" ? "bg-accent text-white" : "text-secondary hover:text-foreground"}`}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Metadata
+              </button>
+            ) : null}
+            {modes.includes("file") ? (
+              <button
+                type="button"
+                onClick={() => onModeChange("file")}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${mode === "file" ? "bg-accent text-white" : "text-secondary hover:text-foreground"}`}
+              >
+                <FilePlus2 className="h-3.5 w-3.5" />
+                File
+              </button>
+            ) : null}
+            {modes.includes("url") ? (
+              <button
+                type="button"
+                onClick={() => onModeChange("url")}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${mode === "url" ? "bg-accent text-white" : "text-secondary hover:text-foreground"}`}
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                URL
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

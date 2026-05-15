@@ -23,7 +23,9 @@ public class ExtensionManager
     private readonly Dictionary<string, string> _extensionDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionManifestFile> _manifestFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionInstallation> _installations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _initializedExtensions = new(StringComparer.OrdinalIgnoreCase);
     private IServiceScopeFactory? _scopeFactory;
+    private IServiceProvider? _rootServices;
     private ILogger<ExtensionManager>? _logger;
     private List<IExtension>? _initOrder;
 
@@ -150,7 +152,7 @@ public class ExtensionManager
                                 _installations[ext.Id] = new ExtensionInstallation
                                 {
                                     ExtensionId = ext.Id,
-                                    Version = ext.Version,
+                                    Version = ResolveInstalledVersion(ext.Version, manifestFile, existingInstall, source),
                                     Enabled = existingInstall?.Enabled ?? true,
                                     Source = source,
                                     InstalledAt = existingInstall?.InstalledAt ?? DateTime.UtcNow,
@@ -328,8 +330,10 @@ public class ExtensionManager
     /// </summary>
     public async Task InitializeAllAsync(IServiceProvider services, CancellationToken ct = default)
     {
+        _rootServices = services;
         CaptureScopeFactory(services);
         _logger = services.GetService<ILogger<ExtensionManager>>();
+        _initializedExtensions.Clear();
 
         // Load installation state from DB
         await LoadInstallationStateAsync(services, ct);
@@ -361,6 +365,7 @@ public class ExtensionManager
                 }
 
                 await ext.InitializeAsync(services, ct);
+                _initializedExtensions.Add(ext.Id);
                 _logger?.LogInformation("Extension {Id} ({Name} v{Version}) initialized", ext.Id, ext.Name, ext.Version);
             }
             catch (Exception ex)
@@ -394,7 +399,12 @@ public class ExtensionManager
     public async Task<bool> InitializeExtensionAsync(string id, IServiceProvider services, CancellationToken ct = default)
     {
         CaptureScopeFactory(services);
-        _logger ??= services.GetService<ILogger<ExtensionManager>>();
+        _rootServices ??= services;
+        var runtimeServices = _rootServices ?? services;
+        _logger ??= runtimeServices.GetService<ILogger<ExtensionManager>>();
+
+        if (_initializedExtensions.Contains(id))
+            return true;
 
         if (!_extensionMap.TryGetValue(id, out var ext))
         {
@@ -410,7 +420,7 @@ public class ExtensionManager
 
         if (ext is IStatefulExtension stateful)
         {
-            var factory = services.GetService<IExtensionStoreFactory>();
+            var factory = runtimeServices.GetService<IExtensionStoreFactory>();
             if (factory != null)
                 stateful.SetStore(factory.CreateStore(ext.Id));
         }
@@ -420,7 +430,7 @@ public class ExtensionManager
 
         try
         {
-            await ext.OnInstallAsync(services, ct);
+            await ext.OnInstallAsync(runtimeServices, ct);
         }
         catch (Exception ex)
         {
@@ -429,10 +439,12 @@ public class ExtensionManager
 
         try
         {
-            await ext.InitializeAsync(services, ct);
+            await ext.InitializeAsync(runtimeServices, ct);
+            _initializedExtensions.Add(ext.Id);
+            var manifest = GetManifestFile(ext.Id);
             if (_installations.TryGetValue(ext.Id, out var install))
             {
-                install.Version = ext.Version;
+                install.Version = ResolveInstalledVersion(ext.Version, manifest, install, install.Source);
                 install.UpdatedAt = DateTime.UtcNow;
             }
             await PersistInstallationStateAsync(ext.Id, ct);
@@ -441,6 +453,47 @@ public class ExtensionManager
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to hot-initialize extension {Id}", ext.Id);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Ensure a loaded extension has completed InitializeAsync before it is used by a runtime capability surface.
+    /// </summary>
+    public async Task<bool> EnsureExtensionInitializedAsync(string id, CancellationToken ct = default)
+    {
+        if (_initializedExtensions.Contains(id))
+            return true;
+
+        if (!_extensionMap.TryGetValue(id, out var ext))
+            return false;
+
+        if (!IsEnabled(id))
+            return false;
+
+        var services = _rootServices;
+        if (services == null)
+            return true;
+
+        _logger ??= services.GetService<ILogger<ExtensionManager>>();
+
+        if (ext is IStatefulExtension stateful)
+        {
+            var factory = services.GetService<IExtensionStoreFactory>();
+            if (factory != null)
+                stateful.SetStore(factory.CreateStore(ext.Id));
+        }
+
+        try
+        {
+            await ext.InitializeAsync(services, ct);
+            _initializedExtensions.Add(ext.Id);
+            _logger?.LogInformation("Extension {Id} initialized on demand", ext.Id);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to initialize extension {Id} on demand", ext.Id);
             return false;
         }
     }
@@ -599,14 +652,20 @@ public class ExtensionManager
     }
 
     /// <summary>Update persisted install metadata for extensions installed after startup.</summary>
-    public async Task SetInstallationSourceAsync(string id, string source, CancellationToken ct = default)
+    public async Task SetInstallationMetadataAsync(string id, string source, string? version = null, CancellationToken ct = default)
     {
         var inst = EnsureInstallationRecord(id);
         if (inst == null) return;
         inst.Source = source;
+        if (!string.IsNullOrWhiteSpace(version))
+            inst.Version = version.Trim();
         inst.UpdatedAt = DateTime.UtcNow;
         await PersistInstallationStateAsync(id, ct);
     }
+
+    /// <summary>Update only the persisted install source for an extension.</summary>
+    public Task SetInstallationSourceAsync(string id, string source, CancellationToken ct = default) =>
+        SetInstallationMetadataAsync(id, source, null, ct);
 
     /// <summary>Get the installation record for an extension.</summary>
     public ExtensionInstallation? GetInstallation(string id) =>
@@ -672,6 +731,35 @@ public class ExtensionManager
 
         var conventionalDirectory = Path.Combine(_context.DataDirectory, id);
         return Directory.Exists(conventionalDirectory) ? conventionalDirectory : null;
+    }
+
+    private static string ResolveInstalledVersion(
+        string runtimeVersion,
+        ExtensionManifestFile? manifest,
+        ExtensionInstallation? install,
+        string? source)
+    {
+        var effectiveSource = !string.IsNullOrWhiteSpace(source)
+            ? source
+            : install?.Source;
+
+        if (string.Equals(effectiveSource, "registry", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(effectiveSource, "url", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrWhiteSpace(install?.Version))
+                return install.Version;
+
+            if (!string.IsNullOrWhiteSpace(manifest?.Version))
+                return manifest.Version;
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtimeVersion))
+            return runtimeVersion;
+
+        if (!string.IsNullOrWhiteSpace(manifest?.Version))
+            return manifest.Version;
+
+        return install?.Version ?? "0.0.0";
     }
 
     // ========================================================================
@@ -1029,7 +1117,7 @@ public class ExtensionManager
         var install = new ExtensionInstallation
         {
             ExtensionId = id,
-            Version = ext.Version,
+            Version = ResolveInstalledVersion(ext.Version, manifest, null, manifest?.RegistryUrl != null ? "registry" : "local"),
             Enabled = true,
             Source = manifest?.RegistryUrl != null ? "registry" : "local",
             InstalledAt = DateTime.UtcNow,
@@ -1043,6 +1131,8 @@ public class ExtensionManager
 
     private void RemoveExtensionFromMemory(string id)
     {
+        _initializedExtensions.Remove(id);
+
         if (_extensionMap.TryGetValue(id, out var existing))
         {
             _extensions.Remove(existing);

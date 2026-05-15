@@ -68,6 +68,7 @@ public class DownloaderService(
             return [];
 
         var results = new List<DownloaderMatchDto>();
+        var failures = new List<(string ProviderId, string Message)>();
         var providers = extensionManager.GetDownloaderProviders()
             .Where(provider => !excludedProviderIds.Contains(provider.Id))
             .ToList();
@@ -80,6 +81,12 @@ public class DownloaderService(
         {
             try
             {
+                if (!await extensionManager.EnsureExtensionInitializedAsync(provider.Id, ct))
+                {
+                    failures.Add((provider.Id, $"Downloader provider failed to initialize: {provider.Id}"));
+                    continue;
+                }
+
                 var matches = await provider.MatchAllAsync(url, ct);
                 if (matches.Count == 0)
                     continue;
@@ -116,13 +123,44 @@ public class DownloaderService(
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Downloader provider {ProviderId} failed URL match for {Url}", provider.Id, url);
+                failures.Add((provider.Id, GetMatchFailureMessage(ex)));
             }
         }
+
+        if (results.Count == 0 && failures.Count > 0)
+            throw new InvalidOperationException(BuildMatchFailureMessage(failures));
 
         return results
             .OrderBy(result => result.DownloaderName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(result => result.DownloaderId, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static string GetMatchFailureMessage(Exception ex)
+    {
+        if (!string.IsNullOrWhiteSpace(ex.Message))
+            return ex.Message.Trim();
+
+        return ex.GetBaseException().Message.Trim();
+    }
+
+    private static string BuildMatchFailureMessage(IReadOnlyList<(string ProviderId, string Message)> failures)
+    {
+        var uniqueFailures = failures
+            .Where(failure => !string.IsNullOrWhiteSpace(failure.Message))
+            .GroupBy(failure => $"{failure.ProviderId}\n{failure.Message}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+
+        if (uniqueFailures.Count == 0)
+            return "No downloader could be matched because provider checks failed.";
+
+        if (uniqueFailures.Count == 1)
+            return uniqueFailures[0].Message;
+
+        return string.Join(
+            Environment.NewLine,
+            ["No downloader could be matched because provider checks failed:", .. uniqueFailures.Select(failure => $"- {failure.ProviderId}: {failure.Message}")]);
     }
 
     public async Task<DownloaderResult?> DownloadAsync(DownloaderRequest request, Cove.Core.Interfaces.IJobProgress? progress, CancellationToken ct)
@@ -137,6 +175,9 @@ public class DownloaderService(
 
         if (registration?.Descriptor == null)
             throw new InvalidOperationException($"Downloader not found: {request.DownloaderId}");
+
+        if (!await extensionManager.EnsureExtensionInitializedAsync(registration.Provider.Id, ct))
+            throw new InvalidOperationException($"Downloader is available but failed to initialize: {registration.Provider.Id}");
 
         Directory.CreateDirectory(_tempRoot);
         var tempDirectory = Path.Combine(_tempRoot, SanitizePathSegment(registration.Descriptor.Id), Guid.NewGuid().ToString("n"));

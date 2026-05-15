@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Eye, FolderOpen, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, FolderOpen, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, Search, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -22,6 +22,7 @@ import { ImageVisualSimilarityPanel } from "../components/VisualSimilarityPanel"
 
 const ImageEditModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageEditModal })));
 const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
+const MediaScrapeDialog = lazy(() => import("../components/MediaScrapeDialog").then((module) => ({ default: module.MediaScrapeDialog })));
 
 interface Props {
   id: number;
@@ -41,6 +42,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [showScrapeDialog, setShowScrapeDialog] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<ImageTab>("details");
   const queryClient = useQueryClient();
@@ -455,6 +457,26 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             onNavigate={onNavigate}
           />
         ) : null}
+        {showScrapeDialog ? (
+          <MediaScrapeDialog
+            open={showScrapeDialog}
+            onClose={() => setShowScrapeDialog(false)}
+            entityType="image"
+            entity={{
+              id: image.id,
+              title: image.title,
+              details: image.details,
+              creator: image.photographer,
+              date: image.date,
+              studioName: image.studioName,
+              urls: image.urls,
+              tags: image.tags,
+              performers: image.performers,
+              files: image.files,
+              organized: image.organized,
+            }}
+          />
+        ) : null}
       </Suspense>
       <ConfirmDialog open={confirmDelete} title="Delete Image" message={`Delete "${displayTitle}"? This cannot be undone.`} onConfirm={() => deleteMut.mutate()} onCancel={() => setConfirmDelete(false)} />
 
@@ -604,6 +626,15 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
               {showOpsMenu ? (
                 <div className="absolute right-0 top-full z-50 mt-1 min-w-[220px] rounded border border-border bg-card py-1 shadow-lg">
                   <ExtensionEntityActions entityType="image" entityId={image.id} renderMode="menu" onInvoked={() => setShowOpsMenu(false)} />
+                  {canWriteImage ? (
+                    <button
+                      type="button"
+                      onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                    >
+                      <Search className="h-3.5 w-3.5" /> Scrape...
+                    </button>
+                  ) : null}
                   {image.files.length === 0 && canDownloadImage ? (
                     <button
                       type="button"

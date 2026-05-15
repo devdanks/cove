@@ -471,6 +471,15 @@ export function MediaScrapeDialog({ open, onClose, entityType, entity }: Props) 
   }, [candidateResults, selectedAttempt]);
 
   useEffect(() => {
+    if (!selectedAttempt) {
+      setError(null);
+      return;
+    }
+
+    setError(selectedAttempt.status.toLowerCase() === "failure" ? selectedAttempt.error || "Scrape returned no results." : null);
+  }, [selectedAttempt]);
+
+  useEffect(() => {
     if (!selectedScraper) {
       return;
     }
@@ -536,7 +545,6 @@ export function MediaScrapeDialog({ open, onClose, entityType, entity }: Props) 
     onSuccess: (attempt) => {
       setSelectedAttempt(attempt);
       setSelectedCandidateIndex(0);
-      setError(attempt.status.toLowerCase() === "failure" ? attempt.error || "Scrape returned no results." : null);
       queryClient.invalidateQueries({ queryKey: ["scrape-attempts", entityType, entity.id] });
     },
     onError: (mutationError: Error) => {
@@ -624,7 +632,7 @@ export function MediaScrapeDialog({ open, onClose, entityType, entity }: Props) 
                   <div>
                     <div className="text-xs uppercase tracking-[0.18em] text-muted">{ENTITY_LABELS[entityType]}</div>
                     <div className="mt-1 text-sm font-semibold text-foreground">{entityLabel}</div>
-                    <div className="mt-2 text-xs text-secondary">{activeSourceUrl ? activeSourceUrl : "No source URL stored yet."}</div>
+                    <div className="mt-2 break-all text-xs text-secondary">{activeSourceUrl ? activeSourceUrl : "No source URL stored yet."}</div>
                     {sourceUrls.length > 1 ? (
                       <div className="mt-3 space-y-1.5">
                         <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted">Source URL</div>
@@ -652,9 +660,6 @@ export function MediaScrapeDialog({ open, onClose, entityType, entity }: Props) 
                       </div>
                     ) : null}
                   </div>
-                  <div className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent">
-                    {sourceUrls.length} URL{sourceUrls.length === 1 ? "" : "s"}
-                  </div>
                 </div>
               </div>
 
@@ -675,7 +680,7 @@ export function MediaScrapeDialog({ open, onClose, entityType, entity }: Props) 
                 {selectedScraper ? (
                   <div className="rounded-xl border border-border bg-card/70 px-3 py-2 text-xs text-muted">
                     <div>Supports: {selectedScraper.supportedScrapes.join(", ")}</div>
-                    <div className="mt-1 truncate">Source: {selectedScraper.sourcePath}</div>
+                    <div className="mt-1 break-all">Source: {selectedScraper.sourcePath}</div>
                   </div>
                 ) : null}
               </div>
@@ -858,7 +863,7 @@ export function MediaScrapeDialog({ open, onClose, entityType, entity }: Props) 
                           >
                             <div className="text-sm font-semibold text-foreground">{title}</div>
                             <div className="mt-1 min-h-[1.25rem] text-xs text-secondary">{subtitle || missingSubtitle}</div>
-                            <div className="mt-2 line-clamp-2 text-xs text-muted">{candidate.urls[0] || candidate.details || "No URL available"}</div>
+                            <div className="mt-2 line-clamp-2 break-all text-xs text-muted">{candidate.urls[0] || candidate.details || "No URL available"}</div>
                             <div className="mt-3 text-[11px] uppercase tracking-[0.18em] text-muted">
                               {candidate.performers.length} performer{candidate.performers.length === 1 ? "" : "s"} • {candidate.tags.length} tag{candidate.tags.length === 1 ? "" : "s"}
                             </div>

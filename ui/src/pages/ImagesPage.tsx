@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { aiVisual, images } from "../api/client";
-import type { EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
+import type { DeleteEntityOptions, EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner } from "../components/Rating";
@@ -28,6 +28,7 @@ import { BookmarkButton } from "../components/BookmarkButton";
 const Lightbox = lazy(() => import("../components/Lightbox").then((module) => ({ default: module.Lightbox })));
 const ImageCreateModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageCreateModal })));
 const QuickViewDialog = lazy(() => import("../components/QuickViewDialog").then((module) => ({ default: module.QuickViewDialog })));
+const MediaScrapeDialog = lazy(() => import("../components/MediaScrapeDialog").then((module) => ({ default: module.MediaScrapeDialog })));
 
 const SEARCH_MODE_OPTIONS = [
   { value: "text", label: "Text", title: "Text search" },
@@ -79,6 +80,7 @@ export function ImagesPage({ onNavigate }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
+  const [showScrapeDialog, setShowScrapeDialog] = useState(false);
   const [wallColumnCount, setWallColumnCount] = useState(6);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
@@ -134,6 +136,7 @@ export function ImagesPage({ onNavigate }: Props) {
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
   const selecting = selectedIds.size > 0;
+  const selectedImage = selectedIds.size === 1 ? items.find((item) => selectedIds.has(item.id)) : undefined;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const lightboxImages: LightboxImage[] = useMemo(
@@ -151,8 +154,10 @@ export function ImagesPage({ onNavigate }: Props) {
     setFilter(withSeededRandomSort(filter, next));
   }, [filter, setFilter]);
 
-  const bulkDeleteMut = useMutation({
-    mutationFn: () => images.bulkDelete([...selectedIds]),
+  const bulkDeleteMut = useMutation<void, Error, DeleteEntityOptions | undefined>({
+    mutationFn: async (options) => {
+      await images.bulkDelete([...selectedIds], options);
+    },
     onSuccess: () => { setShowDeleteConfirm(false); selectNone(); queryClient.invalidateQueries({ queryKey: ["images"] }); },
   });
 
@@ -200,6 +205,15 @@ export function ImagesPage({ onNavigate }: Props) {
       onInvertSelection={invertSelection}
       selectionActions={
         <>
+          {canWriteImage && selectedImage ? (
+            <button
+              onClick={() => setShowScrapeDialog(true)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
+            >
+              <Search className="w-3 h-3" />
+              Scrape
+            </button>
+          ) : null}
           {canWriteImage && (
             <button
               onClick={() => setShowBulkEdit(true)}
@@ -228,8 +242,10 @@ export function ImagesPage({ onNavigate }: Props) {
         title={`Delete ${selectedIds.size} image${selectedIds.size === 1 ? "" : "s"}`}
         message={`Delete ${selectedIds.size} selected image${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`}
         confirmLabel={bulkDeleteMut.isPending ? "Deleting..." : "Delete"}
-        onConfirm={() => bulkDeleteMut.mutate()}
-        onCancel={() => setShowDeleteConfirm(false)}
+        onConfirm={(options) => bulkDeleteMut.mutate(options)}
+        onCancel={() => { bulkDeleteMut.reset(); setShowDeleteConfirm(false); }}
+        isPending={bulkDeleteMut.isPending}
+        errorMessage={bulkDeleteMut.error?.message ?? null}
         showDeleteFile
         showDeleteGenerated
       />
@@ -295,6 +311,26 @@ export function ImagesPage({ onNavigate }: Props) {
       ) : null}
       {quickViewId !== null ? (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+      ) : null}
+      {showScrapeDialog && selectedImage ? (
+        <MediaScrapeDialog
+          open={showScrapeDialog}
+          onClose={() => setShowScrapeDialog(false)}
+          entityType="image"
+          entity={{
+            id: selectedImage.id,
+            title: selectedImage.title,
+            details: selectedImage.details,
+            creator: selectedImage.photographer,
+            date: selectedImage.date,
+            studioName: selectedImage.studioName,
+            urls: selectedImage.urls,
+            tags: selectedImage.tags,
+            performers: selectedImage.performers,
+            files: selectedImage.files,
+            organized: selectedImage.organized,
+          }}
+        />
       ) : null}
     </Suspense>
     </>

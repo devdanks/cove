@@ -238,7 +238,14 @@ public class SystemController(
     [RequiresPermission(Permissions.SystemRead)]
     public async Task<ActionResult<IReadOnlyList<DownloaderMatchDto>>> MatchDownloader([FromServices] DownloaderService downloaderService, [FromBody] DownloaderMatchRequestDto dto, CancellationToken ct)
     {
-        return Ok(await downloaderService.MatchUrlAsync(dto.Url, ct));
+        try
+        {
+            return Ok(await downloaderService.MatchUrlAsync(dto.Url, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpPost("downloaders/preflight")]

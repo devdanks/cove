@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json.Serialization;
 
 namespace Cove.Plugins;
 
@@ -385,15 +386,79 @@ public class ExtensionExternalDependency
     public string? DockerHint { get; set; }
     public string? Url { get; set; }
     public List<string> ExtensionIds { get; set; } = [];
+
+    [JsonPropertyName("optional")]
+    public bool? LegacyOptional
+    {
+        get => null;
+        set
+        {
+            if (value.HasValue)
+                Required = !value.Value;
+        }
+    }
+
+    [JsonPropertyName("settingsKey")]
+    public string? LegacySettingsKey
+    {
+        get => null;
+        set
+        {
+            var trimmed = value?.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+                return;
+
+            if (!ConfigurationKeys.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
+                ConfigurationKeys.Add(trimmed);
+        }
+    }
 }
 
 public class ExtensionSettingManifest
 {
-    public required string Name { get; set; }
+    public string Name { get; set; } = string.Empty;
     public string Type { get; set; } = "STRING";
     public string? DisplayName { get; set; }
     public string? Description { get; set; }
     public List<string> ExtensionIds { get; set; } = [];
+
+    [JsonPropertyName("key")]
+    public string? LegacyKey
+    {
+        get => null;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(Name))
+                return;
+
+            Name = value?.Trim() ?? string.Empty;
+        }
+    }
+
+    [JsonPropertyName("label")]
+    public string? LegacyLabel
+    {
+        get => null;
+        set
+        {
+            if (string.IsNullOrWhiteSpace(DisplayName))
+                DisplayName = value?.Trim();
+        }
+    }
+
+    [JsonPropertyName("defaultValue")]
+    public string? LegacyDefaultValue
+    {
+        get => null;
+        set { }
+    }
+
+    [JsonPropertyName("scope")]
+    public string? LegacyScope
+    {
+        get => null;
+        set { }
+    }
 }
 
 // ============================================================================

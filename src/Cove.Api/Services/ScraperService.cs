@@ -608,7 +608,7 @@ public class ScraperService
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Built-in scraper {ScraperId} failed for URL {Url}", scraperId, url);
+            throw new InvalidOperationException($"Built-in scraper '{scraperId}' failed for URL '{url}': {ex.Message}", ex);
         }
 
         return null;
@@ -1150,8 +1150,7 @@ public class ScraperService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to scrape URL {Url}", url);
-            return null;
+            throw new InvalidOperationException($"XPath scrape failed for URL '{url}': {ex.Message}", ex);
         }
     }
 
@@ -1215,8 +1214,7 @@ public class ScraperService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to scrape JSON URL {Url}", url);
-            return null;
+            throw new InvalidOperationException($"JSON scrape failed for URL '{url}': {ex.Message}", ex);
         }
     }
 
@@ -1245,6 +1243,9 @@ public class ScraperService
         if (!registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByUrl))
             return null;
 
+        if (!await _extensionManager.EnsureExtensionInitializedAsync(registration.Provider.Id, ct))
+            return null;
+
         List<string> urls = string.IsNullOrWhiteSpace(url) ? [] : [url];
         var permissions = BuildScraperPermissions(url);
 
@@ -1266,6 +1267,9 @@ public class ScraperService
         if (!registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByName))
             return null;
 
+        if (!await _extensionManager.EnsureExtensionInitializedAsync(registration.Provider.Id, ct))
+            return null;
+
         var request = new ScraperRequest<string>(registration.Descriptor.Id, name, new ScraperPermissions());
         return registration.Descriptor.Entity switch
         {
@@ -1283,6 +1287,9 @@ public class ScraperService
     private async Task<Dictionary<string, object>?> ScrapeFragmentWithExtensionAsync(ExtensionScraperRegistration registration, Dictionary<string, object> fragment, CancellationToken ct)
     {
         if (!registration.Descriptor.Capabilities.HasFlag(ScraperCapabilities.ByFragment))
+            return null;
+
+        if (!await _extensionManager.EnsureExtensionInitializedAsync(registration.Provider.Id, ct))
             return null;
 
         switch (registration.Descriptor.Entity)

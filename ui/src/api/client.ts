@@ -709,8 +709,16 @@ export const images = {
   createFromFile: (data: FileBackedCreate) => request<Image>("/images/from-file", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: ImageUpdate) => request<Image>(`/images/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkImageUpdate) => request<void>("/images/bulk", { method: "POST", body: JSON.stringify(data) }),
-  delete: (id: number) => request<void>(`/images/${id}`, { method: "DELETE" }),
-  bulkDelete: (ids: number[]) => request<void>("/images/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  delete: (id: number, options?: boolean | DeleteEntityOptions) => {
+    const deleteFile = typeof options === "boolean" ? options : options?.deleteFile;
+    const deleteGenerated = typeof options === "boolean" ? undefined : options?.deleteGenerated;
+    return request<void>(`/images/${id}${buildQuery(undefined, { deleteFile, deleteGenerated })}`, { method: "DELETE" });
+  },
+  bulkDelete: (ids: number[], options?: boolean | DeleteEntityOptions) => {
+    const deleteFiles = typeof options === "boolean" ? options : options?.deleteFile ?? false;
+    const deleteGenerated = typeof options === "boolean" ? false : options?.deleteGenerated ?? false;
+    return request<void>("/images/bulk", { method: "DELETE", body: JSON.stringify({ ids, deleteFiles, deleteGenerated }) });
+  },
   incrementLike: (id: number) => request<number>(`/images/${id}/like`, { method: "POST" }),
   decrementLike: (id: number) => request<number>(`/images/${id}/like`, { method: "DELETE" }),
   resetLike: (id: number) => request<number>(`/images/${id}/like/reset`, { method: "POST" }),

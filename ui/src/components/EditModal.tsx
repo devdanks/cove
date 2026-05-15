@@ -30,7 +30,7 @@ export function EditModal({ title, open, onClose, children }: Props) {
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="px-4 sm:px-6 overflow-y-auto flex-1">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
           {children}
         </div>
       </div>
@@ -126,19 +126,24 @@ export function CreateModalActions({
   onCreateAnotherChange: (value: boolean) => void;
 }) {
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-      <label className="flex items-center gap-2 text-sm text-secondary">
-        <input
-          type="checkbox"
-          checked={createAnother}
-          onChange={(event) => onCreateAnotherChange(event.target.checked)}
-          className="rounded bg-card border-border"
-        />
-        Create another
-      </label>
-      <div className="flex items-center justify-end gap-3">
-        {onCancel && <button onClick={onCancel} className="px-4 py-2 text-sm text-secondary hover:text-white">Cancel</button>}
-        <SaveButton loading={loading} onClick={onSave} />
+    <div className="mt-6 rounded-2xl border border-border bg-card/70 p-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <label className="flex items-start gap-3 rounded-xl border border-border/70 bg-surface/70 px-3 py-3 text-sm text-secondary">
+          <input
+            type="checkbox"
+            checked={createAnother}
+            onChange={(event) => onCreateAnotherChange(event.target.checked)}
+            className="mt-0.5 rounded border-border bg-card"
+          />
+          <span>
+            <span className="block font-medium text-foreground">Create another after save</span>
+            <span className="mt-1 block text-xs text-secondary">Keep this dialog open and reset the form so you can immediately start the next item.</span>
+          </span>
+        </label>
+        <div className="flex items-center justify-end gap-3">
+          {onCancel && <button onClick={onCancel} className="px-4 py-2 text-sm text-secondary hover:text-white">Cancel</button>}
+          <SaveButton loading={loading} onClick={onSave} />
+        </div>
       </div>
     </div>
   );
