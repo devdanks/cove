@@ -63,11 +63,20 @@ export function WallMediaCard({
     const element = mediaRef.current;
     if (!element) return;
 
+    if (typeof IntersectionObserver === "undefined") {
+      setShouldLoadVideo(true);
+      setShouldPlayVideo(true);
+      return;
+    }
+
     const loadObserver = new IntersectionObserver(([entry]) => {
       setShouldLoadVideo(entry.isIntersecting);
     }, { rootMargin: videoLoadRootMargin, threshold: 0 });
     const playObserver = new IntersectionObserver(([entry]) => {
-      setShouldPlayVideo(entry.isIntersecting && entry.intersectionRatio >= videoPlayThreshold);
+      const intersectionRatio = typeof entry.intersectionRatio === "number"
+        ? entry.intersectionRatio
+        : (entry.isIntersecting ? 1 : 0);
+      setShouldPlayVideo(entry.isIntersecting && intersectionRatio >= videoPlayThreshold);
     }, { threshold: [0, Math.min(1, Math.max(0.01, videoPlayThreshold)), 1] });
 
     loadObserver.observe(element);
@@ -122,7 +131,10 @@ export function WallMediaCard({
     if (!video || !useVideo || !videoSrc || !videoAvailable || videoFailed) return;
 
     if (shouldPlayVideo) {
-      video.play().catch(() => {});
+      const playResult = video.play();
+      if (playResult && typeof playResult.catch === "function") {
+        playResult.catch(() => {});
+      }
     } else {
       video.pause();
     }

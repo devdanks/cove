@@ -8,27 +8,27 @@ afterEach(() => {
 });
 
 describe("WallMediaCard", () => {
-  it("uses the image fallback without mounting a missing preview video", async () => {
+  it("uses the image fallback when the preview status request fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
 
     const { container } = render(
-      <WallMediaCard title="Missing preview" imageSrc="/image.jpg" videoSrc="/missing.mp4" useVideo />,
+      <WallMediaCard title="Missing preview" imageSrc="/image.jpg" videoSrc="/missing.mp4" videoStatusSrc="/missing.mp4/status" useVideo />,
     );
 
     expect(screen.getByAltText("Missing preview")).toBeInTheDocument();
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/missing.mp4", expect.objectContaining({ method: "HEAD" })));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/missing.mp4/status", expect.objectContaining({ method: "GET" })));
     expect(container.querySelector("video")).not.toBeInTheDocument();
   });
 
-  it("does not treat a non-video preflight response as an available preview", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, headers: { get: () => "text/html" } }));
+  it("does not mount a preview video when status reports unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ available: false }) }));
 
     const { container } = render(
-      <WallMediaCard title="Fallback preview" imageSrc="/image.jpg" videoSrc="/fallback.html" useVideo />,
+      <WallMediaCard title="Fallback preview" imageSrc="/image.jpg" videoSrc="/preview.mp4" videoStatusSrc="/preview.mp4/status" useVideo />,
     );
 
     expect(screen.getByAltText("Fallback preview")).toBeInTheDocument();
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/fallback.html", expect.objectContaining({ method: "HEAD" })));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/preview.mp4/status", expect.objectContaining({ method: "GET" })));
     expect(container.querySelector("video")).not.toBeInTheDocument();
   });
 
@@ -50,11 +50,19 @@ describe("WallMediaCard", () => {
   });
 
   it("mounts the preview video after the preview exists", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, headers: { get: () => "video/mp4" } }));
     vi.stubGlobal(
       "IntersectionObserver",
       class {
-        observe() {}
+        private readonly callback: IntersectionObserverCallback;
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          this.callback([{ isIntersecting: true, intersectionRatio: 1, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+        }
+
         disconnect() {}
       },
     );
@@ -67,15 +75,31 @@ describe("WallMediaCard", () => {
     expect(container.querySelector("video")).toHaveAttribute("src", "/preview.mp4");
   });
 
-  it("can use a successful preview status endpoint before mounting video", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ available: false }) }));
+  it("mounts video after a successful preview status response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ available: true }) }));
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private readonly callback: IntersectionObserverCallback;
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          this.callback([{ isIntersecting: true, intersectionRatio: 1, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+        }
+
+        disconnect() {}
+      },
+    );
 
     const { container } = render(
       <WallMediaCard title="Status preview" imageSrc="/image.jpg" videoSrc="/preview.mp4" videoStatusSrc="/preview.mp4/status" useVideo />,
     );
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/preview.mp4/status", expect.objectContaining({ method: "GET" })));
-    expect(container.querySelector("video")).not.toBeInTheDocument();
+    await waitFor(() => expect(container.querySelector("video")).toBeInTheDocument());
   });
 
   it("observes and plays the video after async status mounts it", async () => {
@@ -92,7 +116,7 @@ describe("WallMediaCard", () => {
         }
 
         observe(target: Element) {
-          this.callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+          this.callback([{ isIntersecting: true, intersectionRatio: 1, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
         }
 
         disconnect() {}

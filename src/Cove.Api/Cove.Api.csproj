@@ -5,6 +5,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Cove.Api serves the Vite-built SPA from wwwroot. In Debug, the ASP.NET Core static
+         web assets pipeline spends most of the build scanning those JS chunks for Razor
+         collocated modules Cove.Api does not use. Release/publish keeps the SDK pipeline. -->
+    <StaticWebAssetsEnabled Condition="'$(Configuration)' == 'Debug'">false</StaticWebAssetsEnabled>
   </PropertyGroup>
 
   <!-- Publish as a self-contained single-file executable with wwwroot embedded -->
