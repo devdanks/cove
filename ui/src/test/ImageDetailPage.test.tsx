@@ -49,7 +49,7 @@ vi.mock("../router/RouteRegistry", () => ({
 }));
 
 vi.mock("../components/AspectRatingsPanel", () => ({
-  AspectRatingsPanel: () => <div>Aspect Ratings</div>,
+  AspectRatingsPanel: () => <div>Rating Breakdown</div>,
 }));
 
 vi.mock("../components/Rating", () => ({
@@ -58,6 +58,10 @@ vi.mock("../components/Rating", () => ({
 
 vi.mock("../components/ExtensionEntityActions", () => ({
   ExtensionEntityActions: () => <div>Extension Actions</div>,
+}));
+
+vi.mock("../pages/ImageEditModal", () => ({
+  ImageEditPanel: () => <div>Edit Image Panel</div>,
 }));
 
 vi.mock("../components/cardNavigation", () => ({
@@ -157,6 +161,9 @@ describe("ImageDetailPage", () => {
     fireEvent.click(within(tabs).getByRole("tab", { name: /related/i }));
     expect(await screen.findByText("Alex")).toBeInTheDocument();
     expect(screen.getByText("Beach")).toBeInTheDocument();
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: /edit/i }));
+    expect(await screen.findByText("Edit Image Panel")).toBeInTheDocument();
   });
 
   it("supports keyboard shortcuts for related tab, lightbox, and likes count", async () => {

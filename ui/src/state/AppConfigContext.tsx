@@ -52,6 +52,18 @@ function normalizeWallPreviewType(value: string | undefined) {
   return value === "image" ? "image" : "video";
 }
 
+function normalizeFeedVideoSource(value: string | undefined) {
+  return value === "video" ? "video" : "preview";
+}
+
+function clampNumber(value: number | undefined, min: number, max: number) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
 function normalizeConfig(config: CoveConfig, userKeybindingOverrides?: Record<string, string> | null): CoveConfig {
   const interfaceConfig = config.interface;
   const uiConfig = config.ui ?? ({} as CoveConfig["ui"]);
@@ -76,7 +88,13 @@ function normalizeConfig(config: CoveConfig, userKeybindingOverrides?: Record<st
       autoplayOnListClick: uiConfig.autoplayOnListClick ?? false,
       maxLoopDuration: uiConfig.maxLoopDuration ?? 0,
       alwaysResumeOnPlayback: uiConfig.alwaysResumeOnPlayback ?? true,
+      playerVideoStartPercent: clampNumber(uiConfig.playerVideoStartPercent, 0, 95),
+      playerVideoStartMinDuration: Math.max(0, uiConfig.playerVideoStartMinDuration ?? 0),
       wallPreviewType: normalizeWallPreviewType(uiConfig.wallPreviewType),
+      feedVideoSource: normalizeFeedVideoSource(uiConfig.feedVideoSource),
+      feedVideoSound: uiConfig.feedVideoSound ?? false,
+      feedVideoStartPercent: clampNumber(uiConfig.feedVideoStartPercent, 0, 95),
+      feedVideoStartMinDuration: Math.max(0, uiConfig.feedVideoStartMinDuration ?? 0),
       keybindingOverrides: normalizeKeybindingOverrides(userKeybindingOverrides),
       ratingSystemOptions: {
         type: normalizeRatingSystemType(ratingOptions.type),

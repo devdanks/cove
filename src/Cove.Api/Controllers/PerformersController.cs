@@ -173,7 +173,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (resolvedScrape.ErrorResult != null)
             return resolvedScrape.ErrorResult;
 
-        await performerScrapeService.ApplyAsync(performer, resolvedScrape.Scraped!, dto.CreateMissingTags, ct);
+        await performerScrapeService.ApplyAsync(performer, resolvedScrape.Scraped!, dto.CreateMissingTags, ct: ct);
         await performerRepo.UpdateAsync(performer, ct);
 
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
@@ -204,7 +204,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (performer == null)
             return NotFound();
 
-        await performerScrapeService.ApplyAsync(performer, dto.Scraped, dto.CreateMissingTags, ct);
+        await performerScrapeService.ApplyAsync(performer, dto.Scraped, dto.CreateMissingTags, dto.ReplaceFields, dto.CollectionModes, ct);
         await performerRepo.UpdateAsync(performer, ct);
 
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
@@ -292,7 +292,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (performer == null)
             return NotFound();
 
-        var imported = await metadataServerService.MergePerformerAsync(performer, dto.Endpoint, dto.PerformerId, ct);
+        var imported = await metadataServerService.MergePerformerAsync(performer, dto.Endpoint, dto.PerformerId, dto, ct);
         if (!imported)
             return NotFound();
 

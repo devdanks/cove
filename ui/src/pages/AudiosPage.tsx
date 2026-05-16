@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Headphones, Mic2, MonitorPlay, PlayCircle } from "lucide-react";
 import { audios, system } from "../api/client";
 import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundError, type UrlDownloadMode } from "../utils/createFromUrlDownload";
@@ -15,6 +15,7 @@ import { useAuth } from "../auth/AuthContext";
 import { canWriteEntity } from "../auth/visibility";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { getAudioDisplayTitle } from "../utils/audioTextDisplay";
@@ -25,6 +26,7 @@ import { StringListEditor } from "../components/StringListEditor";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { SourceDownloadDialog } from "../components/SourceDownloadDialog";
 import { AUDIO_CRITERIA } from "../components/FilterDialog";
+import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 
 const SORT_OPTIONS = [
   { value: "updatedAt", label: "Updated At" },
@@ -54,24 +56,38 @@ export function AudiosPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list"] as const,
+    allowedDisplayModes: ["grid", "list", "tagger"] as const,
+    allowInfinitePageSize: true,
   });
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-
-  const { data, isLoading } = useQuery({
+  const listData = useInfiniteListData<Audio>({
     queryKey: ["audios", filter, objectFilter],
-    queryFn: () => hasObjectFilter
-      ? audios.findFiltered({ findFilter: filter, objectFilter: objectFilter as AudioFilterCriteria })
-      : audios.find(filter),
+    filter,
+    chunkSize: defaultState.filter.perPage ?? 40,
+    queryPage: (nextFilter) => hasObjectFilter
+      ? audios.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as AudioFilterCriteria })
+      : audios.find(nextFilter),
   });
 
-  const items = data?.items ?? [];
+  const items = listData.items;
+  const totalCount = listData.totalCount;
+  const isLoading = listData.isLoading;
   const { engagementById } = useEntityEngagementBatch("audio", items.map((item) => item.id));
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter }), [listData.infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
   const { hasPermission } = useAuth();
   const canWriteAudio = canWriteEntity("audio", hasPermission);
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await listData.fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
 
   return (
     <>
@@ -82,13 +98,30 @@ export function AudiosPage({ onNavigate }: Props) {
       filterMode="audios"
       filter={filter}
       onFilterChange={setFilter}
-      totalCount={data?.totalCount ?? 0}
+      totalCount={totalCount}
       isLoading={isLoading}
       searchPlaceholder="Search audio, tags, performers..."
       sortOptions={SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
-      availableDisplayModes={["grid", "list"]}
+      availableDisplayModes={["grid", "list", "tagger"]}
+      allowInfinitePageSize
+      showPagingControls={!listData.infinitePageSize}
+      selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
+      onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
+      selectAllMatchingLabel={`Select all ${totalCount} matching`}
+      selectAllMatchingPending={selectAllMatchingPending}
+      infiniteScroll={listData.infinitePageSize ? {
+        hasNextPage: listData.infiniteQuery.hasNextPage,
+        hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
+        isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
+        isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
+        onLoadMore: listData.loadMore,
+        onLoadPrevious: listData.loadPrevious,
+        loadedCount: listData.infiniteQuery.loadedThroughCount,
+        previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
+        totalCount,
+      } : undefined}
       onNew={canWriteAudio ? () => setShowCreate(true) : undefined}
       criteriaDefinitions={AUDIO_CRITERIA}
       objectFilter={objectFilter}
@@ -104,7 +137,20 @@ export function AudiosPage({ onNavigate }: Props) {
           No audio items matched the current filter.
         </div>
       ) : (
-        displayMode === "list" ? (
+        displayMode === "tagger" ? (
+          <ScraperEntityTagger
+            entityType="audio"
+            label="Audio"
+            items={items}
+            selectedIds={selectedIds}
+            selecting={selecting}
+            onSelect={toggle}
+            getTitle={getAudioDisplayTitle}
+            getImageUrl={(audio) => audio.imagePath ?? undefined}
+            getRoute={(audio) => ({ page: "audio", id: audio.id })}
+            queryKey="audios"
+          />
+        ) : displayMode === "list" ? (
           <AudioListTable audios={items} engagementById={engagementById} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} />
         ) : (
         <EntityCardGrid minCardWidth="280px">

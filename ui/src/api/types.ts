@@ -1668,6 +1668,8 @@ export interface UiConfig {
   autoplayOnListClick: boolean;
   maxLoopDuration: number;
   alwaysResumeOnPlayback: boolean;
+  playerVideoStartPercent: number;
+  playerVideoStartMinDuration: number;
   continuePlaylistDefault: boolean;
   showAbLoopControls: boolean;
   soundOnPreview: boolean;
@@ -1678,6 +1680,10 @@ export interface UiConfig {
   wallShowTitle: boolean;
   wallPlayback: number;
   wallPreviewType: string;
+  feedVideoSource: string;
+  feedVideoSound: boolean;
+  feedVideoStartPercent: number;
+  feedVideoStartMinDuration: number;
   deleteFileDefault: boolean;
   slideshowDelay: number;
   noBrowser: boolean;
@@ -2061,6 +2067,7 @@ export interface MetadataServerPerformerMatch {
 export interface MetadataServerPerformerImportRequest {
   endpoint: string;
   performerId: string;
+  fieldStrategies?: Record<string, "ignore" | "merge" | "overwrite">;
 }
 
 export interface MetadataServerFindByIdsRequest {
@@ -2185,6 +2192,7 @@ export interface MetadataServerSceneImportRequest {
   studioOverride?: MetadataServerSceneEntityOverride;
   performerOverrides?: MetadataServerSceneEntityOverride[];
   tagOverrides?: MetadataServerSceneEntityOverride[];
+  fieldStrategies?: Record<string, "ignore" | "merge" | "overwrite">;
 }
 
 // ===== Filter Criteria =====
@@ -2776,9 +2784,30 @@ export interface ExtensionManifest {
   pageOverrides: ExtensionPageOverride[];
   dialogOverrides: ExtensionDialogOverride[];
   actions: ExtensionAction[];
+  tutorialTopics?: ExtensionTutorialTopic[];
   frontendRuntimeVersion?: string;
   jsBundleUrl?: string;
   cssBundleUrl?: string;
+}
+
+export interface ExtensionTutorialTopic {
+  id: string;
+  title: string;
+  description?: string;
+  pages?: string[];
+  extensionId?: string;
+  order: number;
+  slides?: ExtensionTutorialSlide[];
+}
+
+export interface ExtensionTutorialSlide {
+  id: string;
+  title: string;
+  caption: string;
+  points?: string[];
+  imageSrc?: string;
+  imageAlt?: string;
+  mockKind?: string;
 }
 
 export interface ExtensionPageDef {

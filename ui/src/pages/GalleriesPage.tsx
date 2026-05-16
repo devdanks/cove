@@ -14,6 +14,7 @@ import { GALLERY_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GALLERY_BULK_FIELDS } from "../components/BulkEditDialog";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { createNestedRouteLinkProps, createRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle } from "../components/RouteCardLinkOverlay";
 import { useWallColumns } from "../hooks/useWallColumns";
@@ -54,12 +55,14 @@ export function GalleriesPage({ onNavigate }: Props) {
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list", "wall"] as const,
+    allowInfinitePageSize: true,
   });
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [wallColumnCount, setWallColumnCount] = useState(5);
   const [downloadTarget, setDownloadTarget] = useState<Gallery | null>(null);
   const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWriteGallery = canWriteEntity("gallery", hasPermission);
@@ -67,24 +70,37 @@ export function GalleriesPage({ onNavigate }: Props) {
   const canDownloadGallery = hasPermission("jobs.run") && canWriteGallery;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const { data, isLoading } = useQuery({
+  const listData = useInfiniteListData<Gallery>({
     queryKey: ["galleries", filter, objectFilter],
-    queryFn: () =>
+    filter,
+    chunkSize: defaultState.filter.perPage ?? 40,
+    queryPage: (nextFilter) =>
       hasObjectFilter
-        ? galleries.findFiltered({ findFilter: filter, objectFilter: objectFilter as GalleryFilterCriteria })
-        : galleries.find(filter),
+        ? galleries.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as GalleryFilterCriteria })
+        : galleries.find(nextFilter),
   });
 
-  const items = data?.items ?? [];
+  const items = listData.items;
+  const totalCount = listData.totalCount;
+  const isLoading = listData.isLoading;
   const { engagementById } = useEntityEngagementBatch("gallery", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount);
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter }), [listData.infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
   const selectedGallery = selectedIds.size === 1 ? items.find((gallery) => selectedIds.has(gallery.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
   const canDownloadSelectedGallery = canDownloadGallery && selectedDownloadTargets.length > 0;
   const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-galleries");
   const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await listData.fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
 
   const bulkDeleteMut = useMutation({
     mutationFn: () => galleries.bulkDelete([...selectedIds]),
@@ -147,12 +163,29 @@ export function GalleriesPage({ onNavigate }: Props) {
       filterMode="galleries"
       filter={filter}
       onFilterChange={setFilter}
-      totalCount={data?.totalCount ?? 0}
+      totalCount={totalCount}
       isLoading={isLoading}
       sortOptions={GALLERY_SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
       availableDisplayModes={["grid", "list", "wall"]}
+      allowInfinitePageSize
+      showPagingControls={!listData.infinitePageSize}
+      selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
+      onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
+      selectAllMatchingLabel={`Select all ${totalCount} matching`}
+      selectAllMatchingPending={selectAllMatchingPending}
+      infiniteScroll={listData.infinitePageSize ? {
+        hasNextPage: listData.infiniteQuery.hasNextPage,
+        hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
+        isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
+        isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
+        onLoadMore: listData.loadMore,
+        onLoadPrevious: listData.loadPrevious,
+        loadedCount: listData.infiniteQuery.loadedThroughCount,
+        previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
+        totalCount,
+      } : undefined}
       criteriaDefinitions={GALLERY_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}

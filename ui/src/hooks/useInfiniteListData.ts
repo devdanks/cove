@@ -1,0 +1,72 @@
+import { useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import type { FindFilter, PaginatedResponse } from "../api/types";
+import { fetchAllMatchingIds } from "../utils/selectAllMatching";
+import { usePaginatedInfiniteQuery } from "./usePaginatedInfiniteQuery";
+
+interface UseInfiniteListDataOptions<TItem extends { id: string | number }> {
+  queryKey: readonly unknown[];
+  filter: FindFilter;
+  queryPage: (filter: FindFilter) => Promise<PaginatedResponse<TItem>>;
+  enabled?: boolean;
+  chunkSize?: number;
+}
+
+export function useInfiniteListData<TItem extends { id: string | number }>({
+  queryKey,
+  filter,
+  queryPage,
+  enabled = true,
+  chunkSize,
+}: UseInfiniteListDataOptions<TItem>) {
+  const infinitePageSize = filter.perPage === 0;
+  const infiniteChunkSize = chunkSize ?? 40;
+  const infiniteFilterKey = useMemo(
+    () => ({ ...filter, page: 1, perPage: infiniteChunkSize }),
+    [filter, infiniteChunkSize],
+  );
+
+  const pageQuery = useQuery({
+    queryKey: [...queryKey, "page", filter],
+    queryFn: () => queryPage(filter),
+    enabled: enabled && !infinitePageSize,
+  });
+
+  const infiniteQuery = usePaginatedInfiniteQuery<TItem>({
+    queryKey: [...queryKey, "infinite", infiniteFilterKey],
+    enabled: enabled && infinitePageSize,
+    chunkSize: infiniteChunkSize,
+    queryFn: (page, perPage) => queryPage({ ...filter, page, perPage }),
+  });
+
+  const loadMore = useCallback(() => {
+    if (infiniteQuery.hasNextPage && !infiniteQuery.isFetchingNextPage) {
+      void infiniteQuery.fetchNextPage();
+    }
+  }, [infiniteQuery.fetchNextPage, infiniteQuery.hasNextPage, infiniteQuery.isFetchingNextPage]);
+
+  const loadPrevious = useCallback(() => {
+    if (infiniteQuery.hasPreviousPage && !infiniteQuery.isFetchingPreviousPage) {
+      return infiniteQuery.fetchPreviousPage();
+    }
+
+    return Promise.resolve();
+  }, [infiniteQuery.fetchPreviousPage, infiniteQuery.hasPreviousPage, infiniteQuery.isFetchingPreviousPage]);
+
+  const fetchAllIds = useCallback(
+    () => fetchAllMatchingIds(filter, queryPage),
+    [filter, queryPage],
+  );
+
+  return {
+    infinitePageSize,
+    items: infinitePageSize ? infiniteQuery.items : (pageQuery.data?.items ?? []),
+    totalCount: infinitePageSize ? infiniteQuery.totalCount : (pageQuery.data?.totalCount ?? 0),
+    isLoading: infinitePageSize ? infiniteQuery.isPending : pageQuery.isLoading,
+    infiniteQuery,
+    infiniteFilterKey,
+    loadMore,
+    loadPrevious,
+    fetchAllIds,
+  };
+}

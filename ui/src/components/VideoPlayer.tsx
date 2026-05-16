@@ -91,6 +91,14 @@ function roundPlaybackTime(value: number) {
   return Math.round(value * 1000) / 1000;
 }
 
+function getConfiguredPlaybackStartTime(duration: number, startPercent: number, minDuration: number) {
+  if (!Number.isFinite(duration) || duration <= 0 || startPercent <= 0 || duration < minDuration) {
+    return undefined;
+  }
+
+  return roundPlaybackTime(duration * Math.min(95, Math.max(0, startPercent)) / 100);
+}
+
 export function VideoPlayer({
   streamUrl,
   posterUrl,
@@ -140,6 +148,8 @@ export function VideoPlayer({
 }) {
   const { config } = useAppConfig();
   const maxLoopDuration = config?.ui.maxLoopDuration ?? 0;
+  const playerVideoStartPercent = config?.ui.playerVideoStartPercent ?? 0;
+  const playerVideoStartMinDuration = config?.ui.playerVideoStartMinDuration ?? 0;
   const effectiveShowAbLoop = showAbLoop ?? config?.ui.showAbLoopControls ?? true;
   const effectiveResumeTime = config?.ui.alwaysResumeOnPlayback === false ? undefined : resumeTime;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -183,6 +193,10 @@ export function VideoPlayer({
   const timelineDuration = clip ? Math.max(clipEnd - clipStart, 0.001) : Math.max(duration, 0.001);
   const visibleCurrentTime = clip ? Math.max(0, currentTime - clipStart) : currentTime;
   const visibleBuffered = clip ? Math.max(0, Math.min(buffered, clipEnd) - clipStart) : buffered;
+  const defaultPlaybackStartTime = useMemo(
+    () => getConfiguredPlaybackStartTime(duration, playerVideoStartPercent, playerVideoStartMinDuration),
+    [duration, playerVideoStartMinDuration, playerVideoStartPercent],
+  );
   const playbackTrackingTarget = useMemo<PlaybackTrackingTarget | null>(() => {
     if (!trackingEnabled) {
       return null;
@@ -412,7 +426,7 @@ export function VideoPlayer({
     const v = videoRef.current;
     const nextTime = clip
       ? Math.min(Math.max(effectiveResumeTime ?? clip.start, clip.start), clip.end ?? duration)
-      : effectiveResumeTime;
+      : effectiveResumeTime ?? defaultPlaybackStartTime;
     if (v && nextTime != null) {
       v.currentTime = nextTime;
       setCurTime(roundPlaybackTime(nextTime));
@@ -423,7 +437,7 @@ export function VideoPlayer({
     } else if (clip) {
       setAbLoop({ a: null, b: null });
     }
-  }, [clip?.end, clip?.loop, clip?.start, effectiveResumeTime, sceneId, streamUrl]);
+  }, [clip?.end, clip?.loop, clip?.start, defaultPlaybackStartTime, duration, effectiveResumeTime, sceneId, streamUrl]);
 
   useEffect(() => {
     if (!autostart) {
@@ -760,7 +774,9 @@ export function VideoPlayer({
     const shouldAutoplayAfterLoad = pendingRestore?.shouldPlay || pendingAutostartRef.current;
 
     const handleLoadedMetadata = () => {
-      const targetTime = pendingRestore?.time ?? (clip ? clip.start : effectiveResumeTime);
+      const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : duration;
+      const configuredStartTime = getConfiguredPlaybackStartTime(mediaDuration, playerVideoStartPercent, playerVideoStartMinDuration);
+      const targetTime = pendingRestore?.time ?? (clip ? clip.start : effectiveResumeTime ?? configuredStartTime);
       if (targetTime != null && Number.isFinite(targetTime)) {
         video.currentTime = targetTime;
         setCurTime(roundPlaybackTime(targetTime));

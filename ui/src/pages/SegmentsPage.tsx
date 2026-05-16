@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, Loader2, Trash2 } from "lucide-react";
-import { faces, scenes, segmentDisplayProfiles } from "../api/client";
+import { faces, scenes, segmentDisplayProfiles, segmentLibrary, segmentSpans } from "../api/client";
 import type { FindFilter, SegmentDisplayProfile } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
@@ -10,6 +10,7 @@ import { ListPage, type DisplayMode } from "../components/ListPage";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
 import {
   buildAppliedDerivedQuery,
   buildDerivedQueryDescriptor,
@@ -83,6 +84,22 @@ function isPreferredSegmentDisplayProfile(candidate: SegmentDisplayProfile, curr
   return candidate.id < current.id;
 }
 
+async function fetchAllSegmentPages<TItem>(queryPage: (page: number, perPage: number) => Promise<{ items: TItem[]; totalCount: number }>, chunkSize = 1000) {
+  const items: TItem[] = [];
+  let page = 1;
+  let totalCount: number | undefined;
+
+  while (totalCount == null || items.length < totalCount) {
+    const response = await queryPage(page, chunkSize);
+    totalCount = response.totalCount;
+    items.push(...response.items);
+    if (response.items.length === 0) break;
+    page += 1;
+  }
+
+  return items;
+}
+
 export function SegmentsPage({ onNavigate }: Props) {
   const queryClient = useQueryClient();
   const defaultState = useMemo(() => ({
@@ -96,6 +113,7 @@ export function SegmentsPage({ onNavigate }: Props) {
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list"] as const,
+    allowInfinitePageSize: true,
   });
   const { hasPermission } = useAuth();
   const canReadScenes = canReadEntity("scene", hasPermission);
@@ -105,6 +123,8 @@ export function SegmentsPage({ onNavigate }: Props) {
   const [activeProfileId, setActiveProfileId] = useState<number>();
   const [contentView, setContentView] = useState<SegmentsPageContentView>(() => readSegmentsPageContentView());
   const [rawSegmentIds, setRawSegmentIds] = useState<number[]>(() => readRawSegmentIdsFromUrl());
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const [selectedMatchingItems, setSelectedMatchingItems] = useState<{ view: SegmentsPageContentView; spans: DerivedSpanItem[]; raw: RawSegmentItem[] } | null>(null);
 
   const sceneTitle = readStringCriterion(objectFilter.sceneTitleCriterion);
   const sceneSelection = readSceneSelectionCriterion(objectFilter.scenesCriterion);
@@ -114,7 +134,9 @@ export function SegmentsPage({ onNavigate }: Props) {
   );
   const derivedSpanQueryActive = isDerivedSpanQueryFilterActive(objectFilter.derivedSpanQuery);
   const q = filter.q?.trim() ?? "";
-  const perPage = filter.perPage ?? 24;
+  const infinitePageSize = filter.perPage === 0;
+  const defaultPerPage = defaultState.filter.perPage ?? 24;
+  const perPage = infinitePageSize ? defaultPerPage : filter.perPage ?? defaultPerPage;
   const pageNumber = filter.page ?? 1;
   const sort = filter.sort ?? "updated_at";
   const direction = filter.direction ?? "desc";
@@ -226,6 +248,81 @@ export function SegmentsPage({ onNavigate }: Props) {
     [derivedSpanQueryFilter],
   );
   const performerFaceQueriesLoading = performerFaceQueries.some((query) => query.isLoading);
+  const derivedQueryEnabled = !isRawView && activeProfileId != null && (!derivedSpanQueryActive || !performerFaceQueriesLoading) && (sceneSelection.includeIds.length === 0 || !selectedScenesLoading);
+  const rawQueryEnabled = isRawView;
+
+  const queryDerivedSpansPage = useCallback(async (page: number, pageSize: number) => {
+    if (activeProfileId == null) {
+      return { items: [], totalCount: 0, page, perPage: pageSize };
+    }
+
+    const response = await segmentSpans.search({
+      profile: activeProfileId,
+      derivedQuery: appliedQuery != null ? {
+        operator: appliedQuery.operator,
+        operands: appliedQuery.operands,
+        mergeGapSec: appliedQuery.mergeGapSec,
+        minDurationSec: appliedQuery.minDurationSec,
+      } : undefined,
+      page,
+      perPage: pageSize,
+      sort,
+      direction,
+      q: q || undefined,
+      sceneTitle: sceneTitle || undefined,
+      sceneIds: sceneSelection.includeIds.length > 0 ? sceneSelection.includeIds : undefined,
+      excludeSceneIds: sceneSelection.excludeIds.length > 0 ? sceneSelection.excludeIds : undefined,
+    });
+
+    return {
+      items: response.items.map<DerivedSpanItem>((item) => ({
+        id: `${item.sceneId}:${item.span.spanKey}`,
+        key: `${item.sceneId}:${item.span.spanKey}`,
+        kind: derivedQueryDescriptor ? "derivedQuery" : "profile",
+        sceneId: item.sceneId,
+        sceneTitle: item.sceneTitle ?? `Scene #${item.sceneId}`,
+        sceneUpdatedAt: item.sceneUpdatedAt,
+        span: item.span,
+        profileId: item.profileId,
+        derivedQuery: appliedQuery != null ? {
+          operator: appliedQuery.operator,
+          operands: appliedQuery.operands,
+          mergeGapSec: appliedQuery.mergeGapSec,
+          minDurationSec: appliedQuery.minDurationSec,
+        } : undefined,
+        derivedQueryDescriptor,
+      })),
+      totalCount: response.totalCount,
+      page: response.page,
+      perPage: response.perPage,
+    };
+  }, [activeProfileId, appliedQuery, derivedQueryDescriptor, direction, q, sceneSelection.excludeIds, sceneSelection.includeIds, sceneTitle, sort]);
+
+  const queryRawSegmentsPage = useCallback(async (page: number, pageSize: number) => {
+    const response = await segmentLibrary.list({
+      q: q || undefined,
+      ids: rawSegmentIds.length > 0 ? rawSegmentIds.join(",") : undefined,
+      sceneIds: sceneSelection.includeIds.length > 0 ? sceneSelection.includeIds.join(",") : undefined,
+      excludeSceneIds: sceneSelection.excludeIds.length > 0 ? sceneSelection.excludeIds.join(",") : undefined,
+      sceneTitle: sceneTitle || undefined,
+      sort,
+      direction,
+      page,
+      perPage: pageSize,
+    });
+
+    return {
+      items: response.items.map((item) => ({
+        ...item,
+        key: `segment:${item.id}`,
+        sceneId: item.hostId,
+        sceneTitle: item.hostTitle?.trim() || `Scene #${item.hostId}`,
+      })),
+      totalCount: response.totalCount,
+      page: response.page,
+      perPage: response.perPage,
+    };
+  }, [direction, q, rawSegmentIds, sceneSelection.excludeIds, sceneSelection.includeIds, sceneTitle, sort]);
 
   const segmentsWindowQuery = useDerivedSpansQuery({
     activeProfileId,
@@ -239,7 +336,7 @@ export function SegmentsPage({ onNavigate }: Props) {
     excludeSceneIds: sceneSelection.excludeIds,
     appliedQuery,
     derivedQueryDescriptor: appliedQuery != null ? derivedQueryDescriptor : undefined,
-    enabled: !isRawView && activeProfileId != null && (!derivedSpanQueryActive || !performerFaceQueriesLoading) && (sceneSelection.includeIds.length === 0 || !selectedScenesLoading),
+    enabled: derivedQueryEnabled && !infinitePageSize,
   });
 
   const rawSegmentsQuery = useRawSegmentsQuery({
@@ -252,13 +349,31 @@ export function SegmentsPage({ onNavigate }: Props) {
     includeSceneIds: sceneSelection.includeIds,
     excludeSceneIds: sceneSelection.excludeIds,
     rawSegmentIds,
-    enabled: isRawView,
+    enabled: rawQueryEnabled && !infinitePageSize,
   });
 
-  const spanItems = segmentsWindowQuery.data?.items ?? [];
-  const rawItems = rawSegmentsQuery.data?.items ?? [];
+  const derivedInfiniteQuery = usePaginatedInfiniteQuery<DerivedSpanItem>({
+    queryKey: ["segments-page", "search", "infinite", activeProfileId, q, sceneTitle, sort, direction, sceneSelection.includeIds.join(","), sceneSelection.excludeIds.join(","), appliedQuery ?? null],
+    queryFn: queryDerivedSpansPage,
+    enabled: derivedQueryEnabled && infinitePageSize,
+    chunkSize: defaultPerPage,
+    maxPages: Number.MAX_SAFE_INTEGER,
+  });
+
+  const rawInfiniteQuery = usePaginatedInfiniteQuery<RawSegmentItem>({
+    queryKey: ["segments-page", "raw", "infinite", q, sceneTitle, sort, direction, sceneSelection.includeIds.join(","), sceneSelection.excludeIds.join(","), rawSegmentIds.join(",")],
+    queryFn: queryRawSegmentsPage,
+    enabled: rawQueryEnabled && infinitePageSize,
+    chunkSize: defaultPerPage,
+    maxPages: Number.MAX_SAFE_INTEGER,
+  });
+
+  const spanItems = infinitePageSize ? derivedInfiniteQuery.items : segmentsWindowQuery.data?.items ?? [];
+  const rawItems = infinitePageSize ? rawInfiniteQuery.items : rawSegmentsQuery.data?.items ?? [];
   const items = isRawView ? rawItems : spanItems;
-  const totalCount = isRawView ? (rawSegmentsQuery.data?.totalCount ?? 0) : (segmentsWindowQuery.data?.totalCount ?? 0);
+  const totalCount = isRawView
+    ? (infinitePageSize ? rawInfiniteQuery.totalCount : rawSegmentsQuery.data?.totalCount ?? 0)
+    : (infinitePageSize ? derivedInfiniteQuery.totalCount : segmentsWindowQuery.data?.totalCount ?? 0);
   const selectionItems: Array<{ id: string | number }> = items;
 
   const isLoading = (!isRawView && profilesQuery.isLoading)
@@ -266,12 +381,18 @@ export function SegmentsPage({ onNavigate }: Props) {
       ? selectedScenesLoading
       : false)
     || (!isRawView && performerFaceQueriesLoading)
-    || (isRawView ? rawSegmentsQuery.isLoading : segmentsWindowQuery.isLoading);
+    || (isRawView
+      ? (infinitePageSize ? rawInfiniteQuery.isLoading : rawSegmentsQuery.isLoading)
+      : (infinitePageSize ? derivedInfiniteQuery.isLoading : segmentsWindowQuery.isLoading));
   const firstQueryError = isRawView
-    ? (rawSegmentsQuery.error instanceof Error ? rawSegmentsQuery.error : undefined)
-    : (segmentsWindowQuery.error instanceof Error ? segmentsWindowQuery.error : undefined);
+    ? ((infinitePageSize ? rawInfiniteQuery.error : rawSegmentsQuery.error) instanceof Error ? (infinitePageSize ? rawInfiniteQuery.error : rawSegmentsQuery.error) as Error : undefined)
+    : ((infinitePageSize ? derivedInfiniteQuery.error : segmentsWindowQuery.error) instanceof Error ? (infinitePageSize ? derivedInfiniteQuery.error : segmentsWindowQuery.error) as Error : undefined);
 
   useEffect(() => {
+    if (infinitePageSize) {
+      return;
+    }
+
     if (totalCount === 0) {
       return;
     }
@@ -285,12 +406,14 @@ export function SegmentsPage({ onNavigate }: Props) {
       ...filter,
       page: totalPages,
     });
-  }, [filter, pageNumber, perPage, setFilter, totalCount]);
+  }, [filter, infinitePageSize, pageNumber, perPage, setFilter, totalCount]);
 
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(selectionItems);
+  const selectionResetKey = useMemo(() => JSON.stringify({ contentView, filter: { ...filter, page: undefined }, objectFilter, activeProfileId, appliedQuery, rawSegmentIds }), [activeProfileId, appliedQuery, contentView, filter, objectFilter, rawSegmentIds]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(selectionItems, { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
-  const appliedQuerySelectionKey = appliedQuery == null ? "" : JSON.stringify(appliedQuery);
-  const selectedEntries = useMemo<AddToGroupEntry[]>(() => spanItems
+  const spanSelectionItems = selectedMatchingItems?.view === "spans" ? selectedMatchingItems.spans : spanItems;
+  const rawSelectionItems = selectedMatchingItems?.view === "raw" ? selectedMatchingItems.raw : rawItems;
+  const selectedEntries = useMemo<AddToGroupEntry[]>(() => spanSelectionItems
     .filter((item) => selectedIds.has(item.id))
     .map((item) => ({
       key: item.key,
@@ -299,8 +422,28 @@ export function SegmentsPage({ onNavigate }: Props) {
       title: buildSpanTitle(item.span, item.sceneTitle),
       profileId: item.profileId,
       derivedQuery: item.derivedQuery,
-    })), [selectedIds, spanItems]);
-  const selectedRawSegments = useMemo(() => rawItems.filter((item) => selectedIds.has(item.id)), [rawItems, selectedIds]);
+    })), [selectedIds, spanSelectionItems]);
+  const selectedRawSegments = useMemo(() => rawSelectionItems.filter((item) => selectedIds.has(item.id)), [rawSelectionItems, selectedIds]);
+  const handleSelectNone = useCallback(() => {
+    setSelectedMatchingItems(null);
+    selectNone();
+  }, [selectNone]);
+  const handleSelectAllMatching = useCallback(async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      if (isRawView) {
+        const allRawItems = await fetchAllSegmentPages(queryRawSegmentsPage);
+        setSelectedMatchingItems({ view: "raw", spans: [], raw: allRawItems });
+        selectIds(allRawItems.map((item) => item.id));
+      } else {
+        const allSpanItems = await fetchAllSegmentPages(queryDerivedSpansPage);
+        setSelectedMatchingItems({ view: "spans", spans: allSpanItems, raw: [] });
+        selectIds(allSpanItems.map((item) => item.id));
+      }
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  }, [isRawView, queryDerivedSpansPage, queryRawSegmentsPage, selectIds]);
 
   const rawDeleteMutation = useMutation({
     mutationFn: async (segmentsToDelete: RawSegmentItem[]) => {
@@ -315,7 +458,7 @@ export function SegmentsPage({ onNavigate }: Props) {
         await queryClient.invalidateQueries({ queryKey: ["scene", segment.hostId, "segments"] });
         await queryClient.invalidateQueries({ queryKey: ["scene", segment.hostId] });
       }
-      selectNone();
+      handleSelectNone();
     },
   });
 
@@ -325,8 +468,8 @@ export function SegmentsPage({ onNavigate }: Props) {
   );
 
   useEffect(() => {
-    selectNone();
-  }, [activeProfileId, appliedQuerySelectionKey, contentView, rawSegmentIds.join(","), selectNone]);
+    handleSelectNone();
+  }, [handleSelectNone, selectionResetKey]);
 
   useEffect(() => {
     const currentSort = filter.sort ?? "updated_at";
@@ -337,7 +480,7 @@ export function SegmentsPage({ onNavigate }: Props) {
 
   return (
     <>
-      <AddToGroupDialog open={showAddToGroup} onClose={() => setShowAddToGroup(false)} items={selectedEntries} onAdded={() => selectNone()} />
+      <AddToGroupDialog open={showAddToGroup} onClose={() => setShowAddToGroup(false)} items={selectedEntries} onAdded={handleSelectNone} />
       <ListPage
         title="Segments"
         pageKey="segments"
@@ -349,6 +492,29 @@ export function SegmentsPage({ onNavigate }: Props) {
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
         availableDisplayModes={["grid", "list"]}
+        allowInfinitePageSize
+        showPagingControls={!infinitePageSize}
+        selectAllLabel={infinitePageSize ? "Select loaded" : undefined}
+        onSelectAllMatching={infinitePageSize ? handleSelectAllMatching : undefined}
+        selectAllMatchingLabel={`Select all ${totalCount} matching`}
+        selectAllMatchingPending={selectAllMatchingPending}
+        infiniteScroll={infinitePageSize ? {
+          hasNextPage: isRawView ? rawInfiniteQuery.hasNextPage : derivedInfiniteQuery.hasNextPage,
+          hasPreviousPage: isRawView ? rawInfiniteQuery.hasPreviousPage : derivedInfiniteQuery.hasPreviousPage,
+          isFetchingNextPage: isRawView ? rawInfiniteQuery.isFetchingNextPage : derivedInfiniteQuery.isFetchingNextPage,
+          isFetchingPreviousPage: isRawView ? rawInfiniteQuery.isFetchingPreviousPage : derivedInfiniteQuery.isFetchingPreviousPage,
+          onLoadMore: () => {
+            if (isRawView) void rawInfiniteQuery.fetchNextPage();
+            else void derivedInfiniteQuery.fetchNextPage();
+          },
+          onLoadPrevious: () => {
+            if (isRawView) return rawInfiniteQuery.fetchPreviousPage();
+            return derivedInfiniteQuery.fetchPreviousPage();
+          },
+          loadedCount: isRawView ? rawInfiniteQuery.loadedThroughCount : derivedInfiniteQuery.loadedThroughCount,
+          previousLoadedCount: isRawView ? rawInfiniteQuery.firstLoadedIndex : derivedInfiniteQuery.firstLoadedIndex,
+          totalCount,
+        } : undefined}
         criteriaDefinitions={SEGMENT_CRITERIA}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
@@ -400,7 +566,7 @@ export function SegmentsPage({ onNavigate }: Props) {
         )}
         selectedIds={selectedIds}
         onSelectAll={selectAll}
-        onSelectNone={selectNone}
+        onSelectNone={handleSelectNone}
         onInvertSelection={invertSelection}
         selectionActions={
           <>

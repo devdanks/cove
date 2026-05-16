@@ -590,7 +590,10 @@ public class PerformerRepository : IPerformerRepository
         }
 
         var items = await _db.Performers
+            .Include(p => p.Urls)
+            .Include(p => p.Aliases)
             .Include(p => p.PerformerTags).ThenInclude(pt => pt.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Include(p => p.RemoteIds)
             .AsSplitQuery()
             .Where(p => pagedIds.Contains(p.Id))
             .AsNoTracking()
@@ -1858,6 +1861,7 @@ public class ImageRepository : IImageRepository
         // Load full entities only for the paged IDs
         var items = await _db.Images
             .Include(i => i.Studio)
+            .Include(i => i.Urls)
             .Include(i => i.ImageTags).ThenInclude(it => it.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(i => i.ImagePerformers).ThenInclude(ip => ip.Performer)
             .Include(i => i.ImageGalleries).ThenInclude(ig => ig.Gallery)
@@ -2142,9 +2146,9 @@ public class ImageRepository : IImageRepository
 
         IQueryable<Image> matchingQuery = orientation switch
         {
-            "landscape" => query.Where(i => i.HasLandscapeFiles),
-            "portrait" => query.Where(i => i.HasPortraitFiles),
-            "square" => query.Where(i => i.HasSquareFiles),
+            "landscape" => query.Where(i => i.HasLandscapeFiles || i.Files.Any(file => file.Width > file.Height)),
+            "portrait" => query.Where(i => i.HasPortraitFiles || i.Files.Any(file => file.Height > file.Width)),
+            "square" => query.Where(i => i.HasSquareFiles || i.Files.Any(file => file.Width > 0 && file.Width == file.Height)),
             _ => query,
         };
 
@@ -2154,8 +2158,8 @@ public class ImageRepository : IImageRepository
         return criterion.Modifier switch
         {
             CriterionModifier.NotEquals => query.Where(i => !matchingQuery.Select(item => item.Id).Contains(i.Id)),
-            CriterionModifier.IsNull => query.Where(i => !i.HasDimensionData),
-            CriterionModifier.NotNull => query.Where(i => i.HasDimensionData),
+            CriterionModifier.IsNull => query.Where(i => !i.HasDimensionData && !i.Files.Any(file => file.Width > 0 && file.Height > 0)),
+            CriterionModifier.NotNull => query.Where(i => i.HasDimensionData || i.Files.Any(file => file.Width > 0 && file.Height > 0)),
             _ => matchingQuery,
         };
     }

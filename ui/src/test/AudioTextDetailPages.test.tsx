@@ -78,7 +78,7 @@ vi.mock("../components/BookmarkButton", () => ({
 }));
 
 vi.mock("../components/AspectRatingsPanel", () => ({
-  AspectRatingsPanel: () => <div>Aspect Ratings</div>,
+  AspectRatingsPanel: () => <div>Rating Breakdown</div>,
 }));
 
 vi.mock("../components/AudioPlayer", () => ({

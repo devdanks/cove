@@ -1,10 +1,22 @@
 import { useCallback, useState, useRef } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { scenes } from "../api/client";
-import type { Scene, MetadataServerSceneMatch, MetadataServerSceneImportRequest } from "../api/types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { scenes, scrapeAttempts, system } from "../api/client";
+import type { ApplySceneScrapeAttemptRequest, Scene, MetadataServerSceneMatch, MetadataServerSceneImportRequest, ScrapeAttempt, ScraperSummary, ScrapeCollectionItemSelection } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
 import { formatDuration, getResolutionLabel } from "./shared";
 import { createNestedRouteLinkProps } from "./cardNavigation";
+import { type CollectionMode } from "./sceneScrapeUtils";
+import { buildRelationSelectionPayload, relationKey, ScrapeRelationChoices, type ScrapeRelationActionMap } from "./ScrapeRelationChoices";
+import {
+  CompactCollectionDecision,
+  CompactListValue,
+  CompactScalarDecision,
+  DEFAULT_TAGGER_BLACKLIST,
+  TaggerSettingsPanel,
+  TaggerToolbar,
+  cleanTaggerQueryString,
+  type TaggerQueryMode,
+} from "./TaggerShared";
 import {
   Search,
   Loader2,
@@ -41,7 +53,7 @@ interface TaggerConfig {
   onlyExistingStudio: boolean;
   markOrganized: boolean;
   preferFingerprints: boolean;
-  queryMode: "auto" | "filename" | "dir" | "path" | "metadata";
+  queryMode: TaggerQueryMode;
   blacklist: string[];
   createParentStudios: boolean;
   createParentTags: boolean;
@@ -51,7 +63,7 @@ interface TaggerConfig {
 
 interface SceneSearchState {
   loading: boolean;
-  results?: MetadataServerSceneMatch[];
+  results?: UnifiedSceneMatch[];
   error?: string;
   selectedIndex?: number;
   saved?: boolean;
@@ -61,58 +73,249 @@ interface SceneSearchState {
   forceIncludedPerformers?: Set<string>;
   forceIncludedTags?: Set<string>;
   forceIncludeStudio?: boolean;
+  fieldStrategies?: Record<string, SceneFieldStrategy>;
+  collectionModes?: Record<string, CollectionMode>;
+}
+
+type SceneFieldStrategy = "ignore" | "merge" | "overwrite";
+
+type TaggerSource =
+  | { kind: "metadata-server"; value: string; label: string; endpoint: string }
+  | { kind: "scraper"; value: string; label: string; scraper: ScraperSummary };
+
+interface UnifiedSceneMatch extends MetadataServerSceneMatch {
+  sourceKind: "metadata-server" | "scraper";
+  scrapeAttemptId?: string;
+  selectedCandidateIndex?: number;
+  rawResult?: Record<string, unknown>;
+}
+
+const sourceValue = (kind: "metadata-server" | "scraper", id: string) => `${kind}:${id}`;
+
+function resolveSource(value: string, sources: TaggerSource[]): TaggerSource | undefined {
+  return sources.find((source) => source.value === value)
+    ?? sources.find((source) => source.kind === "metadata-server" && source.endpoint === value)
+    ?? sources[0];
+}
+
+function asString(value: unknown): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return undefined;
+}
+
+function asStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(asStringList).filter(Boolean);
+  }
+  const text = asString(value);
+  if (!text) return [];
+  return text.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function pickString(result: Record<string, unknown>, ...keys: string[]) {
+  const entries = Object.entries(result);
+  for (const key of keys) {
+    const entry = entries.find(([entryKey]) => entryKey.toLowerCase() === key.toLowerCase());
+    if (!entry) continue;
+    const value = asString(entry[1]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function pickStringList(result: Record<string, unknown>, ...keys: string[]) {
+  const entries = Object.entries(result);
+  for (const key of keys) {
+    const entry = entries.find(([entryKey]) => entryKey.toLowerCase() === key.toLowerCase());
+    if (!entry) continue;
+    const values = asStringList(entry[1]);
+    if (values.length > 0) return [...new Set(values)];
+  }
+  return [];
+}
+
+function parseAttemptResults(attempt: ScrapeAttempt): Record<string, unknown>[] {
+  try {
+    if (attempt.candidateResultsJson) {
+      const candidates = JSON.parse(attempt.candidateResultsJson);
+      if (Array.isArray(candidates)) return candidates.filter((item): item is Record<string, unknown> => item && typeof item === "object" && !Array.isArray(item));
+    }
+    if (attempt.resultJson) {
+      const result = JSON.parse(attempt.resultJson);
+      if (result && typeof result === "object" && !Array.isArray(result)) return [result as Record<string, unknown>];
+    }
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+function toCandidates(names: string[]) {
+  return names.map((name) => ({ remoteId: name, name, existsLocally: false }));
+}
+
+function toScraperSceneMatch(attempt: ScrapeAttempt, result: Record<string, unknown>, index: number, scraper: ScraperSummary): UnifiedSceneMatch {
+  const title = pickString(result, "Title", "Name");
+  const imageUrl = pickString(result, "Image", "ImageUrl", "ImageURL");
+  const performerNames = pickStringList(result, "Performers", "Performer", "PerformerNames");
+  const tagNames = pickStringList(result, "Tags", "Tag", "TagNames");
+  const studioName = pickString(result, "Studio", "StudioName");
+  return {
+    sourceKind: "scraper",
+    scrapeAttemptId: attempt.id,
+    selectedCandidateIndex: index,
+    rawResult: result,
+    endpoint: scraper.id,
+    serverName: scraper.name,
+    id: `${attempt.id}:${index}`,
+    title,
+    code: pickString(result, "Code"),
+    date: pickString(result, "Date", "ReleaseDate"),
+    director: pickString(result, "Director"),
+    details: pickString(result, "Details", "Description", "Synopsis"),
+    studioName,
+    imageUrl,
+    duration: undefined,
+    performerNames,
+    tagNames,
+    urls: pickStringList(result, "URLs", "Url", "URL"),
+    fingerprintAlgorithms: [],
+    matchCount: 0,
+    fingerprints: [],
+    studioCandidate: studioName ? { remoteId: studioName, name: studioName, existsLocally: false } : undefined,
+    performerCandidates: toCandidates(performerNames),
+    tagCandidates: toCandidates(tagNames),
+  };
+}
+
+function getSceneTagNames(scene: Scene) {
+  return scene.tags.map((tag) => tag.name).filter(Boolean);
+}
+
+function getScenePerformerNames(scene: Scene) {
+  return scene.performers.map((performer) => performer.name).filter(Boolean);
+}
+
+function normalizeDecisionValue(value?: string | null) {
+  return value?.trim() ?? "";
+}
+
+function buildDefaultSceneFieldStrategies(scene: Scene, result: UnifiedSceneMatch): Record<string, SceneFieldStrategy> {
+  const fields = [
+    { key: "title", current: scene.title, scraped: result.title },
+    { key: "code", current: scene.code, scraped: result.code },
+    { key: "details", current: scene.details, scraped: result.details },
+    { key: "director", current: scene.director, scraped: result.director },
+    { key: "date", current: scene.date, scraped: result.date },
+  ];
+  const strategies: Record<string, SceneFieldStrategy> = {};
+  for (const field of fields) {
+    if (!field.scraped) continue;
+    strategies[field.key] = normalizeDecisionValue(field.current) === normalizeDecisionValue(field.scraped) ? "ignore" : "overwrite";
+  }
+  return strategies;
+}
+
+function getSceneFieldStrategies(scene: Scene, result: UnifiedSceneMatch, state: SceneSearchState | undefined) {
+  return { ...buildDefaultSceneFieldStrategies(scene, result), ...(state?.fieldStrategies ?? {}) };
+}
+
+function buildDefaultSceneCollectionModes(result: UnifiedSceneMatch, state: SceneSearchState | undefined, taggerConfig: TaggerConfig): Record<string, CollectionMode> {
+  return {
+    urls: result.urls.length > 0 ? "merge" : "skip",
+    tags: taggerConfig.setTags && result.tagNames.length > 0 ? taggerConfig.tagOperation === "overwrite" ? "replace" : "merge" : "skip",
+    performers: taggerConfig.setPerformers && result.performerNames.length > 0 ? "merge" : "skip",
+    studio: taggerConfig.setStudio && !state?.skipStudio && result.studioName ? "replace" : "skip",
+  };
+}
+
+function getSceneCollectionModes(result: UnifiedSceneMatch, state: SceneSearchState | undefined, taggerConfig: TaggerConfig) {
+  return { ...buildDefaultSceneCollectionModes(result, state, taggerConfig), ...(state?.collectionModes ?? {}) };
+}
+
+function collectionModeToFieldStrategy(mode: CollectionMode): SceneFieldStrategy {
+  if (mode === "replace") return "overwrite";
+  if (mode === "merge") return "merge";
+  return "ignore";
+}
+
+function buildSceneFieldStrategies(scene: Scene, result: UnifiedSceneMatch, state: SceneSearchState | undefined, taggerConfig: TaggerConfig) {
+  const scalarStrategies = getSceneFieldStrategies(scene, result, state);
+  const collectionModes = getSceneCollectionModes(result, state, taggerConfig);
+  return {
+    ...scalarStrategies,
+    urls: collectionModeToFieldStrategy(collectionModes.urls),
+    tags: collectionModeToFieldStrategy(collectionModes.tags),
+    performers: collectionModeToFieldStrategy(collectionModes.performers),
+    studio: collectionModeToFieldStrategy(collectionModes.studio),
+  };
+}
+
+function buildSceneRelationActionMap(
+  names: string[],
+  currentNames: string[],
+  existingNames: string[],
+  excludedNames: Set<string> | undefined,
+  forceCreateNames: Set<string> | undefined,
+  createMissing: boolean,
+): ScrapeRelationActionMap {
+  const current = new Set(currentNames.map(relationKey));
+  const existing = new Set(existingNames.map(relationKey));
+  const excluded = new Set(Array.from(excludedNames ?? []).map(relationKey));
+  const forced = new Set(Array.from(forceCreateNames ?? []).map(relationKey));
+  const actions: ScrapeRelationActionMap = {};
+
+  for (const name of names) {
+    const key = relationKey(name);
+    if (!key) continue;
+    if (excluded.has(key)) actions[key] = "exclude";
+    else if (forced.has(key)) actions[key] = "create";
+    else if (current.has(key) || existing.has(key)) actions[key] = "include";
+    else actions[key] = createMissing ? "create" : "exclude";
+  }
+
+  return actions;
+}
+
+function buildSceneRelationSelections(
+  names: string[],
+  currentNames: string[],
+  existingNames: string[],
+  excludedNames: Set<string> | undefined,
+  forceCreateNames: Set<string> | undefined,
+  createMissing: boolean,
+): ScrapeCollectionItemSelection[] {
+  return buildRelationSelectionPayload(
+    names,
+    buildSceneRelationActionMap(names, currentNames, existingNames, excludedNames, forceCreateNames, createMissing),
+  );
+}
+
+function buildScraperSceneApplyRequest(result: UnifiedSceneMatch, scene: Scene, state: SceneSearchState | undefined, taggerConfig: TaggerConfig): ApplySceneScrapeAttemptRequest {
+  const fieldStrategies = buildSceneFieldStrategies(scene, result, state, taggerConfig);
+  const collectionModes = getSceneCollectionModes(result, state, taggerConfig);
+  const replaceFields = Object.entries(fieldStrategies)
+    .filter(([field, strategy]) => strategy === "overwrite" && !["urls", "tags", "performers", "studio"].includes(field))
+    .map(([field]) => field);
+  const raw = result.rawResult ?? {};
+  if (taggerConfig.setCoverImage && pickString(raw, "Image", "ImageUrl", "ImageURL")) replaceFields.push("image");
+
+  return {
+    replaceFields,
+    collectionModes,
+    createMissingTags: !taggerConfig.onlyExistingTags,
+    createMissingPerformers: !taggerConfig.onlyExistingPerformers,
+    createMissingStudio: !taggerConfig.onlyExistingStudio,
+    markOrganized: taggerConfig.markOrganized,
+    hydratePerformers: taggerConfig.createParentTags,
+    selectedCandidateIndex: result.selectedCandidateIndex,
+    tagSelections: result.tagNames.length > 0 ? buildSceneRelationSelections(result.tagNames, getSceneTagNames(scene), result.tagCandidates.filter((tag) => tag.existsLocally).map((tag) => tag.name), state?.excludedTags, state?.forceIncludedTags, !taggerConfig.onlyExistingTags) : undefined,
+    performerSelections: result.performerNames.length > 0 ? buildSceneRelationSelections(result.performerNames, getScenePerformerNames(scene), result.performerCandidates.filter((performer) => performer.existsLocally).map((performer) => performer.name), state?.excludedPerformers, state?.forceIncludedPerformers, !taggerConfig.onlyExistingPerformers) : undefined,
+  };
 }
 
 const CONCURRENCY_LIMIT = 5;
-
-// Date / JAV-code aware string cleaning (standard behavior)
-const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
-const ddmmyyRegex = /\.(\d\d)\.(\d\d)\.(\d\d)\./;
-const yyyymmddRegex = /(\d{4})[-.](\d{2})[-.](\d{2})/;
-const mmddyyRegex = /(\d{2})[-.](\d{2})[-.](\d{4})/;
-const ddMMyyRegex = new RegExp(`(\\d{1,2}).(${months.join("|")})\\.?.(\\d{4})`, "i");
-const MMddyyRegex = new RegExp(`(${months.join("|")})\\.?.(\\d{1,2}),?.(\\d{4})`, "i");
-const javcodeRegex = /([a-zA-Z|tT28|tT38]+-\d+[zZeE]?)/;
-
-function handleSpecialStrings(input: string): string {
-  let output = input;
-  const ddmmyy = output.match(ddmmyyRegex);
-  if (ddmmyy) output = output.replace(ddmmyy[0], ` 20${ddmmyy[1]}-${ddmmyy[2]}-${ddmmyy[3]} `);
-  const mmddyy = output.match(mmddyyRegex);
-  if (mmddyy) output = output.replace(mmddyy[0], ` ${mmddyy[1]}-${mmddyy[2]}-${mmddyy[3]} `);
-  const ddMMyy = output.match(ddMMyyRegex);
-  if (ddMMyy) {
-    const month = (months.indexOf(ddMMyy[2].toLowerCase()) + 1).toString().padStart(2, "0");
-    output = output.replace(ddMMyy[0], ` ${ddMMyy[3]}-${month}-${ddMMyy[1].padStart(2, "0")} `);
-  }
-  const MMddyy = output.match(MMddyyRegex);
-  if (MMddyy) {
-    const month = (months.indexOf(MMddyy[1].toLowerCase()) + 1).toString().padStart(2, "0");
-    output = output.replace(MMddyy[0], ` ${MMddyy[3]}-${month}-${MMddyy[2].padStart(2, "0")} `);
-  }
-  const yyyymmdd = output.search(yyyymmddRegex);
-  if (yyyymmdd !== -1)
-    return output.slice(0, yyyymmdd).replace(/-/g, " ") + output.slice(yyyymmdd, yyyymmdd + 10).replace(/\./g, "-") + output.slice(yyyymmdd + 10).replace(/-/g, " ");
-  const javcodeIndex = output.search(javcodeRegex);
-  if (javcodeIndex !== -1) {
-    const javcodeLength = output.match(javcodeRegex)![1].length;
-    return output.slice(0, javcodeIndex).replace(/-/g, " ") + output.slice(javcodeIndex, javcodeIndex + javcodeLength) + output.slice(javcodeIndex + javcodeLength).replace(/-/g, " ");
-  }
-  return output.replace(/-/g, " ");
-}
-
-function cleanQueryString(input: string, blacklist: string[]): string {
-  // Convert dots/underscores to spaces so tokens are properly separated
-  let cleaned = input.replace(/[._]/g, " ");
-  // Apply each blacklist item as a regex — every match is removed from the string
-  for (const pattern of blacklist) {
-    try {
-      cleaned = cleaned.replace(new RegExp(pattern, "gi"), "");
-    } catch { /* invalid regex — skip */ }
-  }
-  cleaned = handleSpecialStrings(cleaned);
-  return cleaned.replace(/ +/g, " ").trim();
-}
 
 async function runWithConcurrency<T>(
   items: T[],
@@ -134,11 +337,27 @@ async function runWithConcurrency<T>(
 export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, selecting = false, onSelect }: SceneTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
+  const { data: scraperList = [] } = useQuery({ queryKey: ["scrapers"], queryFn: system.listScrapers });
+  const sceneScrapers = scraperList.filter((scraper) => scraper.entityType.toLowerCase() === "scene");
+  const taggerSources: TaggerSource[] = [
+    ...metadataServers.map((server) => ({
+      kind: "metadata-server" as const,
+      value: sourceValue("metadata-server", server.endpoint),
+      label: server.name || server.endpoint,
+      endpoint: server.endpoint,
+    })),
+    ...sceneScrapers.map((scraper) => ({
+      kind: "scraper" as const,
+      value: sourceValue("scraper", scraper.id),
+      label: `${scraper.name} (Scraper)`,
+      scraper,
+    })),
+  ];
 
   const TAGGER_CONFIG_KEY = "cove-tagger-config";
 
   const DEFAULT_TAGGER_CONFIG: TaggerConfig = {
-    selectedEndpoint: metadataServers[0]?.endpoint ?? "",
+    selectedEndpoint: metadataServers[0] ? sourceValue("metadata-server", metadataServers[0].endpoint) : "",
     showUnmatched: true,
     setCoverImage: true,
     setTags: true,
@@ -151,7 +370,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
     markOrganized: false,
     preferFingerprints: true,
     queryMode: "auto",
-    blacklist: ["\\sXXX\\s", "1080p", "720p", "2160p", "4K", "KTR", "RARBG", "\\smp4\\s"],
+    blacklist: [...DEFAULT_TAGGER_BLACKLIST],
     createParentStudios: true,
     createParentTags: true,
     showMales: true,
@@ -185,6 +404,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
   const [showConfig, setShowConfig] = useState(false);
   const [searchStates, setSearchStates] = useState<Record<number, SceneSearchState>>({});
   const [queryOverrides, setQueryOverrides] = useState<Record<number, string>>({});
+  const selectedSource = resolveSource(taggerConfig.selectedEndpoint, taggerSources);
 
   const updateSearchState = useCallback(
     (sceneId: number, update: Partial<SceneSearchState>) => {
@@ -211,47 +431,76 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
           (scene.performers || []).map((p: any) => p.name).join(" "),
           scene.title ? scene.title.replace(/[^a-zA-Z0-9 ]+/g, "") : "",
         ].filter((s) => s !== "").join(" ");
-        str = cleanQueryString(str, taggerConfig.blacklist);
+        str = cleanTaggerQueryString(str, taggerConfig.blacklist);
         return str;
       }
 
       // filename/dir/path modes: derive from file path
       if (mode === "filename" && file?.basename) {
-        return cleanQueryString(file.basename.replace(/\.\w{2,4}$/, ""), taggerConfig.blacklist);
+        return cleanTaggerQueryString(file.basename.replace(/\.\w{2,4}$/, ""), taggerConfig.blacklist);
       }
       if (mode === "dir" && file?.path) {
         const parts = file.path.replace(/\\/g, "/").split("/");
-        return parts.length > 1 ? cleanQueryString(parts[parts.length - 2], taggerConfig.blacklist) : "";
+        return parts.length > 1 ? cleanTaggerQueryString(parts[parts.length - 2], taggerConfig.blacklist) : "";
       }
       if (mode === "path" && file?.path) {
-        return cleanQueryString(file.path, taggerConfig.blacklist);
+        return cleanTaggerQueryString(file.path, taggerConfig.blacklist);
       }
 
       // auto mode: try title first, then filename — always apply blacklist
-      if (scene.title) return cleanQueryString(scene.title, taggerConfig.blacklist);
+      if (scene.title) return cleanTaggerQueryString(scene.title, taggerConfig.blacklist);
       if (file?.basename) {
-        return cleanQueryString(file.basename.replace(/\.\w{2,4}$/, ""), taggerConfig.blacklist);
+        return cleanTaggerQueryString(file.basename.replace(/\.\w{2,4}$/, ""), taggerConfig.blacklist);
       }
       return "";
     },
     [queryOverrides, taggerConfig.queryMode, taggerConfig.blacklist]
   );
 
+  const getSourceQuery = useCallback(
+    (scene: Scene, source: TaggerSource | undefined): string => {
+      if (source?.kind === "scraper" && source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url")) {
+        return queryOverrides[scene.id] ?? scene.urls?.find(Boolean) ?? getSearchQuery(scene);
+      }
+      return getSearchQuery(scene);
+    },
+    [getSearchQuery, queryOverrides]
+  );
+
   const searchScene = useCallback(
     async (scene: Scene) => {
-      const query = getSearchQuery(scene);
+      const source = selectedSource;
+      const query = getSourceQuery(scene, source);
       updateSearchState(scene.id, { loading: true, error: undefined, results: undefined, saved: false });
       try {
-        let results: MetadataServerSceneMatch[] = [];
-        const endpoint = taggerConfig.selectedEndpoint || undefined;
-        const shouldTryFingerprints = taggerConfig.preferFingerprints || !query;
+        let results: UnifiedSceneMatch[] = [];
+        if (source?.kind === "scraper") {
+          const supportsUrl = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url");
+          const supportsName = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "name");
+          const looksLikeUrl = /^https?:\/\//i.test(query.trim());
+          const inputKind = supportsUrl && looksLikeUrl ? "url" : supportsName ? "name" : supportsUrl ? "url" : undefined;
+          if (!inputKind) throw new Error("This scraper cannot search this scene from the available row data.");
+          const attempt = await scrapeAttempts.create({
+            scraperId: source.scraper.id,
+            entityType: "scene",
+            entityId: scene.id,
+            inputKind,
+            url: inputKind === "url" ? query : undefined,
+            name: inputKind === "name" ? query : undefined,
+          });
+          if (attempt.status.toLowerCase() === "failure") throw new Error(attempt.error || "Scrape returned no results.");
+          results = parseAttemptResults(attempt).map((result, index) => toScraperSceneMatch(attempt, result, index, source.scraper));
+        } else {
+          const endpoint = source?.endpoint || undefined;
+          const shouldTryFingerprints = taggerConfig.preferFingerprints || !query;
 
-        if (shouldTryFingerprints) {
-          results = await scenes.searchMetadataServer(scene.id, undefined, endpoint);
-        }
+          if (shouldTryFingerprints) {
+            results = (await scenes.searchMetadataServer(scene.id, undefined, endpoint)).map((match) => ({ ...match, sourceKind: "metadata-server" as const }));
+          }
 
-        if (results.length === 0 && query) {
-          results = await scenes.searchMetadataServer(scene.id, query, endpoint);
+          if (results.length === 0 && query) {
+            results = (await scenes.searchMetadataServer(scene.id, query, endpoint)).map((match) => ({ ...match, sourceKind: "metadata-server" as const }));
+          }
         }
 
         updateSearchState(scene.id, {
@@ -266,7 +515,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
         });
       }
     },
-    [getSearchQuery, taggerConfig.preferFingerprints, taggerConfig.selectedEndpoint, updateSearchState]
+    [getSourceQuery, selectedSource, taggerConfig.preferFingerprints, updateSearchState]
   );
 
   // Fingerprint-only search
@@ -274,8 +523,8 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
     async (scene: Scene) => {
       updateSearchState(scene.id, { loading: true, error: undefined, results: undefined, saved: false });
       try {
-        const endpoint = taggerConfig.selectedEndpoint || undefined;
-        const results = await scenes.searchMetadataServer(scene.id, undefined, endpoint);
+        if (selectedSource?.kind !== "metadata-server") throw new Error("Fingerprint search is only available for metadata-server sources.");
+        const results = (await scenes.searchMetadataServer(scene.id, undefined, selectedSource.endpoint || undefined)).map((match) => ({ ...match, sourceKind: "metadata-server" as const }));
         updateSearchState(scene.id, {
           loading: false,
           results,
@@ -288,7 +537,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
         });
       }
     },
-    [taggerConfig.selectedEndpoint, updateSearchState]
+    [selectedSource, updateSearchState]
   );
 
   // Batch scrape all (concurrent)
@@ -309,13 +558,13 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
     setBatchSearching(false);
   }, []);
 
-  if (metadataServers.length === 0) {
+  if (taggerSources.length === 0) {
     return (
       <div className="px-4 py-12 text-center">
         <AlertCircle className="w-12 h-12 mx-auto mb-3 text-muted opacity-50" />
-        <p className="text-secondary text-lg">No Metadata Server Sources Configured</p>
+        <p className="text-secondary text-lg">No Metadata Sources Configured</p>
         <p className="text-muted text-sm mt-1">
-          Add a metadata server endpoint in Settings &gt; Metadata Providers to use the tagger.
+          Add a metadata server or install a scene scraper to use the tagger.
         </p>
       </div>
     );
@@ -330,68 +579,29 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
 
   return (
     <div className="space-y-0">
-      {/* Tagger Toolbar — clean like V1: Source / Hide Unmatched / Scrape All / Config gear */}
-      <div className="flex flex-wrap items-center gap-2 bg-surface border-b border-border px-4 py-2">
-        {/* Source selector */}
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-muted whitespace-nowrap">Source:</label>
-          <select
-            value={taggerConfig.selectedEndpoint}
-            onChange={(e) => setTaggerConfig((c) => ({ ...c, selectedEndpoint: e.target.value }))}
-            className="bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
-          >
-            {metadataServers.map((sb) => (
-              <option key={sb.endpoint} value={sb.endpoint}>
-                {sb.name || sb.endpoint}
-              </option>
-            ))}
-          </select>
-        </div>
+      <TaggerToolbar
+        sources={taggerSources.map((source) => ({ value: source.value, label: source.label }))}
+        selectedSource={selectedSource?.value ?? taggerConfig.selectedEndpoint}
+        onSourceChange={(value) => setTaggerConfig((c) => ({ ...c, selectedEndpoint: value }))}
+        showToggle={{
+          value: taggerConfig.showUnmatched,
+          onChange: (value) => setTaggerConfig((c) => ({ ...c, showUnmatched: value })),
+          enabledLabel: "Hide Unmatched",
+          disabledLabel: "Show Unmatched",
+        }}
+        batchSearching={batchSearching}
+        onCancelBatch={cancelBatchSearch}
+        onRunAll={searchAll}
+        countLabel={`${visibleScenes.length} scene${visibleScenes.length !== 1 ? "s" : ""}`}
+        settingsOpen={showConfig}
+        onToggleSettings={() => setShowConfig((current) => !current)}
+      />
 
-        {/* Show/Hide unmatched */}
-        <button
-          onClick={() => setTaggerConfig((c) => ({ ...c, showUnmatched: !c.showUnmatched }))}
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs border border-border bg-input text-secondary hover:text-foreground"
-        >
-          {taggerConfig.showUnmatched ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-          {taggerConfig.showUnmatched ? "Hide Unmatched" : "Show Unmatched"}
-        </button>
-
-        {/* Scrape All / Cancel */}
-        {batchSearching ? (
-          <button
-            onClick={cancelBatchSearch}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-red-600 text-white hover:bg-red-500"
-          >
-            <X className="w-3.5 h-3.5" />
-            Cancel
-          </button>
-        ) : (
-          <button
-            onClick={searchAll}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-accent text-white hover:bg-accent-hover"
-          >
-            <CloudDownload className="w-3.5 h-3.5" />
-            Scrape All
-          </button>
-        )}
-
-        {/* Config toggle */}
-        <button
-          onClick={() => setShowConfig(!showConfig)}
-          className={`flex items-center gap-1 px-2 py-1 rounded text-xs border bg-input ml-auto ${showConfig ? "border-accent text-accent" : "border-border text-secondary hover:text-foreground"}`}
-        >
-          <Settings2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Config panel — standard layout: Configuration (left) / Blacklist (right) */}
       {showConfig && (
-        <div className="bg-card border-b border-border px-4 py-3 space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left: Configuration */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-bold text-foreground italic">Configuration</h3>
+        <TaggerSettingsPanel
+          blacklist={taggerConfig.blacklist}
+          onBlacklistChange={(items) => setTaggerConfig((c) => ({ ...c, blacklist: items }))}
+        >
 
               {/* Performer genders */}
               <div>
@@ -492,21 +702,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
                 </label>
                 <p className="text-[10px] text-muted mt-0.5 ml-5">Immediately mark the scene as Organized after the Save button is clicked.</p>
               </div>
-            </div>
-
-            {/* Right: Blacklist */}
-            <div className="space-y-2">
-              <h3 className="text-sm font-bold text-foreground italic">Blacklist</h3>
-              <BlacklistEditor
-                items={taggerConfig.blacklist}
-                onChange={(items) => setTaggerConfig((c) => ({ ...c, blacklist: items }))}
-              />
-              <p className="text-[10px] text-muted">
-                Blacklist items are excluded from queries. Note that they are regular expressions and also case-insensitive. Certain characters must be escaped with a backslash: <code className="text-pink-400">{`[\\.^$.|?*+()`}</code>
-              </p>
-            </div>
-          </div>
-        </div>
+        </TaggerSettingsPanel>
       )}
 
       {/* Scene list */}
@@ -516,12 +712,12 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
             key={scene.id}
             scene={scene}
             state={searchStates[scene.id]}
-            query={getSearchQuery(scene)}
+            query={getSourceQuery(scene, selectedSource)}
             onQueryChange={(q) => setQueryOverrides((prev) => ({ ...prev, [scene.id]: q }))}
             onSearch={() => searchScene(scene)}
             onSearchFingerprints={() => searchSceneFingerprints(scene)}
             onUpdateState={(update) => updateSearchState(scene.id, update)}
-            endpoint={taggerConfig.selectedEndpoint}
+            source={selectedSource}
             taggerConfig={taggerConfig}
             onNavigate={onNavigate}
             selected={selectedIds?.has(scene.id) ?? false}
@@ -544,7 +740,7 @@ interface TaggerSceneRowProps {
   onSearch: () => void;
   onSearchFingerprints: () => void;
   onUpdateState: (update: Partial<SceneSearchState>) => void;
-  endpoint: string;
+  source?: TaggerSource;
   taggerConfig: TaggerConfig;
   onNavigate?: (sceneId: number) => void;
   selected?: boolean;
@@ -560,7 +756,7 @@ function TaggerSceneRow({
   onSearch,
   onSearchFingerprints,
   onUpdateState,
-  endpoint,
+  source,
   taggerConfig,
   onNavigate,
   selected = false,
@@ -573,43 +769,52 @@ function TaggerSceneRow({
   const queryClient = useQueryClient();
   const sceneLinkProps = createNestedRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: scene.id }, () => onNavigate?.(scene.id));
 
-  const importMut = useMutation({
+  const importMut = useMutation<Scene | ScrapeAttempt, Error>({
     mutationFn: () => {
-      const excludedTags = state?.excludedTags ? Array.from(state.excludedTags) : undefined;
-      const excludedPerformers = state?.excludedPerformers ? Array.from(state.excludedPerformers) : undefined;
+      if (!selectedResult) throw new Error("No result selected");
+      const collectionModes = getSceneCollectionModes(selectedResult, state, taggerConfig);
+      const tagActions = buildSceneRelationActionMap(selectedResult.tagNames, getSceneTagNames(scene), selectedResult.tagCandidates.filter((tag) => tag.existsLocally).map((tag) => tag.name), state?.excludedTags, state?.forceIncludedTags, !taggerConfig.onlyExistingTags);
+      const performerActions = buildSceneRelationActionMap(selectedResult.performerNames, getScenePerformerNames(scene), selectedResult.performerCandidates.filter((performer) => performer.existsLocally).map((performer) => performer.name), state?.excludedPerformers, state?.forceIncludedPerformers, !taggerConfig.onlyExistingPerformers);
+      const excludedTags = collectionModes.tags === "skip" ? selectedResult.tagNames : selectedResult.tagNames.filter((name) => tagActions[relationKey(name)] === "exclude");
+      const excludedPerformers = collectionModes.performers === "skip" ? selectedResult.performerNames : selectedResult.performerNames.filter((name) => performerActions[relationKey(name)] === "exclude");
+      if (selectedResult?.sourceKind === "scraper") {
+        if (!selectedResult.scrapeAttemptId) throw new Error("No scraper attempt selected");
+        return scrapeAttempts.apply(selectedResult.scrapeAttemptId, buildScraperSceneApplyRequest(selectedResult, scene, state, taggerConfig));
+      }
 
       // Build overrides for force-included entities (entities that would normally be skipped
       // by onlyExisting* flags but the user explicitly opted to create)
-      const performerOverrides = state?.forceIncludedPerformers?.size
-        ? selectedResult?.performerCandidates
-            .filter(p => state.forceIncludedPerformers!.has(p.name))
+      const performerOverrides = selectedResult.performerCandidates.some((performer) => performerActions[relationKey(performer.name)] === "create")
+        ? selectedResult.performerCandidates
+            .filter(p => performerActions[relationKey(p.name)] === "create")
             .map(p => ({ remoteId: p.remoteId, name: p.name, action: "create" }))
         : undefined;
-      const tagOverrides = state?.forceIncludedTags?.size
-        ? selectedResult?.tagCandidates
-            .filter(t => state.forceIncludedTags!.has(t.name))
+      const tagOverrides = selectedResult.tagCandidates.some((tag) => tagActions[relationKey(tag.name)] === "create")
+        ? selectedResult.tagCandidates
+            .filter(t => tagActions[relationKey(t.name)] === "create")
             .map(t => ({ remoteId: t.remoteId, name: t.name, action: "create" }))
         : undefined;
-      const studioOverride = state?.forceIncludeStudio && selectedResult?.studioCandidate
+      const studioOverride = state?.forceIncludeStudio && selectedResult.studioCandidate
         ? { remoteId: selectedResult.studioCandidate.remoteId, name: selectedResult.studioCandidate.name, action: "create" }
         : undefined;
 
       const importReq: MetadataServerSceneImportRequest = {
-        endpoint,
+        endpoint: source?.kind === "metadata-server" ? source.endpoint : selectedResult?.endpoint ?? "",
         sceneId: selectedResult?.id ?? "",
         setCoverImage: taggerConfig.setCoverImage,
-        setTags: taggerConfig.setTags,
-        setPerformers: taggerConfig.setPerformers,
-        setStudio: taggerConfig.setStudio && !state?.skipStudio,
+        setTags: taggerConfig.setTags && collectionModes.tags !== "skip",
+        setPerformers: taggerConfig.setPerformers && collectionModes.performers !== "skip",
+        setStudio: taggerConfig.setStudio && collectionModes.studio !== "skip",
         onlyExistingTags: taggerConfig.onlyExistingTags,
         onlyExistingPerformers: taggerConfig.onlyExistingPerformers,
         onlyExistingStudio: taggerConfig.onlyExistingStudio,
         markOrganized: taggerConfig.markOrganized,
-        excludedTagNames: excludedTags,
-        excludedPerformerNames: excludedPerformers,
+        excludedTagNames: excludedTags.length > 0 ? excludedTags : undefined,
+        excludedPerformerNames: excludedPerformers.length > 0 ? excludedPerformers : undefined,
         performerOverrides,
         tagOverrides,
         studioOverride,
+        fieldStrategies: buildSceneFieldStrategies(scene, selectedResult, state, taggerConfig),
       };
       return scenes.importFromMetadataServer(scene.id, importReq);
     },
@@ -683,14 +888,16 @@ function TaggerSceneRow({
             >
               {state?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
             </button>
-            <button
-              onClick={onSearchFingerprints}
-              disabled={state?.loading}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface border border-border text-muted hover:text-foreground disabled:opacity-60"
-              title="Search by fingerprint only"
-            >
-              <Fingerprint className="w-3 h-3" />
-            </button>
+            {source?.kind === "metadata-server" && (
+              <button
+                onClick={onSearchFingerprints}
+                disabled={state?.loading}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface border border-border text-muted hover:text-foreground disabled:opacity-60"
+                title="Search by fingerprint only"
+              >
+                <Fingerprint className="w-3 h-3" />
+              </button>
+            )}
           </div>
 
           {/* Error */}
@@ -709,9 +916,20 @@ function TaggerSceneRow({
           {/* Results */}
           {state?.results && state.results.length > 0 && (
             <TaggerResults
+              scene={scene}
               results={state.results}
               selectedIndex={state.selectedIndex ?? 0}
-              onSelect={(i) => onUpdateState({ selectedIndex: i })}
+              onSelect={(i) => onUpdateState(i === (state.selectedIndex ?? 0) ? { selectedIndex: i } : {
+                selectedIndex: i,
+                fieldStrategies: undefined,
+                collectionModes: undefined,
+                excludedPerformers: undefined,
+                excludedTags: undefined,
+                skipStudio: undefined,
+                forceIncludedPerformers: undefined,
+                forceIncludedTags: undefined,
+                forceIncludeStudio: undefined,
+              })}
               onSave={() => importMut.mutate()}
               saving={importMut.isPending}
               saved={state.saved}
@@ -722,6 +940,16 @@ function TaggerSceneRow({
               forceIncludedPerformers={state.forceIncludedPerformers ?? new Set()}
               forceIncludedTags={state.forceIncludedTags ?? new Set()}
               forceIncludeStudio={state.forceIncludeStudio ?? false}
+              fieldStrategies={selectedResult ? getSceneFieldStrategies(scene, selectedResult, state) : {}}
+              collectionModes={selectedResult ? getSceneCollectionModes(selectedResult, state, taggerConfig) : {}}
+              onFieldStrategyChange={(field, strategy) => {
+                if (!selectedResult) return;
+                onUpdateState({ fieldStrategies: { ...getSceneFieldStrategies(scene, selectedResult, state), [field]: strategy } });
+              }}
+              onCollectionModeChange={(field, mode) => {
+                if (!selectedResult) return;
+                onUpdateState({ collectionModes: { ...getSceneCollectionModes(selectedResult, state, taggerConfig), [field]: mode } });
+              }}
               onTogglePerformer={(name) => {
                 const perf = selectedResult?.performerCandidates.find(p => p.name === name);
                 const willSkipByDefault = taggerConfig.onlyExistingPerformers && perf && !perf.existsLocally;
@@ -780,7 +1008,8 @@ function TaggerSceneRow({
 /* ── Tagger Results ── */
 
 interface TaggerResultsProps {
-  results: MetadataServerSceneMatch[];
+  scene: Scene;
+  results: UnifiedSceneMatch[];
   selectedIndex: number;
   onSelect: (index: number) => void;
   onSave: () => void;
@@ -793,18 +1022,23 @@ interface TaggerResultsProps {
   forceIncludedPerformers: Set<string>;
   forceIncludedTags: Set<string>;
   forceIncludeStudio: boolean;
+  fieldStrategies: Record<string, SceneFieldStrategy>;
+  collectionModes: Record<string, CollectionMode>;
+  onFieldStrategyChange: (field: string, strategy: SceneFieldStrategy) => void;
+  onCollectionModeChange: (field: string, mode: CollectionMode) => void;
   onTogglePerformer: (name: string) => void;
   onToggleTag: (name: string) => void;
   onToggleStudio: () => void;
   taggerConfig: TaggerConfig;
 }
 
-function TaggerResults({ results, selectedIndex, onSelect, onSave, saving, saved, localDuration, excludedPerformers, excludedTags, skipStudio, forceIncludedPerformers, forceIncludedTags, forceIncludeStudio, onTogglePerformer, onToggleTag, onToggleStudio, taggerConfig }: TaggerResultsProps) {
+function TaggerResults({ scene, results, selectedIndex, onSelect, onSave, saving, saved, localDuration, excludedPerformers, excludedTags, skipStudio, forceIncludedPerformers, forceIncludedTags, forceIncludeStudio, fieldStrategies, collectionModes, onFieldStrategyChange, onCollectionModeChange, onTogglePerformer, onToggleTag, onToggleStudio, taggerConfig }: TaggerResultsProps) {
   return (
     <div className="space-y-1">
       {results.map((result, i) => (
         <TaggerResultRow
           key={`${result.endpoint}-${result.id}`}
+          scene={scene}
           result={result}
           isSelected={i === selectedIndex}
           onClick={() => onSelect(i)}
@@ -818,6 +1052,10 @@ function TaggerResults({ results, selectedIndex, onSelect, onSave, saving, saved
           forceIncludedPerformers={forceIncludedPerformers}
           forceIncludedTags={forceIncludedTags}
           forceIncludeStudio={forceIncludeStudio}
+          fieldStrategies={fieldStrategies}
+          collectionModes={collectionModes}
+          onFieldStrategyChange={i === selectedIndex ? onFieldStrategyChange : undefined}
+          onCollectionModeChange={i === selectedIndex ? onCollectionModeChange : undefined}
           onTogglePerformer={i === selectedIndex ? onTogglePerformer : undefined}
           onToggleTag={i === selectedIndex ? onToggleTag : undefined}
           onToggleStudio={i === selectedIndex ? onToggleStudio : undefined}
@@ -829,6 +1067,7 @@ function TaggerResults({ results, selectedIndex, onSelect, onSave, saving, saved
 }
 
 function TaggerResultRow({
+  scene,
   result,
   isSelected,
   onClick,
@@ -842,11 +1081,16 @@ function TaggerResultRow({
   forceIncludedPerformers,
   forceIncludedTags,
   forceIncludeStudio,
+  fieldStrategies,
+  collectionModes,
+  onFieldStrategyChange,
+  onCollectionModeChange,
   onTogglePerformer,
   onToggleTag,
   onToggleStudio,
   taggerConfig,
 }: {
+  scene: Scene;
   result: MetadataServerSceneMatch;
   isSelected: boolean;
   onClick: () => void;
@@ -860,6 +1104,10 @@ function TaggerResultRow({
   forceIncludedPerformers: Set<string>;
   forceIncludedTags: Set<string>;
   forceIncludeStudio: boolean;
+  fieldStrategies: Record<string, SceneFieldStrategy>;
+  collectionModes: Record<string, CollectionMode>;
+  onFieldStrategyChange?: (field: string, strategy: SceneFieldStrategy) => void;
+  onCollectionModeChange?: (field: string, mode: CollectionMode) => void;
   onTogglePerformer?: (name: string) => void;
   onToggleTag?: (name: string) => void;
   onToggleStudio?: () => void;
@@ -869,6 +1117,19 @@ function TaggerResultRow({
     ? Math.abs(localDuration - result.duration)
     : undefined;
   const durationMatch = durationDiff != null && durationDiff < 5;
+  const scalarRows = [
+    { key: "title", label: "Title", current: scene.title, scraped: result.title },
+    { key: "code", label: "Code", current: scene.code, scraped: result.code },
+    { key: "details", label: "Details", current: scene.details, scraped: result.details, multiline: true },
+    { key: "director", label: "Director", current: scene.director, scraped: result.director },
+    { key: "date", label: "Date", current: scene.date, scraped: result.date },
+  ].filter((row) => Boolean(row.scraped));
+  const currentTagNames = getSceneTagNames(scene);
+  const currentPerformerNames = getScenePerformerNames(scene);
+  const existingTagNames = result.tagCandidates.filter((tag) => tag.existsLocally).map((tag) => tag.name);
+  const existingPerformerNames = result.performerCandidates.filter((performer) => performer.existsLocally).map((performer) => performer.name);
+  const tagActions = buildSceneRelationActionMap(result.tagNames, currentTagNames, existingTagNames, excludedTags, forceIncludedTags, !taggerConfig.onlyExistingTags);
+  const performerActions = buildSceneRelationActionMap(result.performerNames, currentPerformerNames, existingPerformerNames, excludedPerformers, forceIncludedPerformers, !taggerConfig.onlyExistingPerformers);
 
   return (
     <div
@@ -955,128 +1216,78 @@ function TaggerResultRow({
       {/* Expanded details — only for selected result */}
       {isSelected && (
         <div className="border-t border-border px-3 py-3 space-y-3">
-          {/* Description */}
-          {result.details && (
-            <p className="text-xs text-secondary leading-relaxed line-clamp-3">{result.details}</p>
+          {scalarRows.map((row) => (
+            <CompactScalarDecision
+              key={row.key}
+              label={row.label}
+              current={row.current}
+              scraped={row.scraped}
+              multiline={row.multiline}
+              replacing={fieldStrategies[row.key] === "overwrite"}
+              onChange={(shouldReplace) => onFieldStrategyChange?.(row.key, shouldReplace ? "overwrite" : "ignore")}
+            />
+          ))}
+
+          {result.studioName && taggerConfig.setStudio && (
+            <CompactScalarDecision
+              label="Studio"
+              current={scene.studioName}
+              scraped={result.studioName}
+              replacing={collectionModes.studio === "replace"}
+              onChange={(shouldReplace) => onCollectionModeChange?.("studio", shouldReplace ? "replace" : "skip")}
+            />
           )}
 
-          {/* Studio */}
-          {result.studioCandidate && taggerConfig.setStudio && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted uppercase tracking-wider w-20 shrink-0">Studio</span>
-              {(() => {
-                const willSkipByDefault = taggerConfig.onlyExistingStudio && !result.studioCandidate.existsLocally;
-                const isForceIncluded = forceIncludeStudio && willSkipByDefault;
-                return (
-                  <span
-                    onClick={(e) => { e.stopPropagation(); onToggleStudio?.(); }}
-                    className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded cursor-pointer border transition-colors ${
-                      skipStudio
-                        ? "bg-surface text-muted border-border line-through opacity-60"
-                        : isForceIncluded
-                          ? "bg-amber-600/10 text-amber-300 border-amber-600/20"
-                          : willSkipByDefault
-                            ? "bg-surface text-muted border-border opacity-60"
-                            : result.studioCandidate.existsLocally
-                              ? "bg-green-600/10 text-green-300 border-green-600/20"
-                              : "bg-amber-600/10 text-amber-300 border-amber-600/20"
-                    }`}
-                    title={
-                      skipStudio ? "Excluded — click to include"
-                      : isForceIncluded ? "Force include — click to skip"
-                      : willSkipByDefault ? "Won't be added (doesn't exist locally) — click to force include"
-                      : result.studioCandidate.existsLocally ? "✓ Matched locally — click to exclude"
-                      : "+ Will create — click to exclude"
-                    }
-                  >
-                    {skipStudio ? <Minus className="w-3 h-3" /> : isForceIncluded ? <Check className="w-3 h-3" /> : willSkipByDefault ? <Plus className="w-3 h-3" /> : result.studioCandidate.existsLocally ? <Check className="w-3 h-3" /> : <Check className="w-3 h-3" />}
-                    {result.studioCandidate.name}
-                  </span>
-                );
-              })()}
-            </div>
+          {result.urls.length > 0 && (
+            <CompactCollectionDecision
+              label="URLs"
+              current={scene.urls}
+              mode={collectionModes.urls}
+              onModeChange={(mode) => onCollectionModeChange?.("urls", mode)}
+              scraped={<CompactListValue values={result.urls} breakAll />}
+            />
           )}
 
-          {/* Performers */}
-          {result.performerCandidates.length > 0 && taggerConfig.setPerformers && (
-            <div className="flex items-start gap-2">
-              <span className="text-[10px] text-muted uppercase tracking-wider w-20 shrink-0 pt-1">Performers</span>
-              <div className="flex flex-wrap gap-1">
-                {result.performerCandidates.map((perf) => {
-                  const excluded = excludedPerformers.has(perf.name);
-                  const willSkipByDefault = taggerConfig.onlyExistingPerformers && !perf.existsLocally;
-                  const isForceIncluded = forceIncludedPerformers.has(perf.name) && willSkipByDefault;
-                  return (
-                    <span
-                      key={perf.remoteId}
-                      onClick={(e) => { e.stopPropagation(); onTogglePerformer?.(perf.name); }}
-                      className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded cursor-pointer border transition-colors ${
-                        excluded
-                          ? "bg-surface text-muted border-border line-through opacity-60"
-                          : isForceIncluded
-                            ? "bg-amber-600/10 text-amber-300 border-amber-600/20"
-                            : willSkipByDefault
-                              ? "bg-surface text-muted border-border opacity-60"
-                              : perf.existsLocally
-                                ? "bg-green-600/10 text-green-300 border-green-600/20"
-                                : "bg-amber-600/10 text-amber-300 border-amber-600/20"
-                      }`}
-                      title={
-                        excluded ? "Excluded — click to include"
-                        : isForceIncluded ? "Force include — click to skip"
-                        : willSkipByDefault ? `Won't be added (doesn't exist locally) — click to force include`
-                        : perf.existsLocally ? `✓ Matched locally — click to exclude`
-                        : `+ Will create — click to exclude`
-                      }
-                    >
-                      {excluded ? <Minus className="w-3 h-3" /> : isForceIncluded ? <Check className="w-3 h-3" /> : willSkipByDefault ? <Plus className="w-3 h-3" /> : perf.existsLocally ? <Check className="w-3 h-3" /> : <Check className="w-3 h-3" />}
-                      {perf.name}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
+          {result.performerNames.length > 0 && taggerConfig.setPerformers && (
+            <CompactCollectionDecision
+              label="Performers"
+              current={currentPerformerNames}
+              mode={collectionModes.performers}
+              onModeChange={(mode) => onCollectionModeChange?.("performers", mode)}
+              scraped={(
+                <div onClick={(event) => event.stopPropagation()}>
+                  <ScrapeRelationChoices
+                    names={result.performerNames}
+                    currentNames={currentPerformerNames}
+                    existingNames={existingPerformerNames}
+                    actions={performerActions}
+                    disabled={collectionModes.performers === "skip"}
+                    onActionChange={(name) => onTogglePerformer?.(name)}
+                  />
+                </div>
+              )}
+            />
           )}
 
-          {/* Tags */}
-          {result.tagCandidates.length > 0 && taggerConfig.setTags && (
-            <div className="flex items-start gap-2">
-              <span className="text-[10px] text-muted uppercase tracking-wider w-20 shrink-0 pt-1">Tags</span>
-              <div className="flex flex-wrap gap-1">
-                {result.tagCandidates.map((tag) => {
-                  const excluded = excludedTags.has(tag.name);
-                  const willSkipByDefault = taggerConfig.onlyExistingTags && !tag.existsLocally;
-                  const isForceIncluded = forceIncludedTags.has(tag.name) && willSkipByDefault;
-                  return (
-                    <span
-                      key={tag.remoteId}
-                      onClick={(e) => { e.stopPropagation(); onToggleTag?.(tag.name); }}
-                      className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded cursor-pointer border transition-colors ${
-                        excluded
-                          ? "bg-surface text-muted border-border line-through opacity-60"
-                          : isForceIncluded
-                            ? "bg-amber-600/10 text-amber-300 border-amber-600/20"
-                            : willSkipByDefault
-                              ? "bg-surface text-muted border-border opacity-60"
-                              : tag.existsLocally
-                                ? "bg-green-600/10 text-green-300 border-green-600/20"
-                                : "bg-amber-600/10 text-amber-300 border-amber-600/20"
-                      }`}
-                      title={
-                        excluded ? "Excluded — click to include"
-                        : isForceIncluded ? "Force include — click to skip"
-                        : willSkipByDefault ? `Won't be added (doesn't exist locally) — click to force include`
-                        : tag.existsLocally ? `✓ Matched locally — click to exclude`
-                        : `+ Will create — click to exclude`
-                      }
-                    >
-                      {excluded ? <Minus className="w-2.5 h-2.5" /> : isForceIncluded ? <Check className="w-2.5 h-2.5" /> : willSkipByDefault ? <Plus className="w-2.5 h-2.5" /> : tag.existsLocally ? <Check className="w-2.5 h-2.5" /> : <Check className="w-2.5 h-2.5" />}
-                      {tag.name}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
+          {result.tagNames.length > 0 && taggerConfig.setTags && (
+            <CompactCollectionDecision
+              label="Tags"
+              current={currentTagNames}
+              mode={collectionModes.tags}
+              onModeChange={(mode) => onCollectionModeChange?.("tags", mode)}
+              scraped={(
+                <div onClick={(event) => event.stopPropagation()}>
+                  <ScrapeRelationChoices
+                    names={result.tagNames}
+                    currentNames={currentTagNames}
+                    existingNames={existingTagNames}
+                    actions={tagActions}
+                    disabled={collectionModes.tags === "skip"}
+                    onActionChange={(name) => onToggleTag?.(name)}
+                  />
+                </div>
+              )}
+            />
           )}
         </div>
       )}
@@ -1084,55 +1295,3 @@ function TaggerResultRow({
   );
 }
 
-/* ── Blacklist Editor (tag-style pills) ── */
-
-function BlacklistEditor({ items, onChange }: { items: string[]; onChange: (items: string[]) => void }) {
-  const [input, setInput] = useState("");
-
-  const addItem = () => {
-    const trimmed = input.trim();
-    if (trimmed && !items.includes(trimmed)) {
-      onChange([...items, trimmed]);
-      setInput("");
-    }
-  };
-
-  const removeItem = (index: number) => {
-    onChange(items.filter((_, i) => i !== index));
-  };
-
-  return (
-    <div className="space-y-2">
-      <div className="flex gap-1.5">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addItem(); } }}
-          placeholder=""
-          className="flex-1 bg-input border border-border rounded px-2 py-1.5 text-xs text-foreground outline-none focus:border-accent font-mono"
-        />
-        <button
-          onClick={addItem}
-          disabled={!input.trim()}
-          className="px-3 py-1.5 text-xs rounded border border-border bg-surface text-foreground hover:bg-card disabled:opacity-40"
-        >
-          Add
-        </button>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((item, i) => (
-          <span
-            key={i}
-            className="inline-flex items-center gap-1 bg-surface text-foreground text-xs px-2 py-1 rounded border border-border font-mono"
-          >
-            {item}
-            <button onClick={() => removeItem(i)} className="text-muted hover:text-red-400 ml-0.5">
-              <X className="w-3 h-3" />
-            </button>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}

@@ -109,7 +109,9 @@ public class InterfaceConfig
         "galleries",
         "studios",
         "tags",
-        "groups"
+        "groups",
+        "audios",
+        "texts"
     ];
 
     public static readonly string[] SegmentsDefaultMenuItems =
@@ -166,6 +168,8 @@ public class UiConfig
     public bool AutoplayOnListClick { get; set; }
     public int MaxLoopDuration { get; set; }
     public bool AlwaysResumeOnPlayback { get; set; } = true;
+    public double PlayerVideoStartPercent { get; set; }
+    public double PlayerVideoStartMinDuration { get; set; }
     public bool ContinuePlaylistDefault { get; set; }
     public bool ShowAbLoopControls { get; set; } = true;
     // Preview
@@ -178,6 +182,10 @@ public class UiConfig
     public bool WallShowTitle { get; set; } = true;
     public int WallPlayback { get; set; } = 1; // 0=Audio, 1=Silent
     public string WallPreviewType { get; set; } = "video";
+    public string FeedVideoSource { get; set; } = "preview";
+    public bool FeedVideoSound { get; set; }
+    public double FeedVideoStartPercent { get; set; }
+    public double FeedVideoStartMinDuration { get; set; }
     // Lightbox
     public bool DeleteFileDefault { get; set; }
     public int SlideshowDelay { get; set; } = 5000;

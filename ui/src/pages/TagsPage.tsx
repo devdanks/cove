@@ -15,6 +15,7 @@ import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { TAG_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, TAG_BULK_FIELDS } from "../components/BulkEditDialog";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { useRouteRegistry } from "../router/RouteRegistry";
 import { useAuth } from "../auth/AuthContext";
@@ -24,6 +25,7 @@ import { StringListEditor } from "../components/StringListEditor";
 import { TagGraphView } from "../components/TagGraphView";
 import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
 import { TagGroupsManager } from "../components/TagGroupsManager";
+import { TagTagger } from "../components/TagTagger";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { CustomFieldsEditor } from "../components/shared";
@@ -64,7 +66,8 @@ export function TagsPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list", "wall", "graph"] as const,
+    allowedDisplayModes: ["grid", "list", "wall", "graph", "tagger"] as const,
+    allowInfinitePageSize: true,
   });
   const [wallColumnCount, setWallColumnCount] = useState(6);
   const [showCreate, setShowCreate] = useState(false);
@@ -72,6 +75,7 @@ export function TagsPage({ onNavigate }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showMetadataBatch, setShowMetadataBatch] = useState(false);
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWriteTag = canWriteEntity("tag", hasPermission);
@@ -83,13 +87,15 @@ export function TagsPage({ onNavigate }: Props) {
     () => ({ ...filter, page: 1, perPage: GRAPH_VIEW_LIMIT }),
     [filter],
   );
-  const { data, isLoading } = useQuery({
+  const listData = useInfiniteListData<Tag>({
     queryKey: ["tags", filter, objectFilter],
-    queryFn: () =>
-      hasObjectFilter
-        ? tags.findFiltered({ findFilter: filter, objectFilter: objectFilter as TagFilterCriteria })
-        : tags.find(filter),
+    filter,
+    chunkSize: defaultState.filter.perPage ?? 40,
     enabled: displayMode !== "graph",
+    queryPage: (nextFilter) =>
+      hasObjectFilter
+        ? tags.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as TagFilterCriteria })
+        : tags.find(nextFilter),
   });
   const { data: graphData, isLoading: isGraphLoading } = useQuery({
     queryKey: ["tags", "graph", graphFindFilter, objectFilter],
@@ -97,12 +103,23 @@ export function TagsPage({ onNavigate }: Props) {
     enabled: displayMode === "graph",
   });
 
-  const items = data?.items ?? [];
+  const items = listData.items;
+  const totalCount = displayMode === "graph" ? graphData?.totalCount ?? 0 : listData.totalCount;
+  const isLoading = displayMode === "graph" ? isGraphLoading : listData.isLoading;
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { engagementById } = useEntityEngagementBatch("tag", items.map((item) => item.id));
   const selectionItems: Array<Pick<Tag, "id" | "name" | "imagePath">> = displayMode === "graph" ? graphData?.items ?? [] : items;
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(selectionItems);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter, displayMode }), [displayMode, listData.infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(selectionItems, { preserveOnAppend: displayMode !== "graph" && listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await listData.fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
 
   const bulkDeleteMut = useMutation({
     mutationFn: () => tags.bulkDelete([...selectedIds]),
@@ -146,15 +163,31 @@ export function TagsPage({ onNavigate }: Props) {
       filterMode="tags"
       filter={filter}
       onFilterChange={setFilter}
-      totalCount={displayMode === "graph" ? graphData?.totalCount ?? 0 : data?.totalCount ?? 0}
-      isLoading={displayMode === "graph" ? isGraphLoading : isLoading}
+      totalCount={totalCount}
+      isLoading={isLoading}
       sortOptions={SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
-      availableDisplayModes={["grid", "list", "wall", "graph"]}
+      availableDisplayModes={["grid", "list", "wall", "graph", "tagger"]}
+      allowInfinitePageSize
+      showPagingControls={displayMode === "graph" || !listData.infinitePageSize}
+      selectAllLabel={displayMode !== "graph" && listData.infinitePageSize ? "Select loaded" : undefined}
+      onSelectAllMatching={displayMode !== "graph" && listData.infinitePageSize ? handleSelectAllMatching : undefined}
+      selectAllMatchingLabel={`Select all ${totalCount} matching`}
+      selectAllMatchingPending={selectAllMatchingPending}
+      infiniteScroll={displayMode !== "graph" && listData.infinitePageSize ? {
+        hasNextPage: listData.infiniteQuery.hasNextPage,
+        hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
+        isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
+        isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
+        onLoadMore: listData.loadMore,
+        onLoadPrevious: listData.loadPrevious,
+        loadedCount: listData.infiniteQuery.loadedThroughCount,
+        previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
+        totalCount,
+      } : undefined}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
-      showPagingControls={displayMode !== "graph"}
       criteriaDefinitions={TAG_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
@@ -215,7 +248,9 @@ export function TagsPage({ onNavigate }: Props) {
         </>
       )}
     >
-      {displayMode === "graph" ? (
+      {displayMode === "tagger" ? (
+        <TagTagger tags={items} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
+      ) : displayMode === "graph" ? (
         <TagGraphView
           nodes={graphData?.items ?? []}
           links={graphData?.links ?? []}

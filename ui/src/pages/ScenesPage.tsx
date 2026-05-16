@@ -1,10 +1,11 @@
-import { useMemo, useState, useCallback, useEffect, lazy, Suspense } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { aiVisual, scenes, tags, performers, galleries } from "../api/client";
 import type { BoolCriterion, EntityEngagement, FindFilter, Group, Scene, SceneCreate, SceneFilterCriteria, SceneListEntry } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
 import { RatingField } from "../components/Rating";
 import { SceneTagger } from "../components/SceneTagger";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -13,7 +14,7 @@ import { CustomFieldsEditor, formatDuration, formatFileSize, getResolutionLabel,
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
-import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Download, Layers } from "lucide-react";
+import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX } from "lucide-react";
 import { useSceneQueue } from "../state/SceneQueueContext";
 import { SceneCard } from "../components/EntityCards";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
@@ -27,11 +28,13 @@ import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { FeedCardFrame, FeedChipButton } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FileBackedCreateSource, type CreateSourceMode } from "../components/FileBackedCreateSource";
 import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundError, type UrlDownloadMode } from "../utils/createFromUrlDownload";
 import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
+import { InfiniteScrollSentinel } from "../components/InfiniteScrollSentinel";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -41,6 +44,7 @@ import {
   saveStoredBatchDownloadOptions,
   type BatchDownloadOptions,
 } from "../utils/batchDownloads";
+import { fetchAllMatchingIds } from "../utils/selectAllMatching";
 
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 
@@ -59,6 +63,23 @@ const SEARCH_MODE_OPTIONS = [
 
 const VISUAL_MATCH_SORT_OPTION = { value: "visual_match", label: "Visual Match" };
 const INCLUDE_COMPILATIONS_FILTER_KEY = "includeCompilationGroups";
+const VERTICAL_PORTRAIT_FILTER_KEY = "orientationCriterion";
+const VISIBILITY_THRESHOLDS = [0, 0.1, 0.25, 0.5, 0.7, 0.85, 1];
+
+function getVisibleAreaRatio(element: HTMLElement, root?: HTMLElement | null) {
+  const rect = element.getBoundingClientRect();
+  const rootRect = root?.getBoundingClientRect() ?? { top: 0, left: 0, right: window.innerWidth, bottom: window.innerHeight };
+  const width = Math.max(0, Math.min(rect.right, rootRect.right) - Math.max(rect.left, rootRect.left));
+  const height = Math.max(0, Math.min(rect.bottom, rootRect.bottom) - Math.max(rect.top, rootRect.top));
+  return (width * height) / Math.max(1, rect.width * rect.height);
+}
+
+function getSceneIdFromData(element: HTMLElement, key: "feedSceneId" | "verticalSceneId") {
+  const raw = element.dataset[key];
+  if (!raw) return null;
+  const id = Number(raw);
+  return Number.isFinite(id) ? id : null;
+}
 
 function isIncludeCompilationGroupsEnabled(value: unknown) {
   if (typeof value === "boolean") {
@@ -86,9 +107,10 @@ export function ScenesPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list", "wall", "tagger"] as const,
+    allowedDisplayModes: ["grid", "list", "wall", "tagger", "feed", "vertical"] as const,
     defaultSearchMode: "text",
     allowedSearchModes: ["text", "visual"],
+    allowInfinitePageSize: true,
   });
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
@@ -97,17 +119,125 @@ export function ScenesPage({ onNavigate }: Props) {
   const [showBatchScrape, setShowBatchScrape] = useState(false);
   const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [wallColumnCount, setWallColumnCount] = useState(5);
+  const verticalViewerRef = useRef<HTMLDivElement>(null);
+  const [verticalFullscreen, setVerticalFullscreen] = useState(false);
+  const [verticalFullscreenDismissed, setVerticalFullscreenDismissed] = useState(false);
+  const [verticalViewerTop, setVerticalViewerTop] = useState(0);
+  const [verticalViewerHeight, setVerticalViewerHeight] = useState<number | null>(null);
+  const [verticalSoundEnabled, setVerticalSoundEnabled] = useState(false);
+  const [activeVerticalSceneId, setActiveVerticalSceneId] = useState<number | null>(null);
+  const [verticalAutoScrollEnabled, setVerticalAutoScrollEnabled] = useState(false);
+  const [verticalAutoScrollSeconds, setVerticalAutoScrollSeconds] = useState(8);
+  const [verticalAutoScrollAwake, setVerticalAutoScrollAwake] = useState(true);
+  const [feedAudioSceneId, setFeedAudioSceneId] = useState<number | null>(null);
   const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
   const queryClient = useQueryClient();
   const { setQueue } = useSceneQueue();
   const { hasPermission } = useAuth();
+  const { config } = useAppConfig();
   const canWriteScene = canWriteEntity("scene", hasPermission);
   const canDeleteScene = canDeleteEntity("scene", hasPermission);
   const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
   const canIdentifyScene = hasPermission("library.autotag") && canWriteScene;
   const canDownloadScene = hasPermission("jobs.run") && canWriteScene;
+  const feedVideoSource = config?.ui.feedVideoSource ?? "preview";
+  const feedVideoSound = config?.ui.feedVideoSound ?? false;
+  const feedVideoStartPercent = config?.ui.feedVideoStartPercent ?? 0;
+  const feedVideoStartMinDuration = config?.ui.feedVideoStartMinDuration ?? 0;
+  const infiniteOnlyDisplayMode = displayMode === "feed" || displayMode === "vertical";
+
+  useEffect(() => {
+    if (displayMode !== "vertical") {
+      setVerticalFullscreen(false);
+      setVerticalFullscreenDismissed(false);
+      setVerticalAutoScrollEnabled(false);
+      setActiveVerticalSceneId(null);
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const syncMobileFullscreen = () => {
+      if (mediaQuery.matches && !verticalFullscreenDismissed) {
+        setVerticalFullscreen(true);
+      }
+    };
+
+    syncMobileFullscreen();
+    mediaQuery.addEventListener("change", syncMobileFullscreen);
+    return () => mediaQuery.removeEventListener("change", syncMobileFullscreen);
+  }, [displayMode, verticalFullscreenDismissed]);
+
+  useEffect(() => {
+    if (displayMode === "vertical") {
+      setVerticalSoundEnabled(feedVideoSound);
+    }
+  }, [displayMode, feedVideoSound]);
+
+  useEffect(() => {
+    if (displayMode !== "vertical" || verticalFullscreen) {
+      setVerticalViewerTop(0);
+      setVerticalViewerHeight(null);
+      return;
+    }
+
+    const updateVerticalBounds = () => {
+      const element = verticalViewerRef.current;
+      if (!element) return;
+      const top = Math.max(0, element.getBoundingClientRect().top);
+      const height = Math.max(120, window.innerHeight - top);
+      setVerticalViewerTop((current) => Math.abs(current - top) > 0.5 ? top : current);
+      setVerticalViewerHeight((current) => current == null || Math.abs(current - height) > 0.5 ? height : current);
+    };
+
+    updateVerticalBounds();
+    const frameId = window.requestAnimationFrame(updateVerticalBounds);
+    window.addEventListener("resize", updateVerticalBounds);
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateVerticalBounds) : null;
+    if (resizeObserver) {
+      resizeObserver.observe(document.body);
+      if (verticalViewerRef.current?.parentElement) {
+        resizeObserver.observe(verticalViewerRef.current.parentElement);
+      }
+    }
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updateVerticalBounds);
+      resizeObserver?.disconnect();
+    };
+  }, [displayMode, verticalFullscreen]);
+
+  useEffect(() => {
+    if (!verticalFullscreen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [verticalFullscreen]);
+
+  useEffect(() => {
+    if (displayMode !== "feed") {
+      setFeedAudioSceneId(null);
+    }
+  }, [displayMode]);
+
+  const wakeVerticalAutoScroll = useCallback(() => setVerticalAutoScrollAwake(true), []);
+
+  useEffect(() => {
+    if (displayMode !== "vertical" || !verticalAutoScrollAwake) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setVerticalAutoScrollAwake(false), verticalAutoScrollEnabled ? 2600 : 3600);
+    return () => window.clearTimeout(timeoutId);
+  }, [displayMode, verticalAutoScrollAwake, verticalAutoScrollEnabled, verticalAutoScrollSeconds]);
 
   const normalizedObjectFilter = useMemo(() => {
     const includeValue = objectFilter[INCLUDE_COMPILATIONS_FILTER_KEY];
@@ -123,6 +253,18 @@ export function ScenesPage({ onNavigate }: Props) {
   ), [normalizedObjectFilter]);
   const hasObjectFilter = Object.keys(backendObjectFilter).length > 0;
   const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
+  const infinitePageSize = filter.perPage === 0 || infiniteOnlyDisplayMode;
+  const infiniteChunkSize = defaultState.filter.perPage ?? 40;
+  const infiniteFilterKey = useMemo(
+    () => ({ ...filter, page: 1, perPage: infiniteChunkSize }),
+    [filter, infiniteChunkSize],
+  );
+
+  useEffect(() => {
+    if (infiniteOnlyDisplayMode && filter.perPage !== 0) {
+      setFilter({ ...filter, page: 1, perPage: 0 });
+    }
+  }, [filter, infiniteOnlyDisplayMode, setFilter]);
   const sortOptions = useMemo(
     () => searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SCENE_SORT_OPTIONS] : SCENE_SORT_OPTIONS,
     [searchMode],
@@ -149,8 +291,21 @@ export function ScenesPage({ onNavigate }: Props) {
     setFilter({ ...filter, page: 1 });
   }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
 
+  const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
+    setDisplayMode(mode);
+
+    if (mode === "vertical" && !objectFilter[VERTICAL_PORTRAIT_FILTER_KEY] && Object.keys(objectFilter).length === 0) {
+      setObjectFilter({ [VERTICAL_PORTRAIT_FILTER_KEY]: { value: "portrait" } });
+    }
+
+    const requiresInfinite = mode === "feed" || mode === "vertical";
+    if (filter.page !== 1 || (requiresInfinite && filter.perPage !== 0)) {
+      setFilter({ ...filter, page: 1, perPage: requiresInfinite ? 0 : filter.perPage });
+    }
+  }, [filter, objectFilter, setDisplayMode, setFilter, setObjectFilter]);
+
   const includeCompilationGroups = isIncludeCompilationGroupsEnabled(normalizedObjectFilter[INCLUDE_COMPILATIONS_FILTER_KEY]);
-  const canShowCompilationGroups = includeCompilationGroups && searchMode === "text" && !hasObjectFilter && (displayMode === "grid" || displayMode === "list");
+  const canShowCompilationGroups = !infinitePageSize && includeCompilationGroups && searchMode === "text" && !hasObjectFilter && (displayMode === "grid" || displayMode === "list");
 
   const { data, isLoading } = useQuery({
     queryKey: ["scenes", filter, backendObjectFilter, searchMode],
@@ -166,24 +321,203 @@ export function ScenesPage({ onNavigate }: Props) {
         ? scenes.findFiltered({ findFilter: filter, objectFilter: backendObjectFilter as SceneFilterCriteria })
         : scenes.find(filter);
     },
-    enabled: !canShowCompilationGroups,
+    enabled: !infinitePageSize && !canShowCompilationGroups,
   });
 
   const { data: unifiedData, isLoading: unifiedLoading } = useQuery({
     queryKey: ["scenes", "with-compilations", filter],
     queryFn: () => scenes.findWithCompilations(filter),
-    enabled: canShowCompilationGroups,
+    enabled: !infinitePageSize && canShowCompilationGroups,
   });
 
-  const listEntries: SceneListEntry[] = canShowCompilationGroups
+  const infiniteScenesQuery = usePaginatedInfiniteQuery<Scene>({
+    queryKey: ["scenes", "infinite", infiniteFilterKey, backendObjectFilter, searchMode],
+    enabled: infinitePageSize,
+    chunkSize: infiniteChunkSize,
+    queryFn: (page, perPage) => {
+      const nextFilter = { ...filter, page, perPage };
+      if (visualSearchActive) {
+        return aiVisual.searchScenes({
+          findFilter: nextFilter,
+          objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
+        });
+      }
+
+      return hasObjectFilter
+        ? scenes.findFiltered({ findFilter: nextFilter, objectFilter: backendObjectFilter as SceneFilterCriteria })
+        : scenes.find(nextFilter);
+    },
+  });
+
+  const defaultListEntries: SceneListEntry[] = canShowCompilationGroups
     ? (unifiedData?.items ?? [])
     : (data?.items ?? []).map((scene) => ({ kind: "scene" as const, id: scene.id, scene }));
-  const items = listEntries.flatMap((entry) => entry.kind === "scene" && entry.scene ? [entry.scene] : []);
-  const totalCount = canShowCompilationGroups ? unifiedData?.totalCount : data?.totalCount;
-  const loading = canShowCompilationGroups ? unifiedLoading : isLoading;
+  const defaultItems = defaultListEntries.flatMap((entry) => entry.kind === "scene" && entry.scene ? [entry.scene] : []);
+  const items = infinitePageSize ? infiniteScenesQuery.items : defaultItems;
+  const itemIdsKey = useMemo(() => items.map((scene) => scene.id).join(","), [items]);
+  const listEntries = infinitePageSize
+    ? items.map((scene) => ({ kind: "scene" as const, id: scene.id, scene }))
+    : defaultListEntries;
+  const totalCount = infinitePageSize
+    ? infiniteScenesQuery.totalCount
+    : (canShowCompilationGroups ? unifiedData?.totalCount : data?.totalCount);
+  const loading = infinitePageSize
+    ? infiniteScenesQuery.isPending
+    : (canShowCompilationGroups ? unifiedLoading : isLoading);
+  const loadMoreScenes = useCallback(() => {
+    if (infiniteScenesQuery.hasNextPage && !infiniteScenesQuery.isFetchingNextPage) {
+      void infiniteScenesQuery.fetchNextPage();
+    }
+  }, [infiniteScenesQuery.fetchNextPage, infiniteScenesQuery.hasNextPage, infiniteScenesQuery.isFetchingNextPage]);
+  const loadPreviousScenes = useCallback((container?: HTMLElement | null) => {
+    if (!infiniteScenesQuery.hasPreviousPage || infiniteScenesQuery.isFetchingPreviousPage) {
+      return;
+    }
+
+    const beforeHeight = container?.scrollHeight ?? document.documentElement.scrollHeight;
+    const beforeTop = container?.scrollTop ?? window.scrollY;
+    void infiniteScenesQuery.fetchPreviousPage().then(() => {
+      window.requestAnimationFrame(() => {
+        const afterHeight = container?.scrollHeight ?? document.documentElement.scrollHeight;
+        const nextTop = beforeTop + (afterHeight - beforeHeight);
+        if (container) {
+          container.scrollTop = nextTop;
+        } else {
+          window.scrollTo({ top: nextTop });
+        }
+      });
+    });
+  }, [infiniteScenesQuery.fetchPreviousPage, infiniteScenesQuery.hasPreviousPage, infiniteScenesQuery.isFetchingPreviousPage]);
+
+  useEffect(() => {
+    if (displayMode !== "feed" || !feedVideoSound) {
+      setFeedAudioSceneId(null);
+      return;
+    }
+
+    const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-feed-scene-id]"));
+    if (elements.length === 0) {
+      setFeedAudioSceneId(null);
+      return;
+    }
+
+    const ratios = new Map<number, number>();
+    const selectBestVisible = () => {
+      let bestId: number | null = null;
+      let bestRatio = 0;
+      for (const [id, ratio] of ratios) {
+        if (ratio > bestRatio) {
+          bestId = id;
+          bestRatio = ratio;
+        }
+      }
+      setFeedAudioSceneId((current) => current === bestId ? current : bestId);
+    };
+
+    const seedRatios = () => {
+      for (const element of elements) {
+        const id = getSceneIdFromData(element, "feedSceneId");
+        if (id != null) ratios.set(id, getVisibleAreaRatio(element));
+      }
+      selectBestVisible();
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const id = getSceneIdFromData(entry.target as HTMLElement, "feedSceneId");
+        if (id != null) ratios.set(id, entry.isIntersecting ? entry.intersectionRatio : 0);
+      }
+      selectBestVisible();
+    }, { root: null, rootMargin: "-10% 0px -25% 0px", threshold: VISIBILITY_THRESHOLDS });
+
+    for (const element of elements) observer.observe(element);
+    const frameId = window.requestAnimationFrame(seedRatios);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [displayMode, feedVideoSound, itemIdsKey]);
+
+  useEffect(() => {
+    if (displayMode !== "vertical") {
+      setActiveVerticalSceneId(null);
+      return;
+    }
+
+    const root = verticalViewerRef.current;
+    if (!root) return;
+    const elements = Array.from(root.querySelectorAll<HTMLElement>("[data-vertical-scene-id]"));
+    if (elements.length === 0) {
+      setActiveVerticalSceneId(null);
+      return;
+    }
+
+    const ratios = new Map<number, number>();
+    const selectBestVisible = () => {
+      let bestId: number | null = null;
+      let bestRatio = 0;
+      for (const [id, ratio] of ratios) {
+        if (ratio > bestRatio) {
+          bestId = id;
+          bestRatio = ratio;
+        }
+      }
+      setActiveVerticalSceneId((current) => current === bestId ? current : bestId);
+    };
+
+    const seedRatios = () => {
+      for (const element of elements) {
+        const id = getSceneIdFromData(element, "verticalSceneId");
+        if (id != null) ratios.set(id, getVisibleAreaRatio(element, root));
+      }
+      selectBestVisible();
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const id = getSceneIdFromData(entry.target as HTMLElement, "verticalSceneId");
+        if (id != null) ratios.set(id, entry.isIntersecting ? entry.intersectionRatio : 0);
+      }
+      selectBestVisible();
+    }, { root, threshold: VISIBILITY_THRESHOLDS });
+
+    for (const element of elements) observer.observe(element);
+    const frameId = window.requestAnimationFrame(seedRatios);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [displayMode, itemIdsKey, verticalFullscreen]);
+
+  useEffect(() => {
+    if (displayMode !== "vertical" || !verticalAutoScrollEnabled || activeVerticalSceneId == null) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const root = verticalViewerRef.current;
+      if (!root) return;
+      const elements = Array.from(root.querySelectorAll<HTMLElement>("[data-vertical-scene-id]"));
+      const currentIndex = elements.findIndex((element) => getSceneIdFromData(element, "verticalSceneId") === activeVerticalSceneId);
+      const nextElement = currentIndex >= 0 ? elements[currentIndex + 1] : elements[0];
+      if (!nextElement) {
+        setVerticalAutoScrollEnabled(false);
+        return;
+      }
+      root.scrollTo({ top: nextElement.offsetTop, behavior: "smooth" });
+    }, verticalAutoScrollSeconds * 1000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeVerticalSceneId, displayMode, itemIdsKey, verticalAutoScrollEnabled, verticalAutoScrollSeconds]);
   const { engagementById } = useEntityEngagementBatch("scene", items.map((item) => item.id));
-  const wallColumns = useWallColumns(items, wallColumnCount);
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const wallColumns = useWallColumns(items, wallColumnCount, (scene) => {
+    const file = scene.files[0];
+    return file?.width && file.height ? file.height / file.width : 9 / 16;
+  });
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter: backendObjectFilter, searchMode }), [backendObjectFilter, infiniteFilterKey, searchMode]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
   const selectedScene = selectedIds.size === 1 ? items.find((scene) => selectedIds.has(scene.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
@@ -201,6 +535,27 @@ export function ScenesPage({ onNavigate }: Props) {
     if (ids.length > 0) setQueue(ids, sceneId);
     onNavigate({ page: "scene", id: sceneId });
   }, [items, setQueue, onNavigate]);
+
+  const handleSelectAllMatching = useCallback(async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      const ids = await fetchAllMatchingIds<Scene>(filter, (nextFilter) => {
+        if (visualSearchActive) {
+          return aiVisual.searchScenes({
+            findFilter: nextFilter,
+            objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
+          });
+        }
+
+        return hasObjectFilter
+          ? scenes.findFiltered({ findFilter: nextFilter, objectFilter: backendObjectFilter as SceneFilterCriteria })
+          : scenes.find(nextFilter);
+      });
+      selectIds(ids);
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  }, [backendObjectFilter, filter, hasObjectFilter, selectIds, visualSearchActive]);
 
   // When sort changes to random, generate a new seed for reproducibility
   const handleFilterChange = useCallback((next: typeof filter) => {
@@ -256,6 +611,8 @@ export function ScenesPage({ onNavigate }: Props) {
     if (totalSize) parts.push(formatFileSize(totalSize));
     return <span className="text-xs text-muted">({parts.join(" — ")})</span>;
   }, [items]);
+  const verticalOverlayTop = verticalFullscreen ? 12 : Math.max(12, verticalViewerTop + 12);
+  const verticalViewerStyle = verticalFullscreen ? undefined : { height: verticalViewerHeight != null ? `${verticalViewerHeight}px` : "calc(100dvh - 10rem)" };
 
   return (
     <>
@@ -307,14 +664,23 @@ export function ScenesPage({ onNavigate }: Props) {
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}
-      onDisplayModeChange={setDisplayMode}
-      availableDisplayModes={["grid", "list", "wall", "tagger"]}
+      onDisplayModeChange={handleDisplayModeChange}
+      availableDisplayModes={["grid", "list", "wall", "tagger", "feed", "vertical"]}
+      allowInfinitePageSize
+      infinitePageSizeOnly={infiniteOnlyDisplayMode}
       metadataByline={byline}
       criteriaDefinitions={SCENE_CRITERIA}
       objectFilter={normalizedObjectFilter}
       onObjectFilterChange={setObjectFilter}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
+      autoScrollContainerRef={displayMode === "vertical" ? verticalViewerRef : undefined}
+      showAutoScrollControls={displayMode !== "vertical"}
+      showPagingControls={!infinitePageSize}
+      selectAllLabel={infinitePageSize ? "Select loaded" : undefined}
+      onSelectAllMatching={infinitePageSize ? handleSelectAllMatching : undefined}
+      selectAllMatchingLabel={`Select all ${totalCount ?? 0} matching`}
+      selectAllMatchingPending={selectAllMatchingPending}
       onNew={canWriteScene ? () => setShowCreate(true) : undefined}
       selectedIds={selectedIds}
       onSelectAll={selectAll}
@@ -406,6 +772,165 @@ export function ScenesPage({ onNavigate }: Props) {
         showDeleteFile
         showDeleteGenerated
       />
+      {displayMode === "vertical" && (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              if (verticalFullscreen) {
+                setVerticalFullscreen(false);
+                setVerticalFullscreenDismissed(true);
+              } else {
+                setVerticalFullscreen(true);
+                setVerticalFullscreenDismissed(false);
+              }
+            }}
+            className={`fixed ${verticalFullscreen ? "left-3" : "right-3"} z-[95] rounded-full border border-white/15 bg-black/55 p-2 text-white shadow-lg backdrop-blur transition-colors hover:bg-black/75`}
+            style={{ top: verticalOverlayTop }}
+            aria-label={verticalFullscreen ? "Exit full screen" : "Enter full screen"}
+            title={verticalFullscreen ? "Exit full screen" : "Enter full screen"}
+          >
+            {verticalFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+          {infinitePageSize && (
+            <div className="pointer-events-none fixed right-3 z-[94] sm:right-5" style={{ top: verticalFullscreen ? "50%" : verticalOverlayTop + 44, transform: verticalFullscreen ? "translateY(-50%)" : undefined }}>
+              <div
+                className="pointer-events-auto relative flex min-h-36 w-12 items-center justify-end"
+                onPointerEnter={wakeVerticalAutoScroll}
+                onPointerMove={wakeVerticalAutoScroll}
+                onFocusCapture={wakeVerticalAutoScroll}
+              >
+                {!verticalAutoScrollAwake && <div className="absolute right-0 h-12 w-1.5 rounded-l-full bg-white/70 shadow-lg" aria-hidden="true" />}
+                <div className={`flex flex-col items-center gap-2 rounded-xl border border-white/15 bg-black/60 px-2 py-2 text-white shadow-2xl backdrop-blur transition-all duration-300 ${verticalAutoScrollAwake ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0"}`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      wakeVerticalAutoScroll();
+                      setVerticalAutoScrollEnabled((current) => !current);
+                    }}
+                    className={`rounded-md border border-transparent p-1.5 transition-colors hover:bg-white/15 focus:outline-none focus:border-white/50 ${verticalAutoScrollEnabled ? "text-accent" : "text-white"}`}
+                    aria-label={verticalAutoScrollEnabled ? "Pause vertical auto-scroll" : "Start vertical auto-scroll"}
+                    title={verticalAutoScrollEnabled ? "Pause vertical auto-scroll" : "Start vertical auto-scroll"}
+                  >
+                    {verticalAutoScrollEnabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                  </button>
+                  <input
+                    type="range"
+                    min={3}
+                    max={30}
+                    step={1}
+                    value={verticalAutoScrollSeconds}
+                    onChange={(event) => {
+                      wakeVerticalAutoScroll();
+                      setVerticalAutoScrollSeconds(Number(event.target.value));
+                    }}
+                    className="h-24 w-1 accent-accent [writing-mode:vertical-lr]"
+                    aria-label="Seconds before next vertical item"
+                    title={`${verticalAutoScrollSeconds}s before next item`}
+                  />
+                  <span className="text-[10px] text-white/80 tabular-nums [writing-mode:vertical-lr]">{verticalAutoScrollSeconds}s/item</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <div
+            ref={verticalViewerRef}
+            style={verticalViewerStyle}
+            className={verticalFullscreen
+              ? "fixed inset-0 z-[80] h-[100dvh] snap-y snap-mandatory overflow-y-auto bg-black px-0 py-0"
+              : "relative -mx-3 -mb-5 snap-y snap-mandatory overflow-y-auto bg-black px-0 py-0 sm:-mx-4 md:-mx-6"}
+          >
+            {infinitePageSize && items.length > 0 && (infiniteScenesQuery.hasPreviousPage || infiniteScenesQuery.isFetchingPreviousPage) && (
+              <InfiniteScrollSentinel
+                direction="previous"
+                hasMore={Boolean(infiniteScenesQuery.hasPreviousPage)}
+                isLoading={infiniteScenesQuery.isFetchingPreviousPage}
+                onLoadMore={() => loadPreviousScenes(verticalViewerRef.current)}
+                loadedCount={infiniteScenesQuery.firstLoadedIndex}
+                totalCount={infiniteScenesQuery.totalCount}
+                className="snap-start pt-2 text-white/70"
+              />
+            )}
+            {items.map((scene) => (
+              <SceneVerticalViewerCard
+                key={scene.id}
+                scene={scene}
+                feedVideoSource={feedVideoSource}
+                soundEnabled={verticalSoundEnabled}
+                onToggleSound={() => setVerticalSoundEnabled((current) => !current)}
+                feedVideoStartPercent={feedVideoStartPercent}
+                feedVideoStartMinDuration={feedVideoStartMinDuration}
+                fullscreen={verticalFullscreen}
+                viewerHeight={verticalViewerHeight}
+                selected={selectedIds.has(scene.id)}
+                selecting={selecting}
+                onSelect={() => toggle(scene.id)}
+                onNavigate={navigateToScene}
+              />
+            ))}
+            {infinitePageSize && items.length > 0 && (infiniteScenesQuery.hasNextPage || infiniteScenesQuery.isFetchingNextPage) && (
+              <InfiniteScrollSentinel
+                hasMore={Boolean(infiniteScenesQuery.hasNextPage)}
+                isLoading={infiniteScenesQuery.isFetchingNextPage}
+                onLoadMore={loadMoreScenes}
+                loadedCount={infiniteScenesQuery.loadedThroughCount}
+                totalCount={infiniteScenesQuery.totalCount}
+                className="snap-start pb-2 text-white/70"
+              />
+            )}
+          </div>
+        </>
+      )}
+      {displayMode === "feed" && (
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 px-2">
+          {infinitePageSize && items.length > 0 && (
+            <InfiniteScrollSentinel
+              direction="previous"
+              hasMore={Boolean(infiniteScenesQuery.hasPreviousPage)}
+              isLoading={infiniteScenesQuery.isFetchingPreviousPage}
+              onLoadMore={() => loadPreviousScenes()}
+              loadedCount={infiniteScenesQuery.firstLoadedIndex}
+              totalCount={infiniteScenesQuery.totalCount}
+            />
+          )}
+          {items.map((scene) => (
+            <SceneFeedCard
+              key={scene.id}
+              scene={scene}
+              engagement={engagementById.get(scene.id)}
+              feedVideoSource={feedVideoSource}
+              feedVideoStartPercent={feedVideoStartPercent}
+              feedVideoStartMinDuration={feedVideoStartMinDuration}
+              soundEnabled={feedAudioSceneId === scene.id}
+              onToggleSound={() => setFeedAudioSceneId((current) => current === scene.id ? null : scene.id)}
+              onNavigate={onNavigate}
+              selected={selectedIds.has(scene.id)}
+              selecting={selecting}
+              onSelect={() => toggle(scene.id)}
+            />
+          ))}
+          {infinitePageSize && items.length > 0 && (
+            <InfiniteScrollSentinel
+              hasMore={Boolean(infiniteScenesQuery.hasNextPage)}
+              isLoading={infiniteScenesQuery.isFetchingNextPage}
+              onLoadMore={loadMoreScenes}
+              loadedCount={infiniteScenesQuery.loadedThroughCount}
+              totalCount={infiniteScenesQuery.totalCount}
+            />
+          )}
+        </div>
+      )}
+      {infinitePageSize && displayMode !== "feed" && displayMode !== "vertical" && items.length > 0 && (infiniteScenesQuery.hasPreviousPage || infiniteScenesQuery.isFetchingPreviousPage) && (
+        <InfiniteScrollSentinel
+          direction="previous"
+          hasMore={Boolean(infiniteScenesQuery.hasPreviousPage)}
+          isLoading={infiniteScenesQuery.isFetchingPreviousPage}
+          onLoadMore={() => loadPreviousScenes()}
+          loadedCount={infiniteScenesQuery.firstLoadedIndex}
+          totalCount={infiniteScenesQuery.totalCount}
+          className="pt-2"
+        />
+      )}
       {displayMode === "grid" && (
         <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {listEntries.map((entry) => entry.kind === "compilation" && entry.group ? (
@@ -448,6 +973,16 @@ export function ScenesPage({ onNavigate }: Props) {
       )}
       {displayMode === "tagger" && (
         <SceneTagger scenes={items} onNavigate={navigateToScene} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
+      )}
+      {infinitePageSize && displayMode !== "feed" && displayMode !== "vertical" && items.length > 0 && (
+        <InfiniteScrollSentinel
+          hasMore={Boolean(infiniteScenesQuery.hasNextPage)}
+          isLoading={infiniteScenesQuery.isFetchingNextPage}
+          onLoadMore={loadMoreScenes}
+          loadedCount={infiniteScenesQuery.loadedThroughCount}
+          totalCount={infiniteScenesQuery.totalCount}
+          className="pb-2"
+        />
       )}
       {listEntries.length === 0 && !loading && (
         <div className="text-center py-20">
@@ -883,6 +1418,49 @@ function getSceneDisplayDuration(scene: Scene) {
   return scene.files[0]?.duration ?? 0;
 }
 
+function getSceneFeedMedia(scene: Scene, feedVideoSource: string) {
+  const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
+  const coverUrl = scene.imagePath ?? screenshotUrl;
+
+  if (feedVideoSource === "video") {
+    return {
+      screenshotUrl,
+      coverUrl,
+      videoSrc: scenes.streamUrl(scene.id),
+      videoStatusSrc: undefined,
+    };
+  }
+
+  return {
+    screenshotUrl,
+    coverUrl,
+    videoSrc: scenes.previewUrl(scene.id),
+    videoStatusSrc: scenes.previewStatusUrl(scene.id),
+  };
+}
+
+function getSceneFeedVideoStartTime(scene: Scene, feedVideoSource: string, startPercent: number, minDuration: number) {
+  if (feedVideoSource !== "video" || startPercent <= 0) {
+    return 0;
+  }
+
+  const duration = getSceneDisplayDuration(scene);
+  if (duration <= Math.max(0, minDuration)) {
+    return 0;
+  }
+
+  return duration * (Math.min(95, Math.max(0, startPercent)) / 100);
+}
+
+function getSceneFeedMediaStyle(file: Scene["files"][number] | undefined) {
+  if (!file?.width || !file.height || file.height <= file.width) {
+    return undefined;
+  }
+
+  const ratio = file.width / file.height;
+  return { maxWidth: `min(100%, ${56 * ratio}vh, ${34 * ratio}rem)` };
+}
+
 /* ── Scene List Table ── */
 
 function SceneListTable({ entries, engagementById, onNavigate, selectedIds, onToggle, selecting }: { entries: SceneListEntry[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
@@ -1011,5 +1589,184 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
         </span>
       )}
     </WallMediaCard>
+  );
+}
+
+function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+  const file = scene.files[0];
+  const { screenshotUrl, coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
+  const title = scene.title || file?.basename || `Scene ${scene.id}`;
+  const duration = getSceneDisplayDuration(scene);
+  const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
+  const mediaStyle = getSceneFeedMediaStyle(file);
+  const mediaIsPortrait = Boolean(mediaStyle);
+  const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
+  const visitCount = engagement?.pageVisitCount ?? 0;
+
+  return (
+    <FeedCardFrame
+      dataAttribute={{ "data-feed-scene-id": scene.id }}
+      selected={selected}
+      header={(
+        <>
+          <span className="font-semibold text-secondary">{scene.studioName || "Cove scenes"}</span>
+          {scene.date ? <span>{scene.date}</span> : null}
+          {duration > 0 ? <span>{formatDuration(duration)}</span> : null}
+          {file ? <span>{getResolutionLabel(file.width, file.height)}</span> : null}
+        </>
+      )}
+      headerActions={(
+        <>
+          <span className="inline-flex min-h-7 items-center rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+            {engagement?.rating != null ? <RatingBadge rating={engagement.rating} /> : "Unrated"}
+          </span>
+          <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+            <Eye className="h-3.5 w-3.5" />
+            {visitCount}
+          </span>
+        </>
+      )}
+      media={(
+        <WallMediaCard
+          title={title}
+          imageSrc={coverUrl}
+          imageFallbackSrc={screenshotUrl}
+          videoSrc={videoSrc}
+          videoStatusSrc={videoStatusSrc}
+          useVideo
+          muted={!soundEnabled}
+          videoStartTimeSec={videoStartTimeSec}
+          videoPlayThreshold={0.65}
+          aspectRatio={aspectRatio}
+          style={mediaStyle}
+          className={`${mediaIsPortrait ? "mx-auto rounded-lg border border-border/60" : "rounded-none border-x-0 border-y border-border/60"} hover:border-border/60`}
+        >
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleSound();
+            }}
+            className="absolute right-2 top-2 z-20 rounded-full border border-white/15 bg-black/60 p-2 text-white shadow transition-colors hover:bg-black/80"
+            aria-label={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
+            title={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
+          >
+            {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+          </button>
+          <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+          <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={() => onNavigate({ page: "scene", id: scene.id })} label={`Open scene ${title}`} selectionSafeZone />
+          {!selecting && (
+            <BookmarkButton
+              hostType="scene"
+              hostId={scene.id}
+              compact
+              deferUntilHover
+              className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+            />
+          )}
+        </WallMediaCard>
+      )}
+      title={(
+        <button
+          type="button"
+          onClick={() => onNavigate({ page: "scene", id: scene.id })}
+          className="text-left text-base font-semibold text-foreground transition-colors hover:text-accent"
+        >
+          {title}
+        </button>
+      )}
+      details={scene.details ? <p className="line-clamp-3">{scene.details}</p> : undefined}
+      chips={(
+        <>
+          {scene.performers.slice(0, 4).map((performer) => (
+            <FeedChipButton
+              key={performer.id}
+              onClick={() => onNavigate({ page: "performer", id: performer.id })}
+            >
+              {performer.name}
+            </FeedChipButton>
+          ))}
+          {scene.tags.slice(0, 4).map((tag) => (
+            <FeedChipButton
+              key={tag.id}
+              onClick={() => onNavigate({ page: "tag", id: tag.id })}
+            >
+              #{tag.name}
+            </FeedChipButton>
+          ))}
+        </>
+      )}
+    />
+  );
+}
+
+function SceneVerticalViewerCard({ scene, feedVideoSource, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, fullscreen, viewerHeight, onNavigate, selected, selecting, onSelect }: { scene: Scene; feedVideoSource: string; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; fullscreen: boolean; viewerHeight: number | null; onNavigate: (sceneId: number) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+  const file = scene.files[0];
+  const { screenshotUrl, coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
+  const title = scene.title || file?.basename || `Scene ${scene.id}`;
+  const duration = getSceneDisplayDuration(scene);
+  const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
+  const availableViewerHeight = viewerHeight != null ? Math.max(120, viewerHeight - 16) : null;
+
+  return (
+    <article data-vertical-scene-id={scene.id} className={`flex min-h-full snap-start snap-always items-center justify-center ${fullscreen ? "px-0 py-0" : "px-2 py-1 sm:px-4"}`}>
+      <WallMediaCard
+        title={title}
+        imageSrc={coverUrl}
+        imageFallbackSrc={screenshotUrl}
+        videoSrc={videoSrc}
+        videoStatusSrc={videoStatusSrc}
+        useVideo
+        muted={!soundEnabled}
+        videoStartTimeSec={videoStartTimeSec}
+        videoPlayThreshold={0.72}
+        aspectRatio="9 / 16"
+        fillMedia={fullscreen}
+        style={fullscreen
+          ? { width: "min(100vw, 56.25dvh)", height: "100dvh" }
+          : { width: availableViewerHeight != null ? `min(calc(100vw - 1rem), ${Math.round(availableViewerHeight * 0.5625)}px)` : "min(calc(100vw - 1rem), calc((100dvh - 10rem) * 0.5625))" }}
+        className={`group mx-auto overflow-hidden bg-card shadow-2xl transition-colors ${fullscreen ? "rounded-none border-0" : "rounded-[1.5rem] sm:rounded-[1.75rem]"} ${selected ? "border-accent ring-1 ring-accent/60" : "border-border hover:border-accent/50"}`}
+      >
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleSound();
+          }}
+          className="absolute right-2 top-2 z-20 rounded-full border border-white/15 bg-black/60 p-2 text-white shadow transition-colors hover:bg-black/80"
+          aria-label={soundEnabled ? "Mute Vertical Viewer" : "Unmute Vertical Viewer"}
+          title={soundEnabled ? "Mute Vertical Viewer" : "Unmute Vertical Viewer"}
+        >
+          {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+        </button>
+        <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+        <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={() => onNavigate(scene.id)} label={`Open scene ${title}`} selectionSafeZone />
+        {!selecting && (
+          <BookmarkButton
+            hostType="scene"
+            hostId={scene.id}
+            compact
+            deferUntilHover
+            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+          />
+        )}
+        {duration > 0 ? <span className="absolute right-2 top-12 rounded bg-black/65 px-2 py-0.5 text-xs text-white">{formatDuration(duration)}</span> : null}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/45 to-transparent p-4 pt-14 text-white">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/75">
+            {scene.studioName ? <span>{scene.studioName}</span> : null}
+            {scene.date ? <span>{scene.date}</span> : null}
+            {file ? <span>{getResolutionLabel(file.width, file.height)}</span> : null}
+            <span>{feedVideoSource === "video" ? "Full video" : "Preview clip"}</span>
+          </div>
+          <p className="mt-1 line-clamp-2 text-base font-semibold leading-tight sm:text-lg">{title}</p>
+          <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-white/85">
+            {scene.performers.slice(0, 3).map((performer) => <span key={performer.id}>@{performer.name}</span>)}
+            {scene.tags.slice(0, 3).map((tag) => <span key={tag.id}>#{tag.name}</span>)}
+          </div>
+        </div>
+      </WallMediaCard>
+    </article>
   );
 }

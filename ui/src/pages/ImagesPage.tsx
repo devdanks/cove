@@ -6,6 +6,8 @@ import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner } from "../components/Rating";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { useListUrlState } from "../hooks/useListUrlState";
+import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen, Search } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
@@ -13,7 +15,6 @@ import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog"
 import { GalleriesPopoverContent, LikeCounter, PerformerPreviewGrid, PopoverButton } from "../components/EntityCards";
 import type { LightboxImage } from "../components/Lightbox";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
-import { useListUrlState } from "../hooks/useListUrlState";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
@@ -22,8 +23,12 @@ import { useWallColumns } from "../hooks/useWallColumns";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
+import { fetchAllMatchingIds } from "../utils/selectAllMatching";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { FeedCardFrame, FeedChipButton, FeedMetadataPill } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
+import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
+import { InfiniteScrollSentinel } from "../components/InfiniteScrollSentinel";
 
 const Lightbox = lazy(() => import("../components/Lightbox").then((module) => ({ default: module.Lightbox })));
 const ImageCreateModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageCreateModal })));
@@ -71,9 +76,10 @@ export function ImagesPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "wall"] as const,
+    allowedDisplayModes: ["grid", "wall", "tagger", "feed"] as const,
     defaultSearchMode: "text",
     allowedSearchModes: ["text", "visual"],
+    allowInfinitePageSize: true,
   });
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
@@ -82,6 +88,7 @@ export function ImagesPage({ onNavigate }: Props) {
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [showScrapeDialog, setShowScrapeDialog] = useState(false);
   const [wallColumnCount, setWallColumnCount] = useState(6);
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWriteImage = canWriteEntity("image", hasPermission);
@@ -89,6 +96,12 @@ export function ImagesPage({ onNavigate }: Props) {
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
+  const infinitePageSize = filter.perPage === 0;
+  const infiniteChunkSize = defaultState.filter.perPage ?? 40;
+  const infiniteFilterKey = useMemo(
+    () => ({ ...filter, page: 1, perPage: infiniteChunkSize }),
+    [filter, infiniteChunkSize],
+  );
   const sortOptions = useMemo(
     () => searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SORT_OPTIONS] : SORT_OPTIONS,
     [searchMode],
@@ -115,6 +128,13 @@ export function ImagesPage({ onNavigate }: Props) {
     setFilter({ ...filter, page: 1 });
   }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
 
+  const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
+    setDisplayMode(mode);
+    if (filter.page !== 1) {
+      setFilter({ ...filter, page: 1 });
+    }
+  }, [filter, setDisplayMode, setFilter]);
+
   const { data, isLoading } = useQuery({
     queryKey: ["images", filter, objectFilter, searchMode],
     queryFn: () => {
@@ -129,12 +149,59 @@ export function ImagesPage({ onNavigate }: Props) {
         ? images.findFiltered({ findFilter: filter, objectFilter: objectFilter as ImageFilterCriteria })
         : images.find(filter);
     },
+    enabled: !infinitePageSize,
   });
 
-  const items = data?.items ?? [];
+  const infiniteImagesQuery = usePaginatedInfiniteQuery<Image>({
+    queryKey: ["images", "infinite", infiniteFilterKey, objectFilter, searchMode],
+    enabled: infinitePageSize,
+    chunkSize: infiniteChunkSize,
+    queryFn: (page, perPage) => {
+      const nextFilter = { ...filter, page, perPage };
+      if (visualSearchActive) {
+        return aiVisual.searchImages({
+          findFilter: nextFilter,
+          objectFilter: hasObjectFilter ? objectFilter as ImageFilterCriteria : undefined,
+        });
+      }
+
+      return hasObjectFilter
+        ? images.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as ImageFilterCriteria })
+        : images.find(nextFilter);
+    },
+  });
+
+  const items = infinitePageSize ? infiniteImagesQuery.items : (data?.items ?? []);
+  const totalCount = infinitePageSize ? infiniteImagesQuery.totalCount : (data?.totalCount ?? 0);
+  const loading = infinitePageSize ? infiniteImagesQuery.isPending : isLoading;
+  const loadMoreImages = useCallback(() => {
+    if (infiniteImagesQuery.hasNextPage && !infiniteImagesQuery.isFetchingNextPage) {
+      void infiniteImagesQuery.fetchNextPage();
+    }
+  }, [infiniteImagesQuery.fetchNextPage, infiniteImagesQuery.hasNextPage, infiniteImagesQuery.isFetchingNextPage]);
+  const loadPreviousImages = useCallback(() => {
+    if (!infiniteImagesQuery.hasPreviousPage || infiniteImagesQuery.isFetchingPreviousPage) {
+      return;
+    }
+
+    const beforeHeight = document.documentElement.scrollHeight;
+    const beforeTop = window.scrollY;
+    void infiniteImagesQuery.fetchPreviousPage().then(() => {
+      window.requestAnimationFrame(() => {
+        const afterHeight = document.documentElement.scrollHeight;
+        window.scrollTo({ top: beforeTop + (afterHeight - beforeHeight) });
+      });
+    });
+  }, [infiniteImagesQuery.fetchPreviousPage, infiniteImagesQuery.hasPreviousPage, infiniteImagesQuery.isFetchingPreviousPage]);
   const { engagementById } = useEntityEngagementBatch("image", items.map((item) => item.id));
-  const wallColumns = useWallColumns(items, wallColumnCount);
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const estimateImageWallHeight = useCallback((image: Image) => {
+    const file = image.files[0];
+    return file?.width && file.height ? file.height / file.width : 1;
+  }, []);
+  const wallColumnOptions = useMemo(() => ({ stable: infinitePageSize, getKey: (image: Image) => image.id }), [infinitePageSize]);
+  const wallColumns = useWallColumns(items, wallColumnCount, estimateImageWallHeight, wallColumnOptions);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter, searchMode }), [infiniteFilterKey, objectFilter, searchMode]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
   const selectedImage = selectedIds.size === 1 ? items.find((item) => selectedIds.has(item.id)) : undefined;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -153,6 +220,27 @@ export function ImagesPage({ onNavigate }: Props) {
   const handleFilterChange = useCallback((next: typeof filter) => {
     setFilter(withSeededRandomSort(filter, next));
   }, [filter, setFilter]);
+
+  const handleSelectAllMatching = useCallback(async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      const ids = await fetchAllMatchingIds<Image>(filter, (nextFilter) => {
+        if (visualSearchActive) {
+          return aiVisual.searchImages({
+            findFilter: nextFilter,
+            objectFilter: hasObjectFilter ? objectFilter as ImageFilterCriteria : undefined,
+          });
+        }
+
+        return hasObjectFilter
+          ? images.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as ImageFilterCriteria })
+          : images.find(nextFilter);
+      });
+      selectIds(ids);
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  }, [filter, hasObjectFilter, objectFilter, selectIds, visualSearchActive]);
 
   const bulkDeleteMut = useMutation<void, Error, DeleteEntityOptions | undefined>({
     mutationFn: async (options) => {
@@ -182,22 +270,28 @@ export function ImagesPage({ onNavigate }: Props) {
       filterMode="images"
       filter={filter}
       onFilterChange={handleFilterChange}
-      totalCount={data?.totalCount ?? 0}
-      isLoading={isLoading}
+      totalCount={totalCount}
+      isLoading={loading}
       searchMode={searchMode}
       searchModes={SEARCH_MODE_OPTIONS}
       searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Search images, tags, performers..."}
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}
-      onDisplayModeChange={setDisplayMode}
-      availableDisplayModes={["grid", "wall"]}
+      onDisplayModeChange={handleDisplayModeChange}
+      availableDisplayModes={["grid", "wall", "tagger", "feed"]}
+      allowInfinitePageSize
       onNew={canWriteImage ? () => setShowCreate(true) : undefined}
       criteriaDefinitions={IMAGE_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
+      showPagingControls={!infinitePageSize}
+      selectAllLabel={infinitePageSize ? "Select loaded" : undefined}
+      onSelectAllMatching={infinitePageSize ? handleSelectAllMatching : undefined}
+      selectAllMatchingLabel={`Select all ${totalCount} matching`}
+      selectAllMatchingPending={selectAllMatchingPending}
 
       selectedIds={selectedIds}
       onSelectAll={selectAll}
@@ -249,7 +343,64 @@ export function ImagesPage({ onNavigate }: Props) {
         showDeleteFile
         showDeleteGenerated
       />
-      {displayMode === "grid" ? (
+      {infinitePageSize && displayMode !== "feed" && items.length > 0 && (infiniteImagesQuery.hasPreviousPage || infiniteImagesQuery.isFetchingPreviousPage) && (
+        <InfiniteScrollSentinel
+          direction="previous"
+          hasMore={Boolean(infiniteImagesQuery.hasPreviousPage)}
+          isLoading={infiniteImagesQuery.isFetchingPreviousPage}
+          onLoadMore={loadPreviousImages}
+          loadedCount={infiniteImagesQuery.firstLoadedIndex}
+          totalCount={infiniteImagesQuery.totalCount}
+          className="pt-2"
+        />
+      )}
+      {displayMode === "feed" ? (
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 px-2">
+          {infinitePageSize && items.length > 0 && (infiniteImagesQuery.hasPreviousPage || infiniteImagesQuery.isFetchingPreviousPage) && (
+            <InfiniteScrollSentinel
+              direction="previous"
+              hasMore={Boolean(infiniteImagesQuery.hasPreviousPage)}
+              isLoading={infiniteImagesQuery.isFetchingPreviousPage}
+              onLoadMore={loadPreviousImages}
+              loadedCount={infiniteImagesQuery.firstLoadedIndex}
+              totalCount={infiniteImagesQuery.totalCount}
+            />
+          )}
+          {items.map((img) => (
+            <ImageFeedCard
+              key={img.id}
+              image={img}
+              engagement={engagementById.get(img.id)}
+              onNavigate={onNavigate}
+              selected={selectedIds.has(img.id)}
+              onSelect={() => toggle(img.id)}
+              selecting={selecting}
+            />
+          ))}
+          {infinitePageSize && items.length > 0 && (
+            <InfiniteScrollSentinel
+              hasMore={Boolean(infiniteImagesQuery.hasNextPage)}
+              isLoading={infiniteImagesQuery.isFetchingNextPage}
+              onLoadMore={loadMoreImages}
+              loadedCount={infiniteImagesQuery.loadedThroughCount}
+              totalCount={infiniteImagesQuery.totalCount}
+            />
+          )}
+        </div>
+      ) : displayMode === "tagger" ? (
+        <ScraperEntityTagger
+          entityType="image"
+          label="Image"
+          items={items}
+          selectedIds={selectedIds}
+          selecting={selecting}
+          onSelect={toggle}
+          getTitle={getImageDisplayTitle}
+          getImageUrl={(image) => images.thumbnailUrl(image.id, 320)}
+          getRoute={(image) => ({ page: "image", id: image.id })}
+          queryKey="images"
+        />
+      ) : displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 140px)">
           {items.map((img, idx) => (
             <ImageCard
@@ -278,11 +429,21 @@ export function ImagesPage({ onNavigate }: Props) {
           {wallColumns.map((column, columnIndex) => (
             <div key={columnIndex} className="flex min-w-0 flex-1 flex-col gap-2">
               {column.map((img) => (
-                <ImageWallCard key={img.id} image={img} onClick={() => onNavigate({ page: "image", id: img.id })} />
+                <ImageWallCard key={img.id} image={img} onClick={() => selecting ? toggle(img.id) : onNavigate({ page: "image", id: img.id })} selected={selectedIds.has(img.id)} selecting={selecting} onSelect={() => toggle(img.id)} />
               ))}
             </div>
           ))}
         </div>
+      )}
+      {infinitePageSize && displayMode !== "feed" && items.length > 0 && (
+        <InfiniteScrollSentinel
+          hasMore={Boolean(infiniteImagesQuery.hasNextPage)}
+          isLoading={infiniteImagesQuery.isFetchingNextPage}
+          onLoadMore={loadMoreImages}
+          loadedCount={infiniteImagesQuery.loadedThroughCount}
+          totalCount={infiniteImagesQuery.totalCount}
+          className="pb-2"
+        />
       )}
       {items.length === 0 && (
         <div className="text-center text-secondary py-16">
@@ -424,7 +585,100 @@ function ImageCard({ image, engagement, onPreview, onDetails, onNavigate, select
   );
 }
 
-function ImageWallCard({ image, onClick }: { image: Image; onClick: () => void }) {
+function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, selecting }: { image: Image; engagement?: EntityEngagement; onNavigate: (route: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+  const displayTitle = getImageDisplayTitle(image);
+  const file = image.files[0];
+  const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "1 / 1";
+  const likeCount = engagement?.likeCount ?? 0;
+
+  return (
+    <FeedCardFrame
+      dataAttribute={{ "data-feed-image-id": image.id }}
+      selected={selected}
+      header={(
+        <>
+          <span className="font-semibold text-secondary">{image.studioName || "Cove images"}</span>
+          {image.date ? <span>{image.date}</span> : null}
+          {image.photographer ? <span>{image.photographer}</span> : null}
+          {file?.width && file.height ? <span>{file.width}x{file.height}</span> : null}
+        </>
+      )}
+      headerActions={(
+        <>
+          <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+            <Heart className="h-3.5 w-3.5" />
+            {likeCount}
+          </span>
+          {image.galleryCount > 0 ? (
+            <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+              <FolderOpen className="h-3.5 w-3.5" />
+              {image.galleryCount}
+            </span>
+          ) : null}
+        </>
+      )}
+      media={(
+        <WallMediaCard
+          title={displayTitle}
+          imageSrc={images.thumbnailUrl(image.id, 1280)}
+          aspectRatio={aspectRatio}
+          className="rounded-none border-x-0 border-y border-border/60 hover:border-border/60"
+        >
+          <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+          <RouteCardLinkOverlay route={{ page: "image", id: image.id }} onClick={() => onNavigate({ page: "image", id: image.id })} label={`Open image ${displayTitle}`} selectionSafeZone />
+          {!selecting && (
+            <BookmarkButton
+              hostType="image"
+              hostId={image.id}
+              compact
+              deferUntilHover
+              className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+            />
+          )}
+        </WallMediaCard>
+      )}
+      title={(
+        <button
+          type="button"
+          onClick={() => onNavigate({ page: "image", id: image.id })}
+          className="text-left text-base font-semibold text-foreground transition-colors hover:text-accent"
+        >
+          {displayTitle}
+        </button>
+      )}
+      details={image.details ? <p className="line-clamp-3">{image.details}</p> : undefined}
+      metadata={(
+        <>
+          {file ? <FeedMetadataPill>{file.width && file.height ? `${file.width}x${file.height}` : "Image"}</FeedMetadataPill> : null}
+          {image.organized ? <FeedMetadataPill>Organized</FeedMetadataPill> : null}
+          {image.galleries.length > 0 ? <FeedMetadataPill>{image.galleries.length} galleries</FeedMetadataPill> : null}
+        </>
+      )}
+      chips={(
+        <>
+          {image.performers.slice(0, 4).map((performer) => (
+            <FeedChipButton
+              key={performer.id}
+              onClick={() => onNavigate({ page: "performer", id: performer.id })}
+            >
+              {performer.name}
+            </FeedChipButton>
+          ))}
+          {image.tags.slice(0, 4).map((tag) => (
+            <FeedChipButton
+              key={tag.id}
+              onClick={() => onNavigate({ page: "tag", id: tag.id })}
+            >
+              #{tag.name}
+            </FeedChipButton>
+          ))}
+        </>
+      )}
+    />
+  );
+}
+
+function ImageWallCard({ image, onClick, selected, selecting, onSelect }: { image: Image; onClick: () => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const displayTitle = getImageDisplayTitle(image);
   const file = image.files[0];
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "1 / 1";
@@ -434,8 +688,19 @@ function ImageWallCard({ image, onClick }: { image: Image; onClick: () => void }
       title={displayTitle}
       imageSrc={images.thumbnailUrl(image.id)}
       aspectRatio={aspectRatio}
+      className={`group ${selected ? "border-accent ring-1 ring-accent/60" : ""}`.trim()}
     >
-      <RouteCardLinkOverlay route={{ page: "image", id: image.id }} onClick={onClick} label={`Open image ${displayTitle}`} />
+      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+      <RouteCardLinkOverlay route={{ page: "image", id: image.id }} onClick={onClick} label={`Open image ${displayTitle}`} selectionSafeZone />
+      {!selecting && (
+        <BookmarkButton
+          hostType="image"
+          hostId={image.id}
+          compact
+          deferUntilHover
+          className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+        />
+      )}
     </WallMediaCard>
   );
 }

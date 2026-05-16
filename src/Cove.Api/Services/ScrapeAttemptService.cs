@@ -1461,7 +1461,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             }
 
             if (scraped != null)
-                await performerScrapeService.ApplyAsync(performer, scraped, createMissingTags, ct);
+                await performerScrapeService.ApplyAsync(performer, scraped, createMissingTags, ct: ct);
         }
     }
 

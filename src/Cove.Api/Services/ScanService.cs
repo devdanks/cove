@@ -272,7 +272,7 @@ public class ScanService(
                                 var fileInfo = new FileInfo(file.Path);
                                 var needsMetadata = existingFile switch
                                 {
-                                    VideoFile vf => vf.Width == 0 && vf.Height == 0 && vf.Duration == 0,
+                                    VideoFile vf => NeedsVideoMetadataProbe(vf),
                                     AudioFile af => af.Duration == 0 && string.IsNullOrWhiteSpace(af.AudioCodec),
                                     TextFile tf => !tf.WordCount.HasValue && string.IsNullOrWhiteSpace(tf.ExcerptText),
                                     _ => false,
@@ -851,7 +851,7 @@ public class ScanService(
                 existing.SceneId = targetScene.Id;
 
             // Re-probe if metadata is missing (e.g., FFprobe wasn't available during initial scan)
-            if (existing.Width == 0 && existing.Height == 0 && existing.Duration == 0)
+            if (NeedsVideoMetadataProbe(existing))
             {
                 await ProbeVideoAsync(existing, path, ct);
             }
@@ -1606,6 +1606,11 @@ public class ScanService(
         {
             return null;
         }
+    }
+
+    internal static bool NeedsVideoMetadataProbe(VideoFile videoFile)
+    {
+        return videoFile.Width <= 0 || videoFile.Height <= 0 || videoFile.Duration <= 0;
     }
 
     private async Task ProbeVideoAsync(VideoFile videoFile, string path, CancellationToken ct)

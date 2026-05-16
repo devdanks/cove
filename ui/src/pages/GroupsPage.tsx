@@ -16,6 +16,7 @@ import { GROUP_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GROUP_BULK_FIELDS } from "../components/BulkEditDialog";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
@@ -53,28 +54,43 @@ export function GroupsPage({ onNavigate }: Props) {
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list"] as const,
+    allowInfinitePageSize: true,
   });
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWriteGroup = canWriteEntity("group", hasPermission);
   const canDeleteGroup = canDeleteEntity("group", hasPermission);
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const { data, isLoading } = useQuery({
+  const listData = useInfiniteListData<Group>({
     queryKey: ["groups", filter, objectFilter],
-    queryFn: () =>
+    filter,
+    chunkSize: defaultState.filter.perPage ?? 40,
+    queryPage: (nextFilter) =>
       hasObjectFilter
-        ? groups.findFiltered({ findFilter: filter, objectFilter: objectFilter as GroupFilterCriteria })
-        : groups.find(filter),
+        ? groups.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as GroupFilterCriteria })
+        : groups.find(nextFilter),
   });
 
-  const items = data?.items ?? [];
-  const manualOrderingEnabled = displayMode === "grid" && !hasObjectFilter && !filter.q && (filter.sort ?? "sort_order") === "sort_order" && (filter.direction ?? "asc") !== "desc";
+  const items = listData.items;
+  const totalCount = listData.totalCount;
+  const isLoading = listData.isLoading;
+  const manualOrderingEnabled = !listData.infinitePageSize && displayMode === "grid" && !hasObjectFilter && !filter.q && (filter.sort ?? "sort_order") === "sort_order" && (filter.direction ?? "asc") !== "desc";
   const { engagementById } = useEntityEngagementBatch("group", items.map((item) => item.id));
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter }), [listData.infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await listData.fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
 
   const bulkDeleteMut = useMutation({
     mutationFn: () => groups.bulkDelete([...selectedIds]),
@@ -118,12 +134,29 @@ export function GroupsPage({ onNavigate }: Props) {
         filterMode="groups"
         filter={filter}
         onFilterChange={setFilter}
-        totalCount={data?.totalCount ?? 0}
+        totalCount={totalCount}
         isLoading={isLoading}
         sortOptions={SORT_OPTIONS}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
         availableDisplayModes={["grid", "list"]}
+        allowInfinitePageSize
+        showPagingControls={!listData.infinitePageSize}
+        selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
+        onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
+        selectAllMatchingLabel={`Select all ${totalCount} matching`}
+        selectAllMatchingPending={selectAllMatchingPending}
+        infiniteScroll={listData.infinitePageSize ? {
+          hasNextPage: listData.infiniteQuery.hasNextPage,
+          hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
+          isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
+          isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
+          onLoadMore: listData.loadMore,
+          onLoadPrevious: listData.loadPrevious,
+          loadedCount: listData.infiniteQuery.loadedThroughCount,
+          previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
+          totalCount,
+        } : undefined}
         criteriaDefinitions={GROUP_CRITERIA}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}

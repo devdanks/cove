@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { jobs, system, stashMigration } from "../api/client";
+import { database, jobs, system, stashMigration } from "../api/client";
 import type { StashPreviewResult, StashImportOptions, StashImportResult } from "../api/client";
 import type { CoveConfig, CovePathConfig, JobInfo } from "../api/types";
+import { useExtensions } from "../extensions/ExtensionLoader";
+import { navigateToUrl } from "../router/location";
 import {
   FolderOpen,
   Plus,
@@ -15,17 +17,367 @@ import {
   Settings,
   Database,
   RefreshCw,
+  BookOpen,
 } from "lucide-react";
 
 interface Props {
   config: CoveConfig;
-  onComplete: () => void;
+  onComplete: (options?: { showTutorial?: boolean }) => void;
 }
 
-type Step = "welcome" | "source" | "paths" | "confirm" | "stash-config" | "done";
+type Step = "welcome" | "source" | "paths" | "confirm" | "stash-config" | "backup-restore" | "theme" | "done";
+type SetupMode = "fresh" | "stash" | "backup" | null;
+
+interface BackupRestoreResultSummary {
+  backupPath: string;
+  configBackupPath: string | null;
+}
+
+const THEME_PREVIEW_VARIANTS = ["dashboard", "library", "metadata", "tasks"] as const;
+
+type ThemePreviewVariant = typeof THEME_PREVIEW_VARIANTS[number];
+
+const TUTORIAL_STEPS = [
+  {
+    eyebrow: "Step 1",
+    title: "Scan and generate your library",
+    description: "After setup, head to Tasks first. Run Scan to index files, then Generate when you want previews, thumbnails, hashes, sprites, or markers.",
+    actionLabel: "Open Settings > Tasks",
+    highlight: "This is the fastest way to move from an empty library to something you can actually browse.",
+    checklist: ["Scan the folders you just added", "Run Generate for previews and images", "Come back later if you add more media"],
+    icon: FolderOpen,
+    kind: "tasks",
+  },
+  {
+    eyebrow: "Step 2",
+    title: "Browse with the view that fits the media",
+    description: "Scenes and images each have multiple layouts. Start with grid, then try feed, wall, or Infinite page size when you want long browsing sessions.",
+    actionLabel: "Open Scenes or Images",
+    highlight: "Feed is better for reading details. Wall is better for visual skimming. Infinite keeps the list moving.",
+    checklist: ["Switch between grid, wall, and feed", "Use page size to turn on Infinite", "Open detail pages when something needs cleanup"],
+    icon: Play,
+    kind: "browse",
+  },
+  {
+    eyebrow: "Step 3",
+    title: "Scrape and identify when titles are incomplete",
+    description: "If a scene or image is missing tags, performers, studios, or dates, use Scrape or Identify from the media pages and then tune providers in Settings.",
+    actionLabel: "Use Scrape or Identify",
+    highlight: "Start from a single item first so you can verify the source and field mappings before doing it in bulk.",
+    checklist: ["Open one item and inspect the current fields", "Run Scrape or Identify", "Adjust scrapers or MetadataServer settings if the match looks wrong"],
+    icon: Database,
+    kind: "metadata",
+  },
+  {
+    eyebrow: "Step 4",
+    title: "Keep settings and docs within reach",
+    description: "Most setup tasks live in Settings, and the docs site fills in the edge cases: extensions, MetadataServer setup, import workflows, and troubleshooting.",
+    actionLabel: "Use Settings and docs.cove.app",
+    highlight: "If you forget where something from this wizard went, it is almost always in Settings.",
+    checklist: ["Return to Settings for paths, scrapers, and themes", "Use docs.cove.app for deeper walkthroughs", "Treat the wizard as the fast path, not the only path"],
+    icon: BookOpen,
+    kind: "docs",
+  },
+] as const;
+
+function ThemeMiniPreview({
+  background,
+  card,
+  accent,
+  foreground,
+  variant,
+}: {
+  background: string;
+  card: string;
+  accent: string;
+  foreground: string;
+  variant: ThemePreviewVariant;
+}) {
+  const textStyle = (opacity: number) => ({ background: foreground, opacity });
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-black/10" style={{ background }}>
+      <div className="flex items-center justify-between gap-2 border-b border-black/10 px-3 py-2" style={{ background: card }}>
+        <div className="flex items-center gap-1.5">
+          {[background, card, accent, foreground].map((color, index) => (
+            <span key={`${color}-${index}`} className="h-4 w-4 rounded-full border border-black/15" style={{ background: color }} />
+          ))}
+        </div>
+        <div className="h-2.5 w-16 rounded-full" style={textStyle(0.55)} />
+      </div>
+      <div className="grid grid-cols-[4rem_minmax(0,1fr)] gap-3 p-3">
+        <div className="space-y-2 rounded-xl p-2" style={{ background: card }}>
+          {[0.78, 0.56, 0.38].map((opacity, index) => (
+            <div key={index} className="h-2 rounded-full" style={textStyle(opacity)} />
+          ))}
+        </div>
+        <div className="space-y-2">
+          <div className="overflow-hidden rounded-xl" style={{ background: card }}>
+            <div className="aspect-[16/7]" style={{ background: accent, opacity: 0.86 }} />
+            <div className="space-y-1.5 p-2">
+              <div className="h-2.5 w-3/4 rounded-full" style={textStyle(0.78)} />
+              <div className="h-2 w-1/2 rounded-full" style={textStyle(0.42)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[0.9, 0.68, 0.46].map((opacity, index) => (
+              <div key={index} className="h-8 rounded-lg" style={{ background: index === 0 ? accent : card, opacity }} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (variant === "library") {
+    return (
+      <div className="rounded-xl border border-black/10 p-3" style={{ background }}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="h-2.5 w-20 rounded-full" style={textStyle(0.78)} />
+          <div className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: accent }}>
+            Scenes
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-[1.35fr_0.95fr] gap-2">
+          <div className="overflow-hidden rounded-xl" style={{ background: card }}>
+            <div className="aspect-[16/10]" style={{ background: accent, opacity: 0.88 }} />
+            <div className="space-y-2 p-2.5">
+              <div className="h-2.5 w-4/5 rounded-full" style={textStyle(0.78)} />
+              <div className="h-2 w-2/3 rounded-full" style={textStyle(0.42)} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            {[0.84, 0.72, 0.62].map((opacity, index) => (
+              <div key={index} className="rounded-xl p-2" style={{ background: card, opacity }}>
+                <div className="h-10 rounded-lg" style={{ background: accent, opacity: 0.48 }} />
+                <div className="mt-2 h-2 w-3/4 rounded-full" style={textStyle(0.7)} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === "metadata") {
+    return (
+      <div className="rounded-xl border border-black/10 p-3" style={{ background }}>
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-8 rounded-xl" style={{ background: accent }} />
+          <div className="h-2.5 flex-1 rounded-full" style={textStyle(0.75)} />
+        </div>
+        <div className="mt-3 rounded-2xl p-3" style={{ background: card }}>
+          <div className="flex flex-wrap gap-1.5">
+            {["Scrape", "Identify", "Apply"].map((label, index) => (
+              <div
+                key={label}
+                className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                style={index === 0 ? { background: accent, color: "#fff" } : { background: foreground, color: background, opacity: 0.75 }}
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[1.2fr_0.8fr]">
+            <div className="space-y-2">
+              <div className="h-2.5 w-5/6 rounded-full" style={textStyle(0.8)} />
+              <div className="h-2.5 w-3/5 rounded-full" style={textStyle(0.55)} />
+              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                {[0.76, 0.62, 0.48].map((opacity, index) => (
+                  <div key={index} className="h-8 rounded-xl" style={{ background: accent, opacity }} />
+                ))}
+              </div>
+            </div>
+            <div className="rounded-xl border border-black/10 p-2" style={{ background, opacity: 0.88 }}>
+              <div className="h-2 w-2/3 rounded-full" style={textStyle(0.72)} />
+              <div className="mt-2 h-10 rounded-lg" style={{ background: accent, opacity: 0.42 }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === "tasks") {
+    return (
+      <div className="rounded-xl border border-black/10 p-3" style={{ background }}>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="h-2.5 w-24 rounded-full" style={textStyle(0.82)} />
+            <div className="mt-1.5 h-2 w-16 rounded-full" style={textStyle(0.45)} />
+          </div>
+          <div className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: accent }}>
+            Running
+          </div>
+        </div>
+        <div className="mt-3 space-y-2">
+          {[0.92, 0.76].map((opacity, index) => (
+            <div key={index} className="rounded-2xl p-2.5" style={{ background: card }}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="h-2.5 w-24 rounded-full" style={textStyle(0.74)} />
+                <div className="h-2 w-10 rounded-full" style={textStyle(0.36)} />
+              </div>
+              <div className="mt-2 h-2 rounded-full" style={{ background: foreground, opacity: 0.14 }}>
+                <div className="h-full rounded-full" style={{ width: index === 0 ? "74%" : "38%", background: accent, opacity }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex gap-2">
+          <div className="h-9 flex-1 rounded-xl" style={{ background: accent }} />
+          <div className="h-9 w-24 rounded-xl" style={{ background: card }} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-black/10 p-3" style={{ background }}>
+      <div className="flex items-center gap-2">
+        <div className="h-8 w-8 rounded-xl" style={{ background: accent }} />
+        <div className="h-2.5 flex-1 rounded-full" style={textStyle(0.8)} />
+        <div className="h-6 w-14 rounded-full" style={{ background: card }} />
+      </div>
+      <div className="mt-3 grid grid-cols-[0.9fr_1.4fr] gap-2">
+        <div className="space-y-2 rounded-2xl p-2.5" style={{ background: card }}>
+          {[0.78, 0.6, 0.45].map((opacity, index) => (
+            <div key={index} className="h-2.5 rounded-full" style={textStyle(opacity)} />
+          ))}
+        </div>
+        <div className="grid gap-2">
+          <div className="grid grid-cols-2 gap-2">
+            {[0.92, 0.76].map((opacity, index) => (
+              <div key={index} className="rounded-2xl p-2.5" style={{ background: card, opacity }}>
+                <div className="h-8 rounded-lg" style={{ background: accent, opacity: 0.55 }} />
+                <div className="mt-2 h-2 w-3/4 rounded-full" style={textStyle(0.7)} />
+              </div>
+            ))}
+          </div>
+          <div className="h-16 rounded-2xl" style={{ background: card, opacity: 0.88 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TutorialPreview({ step }: { step: typeof TUTORIAL_STEPS[number] }) {
+  if (step.kind === "tasks") {
+    return (
+      <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+        <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Settings</div>
+            <div className="text-sm font-semibold text-foreground">Tasks</div>
+          </div>
+          <div className="rounded-full bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent">First run</div>
+        </div>
+        <div className="mt-4 space-y-3">
+          {["Scan library", "Generate previews"].map((label, index) => (
+            <div key={label} className="rounded-2xl border border-border bg-card p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-foreground">{label}</div>
+                  <div className="text-xs text-muted">{index === 0 ? "Reads folders and creates items" : "Builds thumbnails, previews, and hashes"}</div>
+                </div>
+                <div className="rounded-full bg-accent px-3 py-1 text-[11px] font-semibold text-white">
+                  {index === 0 ? "Run first" : "Run second"}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (step.kind === "browse") {
+    return (
+      <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border/60 pb-3 text-xs text-muted">
+          {[
+            { label: "Grid", active: false },
+            { label: "Feed", active: true },
+            { label: "Wall", active: false },
+            { label: "Infinite", active: true },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className={`rounded-full px-2.5 py-1 font-medium ${item.active ? "bg-accent text-white" : "bg-card text-secondary"}`}
+            >
+              {item.label}
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {[0, 1].map((index) => (
+            <div key={index} className="overflow-hidden rounded-2xl border border-border bg-card">
+              <div className="aspect-[16/10] bg-accent/25" />
+              <div className="space-y-2 p-3">
+                <div className="h-2.5 w-3/4 rounded-full bg-foreground/80" />
+                <div className="flex flex-wrap gap-1.5 text-[11px] text-muted">
+                  <span className="rounded-full border border-border px-2 py-0.5">performer</span>
+                  <span className="rounded-full border border-border px-2 py-0.5">tag</span>
+                  <span className="rounded-full border border-border px-2 py-0.5">rating</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (step.kind === "metadata") {
+    return (
+      <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+        <div className="grid gap-4 md:grid-cols-[1.15fr_0.85fr]">
+          <div className="overflow-hidden rounded-2xl border border-border bg-card">
+            <div className="aspect-[16/10] bg-accent/25" />
+            <div className="space-y-2 p-3">
+              <div className="h-2.5 w-5/6 rounded-full bg-foreground/80" />
+              <div className="h-2.5 w-2/3 rounded-full bg-foreground/40" />
+            </div>
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Actions</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <div className="rounded-xl bg-accent px-3 py-1.5 text-xs font-semibold text-white">Scrape</div>
+              <div className="rounded-xl border border-border px-3 py-1.5 text-xs font-semibold text-foreground">Identify</div>
+            </div>
+            <div className="mt-4 space-y-2 text-xs text-muted">
+              <div className="rounded-xl bg-background/70 px-3 py-2">Tags, performers, studios, dates, and urls can all be reviewed before you apply.</div>
+              <div className="rounded-xl bg-background/70 px-3 py-2">Use one item first before running a bulk pass.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl border border-border bg-card p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Settings</div>
+          <div className="mt-3 space-y-2 text-sm text-secondary">
+            <div className="rounded-xl bg-background/70 px-3 py-2">Paths and scans</div>
+            <div className="rounded-xl bg-background/70 px-3 py-2">Scrapers and MetadataServer</div>
+            <div className="rounded-xl bg-background/70 px-3 py-2">Themes and interface options</div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Docs</div>
+          <div className="mt-3 rounded-xl bg-accent/10 px-3 py-2 text-sm font-semibold text-accent">docs.cove.app</div>
+          <div className="mt-2 text-xs text-muted">Use it for extension setup, troubleshooting, deeper metadata workflows, and examples that do not fit in the wizard.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function SetupWizardPage({ config, onComplete }: Props) {
   const [step, setStep] = useState<Step>("welcome");
+  const [setupMode, setSetupMode] = useState<SetupMode>(null);
   const [paths, setPaths] = useState<CovePathConfig[]>(
     config.covePaths.length > 0
       ? config.covePaths
@@ -39,12 +391,43 @@ export function SetupWizardPage({ config, onComplete }: Props) {
   const [coveGeneratedPath, setCoveGeneratedPath] = useState(config.generatedPath ?? "");
   const [migrateGeneratedContent, setMigrateGeneratedContent] = useState(true);
   const [aiDataSource, setAiDataSource] = useState("");
+  const [restoreBackupPath, setRestoreBackupPath] = useState("");
+  const [restoreConfigBackupPath, setRestoreConfigBackupPath] = useState("");
+  const [restoreConfirmed, setRestoreConfirmed] = useState(false);
+  const [backupRestoreResult, setBackupRestoreResult] = useState<BackupRestoreResultSummary | null>(null);
   const queryClient = useQueryClient();
+  const { availableThemes, activeThemeId, setActiveTheme } = useExtensions();
   const stashImportOptions: StashImportOptions = {
     coveGeneratedPath: coveGeneratedPath.trim() || undefined,
     migrateGeneratedContent,
     aiDataSource: aiDataSource.trim() || undefined,
   };
+  const activeMode = setupMode
+    ?? (step === "stash-config" || stashImportJobId !== null || stashResult !== null
+      ? "stash"
+      : step === "backup-restore" || backupRestoreResult !== null
+      ? "backup"
+      : "fresh");
+  const stepList: Step[] = activeMode === "stash"
+    ? ["welcome", "source", "stash-config", "theme", "done"]
+    : activeMode === "backup"
+    ? ["welcome", "source", "backup-restore", "theme", "done"]
+    : ["welcome", "source", "paths", "confirm", "theme", "done"];
+  const themeOptions = useMemo(() => {
+    const defaultTheme = {
+      id: "default",
+      name: "Classic Cove",
+      description: "Use Cove's built-in layout, spacing, and accents.",
+      cssVariables: {
+        "--background": "#0b1220",
+        "--card": "#152033",
+        "--accent": "#2f80ed",
+        "--foreground": "#f8fafc",
+      },
+    };
+
+    return [defaultTheme, ...availableThemes.filter((theme) => theme.id !== "default")];
+  }, [availableThemes]);
 
   const stashPreviewMut = useMutation({
     mutationFn: () => stashMigration.preview(stashDbPath),
@@ -79,12 +462,51 @@ export function SetupWizardPage({ config, onComplete }: Props) {
     retry: false,
     refetchInterval: (query) => (query.state.data ? false : 500),
   });
+  const latestBackupQuery = useQuery({
+    queryKey: ["setup", "latest-backup"],
+    queryFn: () => database.latestBackup(),
+    enabled: step === "backup-restore" || activeMode === "backup",
+    retry: false,
+  });
+  const latestConfigBackupQuery = useQuery({
+    queryKey: ["setup", "latest-config-backup"],
+    queryFn: () => database.latestConfigBackup(),
+    enabled: step === "backup-restore" || activeMode === "backup",
+    retry: false,
+  });
+  const backupRestoreMut = useMutation({
+    mutationFn: async () => {
+      const backupPath = restoreBackupPath.trim();
+      const configBackupPath = restoreConfigBackupPath.trim();
+
+      if (!backupPath) {
+        throw new Error("Backup path is required.");
+      }
+      if (!restoreConfirmed) {
+        throw new Error("Confirm that restoring will replace the current Cove data first.");
+      }
+
+      await database.restore(backupPath);
+      if (configBackupPath) {
+        await database.restoreConfig(configBackupPath);
+      }
+
+      return { backupPath, configBackupPath: configBackupPath || null };
+    },
+    onSuccess: async (result) => {
+      setError(null);
+      setBackupRestoreResult(result);
+      await queryClient.invalidateQueries();
+      setStep("theme");
+    },
+    onError: (err: Error) => setError(err.message),
+  });
 
   useEffect(() => {
     if (!stashImportResultQuery.data) return;
     setError(null);
     setStashResult(stashImportResultQuery.data);
-    setStep("done");
+    setStep("theme");
     queryClient.invalidateQueries();
   }, [queryClient, stashImportResultQuery.data]);
 
@@ -106,7 +528,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
     mutationFn: (cfg: CoveConfig) => system.saveConfig(cfg),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["system-config"] });
-      setStep("done");
+      setStep("theme");
     },
     onError: (err: Error) => setError(err.message),
   });
@@ -133,15 +555,27 @@ export function SetupWizardPage({ config, onComplete }: Props) {
     saveMut.mutate(updatedConfig);
   };
 
+  const handleFinish = (target: "dashboard" | "tasks" | "settings" = "dashboard") => {
+    if (target === "tasks") {
+      navigateToUrl("/settings/tasks");
+    } else if (target === "settings") {
+      navigateToUrl("/settings");
+    } else {
+      navigateToUrl("/");
+    }
+
+    onComplete({ showTutorial: true });
+
+    if (backupRestoreResult) {
+      window.location.reload();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-2xl">
         {/* Progress indicator */}
         {(() => {
-          const isStashPath = ["stash-config"].includes(step) || stashResult !== null || stashImportJobId !== null;
-          const freshSteps: Step[] = ["welcome", "source", "paths", "confirm", "done"];
-          const stashSteps: Step[] = ["welcome", "source", "stash-config", "done"];
-          const stepList = isStashPath ? stashSteps : freshSteps;
           const currentIdx = stepList.indexOf(step);
           return (
             <div className="flex items-center justify-center gap-2 mb-8">
@@ -189,11 +623,11 @@ export function SetupWizardPage({ config, onComplete }: Props) {
             <div className="p-8">
               <h2 className="text-xl font-bold text-foreground mb-2">How would you like to start?</h2>
               <p className="text-sm text-secondary mb-6">
-                Start with a fresh Cove library, or import your existing Stash library.
+                Start fresh, migrate from Stash, or restore a previous Cove backup.
               </p>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 md:grid-cols-3">
                 <button
-                  onClick={() => setStep("paths")}
+                  onClick={() => { setSetupMode("fresh"); setStep("paths"); }}
                   className="flex flex-col items-center gap-3 p-6 bg-card border-2 border-border hover:border-accent rounded-xl transition-colors text-left"
                 >
                   <FolderOpen className="w-8 h-8 text-accent" />
@@ -203,13 +637,23 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                   </div>
                 </button>
                 <button
-                  onClick={() => setStep("stash-config")}
+                  onClick={() => { setSetupMode("stash"); setStep("stash-config"); }}
                   className="flex flex-col items-center gap-3 p-6 bg-card border-2 border-border hover:border-accent rounded-xl transition-colors text-left"
                 >
                   <Database className="w-8 h-8 text-accent" />
                   <div>
                     <div className="font-semibold text-foreground mb-1">Import from Stash</div>
                     <div className="text-xs text-secondary">Migrate your existing Stash database to Cove.</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setSetupMode("backup"); setStep("backup-restore"); }}
+                  className="flex flex-col items-center gap-3 p-6 bg-card border-2 border-border hover:border-accent rounded-xl transition-colors text-left"
+                >
+                  <RefreshCw className="w-8 h-8 text-accent" />
+                  <div>
+                    <div className="font-semibold text-foreground mb-1">Restore Cove Backup</div>
+                    <div className="text-xs text-secondary">Restore a Cove database backup, and optionally a config backup too.</div>
                   </div>
                 </button>
               </div>
@@ -219,6 +663,104 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                   className="flex items-center gap-1.5 px-4 py-2 text-sm text-secondary hover:text-foreground transition-colors"
                 >
                   <ChevronLeft className="w-4 h-4" /> Back
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === "backup-restore" && (
+            <div className="p-8">
+              <h2 className="text-xl font-bold text-foreground mb-2">Restore from a Cove backup</h2>
+              <p className="text-sm text-secondary mb-6">
+                Choose a Cove database backup to restore. You can also provide a config backup if you want Cove paths and related settings restored too.
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Database backup path</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 flex items-center gap-2 bg-card border border-border rounded-lg px-3 py-2">
+                      <Database className="w-4 h-4 text-muted flex-shrink-0" />
+                      <input
+                        type="text"
+                        value={restoreBackupPath}
+                        onChange={(e) => { setRestoreBackupPath(e.target.value); setError(null); }}
+                        placeholder="C:\\Backups\\cove-2026-05-01.db"
+                        className="flex-1 bg-transparent outline-none text-sm text-foreground"
+                      />
+                    </div>
+                    {latestBackupQuery.data && (
+                      <button
+                        onClick={() => setRestoreBackupPath(latestBackupQuery.data ?? "")}
+                        className="px-4 py-2 text-sm bg-card border border-border hover:border-accent text-foreground rounded-lg transition-colors"
+                      >
+                        Use latest
+                      </button>
+                    )}
+                  </div>
+                  {latestBackupQuery.data ? <p className="mt-2 text-xs text-muted">Latest backup: {latestBackupQuery.data}</p> : null}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Config backup path</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 flex items-center gap-2 bg-card border border-border rounded-lg px-3 py-2">
+                      <Settings className="w-4 h-4 text-muted flex-shrink-0" />
+                      <input
+                        type="text"
+                        value={restoreConfigBackupPath}
+                        onChange={(e) => { setRestoreConfigBackupPath(e.target.value); setError(null); }}
+                        placeholder="Optional: C:\\Backups\\cove-config-2026-05-01.json"
+                        className="flex-1 bg-transparent outline-none text-sm text-foreground"
+                      />
+                    </div>
+                    {latestConfigBackupQuery.data && (
+                      <button
+                        onClick={() => setRestoreConfigBackupPath(latestConfigBackupQuery.data ?? "")}
+                        className="px-4 py-2 text-sm bg-card border border-border hover:border-accent text-foreground rounded-lg transition-colors"
+                      >
+                        Use latest
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-muted">
+                    Optional. Add this when you want Cove paths and other config values restored alongside the database.
+                  </p>
+                  {latestConfigBackupQuery.data ? <p className="mt-1 text-xs text-muted">Latest config backup: {latestConfigBackupQuery.data}</p> : null}
+                </div>
+
+                <label className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={restoreConfirmed}
+                    onChange={(e) => setRestoreConfirmed(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
+                  />
+                  <span>
+                    <span className="block font-medium text-foreground">Replace the current Cove data</span>
+                    <span className="block text-xs text-muted">Restoring replaces the current library database. If you provide a config backup, that file is restored too.</span>
+                  </span>
+                </label>
+
+                {error && (
+                  <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-3 text-sm text-red-300">{error}</div>
+                )}
+              </div>
+
+              <div className="flex justify-between mt-6">
+                <button
+                  onClick={() => { setStep("source"); setSetupMode(null); setError(null); }}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-secondary hover:text-foreground transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" /> Back
+                </button>
+                <button
+                  onClick={() => { setError(null); backupRestoreMut.mutate(); }}
+                  disabled={restoreBackupPath.trim() === "" || !restoreConfirmed || backupRestoreMut.isPending}
+                  className="inline-flex items-center gap-2 px-5 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {backupRestoreMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Restore & Continue
                 </button>
               </div>
             </div>
@@ -332,7 +874,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
 
               <div className="flex justify-between mt-6">
                 <button
-                  onClick={() => { setStep("source"); setStashPreview(null); setError(null); }}
+                  onClick={() => { setStep("source"); setSetupMode(null); setStashPreview(null); setError(null); }}
                   disabled={isStashImportActive}
                   className="flex items-center gap-1.5 px-4 py-2 text-sm text-secondary hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -435,7 +977,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
 
               <div className="flex justify-between">
                 <button
-                  onClick={() => setStep("source")}
+                  onClick={() => { setStep("source"); setSetupMode(null); }}
                   className="flex items-center gap-1.5 px-4 py-2 text-sm text-secondary hover:text-foreground transition-colors"
                 >
                   <ChevronLeft className="w-4 h-4" /> Back
@@ -500,6 +1042,67 @@ export function SetupWizardPage({ config, onComplete }: Props) {
             </div>
           )}
 
+          {step === "theme" && (
+            <div className="p-8">
+              <h2 className="text-xl font-bold text-foreground mb-2">Pick an optional theme</h2>
+              <p className="text-sm text-secondary mb-6">
+                Choose the look you want to start with. You can change this later in Settings &gt; Extensions.
+              </p>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                {themeOptions.map((theme, index) => {
+                  const isSelected = (activeThemeId ?? "default") === theme.id;
+                  const cssVariables = (theme.cssVariables ?? {}) as Record<string, string>;
+                  const background = cssVariables["--background"] ?? cssVariables["--color-background"] ?? "#0b1220";
+                  const card = cssVariables["--card"] ?? cssVariables["--color-card"] ?? "#152033";
+                  const accent = cssVariables["--accent"] ?? cssVariables["--color-accent"] ?? "#2f80ed";
+                  const foreground = cssVariables["--foreground"] ?? cssVariables["--color-foreground"] ?? "#f8fafc";
+                  const previewVariant = THEME_PREVIEW_VARIANTS[index % THEME_PREVIEW_VARIANTS.length];
+
+                  return (
+                    <button
+                      key={theme.id}
+                      onClick={() => setActiveTheme(theme.id === "default" ? "default" : theme.id)}
+                      className={`rounded-2xl border p-4 text-left transition-colors ${isSelected ? "border-accent bg-accent/5 shadow-lg shadow-accent/10" : "border-border bg-card hover:border-accent/50"}`}
+                    >
+                      <ThemeMiniPreview
+                        background={background}
+                        card={card}
+                        accent={accent}
+                        foreground={foreground}
+                        variant={previewVariant}
+                      />
+                      <div className="mt-4 flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-foreground">{theme.name}</div>
+                          <div className="mt-1 text-xs text-secondary">{theme.description ?? "Extension-provided theme."}</div>
+                        </div>
+                        {isSelected ? <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-white">Selected</span> : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-between mt-6">
+                {activeMode === "fresh" ? (
+                  <button
+                    onClick={() => setStep("confirm")}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm text-secondary hover:text-foreground transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Back
+                  </button>
+                ) : <div />}
+                <button
+                  onClick={() => setStep("done")}
+                  className="inline-flex items-center gap-2 px-5 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors"
+                >
+                  Continue <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {step === "done" && (
             <div className="p-8 text-center">
               <div className="w-16 h-16 bg-green-600/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
@@ -527,24 +1130,47 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                     ))}
                   </div>
                 </div>
+              ) : backupRestoreResult ? (
+                <div className="mb-6 max-w-lg mx-auto text-left">
+                  <p className="text-secondary mb-4 text-center">
+                    Restored your Cove library from backup.
+                  </p>
+                  <div className="bg-card border border-border rounded-xl p-4 space-y-2 text-xs text-secondary">
+                    <div>
+                      <span className="font-medium text-foreground">Database backup:</span> {backupRestoreResult.backupPath}
+                    </div>
+                    {backupRestoreResult.configBackupPath ? (
+                      <div>
+                        <span className="font-medium text-foreground">Config backup:</span> {backupRestoreResult.configBackupPath}
+                      </div>
+                    ) : (
+                      <div>Config restore was skipped.</div>
+                    )}
+                  </div>
+                </div>
               ) : (
                 <p className="text-secondary mb-6 max-w-md mx-auto">
-                  Your library paths have been configured. Head to Settings &gt; Tasks to start
-                  scanning for content.
+                  Your library paths have been configured. Open Tasks when you're ready to scan and generate library data.
                 </p>
               )}
               <p className="text-xs text-muted mb-6">
-                You can add more paths, configure scrapers, and set up MetadataServer connections in Settings.
+                You can add more paths, configure scrapers, set up MetadataServer connections, and change themes from Settings later.
               </p>
-              <div className="flex justify-center gap-3">
+              <div className="flex flex-wrap justify-center gap-3">
                 <button
-                  onClick={onComplete}
+                  onClick={() => handleFinish("dashboard")}
                   className="inline-flex items-center gap-2 px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors"
                 >
                   Go to Dashboard <ChevronRight className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => { onComplete(); window.location.hash = "#/settings"; }}
+                  onClick={() => handleFinish("tasks")}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-card border border-border text-secondary hover:text-foreground rounded-lg font-medium transition-colors"
+                >
+                  <Play className="w-4 h-4" /> Open Tasks
+                </button>
+                <button
+                  onClick={() => handleFinish("settings")}
                   className="inline-flex items-center gap-2 px-6 py-3 bg-card border border-border text-secondary hover:text-foreground rounded-lg font-medium transition-colors"
                 >
                   <Settings className="w-4 h-4" /> Open Settings
@@ -558,7 +1184,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
         {step !== "done" && (
           <div className="text-center mt-4">
             <button
-              onClick={onComplete}
+              onClick={() => onComplete({ showTutorial: false })}
               className="text-xs text-muted hover:text-secondary transition-colors"
             >
               Skip setup for now

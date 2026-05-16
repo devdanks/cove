@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronUp,
+  BookOpen,
   Database,
   Download,
   FolderOpen,
@@ -78,6 +79,7 @@ import { defaultRatingSystemOptions, normalizeRatingOptions } from "../component
 import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 import { KEYBINDING_GROUPS, keybindingDefault } from "../keyboard/keybindings";
+import { openTutorialStoryboard } from "../components/TutorialStoryboardDialog";
 
 type SettingsTab = "tasks" | "library" | "interface" | "user-settings" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
@@ -298,6 +300,7 @@ const menuItems = [
   { value: "tags", label: "Tags" },
   { value: "groups", label: "Groups" },
   { value: "audios", label: "Audios" },
+  { value: "texts", label: "Texts" },
 ];
 
 const ratingSystemOptions: { value: RatingSystemType; label: string }[] = [
@@ -436,6 +439,12 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
     },
     ui: {
       ...config.ui,
+      playerVideoStartPercent: Math.min(95, Math.max(0, config.ui.playerVideoStartPercent ?? 0)),
+      playerVideoStartMinDuration: Math.max(0, config.ui.playerVideoStartMinDuration ?? 0),
+      feedVideoSource: config.ui.feedVideoSource === "video" ? "video" : "preview",
+      feedVideoSound: config.ui.feedVideoSound ?? false,
+      feedVideoStartPercent: Math.min(95, Math.max(0, config.ui.feedVideoStartPercent ?? 0)),
+      feedVideoStartMinDuration: Math.max(0, config.ui.feedVideoStartMinDuration ?? 0),
       keybindingOverrides: Object.fromEntries(
         Object.entries(config.ui.keybindingOverrides ?? {})
           .map(([key, value]) => [key.trim(), value.trim()])
@@ -606,6 +615,11 @@ export function SettingsPage() {
     if (!nextDraft.ui.ratingSystemOptions) {
       nextDraft.ui.ratingSystemOptions = { type: "stars", starPrecision: "full" };
     }
+    nextDraft.ui.playerVideoStartPercent = Math.min(95, Math.max(0, nextDraft.ui.playerVideoStartPercent ?? 0));
+    nextDraft.ui.playerVideoStartMinDuration = Math.max(0, nextDraft.ui.playerVideoStartMinDuration ?? 0);
+    nextDraft.ui.feedVideoSound = nextDraft.ui.feedVideoSound ?? false;
+    nextDraft.ui.feedVideoStartPercent = Math.min(95, Math.max(0, nextDraft.ui.feedVideoStartPercent ?? 0));
+    nextDraft.ui.feedVideoStartMinDuration = Math.max(0, nextDraft.ui.feedVideoStartMinDuration ?? 0);
 
     setDraft(nextDraft);
   }, [config]);
@@ -633,7 +647,8 @@ export function SettingsPage() {
     mutationFn: (nextConfig: CoveConfig) => system.saveConfig(nextConfig),
     onSuccess: (savedConfig) => {
       savingRef.current = true;
-      queryClient.setQueryData(["system-config"], savedConfig);
+      queryClient.setQueriesData({ queryKey: ["system-config"] }, savedConfig);
+      queryClient.invalidateQueries({ queryKey: ["system-config"] });
       queryClient.invalidateQueries({ queryKey: ["system-scrapers"] });
       setError(null);
     },
@@ -1387,16 +1402,26 @@ export function SettingsPage() {
             </SectionCard>
 
             <SectionCard title="Navigation" description="Drag to reorder, toggle to show/hide. Changes apply immediately after save.">
-              <NavReorderList
-                allItems={menuItems}
-                enabledItems={draft.interface.menuItems}
-                onChange={(items) =>
-                  updateDraft((current) => ({
-                    ...current,
-                    interface: { ...current.interface, menuItems: items },
-                  }))
-                }
-              />
+              <div className="space-y-4">
+                <NavReorderList
+                  allItems={menuItems}
+                  enabledItems={draft.interface.menuItems}
+                  onChange={(items) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      interface: { ...current.interface, menuItems: items },
+                    }))
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => openTutorialStoryboard("getting-started")}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-secondary transition-colors hover:border-accent hover:text-foreground"
+                >
+                  <BookOpen className="h-4 w-4" />
+                  Replay setup tour
+                </button>
+              </div>
             </SectionCard>
 
             <SectionCard title="Ratings" description="Stored ratings remain 1-100 internally. This changes how they are displayed and edited in the UI.">
@@ -1462,6 +1487,21 @@ export function SettingsPage() {
                   checked={draft.ui.alwaysResumeOnPlayback}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, alwaysResumeOnPlayback: checked } }))}
                 />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <NumberField
+                    label="Default player start (%)"
+                    value={draft.ui.playerVideoStartPercent ?? 0}
+                    min={0}
+                    max={95}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, playerVideoStartPercent: Math.min(95, Math.max(0, value ?? 0)) } }))}
+                  />
+                  <NumberField
+                    label="Use default start only for videos longer than (seconds)"
+                    value={draft.ui.playerVideoStartMinDuration ?? 0}
+                    min={0}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, playerVideoStartMinDuration: Math.max(0, value ?? 0) } }))}
+                  />
+                </div>
                 <CheckboxLabel
                   label="Continue playlist default"
                   checked={draft.ui.continuePlaylistDefault}
@@ -1541,6 +1581,40 @@ export function SettingsPage() {
                     { value: "image", label: "Static Image" },
                   ]}
                 />
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Feed & Vertical Viewer" description="Choose what autoplays in the scene feed-style views.">
+              <div className="space-y-4">
+                <SelectField
+                  label="Playback source"
+                  value={draft.ui.feedVideoSource ?? "preview"}
+                  onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, feedVideoSource: value } }))}
+                  options={[
+                    { value: "preview", label: "Generated preview clip" },
+                    { value: "video", label: "Full video" },
+                  ]}
+                />
+                <CheckboxLabel
+                  label="Play sound by default in Feed and Vertical Viewer"
+                  checked={draft.ui.feedVideoSound ?? false}
+                  onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, feedVideoSound: checked } }))}
+                />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <NumberField
+                    label="Full video start (%)"
+                    value={draft.ui.feedVideoStartPercent ?? 0}
+                    min={0}
+                    max={95}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, feedVideoStartPercent: Math.min(95, Math.max(0, value ?? 0)) } }))}
+                  />
+                  <NumberField
+                    label="Use start % only for videos longer than (seconds)"
+                    value={draft.ui.feedVideoStartMinDuration ?? 0}
+                    min={0}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, feedVideoStartMinDuration: Math.max(0, value ?? 0) } }))}
+                  />
+                </div>
               </div>
             </SectionCard>
 
@@ -4035,6 +4109,47 @@ function buildColorWithAlpha(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`;
 }
 
+function getThemePreviewColor(cssVariables: Record<string, string> | undefined, key: string, fallback: string) {
+  return cssVariables?.[`--${key}`] ?? cssVariables?.[`--color-${key}`] ?? fallback;
+}
+
+function ThemePalettePreview({ cssVariables }: { cssVariables?: Record<string, string> }) {
+  const background = getThemePreviewColor(cssVariables, "background", "#0b1220");
+  const card = getThemePreviewColor(cssVariables, "card", "#152033");
+  const surface = getThemePreviewColor(cssVariables, "surface", card);
+  const accent = getThemePreviewColor(cssVariables, "accent", "#2f80ed");
+  const foreground = getThemePreviewColor(cssVariables, "foreground", "#f8fafc");
+  const secondary = getThemePreviewColor(cssVariables, "secondary", foreground);
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-black/10" style={{ background }}>
+      <div className="flex items-center justify-between gap-2 border-b border-black/10 px-3 py-2" style={{ background: surface }}>
+        <div className="flex items-center gap-1.5">
+          {[background, surface, card, accent, foreground].map((color, index) => (
+            <span key={`${color}-${index}`} className="h-4 w-4 rounded-full border border-black/15" style={{ background: color }} />
+          ))}
+        </div>
+        <div className="h-2 w-14 rounded-full" style={{ background: secondary, opacity: 0.55 }} />
+      </div>
+      <div className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-2 p-3">
+        <div className="space-y-1.5 rounded-lg p-2" style={{ background: card }}>
+          {[0.85, 0.6, 0.38].map((opacity, index) => (
+            <div key={index} className="h-1.5 rounded-full" style={{ background: foreground, opacity }} />
+          ))}
+        </div>
+        <div className="space-y-2">
+          <div className="h-9 rounded-lg" style={{ background: accent }} />
+          <div className="grid grid-cols-3 gap-1.5">
+            {[surface, card, accent].map((color, index) => (
+              <div key={`${color}-${index}`} className="h-6 rounded-md" style={{ background: color, opacity: index === 2 ? 0.75 : 1 }} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ThemeSelector() {
   const { user } = useAuth();
   const {
@@ -4251,13 +4366,7 @@ function ThemeSelector() {
                 {theme.description && (
                   <div className="text-xs text-secondary mt-1">{theme.description}</div>
                 )}
-                {theme.cssVariables && (
-                  <div className="flex gap-1 mt-2">
-                    {Object.entries(theme.cssVariables).slice(0, 3).map(([key, val]) => (
-                      <div key={key} className="w-5 h-5 rounded border border-white/10" style={{ background: val }} />
-                    ))}
-                  </div>
-                )}
+                <ThemePalettePreview cssVariables={theme.cssVariables} />
               </button>
             ))}
 
@@ -4276,9 +4385,7 @@ function ThemeSelector() {
                 >
                   <div className="text-sm font-medium text-foreground">Custom</div>
                   <div className="text-xs text-secondary mt-1">Pick your own colors</div>
-                  <div className="flex gap-1 mt-2">
-                    <div className="w-5 h-5 rounded border border-white/10" style={{ background: "linear-gradient(135deg, #ff6b6b, #4ecdc4, #45b7d1)" }} />
-                  </div>
+                  <ThemePalettePreview cssVariables={customThemeColors} />
                 </button>
                 {activeThemeId === "custom" && (
                   <button

@@ -17,9 +17,10 @@ interface UseListUrlStateOptions<TDisplayMode extends string> {
   allowedDisplayModes: readonly TDisplayMode[];
   defaultSearchMode?: string;
   allowedSearchModes?: readonly string[];
+  allowInfinitePageSize?: boolean;
 }
 
-const MANAGED_KEYS = ["q", "page", "perPage", "sort", "direction", "view", "filters", "seed", "searchMode"];
+const MANAGED_KEYS = ["q", "page", "perPage", "sort", "direction", "view", "viewMode", "filters", "seed", "searchMode"];
 const DEFAULT_SEARCH_MODE = "text";
 
 function cloneFilter(filter: FindFilter): FindFilter {
@@ -47,6 +48,14 @@ function normalizeInteger(value: string | null, fallback?: number): number | und
   return parsed;
 }
 
+function normalizePerPage(value: string | null, fallback: number | undefined, allowInfinite: boolean): number | undefined {
+  if (allowInfinite && (value === "infinite" || value === "0")) {
+    return 0;
+  }
+
+  return normalizeInteger(value, fallback);
+}
+
 function normalizeDirection(value: string | null, fallback?: "asc" | "desc"): "asc" | "desc" | undefined {
   if (value === "asc" || value === "desc") {
     return value;
@@ -57,11 +66,11 @@ function normalizeDirection(value: string | null, fallback?: "asc" | "desc"): "a
 
 function readObjectFilter(value: string | null, fallback: Record<string, unknown>): Record<string, unknown> {
   if (value == null) {
-    // No "filters" param in URL at all → use defaults
+    // No "filters" param in URL at all means use defaults.
     return cloneObjectFilter(fallback);
   }
 
-  // Explicit empty string or "{}" means "user cleared all filters"
+  // Explicit empty string or "{}" means the user cleared all filters.
   if (value === "" || value === "{}") {
     return {};
   }
@@ -86,14 +95,17 @@ function readStateFromUrl<TDisplayMode extends string>(options: UseListUrlStateO
   const filter: FindFilter = {
     q: params.get("q") ?? options.defaultFilter.q,
     page: normalizeInteger(params.get("page"), options.defaultFilter.page),
-    perPage: normalizeInteger(params.get("perPage"), options.defaultFilter.perPage),
+    perPage: normalizePerPage(params.get("perPage"), options.defaultFilter.perPage, options.allowInfinitePageSize === true),
     sort: params.get("sort") ?? options.defaultFilter.sort,
     direction: normalizeDirection(params.get("direction"), options.defaultFilter.direction),
     seed: normalizeInteger(params.get("seed"), options.defaultFilter.seed),
   };
 
-  const view = params.get("view");
-  const displayMode = options.allowedDisplayModes.includes(view as TDisplayMode)
+  const rawView = params.get("view");
+  const view = rawView && options.allowedDisplayModes.includes(rawView as TDisplayMode)
+    ? rawView
+    : null;
+  const displayMode = view
     ? (view as TDisplayMode)
     : options.defaultDisplayMode;
 
@@ -120,8 +132,8 @@ function writeStateToParams<TDisplayMode extends string>(
   if (state.filter.page && state.filter.page !== options.defaultFilter.page) {
     params.set("page", String(state.filter.page));
   }
-  if (state.filter.perPage && state.filter.perPage !== options.defaultFilter.perPage) {
-    params.set("perPage", String(state.filter.perPage));
+  if (state.filter.perPage != null && state.filter.perPage !== options.defaultFilter.perPage) {
+    params.set("perPage", state.filter.perPage === 0 ? "infinite" : String(state.filter.perPage));
   }
   if (state.filter.sort && state.filter.sort !== options.defaultFilter.sort) {
     params.set("sort", state.filter.sort);
@@ -141,7 +153,6 @@ function writeStateToParams<TDisplayMode extends string>(
   if (Object.keys(state.objectFilter).length > 0) {
     params.set("filters", JSON.stringify(state.objectFilter));
   } else if (options.defaultObjectFilter && Object.keys(options.defaultObjectFilter).length > 0) {
-    // Explicitly write empty filters to distinguish "user cleared filters" from "use defaults"
     params.set("filters", "{}");
   }
 }

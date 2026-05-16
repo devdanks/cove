@@ -32,7 +32,6 @@ import { trackInteraction } from "../utils/interactionTracking";
 import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector, type SelectableTag } from "../components/TagSelector";
 
-const SceneEditModal = lazy(() => import("./SceneEditModal").then((module) => ({ default: module.SceneEditModal })));
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
 const DetailMergeDialog = lazy(() => import("../components/DetailMergeDialog").then((module) => ({ default: module.DetailMergeDialog })));
 const IdentifyDialog = lazy(() => import("../components/IdentifyDialog").then((module) => ({ default: module.IdentifyDialog })));
@@ -78,7 +77,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const { config } = useAppConfig();
   const { hasPrev, hasNext, prevId, nextId, currentPosition, queueLength } = useSceneQueue();
   const { getTabsForPage, resolveComponent: resolveExtComponent } = useExtensions();
-  const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
   const [theaterMode, setTheaterMode] = useState(false);
@@ -133,7 +131,10 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const sceneLikeCount = sceneEngagement?.likeCount ?? 0;
   const sceneDerivedLikeCount = sceneEngagement?.derivedLikeCount ?? 0;
   const scenePageVisitCount = sceneEngagement?.pageVisitCount ?? 0;
-  const effectiveResumeTime = initialSeekTo ?? sceneResumeTime;
+  const effectiveSceneResumeTime = typeof sceneResumeTime === "number" && Number.isFinite(sceneResumeTime) && sceneResumeTime > 0
+    ? sceneResumeTime
+    : undefined;
+  const effectiveResumeTime = initialSeekTo ?? effectiveSceneResumeTime;
 
   useEffect(() => {
     if (!scene || !trackPlaybackActivity) return;
@@ -459,7 +460,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         </button>
         {showOpsMenu && (
           <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] rounded-2xl border border-border bg-card py-1 shadow-lg">
-            {canWriteScene ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
+            {canWriteScene ? <button onClick={() => { setActiveTab("edit"); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
             {!file && canDownloadScene ? (
               <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Download className="h-3.5 w-3.5" /> Download Media…</button>
             ) : null}
@@ -593,7 +594,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         onChange={handleCoverFileChange}
       />
       <Suspense fallback={null}>
-        {scene && editing ? <SceneEditModal scene={scene} open={editing} onClose={() => setEditing(false)} /> : null}
         {showGenerate ? (
           <GenerateDialog
             open={showGenerate}

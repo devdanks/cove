@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BookOpenText, FileText } from "lucide-react";
 import { system, texts } from "../api/client";
 import type { DownloaderMatch, TextCreate, TextDocument, TextFilterCriteria } from "../api/types";
@@ -13,6 +13,7 @@ import { EntityReferencePopovers } from "../components/EntityCards";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteEntity } from "../auth/visibility";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { getTextDisplayTitle, pickPrimaryTextFile } from "../utils/audioTextDisplay";
@@ -24,6 +25,7 @@ import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundErro
 import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
 import { SourceDownloadDialog } from "../components/SourceDownloadDialog";
 import { TEXT_CRITERIA } from "../components/FilterDialog";
+import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 
 const SORT_OPTIONS = [
   { value: "updatedAt", label: "Updated At" },
@@ -54,23 +56,37 @@ export function TextsPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list"] as const,
+    allowedDisplayModes: ["grid", "list", "tagger"] as const,
+    allowInfinitePageSize: true,
   });
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-
-  const { data, isLoading } = useQuery({
+  const listData = useInfiniteListData<TextDocument>({
     queryKey: ["texts", filter, objectFilter],
-    queryFn: () => hasObjectFilter
-      ? texts.findFiltered({ findFilter: filter, objectFilter: objectFilter as TextFilterCriteria })
-      : texts.find(filter),
+    filter,
+    chunkSize: defaultState.filter.perPage ?? 40,
+    queryPage: (nextFilter) => hasObjectFilter
+      ? texts.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as TextFilterCriteria })
+      : texts.find(nextFilter),
   });
 
-  const items = data?.items ?? [];
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const items = listData.items;
+  const totalCount = listData.totalCount;
+  const isLoading = listData.isLoading;
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter }), [listData.infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
   const { hasPermission } = useAuth();
   const canWriteText = canWriteEntity("text", hasPermission);
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await listData.fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
 
   return (
     <>
@@ -81,13 +97,30 @@ export function TextsPage({ onNavigate }: Props) {
       filterMode="texts"
       filter={filter}
       onFilterChange={setFilter}
-      totalCount={data?.totalCount ?? 0}
+      totalCount={totalCount}
       isLoading={isLoading}
       searchPlaceholder="Search text, tags, performers..."
       sortOptions={SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
-      availableDisplayModes={["grid", "list"]}
+      availableDisplayModes={["grid", "list", "tagger"]}
+      allowInfinitePageSize
+      showPagingControls={!listData.infinitePageSize}
+      selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
+      onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
+      selectAllMatchingLabel={`Select all ${totalCount} matching`}
+      selectAllMatchingPending={selectAllMatchingPending}
+      infiniteScroll={listData.infinitePageSize ? {
+        hasNextPage: listData.infiniteQuery.hasNextPage,
+        hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
+        isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
+        isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
+        onLoadMore: listData.loadMore,
+        onLoadPrevious: listData.loadPrevious,
+        loadedCount: listData.infiniteQuery.loadedThroughCount,
+        previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
+        totalCount,
+      } : undefined}
       onNew={canWriteText ? () => setShowCreate(true) : undefined}
       criteriaDefinitions={TEXT_CRITERIA}
       objectFilter={objectFilter}
@@ -103,7 +136,20 @@ export function TextsPage({ onNavigate }: Props) {
           No text documents matched the current filter.
         </div>
       ) : (
-        displayMode === "list" ? (
+        displayMode === "tagger" ? (
+          <ScraperEntityTagger
+            entityType="text"
+            label="Text"
+            items={items}
+            selectedIds={selectedIds}
+            selecting={selecting}
+            onSelect={toggle}
+            getTitle={getTextDisplayTitle}
+            getImageUrl={(text) => text.imagePath ?? undefined}
+            getRoute={(text) => ({ page: "text", id: text.id })}
+            queryKey="texts"
+          />
+        ) : displayMode === "list" ? (
           <TextListTable texts={items} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} />
         ) : (
         <EntityCardGrid minCardWidth="300px">

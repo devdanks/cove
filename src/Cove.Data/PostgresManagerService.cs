@@ -598,8 +598,6 @@ public class PostgresManagerService : IHostedService
             Arguments = args,
             WorkingDirectory = workDir,
             UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
             CreateNoWindow = true,
         };
 
@@ -631,7 +629,9 @@ public class PostgresManagerService : IHostedService
 
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start {exe}");
         var stdout = await proc.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = proc.StandardError.ReadToEndAsync(ct);
         await proc.WaitForExitAsync(ct);
+        await stderrTask;
         return (proc.ExitCode, stdout);
     }
 }

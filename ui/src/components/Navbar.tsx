@@ -5,9 +5,9 @@ import { GlobalSearch } from "./GlobalSearch";
 import { useRouteRegistry } from "../router/RouteRegistry";
 import { useAppConfig } from "../state/AppConfigContext";
 import { useExtensions } from "../extensions/ExtensionLoader";
-import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
 import { useAuth } from "../auth/AuthContext";
 import { canShowNavPage, type NavPage } from "../auth/visibility";
+import { openTutorialStoryboard } from "./TutorialStoryboardDialog";
 
 interface NavbarProps {
   currentPage: string;
@@ -43,7 +43,6 @@ const DETAIL_PARENT_PAGE: Record<string, string> = {
 
 export function Navbar({ currentPage, navigate }: NavbarProps) {
   const [jobDrawerOpen, setJobDrawerOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const jobCount = useJobCount();
   const { routes } = useRouteRegistry();
@@ -163,9 +162,9 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
               </a>
             ) : null}
             <button
-              onClick={() => setHelpOpen(true)}
+              onClick={() => openTutorialStoryboard({ page: activePage })}
               className="p-2 rounded text-secondary hover:text-foreground"
-              title="Keyboard Shortcuts (?)"
+              title="Help and tutorials"
             >
               <HelpCircle className="w-[18px] h-[18px]" />
             </button>
@@ -185,7 +184,6 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
         </div>
       </div>
       <JobDrawer open={jobDrawerOpen} onClose={() => setJobDrawerOpen(false)} onNavigate={navigate} />
-      <KeyboardShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       {/* Mobile dropdown menu */}
       {mobileMenuOpen && (
         <div className="navbar-mobile-menu bg-nav border-t border-border shadow-lg">

@@ -13,6 +13,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { formatDate } from "../components/shared";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
@@ -124,6 +125,7 @@ export function FacesPage({ onNavigate }: Props) {
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list"] as const,
+    allowInfinitePageSize: true,
   });
   const linked = readTriState(objectFilter.linked);
   const ignored = readTriState(objectFilter.ignored);
@@ -173,6 +175,7 @@ export function FacesPage({ onNavigate }: Props) {
   const [batchMinConfidence, setBatchMinConfidence] = useState(60);
   const [batchResult, setBatchResult] = useState<FaceBatchOperationResult | null>(null);
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
 
   const query = useMemo(() => ({
     q: filter.q?.trim() || undefined,
@@ -184,15 +187,32 @@ export function FacesPage({ onNavigate }: Props) {
     perPage: filter.perPage ?? 36,
   }), [filter.page, filter.perPage, filter.q, ignored, linked, merged, sort]);
 
-  const { data, isLoading } = useQuery({
+  const listData = useInfiniteListData<Face>({
     queryKey: ["faces", query],
-    queryFn: () => faces.list(query),
+    filter,
+    chunkSize: defaultState.filter.perPage ?? 36,
+    queryPage: (nextFilter) => faces.list({
+      ...query,
+      page: nextFilter.page ?? 1,
+      perPage: nextFilter.perPage ?? defaultState.filter.perPage ?? 36,
+    }),
   });
 
-  const items = data?.items ?? [];
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const items = listData.items;
+  const totalCount = listData.totalCount;
+  const isLoading = listData.isLoading;
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter }), [listData.infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
   const selectedFaceIds = useMemo(() => Array.from(selectedIds).map((value) => Number(value)), [selectedIds]);
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await listData.fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
 
   const invalidateFace = useCallback((faceId: number) => {
     queryClient.invalidateQueries({ queryKey: ["faces"] });
@@ -286,13 +306,30 @@ export function FacesPage({ onNavigate }: Props) {
         pageKey="faces"
         filter={filter}
         onFilterChange={handleFilterChange}
-        totalCount={data?.totalCount ?? 0}
+        totalCount={totalCount}
         isLoading={isLoading}
         sortOptions={FACE_SORT_OPTIONS}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
         showClearAllObjectFilters={false}
         availableDisplayModes={["grid", "list"]}
+        allowInfinitePageSize
+        showPagingControls={!listData.infinitePageSize}
+        selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
+        onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
+        selectAllMatchingLabel={`Select all ${totalCount} matching`}
+        selectAllMatchingPending={selectAllMatchingPending}
+        infiniteScroll={listData.infinitePageSize ? {
+          hasNextPage: listData.infiniteQuery.hasNextPage,
+          hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
+          isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
+          isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
+          onLoadMore: listData.loadMore,
+          onLoadPrevious: listData.loadPrevious,
+          loadedCount: listData.infiniteQuery.loadedThroughCount,
+          previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
+          totalCount,
+        } : undefined}
         criteriaDefinitions={[]}
         objectFilter={objectFilter}
         onObjectFilterChange={handleObjectFilterChange}

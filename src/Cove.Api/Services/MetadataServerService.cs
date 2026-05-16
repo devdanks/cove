@@ -312,7 +312,10 @@ query Me {
         return results;
     }
 
-    public async Task<bool> MergePerformerAsync(Performer performer, string endpoint, string performerId, CancellationToken ct)
+    public Task<bool> MergePerformerAsync(Performer performer, string endpoint, string performerId, CancellationToken ct)
+        => MergePerformerAsync(performer, endpoint, performerId, null, ct);
+
+    public async Task<bool> MergePerformerAsync(Performer performer, string endpoint, string performerId, MetadataServerPerformerImportRequestDto? importConfig, CancellationToken ct)
     {
         var box = ResolveBox(endpoint);
         var remote = await GetRemotePerformerAsync(box, performerId, ct);
@@ -326,7 +329,7 @@ query Me {
                 remote = merged;
         }
 
-        ApplyRemotePerformer(performer, box.Endpoint, remote);
+        ApplyRemotePerformer(performer, box.Endpoint, remote, importConfig);
         await DownloadPerformerImageAsync(performer, remote, ct);
         return true;
     }
@@ -1534,31 +1537,91 @@ query Me {
         Existing,
     }
 
-    private void ApplyRemotePerformer(Performer performer, string endpoint, MetadataServerRemotePerformer remote)
+    private void ApplyRemotePerformer(Performer performer, string endpoint, MetadataServerRemotePerformer remote, MetadataServerPerformerImportRequestDto? importConfig = null)
     {
-        performer.Name = remote.Name.Trim();
-        performer.Disambiguation = string.IsNullOrWhiteSpace(remote.Disambiguation) ? performer.Disambiguation : remote.Disambiguation.Trim();
-        performer.Gender = MapGender(remote.Gender) ?? performer.Gender;
-        performer.Birthdate = ParseDate(remote.BirthDate) ?? performer.Birthdate;
-        performer.DeathDate = ParseDate(remote.DeathDate) ?? performer.DeathDate;
-        performer.Country = Coalesce(performer.Country, remote.Country);
-        performer.Ethnicity = Coalesce(performer.Ethnicity, HumanizeGraphQlEnum(remote.Ethnicity));
-        performer.EyeColor = Coalesce(performer.EyeColor, HumanizeGraphQlEnum(remote.EyeColor));
-        performer.HairColor = Coalesce(performer.HairColor, HumanizeGraphQlEnum(remote.HairColor));
-        performer.HeightCm = remote.Height > 0 ? remote.Height.Value : performer.HeightCm;
-        performer.Measurements = Coalesce(performer.Measurements, FormatMeasurements(remote.Measurements));
-        performer.FakeTits = Coalesce(performer.FakeTits, HumanizeGraphQlEnum(remote.BreastType));
-        performer.CareerStart = remote.CareerStartYear > 0 ? new DateOnly(remote.CareerStartYear.Value, 1, 1) : performer.CareerStart;
-        performer.CareerEnd = remote.CareerEndYear > 0 ? new DateOnly(remote.CareerEndYear.Value, 1, 1) : performer.CareerEnd;
-        performer.Tattoos = Coalesce(performer.Tattoos, FormatBodyModifications(remote.Tattoos));
-        performer.Piercings = Coalesce(performer.Piercings, FormatBodyModifications(remote.Piercings));
-
         var aliases = remote.Aliases
             .Where(alias => !string.IsNullOrWhiteSpace(alias))
             .Select(alias => alias.Trim())
-            .Where(alias => !string.Equals(alias, remote.Name, StringComparison.OrdinalIgnoreCase));
-        MergeAliases(performer, aliases);
-        MergeUrls(performer, remote.Urls.Select(url => url.Url));
+            .Where(alias => !string.Equals(alias, remote.Name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var urls = remote.Urls.Select(url => url.Url).Where(url => !string.IsNullOrWhiteSpace(url)).ToList();
+
+        if (importConfig?.FieldStrategies == null)
+        {
+            performer.Name = remote.Name.Trim();
+            performer.Disambiguation = string.IsNullOrWhiteSpace(remote.Disambiguation) ? performer.Disambiguation : remote.Disambiguation.Trim();
+            performer.Gender = MapGender(remote.Gender) ?? performer.Gender;
+            performer.Birthdate = ParseDate(remote.BirthDate) ?? performer.Birthdate;
+            performer.DeathDate = ParseDate(remote.DeathDate) ?? performer.DeathDate;
+            performer.Country = Coalesce(performer.Country, remote.Country);
+            performer.Ethnicity = Coalesce(performer.Ethnicity, HumanizeGraphQlEnum(remote.Ethnicity));
+            performer.EyeColor = Coalesce(performer.EyeColor, HumanizeGraphQlEnum(remote.EyeColor));
+            performer.HairColor = Coalesce(performer.HairColor, HumanizeGraphQlEnum(remote.HairColor));
+            performer.HeightCm = remote.Height > 0 ? remote.Height.Value : performer.HeightCm;
+            performer.Measurements = Coalesce(performer.Measurements, FormatMeasurements(remote.Measurements));
+            performer.FakeTits = Coalesce(performer.FakeTits, HumanizeGraphQlEnum(remote.BreastType));
+            performer.CareerStart = remote.CareerStartYear > 0 ? new DateOnly(remote.CareerStartYear.Value, 1, 1) : performer.CareerStart;
+            performer.CareerEnd = remote.CareerEndYear > 0 ? new DateOnly(remote.CareerEndYear.Value, 1, 1) : performer.CareerEnd;
+            performer.Tattoos = Coalesce(performer.Tattoos, FormatBodyModifications(remote.Tattoos));
+            performer.Piercings = Coalesce(performer.Piercings, FormatBodyModifications(remote.Piercings));
+            MergeAliases(performer, aliases);
+            MergeUrls(performer, urls);
+        }
+        else
+        {
+            var fieldStrategies = importConfig.FieldStrategies;
+
+            void ApplyString(string field, string? value, Action<string> setter, string? currentValue)
+            {
+                var strategy = GetMetadataFieldStrategy(fieldStrategies, field, MetadataFieldStrategy.Merge);
+                var merged = MergeStringField(currentValue, value, strategy);
+                if (merged != null)
+                    setter(merged);
+            }
+
+            void ApplyDate(string field, string? value, Action<DateOnly?> setter, DateOnly? currentValue)
+            {
+                var strategy = GetMetadataFieldStrategy(fieldStrategies, field, MetadataFieldStrategy.Merge);
+                var parsed = ParseDate(value);
+                var merged = MergeDateField(currentValue, parsed, strategy);
+                setter(merged);
+            }
+
+            void ApplyInt(string field, int? value, Action<int?> setter, int? currentValue)
+            {
+                var strategy = GetMetadataFieldStrategy(fieldStrategies, field, MetadataFieldStrategy.Merge);
+                if (strategy == MetadataFieldStrategy.Ignore || !value.HasValue || value.Value <= 0)
+                    return;
+                if (strategy == MetadataFieldStrategy.Overwrite || !currentValue.HasValue)
+                    setter(value.Value);
+            }
+
+            ApplyString("name", remote.Name, value => performer.Name = value, performer.Name);
+            ApplyString("disambiguation", remote.Disambiguation, value => performer.Disambiguation = value, performer.Disambiguation);
+            var genderStrategy = GetMetadataFieldStrategy(fieldStrategies, "gender", MetadataFieldStrategy.Merge);
+            var remoteGender = MapGender(remote.Gender);
+            if (remoteGender.HasValue && genderStrategy != MetadataFieldStrategy.Ignore && (genderStrategy == MetadataFieldStrategy.Overwrite || performer.Gender == null))
+                performer.Gender = remoteGender.Value;
+            ApplyDate("birthdate", remote.BirthDate, value => performer.Birthdate = value, performer.Birthdate);
+            ApplyDate("deathDate", remote.DeathDate, value => performer.DeathDate = value, performer.DeathDate);
+            ApplyString("country", remote.Country, value => performer.Country = value, performer.Country);
+            ApplyString("ethnicity", HumanizeGraphQlEnum(remote.Ethnicity), value => performer.Ethnicity = value, performer.Ethnicity);
+            ApplyString("eyeColor", HumanizeGraphQlEnum(remote.EyeColor), value => performer.EyeColor = value, performer.EyeColor);
+            ApplyString("hairColor", HumanizeGraphQlEnum(remote.HairColor), value => performer.HairColor = value, performer.HairColor);
+            ApplyInt("heightCm", remote.Height, value => performer.HeightCm = value, performer.HeightCm);
+            ApplyString("measurements", FormatMeasurements(remote.Measurements), value => performer.Measurements = value, performer.Measurements);
+            ApplyString("fakeTits", HumanizeGraphQlEnum(remote.BreastType), value => performer.FakeTits = value, performer.FakeTits);
+            if (GetMetadataFieldStrategy(fieldStrategies, "aliases", MetadataFieldStrategy.Merge) == MetadataFieldStrategy.Overwrite)
+                performer.Aliases.Clear();
+            if (GetMetadataFieldStrategy(fieldStrategies, "aliases", MetadataFieldStrategy.Merge) != MetadataFieldStrategy.Ignore)
+                MergeAliases(performer, aliases);
+            if (GetMetadataFieldStrategy(fieldStrategies, "urls", MetadataFieldStrategy.Merge) == MetadataFieldStrategy.Overwrite)
+                performer.Urls.Clear();
+            if (GetMetadataFieldStrategy(fieldStrategies, "urls", MetadataFieldStrategy.Merge) != MetadataFieldStrategy.Ignore)
+                MergeUrls(performer, urls);
+            ApplyString("tattoos", FormatBodyModifications(remote.Tattoos), value => performer.Tattoos = value, performer.Tattoos);
+            ApplyString("piercings", FormatBodyModifications(remote.Piercings), value => performer.Piercings = value, performer.Piercings);
+        }
 
         var remoteId = performer.RemoteIds.FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
         if (remoteId == null)

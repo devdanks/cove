@@ -1,8 +1,20 @@
 import { useCallback, useState, useRef } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { performers } from "../api/client";
-import type { Performer, MetadataServerPerformerMatch, MetadataServerPerformerImportRequest } from "../api/types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { performers, system, tags } from "../api/client";
+import type { Performer, MetadataServerPerformerMatch, MetadataServerPerformerImportRequest, ScrapedPerformer, ScraperSummary } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
+import { createNestedRouteLinkProps } from "./cardNavigation";
+import { DEFAULT_COLLECTION_MODES, pickBestSourceUrl, type CollectionMode } from "./sceneScrapeUtils";
+import { buildRelationActionMap, relationKey, ScrapeRelationChoices, type ScrapeRelationActionMap } from "./ScrapeRelationChoices";
+import {
+  CompactCollectionDecision,
+  CompactListValue,
+  CompactScalarDecision,
+  DEFAULT_TAGGER_BLACKLIST,
+  TaggerSettingsPanel,
+  TaggerToolbar,
+  cleanTaggerQueryString,
+} from "./TaggerShared";
 import {
   Search, Loader2, Check, X, ChevronDown, ChevronUp, AlertCircle,
   CloudDownload, Fingerprint, Settings2, EyeOff, Eye,
@@ -13,22 +25,240 @@ interface PerformerTaggerProps {
   selectedIds?: Set<number>;
   selecting?: boolean;
   onSelect?: (performerId: number) => void;
+  onNavigate?: (performerId: number) => void;
 }
 
 interface TaggerConfig {
   selectedEndpoint: string;
   showTagged: boolean;
+  createMissingTags: boolean;
+  blacklist: string[];
 }
 
 interface PerformerSearchState {
   loading: boolean;
-  results?: MetadataServerPerformerMatch[];
+  results?: UnifiedPerformerMatch[];
   error?: string;
   selectedIndex?: number;
   saved?: boolean;
+  fieldStrategies?: Record<string, PerformerFieldStrategy>;
+  collectionModes?: Record<string, CollectionMode>;
+  tagActions?: ScrapeRelationActionMap;
+}
+
+type PerformerFieldStrategy = "ignore" | "merge" | "overwrite";
+
+type PerformerSource =
+  | { kind: "metadata-server"; value: string; label: string; endpoint: string }
+  | { kind: "scraper"; value: string; label: string; scraper: ScraperSummary };
+
+interface UnifiedPerformerMatch extends MetadataServerPerformerMatch {
+  sourceKind: "metadata-server" | "scraper";
+  scraped?: ScrapedPerformer;
+}
+
+const sourceValue = (kind: "metadata-server" | "scraper", id: string) => `${kind}:${id}`;
+
+function resolveSource(value: string, sources: PerformerSource[]): PerformerSource | undefined {
+  return sources.find((source) => source.value === value)
+    ?? sources.find((source) => source.kind === "metadata-server" && source.endpoint === value)
+    ?? sources[0];
+}
+
+function mapScrapedPerformer(scraped: ScrapedPerformer, scraper: ScraperSummary): UnifiedPerformerMatch {
+  return {
+    sourceKind: "scraper",
+    scraped,
+    endpoint: scraper.id,
+    serverName: scraper.name,
+    id: scraper.id,
+    name: scraped.name || "Untitled performer",
+    disambiguation: scraped.disambiguation,
+    gender: scraped.gender,
+    birthDate: scraped.birthdate,
+    country: scraped.country,
+    imageUrl: scraped.imageUrl,
+    deleted: false,
+    aliases: scraped.aliases ?? [],
+    urls: scraped.urls ?? [],
+  };
 }
 
 const CONCURRENCY_LIMIT = 5;
+const PERFORMER_TAGGER_CONFIG_KEY = "cove.performerTaggerConfig";
+
+function loadPerformerTaggerConfig(defaultEndpoint: string): TaggerConfig {
+  const fallback: TaggerConfig = {
+    selectedEndpoint: defaultEndpoint,
+    showTagged: false,
+    createMissingTags: true,
+    blacklist: [...DEFAULT_TAGGER_BLACKLIST],
+  };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(PERFORMER_TAGGER_CONFIG_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<TaggerConfig>;
+    return {
+      ...fallback,
+      ...parsed,
+      selectedEndpoint: parsed.selectedEndpoint ?? fallback.selectedEndpoint,
+      blacklist: parsed.blacklist ?? fallback.blacklist,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function savePerformerTaggerConfig(config: TaggerConfig) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PERFORMER_TAGGER_CONFIG_KEY, JSON.stringify(config));
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
+function normalizeDecisionValue(value?: string | number | null) {
+  return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function getPerformerTagNames(performer: Performer) {
+  return performer.tags.map((tag) => tag.name).filter(Boolean);
+}
+
+function getPerformerScrapedValue(result: UnifiedPerformerMatch, key: string): string | number | undefined {
+  const scraped = result.scraped;
+  switch (key) {
+    case "name": return result.name;
+    case "disambiguation": return result.disambiguation;
+    case "gender": return result.gender;
+    case "birthdate": return result.birthDate ?? scraped?.birthdate;
+    case "country": return result.country;
+    case "ethnicity": return scraped?.ethnicity;
+    case "eyeColor": return scraped?.eyeColor;
+    case "hairColor": return scraped?.hairColor;
+    case "heightCm": return scraped?.heightCm;
+    case "weight": return scraped?.weight;
+    case "measurements": return scraped?.measurements;
+    case "tattoos": return scraped?.tattoos;
+    case "piercings": return scraped?.piercings;
+    case "details": return scraped?.details;
+    default: return undefined;
+  }
+}
+
+function getPerformerCurrentValue(performer: Performer, key: string): string | number | undefined {
+  switch (key) {
+    case "name": return performer.name;
+    case "disambiguation": return performer.disambiguation;
+    case "gender": return performer.gender;
+    case "birthdate": return performer.birthdate;
+    case "country": return performer.country;
+    case "ethnicity": return performer.ethnicity;
+    case "eyeColor": return performer.eyeColor;
+    case "hairColor": return performer.hairColor;
+    case "heightCm": return performer.heightCm;
+    case "weight": return performer.weight;
+    case "measurements": return performer.measurements;
+    case "tattoos": return performer.tattoos;
+    case "piercings": return performer.piercings;
+    case "details": return performer.details;
+    default: return undefined;
+  }
+}
+
+const performerScalarFields = [
+  { key: "name", label: "Name" },
+  { key: "disambiguation", label: "Disambiguation" },
+  { key: "gender", label: "Gender" },
+  { key: "birthdate", label: "Birthdate" },
+  { key: "country", label: "Country" },
+  { key: "ethnicity", label: "Ethnicity" },
+  { key: "eyeColor", label: "Eye Color" },
+  { key: "hairColor", label: "Hair Color" },
+  { key: "heightCm", label: "Height" },
+  { key: "weight", label: "Weight" },
+  { key: "measurements", label: "Measurements" },
+  { key: "tattoos", label: "Tattoos", multiline: true },
+  { key: "piercings", label: "Piercings", multiline: true },
+  { key: "details", label: "Details", multiline: true },
+];
+
+function buildDefaultPerformerFieldStrategies(performer: Performer, result: UnifiedPerformerMatch): Record<string, PerformerFieldStrategy> {
+  const strategies: Record<string, PerformerFieldStrategy> = {};
+  for (const field of performerScalarFields) {
+    const scraped = getPerformerScrapedValue(result, field.key);
+    if (scraped === undefined || scraped === null || scraped === "") continue;
+    const current = getPerformerCurrentValue(performer, field.key);
+    strategies[field.key] = normalizeDecisionValue(current) === normalizeDecisionValue(scraped) ? "ignore" : "overwrite";
+  }
+  return strategies;
+}
+
+function getPerformerFieldStrategies(performer: Performer, result: UnifiedPerformerMatch, state?: PerformerSearchState) {
+  return { ...buildDefaultPerformerFieldStrategies(performer, result), ...(state?.fieldStrategies ?? {}) };
+}
+
+function buildDefaultPerformerCollectionModes(result: UnifiedPerformerMatch): Record<string, CollectionMode> {
+  return {
+    ...DEFAULT_COLLECTION_MODES,
+    urls: result.urls.length > 0 ? "merge" : "skip",
+    aliases: result.aliases.length > 0 ? "merge" : "skip",
+    tags: (result.scraped?.tagNames?.length ?? 0) > 0 ? "merge" : "skip",
+  };
+}
+
+function getPerformerCollectionModes(result: UnifiedPerformerMatch, state?: PerformerSearchState) {
+  return { ...buildDefaultPerformerCollectionModes(result), ...(state?.collectionModes ?? {}) };
+}
+
+function collectionModeToFieldStrategy(mode: CollectionMode): PerformerFieldStrategy {
+  if (mode === "replace") return "overwrite";
+  if (mode === "merge") return "merge";
+  return "ignore";
+}
+
+function buildPerformerFieldStrategies(performer: Performer, result: UnifiedPerformerMatch, state?: PerformerSearchState) {
+  const scalarStrategies = getPerformerFieldStrategies(performer, result, state);
+  const collectionModes = getPerformerCollectionModes(result, state);
+  return {
+    ...scalarStrategies,
+    urls: collectionModeToFieldStrategy(collectionModes.urls),
+    aliases: collectionModeToFieldStrategy(collectionModes.aliases),
+    tags: collectionModeToFieldStrategy(collectionModes.tags),
+  };
+}
+
+function buildFilteredScrapedPerformer(
+  performer: Performer,
+  result: UnifiedPerformerMatch,
+  state: PerformerSearchState | undefined,
+  createMissingTags: boolean,
+): ScrapedPerformer {
+  const scraped = result.scraped;
+  if (!scraped) throw new Error("No scraped performer selected");
+  const fieldStrategies = getPerformerFieldStrategies(performer, result, state);
+  const collectionModes = getPerformerCollectionModes(result, state);
+  const currentTagNames = getPerformerTagNames(performer);
+  const tagActions = state?.tagActions ?? buildRelationActionMap(scraped.tagNames ?? [], currentTagNames, currentTagNames, createMissingTags);
+  const selectedTags = (scraped.tagNames ?? []).filter((name) => tagActions[relationKey(name)] !== "exclude");
+
+  const filtered: ScrapedPerformer = {
+    urls: collectionModes.urls === "skip" ? [] : scraped.urls ?? [],
+    aliases: collectionModes.aliases === "skip" ? [] : scraped.aliases ?? [],
+    tagNames: collectionModes.tags === "skip" ? [] : selectedTags,
+  };
+  for (const field of performerScalarFields) {
+    if (fieldStrategies[field.key] !== "overwrite") continue;
+    const value = getPerformerScrapedValue(result, field.key);
+    if (value === undefined || value === null || value === "") continue;
+    (filtered as unknown as Record<string, unknown>)[field.key] = value;
+  }
+  if (result.imageUrl) filtered.imageUrl = result.imageUrl;
+  return filtered;
+}
+
 async function runWithConcurrency<T>(items: T[], fn: (item: T) => Promise<void>, limit: number, signal?: AbortSignal): Promise<void> {
   let index = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -41,17 +271,58 @@ async function runWithConcurrency<T>(items: T[], fn: (item: T) => Promise<void>,
   await Promise.all(workers);
 }
 
-export function PerformerTagger({ performers: performerList, selectedIds, selecting = false, onSelect }: PerformerTaggerProps) {
+export function PerformerTagger({ performers: performerList, selectedIds, selecting = false, onSelect, onNavigate }: PerformerTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
-
-  const [taggerConfig, setTaggerConfig] = useState<TaggerConfig>({
-    selectedEndpoint: metadataServers[0]?.endpoint ?? "",
-    showTagged: false,
+  const { data: scraperList = [] } = useQuery({ queryKey: ["scrapers"], queryFn: system.listScrapers });
+  const { data: tagPage } = useQuery({
+    queryKey: ["performer-tagger-tags"],
+    queryFn: () => tags.find({ page: 1, perPage: 10000, sort: "name", direction: "asc" }),
+    enabled: performerList.length > 0,
+    staleTime: 60_000,
   });
+  const performerScrapers = scraperList.filter((scraper) => scraper.entityType.toLowerCase() === "performer");
+  const sources: PerformerSource[] = [
+    ...metadataServers.map((server) => ({
+      kind: "metadata-server" as const,
+      value: sourceValue("metadata-server", server.endpoint),
+      label: server.name || server.endpoint,
+      endpoint: server.endpoint,
+    })),
+    ...performerScrapers.map((scraper) => ({
+      kind: "scraper" as const,
+      value: sourceValue("scraper", scraper.id),
+      label: `${scraper.name} (Scraper)`,
+      scraper,
+    })),
+  ];
+
+  const [taggerConfig, _setTaggerConfig] = useState<TaggerConfig>(() => loadPerformerTaggerConfig(metadataServers[0] ? sourceValue("metadata-server", metadataServers[0].endpoint) : ""));
+  const setTaggerConfig = useCallback((updater: TaggerConfig | ((current: TaggerConfig) => TaggerConfig)) => {
+    _setTaggerConfig((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      savePerformerTaggerConfig(next);
+      return next;
+    });
+  }, []);
 
   const [searchStates, setSearchStates] = useState<Record<number, PerformerSearchState>>({});
   const [queryOverrides, setQueryOverrides] = useState<Record<number, string>>({});
+  const [showSettings, setShowSettings] = useState(false);
+  const selectedSource = resolveSource(taggerConfig.selectedEndpoint, sources);
+  const existingTagNames = (tagPage?.items ?? []).map((tag) => tag.name);
+
+  const getQuery = useCallback((performer: Performer) => {
+    if (queryOverrides[performer.id] !== undefined) {
+      return queryOverrides[performer.id];
+    }
+
+    if (selectedSource?.kind === "scraper" && selectedSource.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url")) {
+      return pickBestSourceUrl(performer.urls, selectedSource.scraper) ?? cleanTaggerQueryString(performer.name, taggerConfig.blacklist);
+    }
+
+    return cleanTaggerQueryString(performer.name, taggerConfig.blacklist);
+  }, [queryOverrides, selectedSource, taggerConfig.blacklist]);
 
   const updateSearchState = useCallback(
     (performerId: number, update: Partial<PerformerSearchState>) => {
@@ -62,11 +333,28 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
 
   const searchPerformer = useCallback(
     async (performer: Performer) => {
-      const query = queryOverrides[performer.id] ?? performer.name;
+      const source = selectedSource;
+      const query = getQuery(performer);
       updateSearchState(performer.id, { loading: true, error: undefined, results: undefined, saved: false });
       try {
-        const endpoint = taggerConfig.selectedEndpoint || undefined;
-        const results = await performers.searchMetadataServer(performer.id, query, endpoint);
+        let results: UnifiedPerformerMatch[];
+        if (source?.kind === "scraper") {
+          const supportsUrl = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url");
+          const supportsName = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "name");
+          const looksLikeUrl = /^https?:\/\//i.test(query.trim());
+          const inputKind = supportsUrl && looksLikeUrl ? "url" : supportsName ? "name" : supportsUrl ? "url" : undefined;
+          if (!inputKind) throw new Error("This scraper cannot search this performer from the available row data.");
+          const preview = await performers.previewScrape(performer.id, {
+            scraperId: source.scraper.id,
+            inputKind,
+            url: inputKind === "url" ? query : undefined,
+            name: inputKind === "name" ? query : undefined,
+          });
+          results = [mapScrapedPerformer(preview.scraped, source.scraper)];
+        } else {
+          const endpoint = source?.endpoint || undefined;
+          results = (await performers.searchMetadataServer(performer.id, query, endpoint)).map((match) => ({ ...match, sourceKind: "metadata-server" as const }));
+        }
         updateSearchState(performer.id, {
           loading: false,
           results,
@@ -79,7 +367,7 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
         });
       }
     },
-    [queryOverrides, taggerConfig.selectedEndpoint, updateSearchState]
+    [getQuery, selectedSource, updateSearchState]
   );
 
   const [batchSearching, setBatchSearching] = useState(false);
@@ -99,13 +387,13 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
     setBatchSearching(false);
   }, []);
 
-  if (metadataServers.length === 0) {
+  if (sources.length === 0) {
     return (
       <div className="px-4 py-12 text-center">
         <AlertCircle className="w-12 h-12 mx-auto mb-3 text-muted opacity-50" />
-        <p className="text-secondary text-lg">No Metadata Server Sources Configured</p>
+        <p className="text-secondary text-lg">No Metadata Sources Configured</p>
         <p className="text-muted text-sm mt-1">
-          Add a metadata server endpoint in Settings &gt; Metadata Providers to use the tagger.
+          Add a metadata server or install a performer scraper to use the tagger.
         </p>
       </div>
     );
@@ -117,53 +405,34 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
 
   return (
     <div className="space-y-0">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 bg-surface border-b border-border px-4 py-2">
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-muted whitespace-nowrap">Source:</label>
-          <select
-            value={taggerConfig.selectedEndpoint}
-            onChange={(e) => setTaggerConfig((c) => ({ ...c, selectedEndpoint: e.target.value }))}
-            className="bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
-          >
-            {metadataServers.map((sb) => (
-              <option key={sb.endpoint} value={sb.endpoint}>
-                {sb.name || sb.endpoint}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          onClick={() => setTaggerConfig((c) => ({ ...c, showTagged: !c.showTagged }))}
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs border border-border bg-input text-secondary hover:text-foreground"
+      <TaggerToolbar
+        sources={sources.map((source) => ({ value: source.value, label: source.label }))}
+        selectedSource={selectedSource?.value ?? taggerConfig.selectedEndpoint}
+        onSourceChange={(value) => setTaggerConfig((current) => ({ ...current, selectedEndpoint: value }))}
+        showToggle={{
+          value: taggerConfig.showTagged,
+          onChange: (value) => setTaggerConfig((current) => ({ ...current, showTagged: value })),
+          enabledLabel: "Hide Already Tagged",
+          disabledLabel: "Show Already Tagged",
+        }}
+        batchSearching={batchSearching}
+        onCancelBatch={cancelBatchSearch}
+        onRunAll={searchAll}
+        countLabel={`${visiblePerformers.length} performer${visiblePerformers.length !== 1 ? "s" : ""}`}
+        settingsOpen={showSettings}
+        onToggleSettings={() => setShowSettings((current) => !current)}
+      />
+      {showSettings && (
+        <TaggerSettingsPanel
+          blacklist={taggerConfig.blacklist}
+          onBlacklistChange={(items) => setTaggerConfig((current) => ({ ...current, blacklist: items }))}
         >
-          {taggerConfig.showTagged ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-          {taggerConfig.showTagged ? "Hide Already Tagged" : "Show Already Tagged"}
-        </button>
-
-        {batchSearching ? (
-          <button
-            onClick={cancelBatchSearch}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-red-600 text-white hover:bg-red-500"
-          >
-            <X className="w-3.5 h-3.5" />
-            Cancel
-          </button>
-        ) : (
-          <button
-            onClick={searchAll}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-accent text-white hover:bg-accent-hover"
-          >
-            <CloudDownload className="w-3.5 h-3.5" />
-            Scrape All
-          </button>
-        )}
-
-        <span className="text-xs text-muted ml-auto">
-          {visiblePerformers.length} performer{visiblePerformers.length !== 1 ? "s" : ""}
-        </span>
-      </div>
+          <label className="flex items-center gap-2 text-xs text-foreground">
+            <input type="checkbox" checked={taggerConfig.createMissingTags} onChange={(event) => setTaggerConfig((current) => ({ ...current, createMissingTags: event.target.checked }))} className="rounded border-border" />
+            Create missing tags
+          </label>
+        </TaggerSettingsPanel>
+      )}
 
       {/* Performer list */}
       <div className="divide-y divide-border">
@@ -172,14 +441,17 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
             key={performer.id}
             performer={performer}
             state={searchStates[performer.id]}
-            query={queryOverrides[performer.id] ?? performer.name}
+            query={getQuery(performer)}
             onQueryChange={(q) => setQueryOverrides((prev) => ({ ...prev, [performer.id]: q }))}
             onSearch={() => searchPerformer(performer)}
             onUpdateState={(update) => updateSearchState(performer.id, update)}
-            endpoint={taggerConfig.selectedEndpoint}
+            source={selectedSource}
             selected={selectedIds?.has(performer.id) ?? false}
             selecting={selecting}
             onSelect={onSelect}
+            onNavigate={onNavigate}
+            taggerConfig={taggerConfig}
+            existingTagNames={existingTagNames}
           />
         ))}
       </div>
@@ -194,10 +466,13 @@ function PerformerTaggerRow({
   onQueryChange,
   onSearch,
   onUpdateState,
-  endpoint,
+  source,
   selected,
   selecting,
   onSelect,
+  onNavigate,
+  taggerConfig,
+  existingTagNames,
 }: {
   performer: Performer;
   state?: PerformerSearchState;
@@ -205,31 +480,77 @@ function PerformerTaggerRow({
   onQueryChange: (q: string) => void;
   onSearch: () => void;
   onUpdateState: (update: Partial<PerformerSearchState>) => void;
-  endpoint: string;
+  source?: PerformerSource;
   selected: boolean;
   selecting: boolean;
   onSelect?: (performerId: number) => void;
+  onNavigate?: (performerId: number) => void;
+  taggerConfig: TaggerConfig;
+  existingTagNames: string[];
 }) {
   const imageUrl = performer.imagePath;
+  const queryClient = useQueryClient();
+  const performerLinkProps = createNestedRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, () => onNavigate?.(performer.id));
 
   const importMut = useMutation({
     mutationFn: () => {
       const selectedResult = state?.results?.[state.selectedIndex ?? 0];
       if (!selectedResult) throw new Error("No result selected");
+      if (selectedResult.sourceKind === "scraper") {
+        if (!selectedResult.scraped) throw new Error("No scraped performer selected");
+        const tagActions = state?.tagActions ?? buildRelationActionMap(selectedResult.scraped.tagNames ?? [], getPerformerTagNames(performer), existingTagNames, taggerConfig.createMissingTags);
+        const forceCreateTags = Object.values(tagActions).some((action) => action === "create");
+        return performers.applyScraped(performer.id, {
+          scraped: buildFilteredScrapedPerformer(performer, selectedResult, state, taggerConfig.createMissingTags),
+          createMissingTags: taggerConfig.createMissingTags || forceCreateTags,
+          replaceFields: [
+            ...Object.entries(getPerformerFieldStrategies(performer, selectedResult, state)).filter(([, strategy]) => strategy === "overwrite").map(([field]) => field),
+            ...(selectedResult.imageUrl ? ["image"] : []),
+          ],
+          collectionModes: getPerformerCollectionModes(selectedResult, state),
+        });
+      }
       const importReq: MetadataServerPerformerImportRequest = {
-        endpoint,
+        endpoint: source?.kind === "metadata-server" ? source.endpoint : selectedResult.endpoint,
         performerId: selectedResult.id,
+        fieldStrategies: buildPerformerFieldStrategies(performer, selectedResult, state),
       };
       return performers.importFromMetadataServer(performer.id, importReq);
     },
     onSuccess: () => {
       onUpdateState({ saved: true });
+      queryClient.invalidateQueries({ queryKey: ["performer", performer.id] });
+      queryClient.invalidateQueries({ queryKey: ["performers"] });
     },
   });
 
+  const preview = (
+    <>
+      <div className="relative aspect-[2/3] bg-card rounded overflow-hidden">
+        {imageUrl ? (
+          <img src={imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-muted text-xs">No Image</div>
+        )}
+      </div>
+      <p className="mt-0.5 truncate text-[11px] font-medium leading-snug text-accent group-hover/performer:underline">{performer.name}</p>
+      <p className="truncate text-[10px] text-muted">{performer.disambiguation || performer.country || performer.birthdate || ""}</p>
+      {performer.remoteIds && performer.remoteIds.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {performer.remoteIds.map((sid) => (
+            <span key={`${sid.endpoint}-${sid.remoteId}`} className="text-[9px] px-1.5 py-0.5 rounded bg-green-600/20 text-green-300" title={sid.endpoint}>
+              <Fingerprint className="w-2.5 h-2.5 inline mr-0.5" />
+              {sid.remoteId.substring(0, 8)}…
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
   return (
-    <div className={`px-4 py-3 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
-      <div className="flex gap-4">
+    <div className={`px-3 py-2 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
+      <div className="flex gap-3">
         {onSelect && (
           <button
             type="button"
@@ -241,27 +562,9 @@ function PerformerTaggerRow({
             <Check className="h-3 w-3" />
           </button>
         )}
-        {/* Performer image */}
-        <div className="flex-shrink-0 w-24">
-          <div className="relative aspect-[2/3] bg-card rounded overflow-hidden">
-            {imageUrl ? (
-              <img src={imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-muted text-xs">No Image</div>
-            )}
-          </div>
-          <p className="text-xs text-foreground mt-1 truncate font-medium">{performer.name}</p>
-          {performer.remoteIds && performer.remoteIds.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
-              {performer.remoteIds.map((sid) => (
-                <span key={`${sid.endpoint}-${sid.remoteId}`} className="text-[9px] px-1.5 py-0.5 rounded bg-green-600/20 text-green-300" title={sid.endpoint}>
-                  <Fingerprint className="w-2.5 h-2.5 inline mr-0.5" />
-                  {sid.remoteId.substring(0, 8)}…
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        <a {...performerLinkProps} className="group/performer block w-28 flex-shrink-0" title={`Open performer ${performer.name}`}>
+          {preview}
+        </a>
 
         {/* Search + Results */}
         <div className="flex-1 min-w-0">
@@ -299,9 +602,18 @@ function PerformerTaggerRow({
               {state.results.map((result, i) => (
                 <PerformerResultRow
                   key={`${result.endpoint}-${result.id}`}
+                  performer={performer}
                   result={result}
                   isSelected={i === (state.selectedIndex ?? 0)}
-                  onClick={() => onUpdateState({ selectedIndex: i })}
+                  fieldStrategies={getPerformerFieldStrategies(performer, result, state)}
+                  collectionModes={getPerformerCollectionModes(result, state)}
+                  tagActions={state.tagActions ?? buildRelationActionMap(result.scraped?.tagNames ?? [], getPerformerTagNames(performer), existingTagNames, taggerConfig.createMissingTags)}
+                  existingTagNames={existingTagNames}
+                  createMissingTags={taggerConfig.createMissingTags}
+                  onFieldStrategyChange={(field, strategy) => onUpdateState({ fieldStrategies: { ...getPerformerFieldStrategies(performer, result, state), [field]: strategy } })}
+                  onCollectionModeChange={(field, mode) => onUpdateState({ collectionModes: { ...getPerformerCollectionModes(result, state), [field]: mode } })}
+                  onTagActionChange={(name, action) => onUpdateState({ tagActions: { ...(state.tagActions ?? buildRelationActionMap(result.scraped?.tagNames ?? [], getPerformerTagNames(performer), existingTagNames, taggerConfig.createMissingTags)), [relationKey(name)]: action } })}
+                  onClick={() => onUpdateState(i === (state.selectedIndex ?? 0) ? { selectedIndex: i } : { selectedIndex: i, fieldStrategies: undefined, collectionModes: undefined, tagActions: undefined })}
                   onSave={i === (state.selectedIndex ?? 0) ? () => importMut.mutate() : undefined}
                   saving={i === (state.selectedIndex ?? 0) ? importMut.isPending : false}
                   saved={state.saved}
@@ -322,20 +634,51 @@ function PerformerTaggerRow({
 }
 
 function PerformerResultRow({
+  performer,
   result,
   isSelected,
+  fieldStrategies,
+  collectionModes,
+  tagActions,
+  existingTagNames,
+  createMissingTags,
+  onFieldStrategyChange,
+  onCollectionModeChange,
+  onTagActionChange,
   onClick,
   onSave,
   saving,
   saved,
 }: {
-  result: MetadataServerPerformerMatch;
+  performer: Performer;
+  result: UnifiedPerformerMatch;
   isSelected: boolean;
+  fieldStrategies: Record<string, PerformerFieldStrategy>;
+  collectionModes: Record<string, CollectionMode>;
+  tagActions: ScrapeRelationActionMap;
+  existingTagNames: string[];
+  createMissingTags: boolean;
+  onFieldStrategyChange: (field: string, strategy: PerformerFieldStrategy) => void;
+  onCollectionModeChange: (field: string, mode: CollectionMode) => void;
+  onTagActionChange: (name: string, action: "include" | "create" | "exclude") => void;
   onClick: () => void;
   onSave?: () => void;
   saving?: boolean;
   saved?: boolean;
 }) {
+  const scalarRows = performerScalarFields
+    .map((field) => ({
+      ...field,
+      current: getPerformerCurrentValue(performer, field.key),
+      scraped: getPerformerScrapedValue(result, field.key),
+    }))
+    .filter((field) => field.scraped !== undefined && field.scraped !== null && field.scraped !== "");
+  const currentTagNames = getPerformerTagNames(performer);
+  const scrapedTagNames = result.scraped?.tagNames ?? [];
+  const effectiveTagActions = scrapedTagNames.length > 0
+    ? tagActions
+    : buildRelationActionMap(scrapedTagNames, currentTagNames, existingTagNames, createMissingTags);
+
   return (
     <div
       onClick={onClick}
@@ -359,14 +702,59 @@ function PerformerResultRow({
       </div>
 
       {isSelected && (
-        <div className="border-t border-border p-3">
-          <div className="grid grid-cols-2 gap-2 text-xs mb-3">
-            {result.disambiguation && <FieldRow label="Disambiguation" value={result.disambiguation} />}
-            {result.gender && <FieldRow label="Gender" value={result.gender} />}
-            {result.birthDate && <FieldRow label="Birthdate" value={result.birthDate} />}
-            {result.country && <FieldRow label="Country" value={result.country} />}
-            {result.aliases && result.aliases.length > 0 && <FieldRow label="Aliases" value={result.aliases.join(", ")} />}
-          </div>
+        <div className="border-t border-border px-3 py-3 space-y-3">
+          {scalarRows.map((row) => (
+            <CompactScalarDecision
+              key={row.key}
+              label={row.label}
+              current={row.current}
+              scraped={row.scraped}
+              multiline={row.multiline}
+              replacing={fieldStrategies[row.key] === "overwrite"}
+              onChange={(shouldReplace) => onFieldStrategyChange(row.key, shouldReplace ? "overwrite" : "ignore")}
+            />
+          ))}
+
+          {result.urls.length > 0 && (
+            <CompactCollectionDecision
+              label="URLs"
+              current={performer.urls}
+              mode={collectionModes.urls}
+              onModeChange={(mode) => onCollectionModeChange("urls", mode)}
+              scraped={<CompactListValue values={result.urls} breakAll />}
+            />
+          )}
+
+          {result.aliases.length > 0 && (
+            <CompactCollectionDecision
+              label="Aliases"
+              current={performer.aliases}
+              mode={collectionModes.aliases}
+              onModeChange={(mode) => onCollectionModeChange("aliases", mode)}
+              scraped={<CompactListValue values={result.aliases} />}
+            />
+          )}
+
+          {scrapedTagNames.length > 0 && (
+            <CompactCollectionDecision
+              label="Tags"
+              current={currentTagNames}
+              mode={collectionModes.tags}
+              onModeChange={(mode) => onCollectionModeChange("tags", mode)}
+              scraped={(
+                <div onClick={(event) => event.stopPropagation()}>
+                  <ScrapeRelationChoices
+                    names={scrapedTagNames}
+                    currentNames={currentTagNames}
+                    existingNames={existingTagNames}
+                    actions={effectiveTagActions}
+                    disabled={collectionModes.tags === "skip"}
+                    onActionChange={onTagActionChange}
+                  />
+                </div>
+              )}
+            />
+          )}
 
           {onSave && !saved && (
             <div className="flex justify-end">
@@ -386,11 +774,3 @@ function PerformerResultRow({
   );
 }
 
-function FieldRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-2">
-      <span className="text-muted w-24 flex-shrink-0 text-right">{label}:</span>
-      <span className="text-foreground truncate">{value}</span>
-    </div>
-  );
-}

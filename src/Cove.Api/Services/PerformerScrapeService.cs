@@ -69,111 +69,148 @@ public class PerformerScrapeService(
         return await TryScrapeGeneratedUrlsAsync(performerScrapers, name, ct);
     }
 
-    public async Task ApplyAsync(Performer performer, ScrapedPerformerDto scraped, bool createMissingTags, CancellationToken ct = default)
+    public async Task ApplyAsync(
+        Performer performer,
+        ScrapedPerformerDto scraped,
+        bool createMissingTags,
+        IReadOnlyCollection<string>? replaceFields = null,
+        IReadOnlyDictionary<string, string>? collectionModes = null,
+        CancellationToken ct = default)
     {
         var fieldProvenance = new Dictionary<string, object?>();
+        var replaceFieldSet = replaceFields?.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        if (!string.IsNullOrWhiteSpace(scraped.Name))
+        bool ShouldApplyField(params string[] names) => replaceFieldSet == null || names.Any(replaceFieldSet.Contains);
+        string GetCollectionMode(string field)
+        {
+            if (collectionModes == null || !collectionModes.TryGetValue(field, out var mode) || string.IsNullOrWhiteSpace(mode))
+                return "merge";
+            return mode.Trim().ToLowerInvariant() switch
+            {
+                "skip" or "ignore" => "skip",
+                "replace" or "overwrite" => "replace",
+                _ => "merge",
+            };
+        }
+
+        if (ShouldApplyField("name") && !string.IsNullOrWhiteSpace(scraped.Name))
         {
             performer.Name = scraped.Name.Trim();
             fieldProvenance["name"] = performer.Name;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Disambiguation))
+        if (ShouldApplyField("disambiguation") && !string.IsNullOrWhiteSpace(scraped.Disambiguation))
         {
             performer.Disambiguation = scraped.Disambiguation.Trim();
             fieldProvenance["disambiguation"] = performer.Disambiguation;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Gender) && TryParseEnum(scraped.Gender, out GenderEnum gender))
+        if (ShouldApplyField("gender") && !string.IsNullOrWhiteSpace(scraped.Gender) && TryParseEnum(scraped.Gender, out GenderEnum gender))
         {
             performer.Gender = gender;
             fieldProvenance["gender"] = gender.ToString();
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Birthdate) && TryParseDate(scraped.Birthdate, out var birthdate))
+        if (ShouldApplyField("birthdate", "birthDate") && !string.IsNullOrWhiteSpace(scraped.Birthdate) && TryParseDate(scraped.Birthdate, out var birthdate))
         {
             performer.Birthdate = birthdate;
             fieldProvenance["birthdate"] = birthdate.ToString("yyyy-MM-dd");
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Country))
+        if (ShouldApplyField("country") && !string.IsNullOrWhiteSpace(scraped.Country))
         {
             performer.Country = scraped.Country.Trim();
             fieldProvenance["country"] = performer.Country;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Ethnicity))
+        if (ShouldApplyField("ethnicity") && !string.IsNullOrWhiteSpace(scraped.Ethnicity))
         {
             performer.Ethnicity = scraped.Ethnicity.Trim();
             fieldProvenance["ethnicity"] = performer.Ethnicity;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.EyeColor))
+        if (ShouldApplyField("eyeColor", "eye_color") && !string.IsNullOrWhiteSpace(scraped.EyeColor))
         {
             performer.EyeColor = scraped.EyeColor.Trim();
             fieldProvenance["eye_color"] = performer.EyeColor;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.HairColor))
+        if (ShouldApplyField("hairColor", "hair_color") && !string.IsNullOrWhiteSpace(scraped.HairColor))
         {
             performer.HairColor = scraped.HairColor.Trim();
             fieldProvenance["hair_color"] = performer.HairColor;
         }
 
-        if (scraped.HeightCm.HasValue)
+        if (ShouldApplyField("heightCm", "height_cm") && scraped.HeightCm.HasValue)
         {
             performer.HeightCm = scraped.HeightCm.Value;
             fieldProvenance["height_cm"] = performer.HeightCm;
         }
 
-        if (scraped.Weight.HasValue)
+        if (ShouldApplyField("weight") && scraped.Weight.HasValue)
         {
             performer.Weight = scraped.Weight.Value;
             fieldProvenance["weight"] = performer.Weight;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Measurements))
+        if (ShouldApplyField("measurements") && !string.IsNullOrWhiteSpace(scraped.Measurements))
         {
             performer.Measurements = scraped.Measurements.Trim();
             fieldProvenance["measurements"] = performer.Measurements;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Tattoos))
+        if (ShouldApplyField("tattoos") && !string.IsNullOrWhiteSpace(scraped.Tattoos))
         {
             performer.Tattoos = scraped.Tattoos.Trim();
             fieldProvenance["tattoos"] = performer.Tattoos;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Piercings))
+        if (ShouldApplyField("piercings") && !string.IsNullOrWhiteSpace(scraped.Piercings))
         {
             performer.Piercings = scraped.Piercings.Trim();
             fieldProvenance["piercings"] = performer.Piercings;
         }
 
-        if (!string.IsNullOrWhiteSpace(scraped.Details))
+        if (ShouldApplyField("details") && !string.IsNullOrWhiteSpace(scraped.Details))
         {
             performer.Details = scraped.Details.Trim();
             fieldProvenance["details"] = performer.Details;
         }
 
         var urls = NormalizeNames(scraped.Urls);
-        if (urls.Count > 0)
-            fieldProvenance["urls"] = urls;
-        MergeValues(performer.Urls, urls, item => item.Url, value => new PerformerUrl { Url = value, Performer = performer }, NormalizeUrlKey);
+        var urlsMode = GetCollectionMode("urls");
+        if (urlsMode != "skip")
+        {
+            if (urlsMode == "replace")
+                performer.Urls.Clear();
+            if (urls.Count > 0)
+                fieldProvenance["urls"] = urls;
+            MergeValues(performer.Urls, urls, item => item.Url, value => new PerformerUrl { Url = value, Performer = performer }, NormalizeUrlKey);
+        }
 
         var aliases = NormalizeNames(scraped.Aliases);
-        if (aliases.Count > 0)
-            fieldProvenance["aliases"] = aliases;
-        MergeValues(performer.Aliases, aliases, item => item.Alias, value => new PerformerAlias { Alias = value, Performer = performer });
+        var aliasesMode = GetCollectionMode("aliases");
+        if (aliasesMode != "skip")
+        {
+            if (aliasesMode == "replace")
+                performer.Aliases.Clear();
+            if (aliases.Count > 0)
+                fieldProvenance["aliases"] = aliases;
+            MergeValues(performer.Aliases, aliases, item => item.Alias, value => new PerformerAlias { Alias = value, Performer = performer });
+        }
 
-        await TryApplyImageAsync(performer, scraped.ImageUrl, ct);
-        if (!string.IsNullOrWhiteSpace(scraped.ImageUrl))
+        if (ShouldApplyField("image", "imageUrl", "image_url"))
+            await TryApplyImageAsync(performer, scraped.ImageUrl, ct);
+        if (ShouldApplyField("image", "imageUrl", "image_url") && !string.IsNullOrWhiteSpace(scraped.ImageUrl))
             fieldProvenance["image_url"] = scraped.ImageUrl.Trim();
 
         var normalizedTagNames = NormalizeNames(scraped.TagNames);
-        if (normalizedTagNames.Count > 0)
+        var tagsMode = GetCollectionMode("tags");
+        if (tagsMode != "skip" && normalizedTagNames.Count > 0)
         {
+            if (tagsMode == "replace")
+                performer.PerformerTags.Clear();
+
             var normalizedKeys = normalizedTagNames
                 .Select(tagName => tagName.ToLowerInvariant())
                 .ToList();

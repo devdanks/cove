@@ -114,6 +114,8 @@ public class ConfigService
                 AutoplayOnListClick = cfg.Ui.AutoplayOnListClick,
                 MaxLoopDuration = cfg.Ui.MaxLoopDuration,
                 AlwaysResumeOnPlayback = cfg.Ui.AlwaysResumeOnPlayback,
+                PlayerVideoStartPercent = cfg.Ui.PlayerVideoStartPercent,
+                PlayerVideoStartMinDuration = cfg.Ui.PlayerVideoStartMinDuration,
                 ContinuePlaylistDefault = cfg.Ui.ContinuePlaylistDefault,
                 ShowAbLoopControls = cfg.Ui.ShowAbLoopControls,
                 SoundOnPreview = cfg.Ui.SoundOnPreview,
@@ -124,6 +126,10 @@ public class ConfigService
                 WallShowTitle = cfg.Ui.WallShowTitle,
                 WallPlayback = cfg.Ui.WallPlayback,
                 WallPreviewType = cfg.Ui.WallPreviewType,
+                FeedVideoSource = cfg.Ui.FeedVideoSource,
+                FeedVideoSound = cfg.Ui.FeedVideoSound,
+                FeedVideoStartPercent = cfg.Ui.FeedVideoStartPercent,
+                FeedVideoStartMinDuration = cfg.Ui.FeedVideoStartMinDuration,
                 DeleteFileDefault = cfg.Ui.DeleteFileDefault,
                 SlideshowDelay = cfg.Ui.SlideshowDelay,
                 NoBrowser = cfg.Ui.NoBrowser,
@@ -332,6 +338,8 @@ public class ConfigService
         cfg.Ui.AutoplayOnListClick = dto.Ui.AutoplayOnListClick;
         cfg.Ui.MaxLoopDuration = dto.Ui.MaxLoopDuration;
         cfg.Ui.AlwaysResumeOnPlayback = dto.Ui.AlwaysResumeOnPlayback;
+        cfg.Ui.PlayerVideoStartPercent = Math.Clamp(dto.Ui.PlayerVideoStartPercent, 0, 95);
+        cfg.Ui.PlayerVideoStartMinDuration = Math.Max(0, dto.Ui.PlayerVideoStartMinDuration);
         cfg.Ui.ContinuePlaylistDefault = dto.Ui.ContinuePlaylistDefault;
         cfg.Ui.ShowAbLoopControls = dto.Ui.ShowAbLoopControls;
         cfg.Ui.SoundOnPreview = dto.Ui.SoundOnPreview;
@@ -342,6 +350,10 @@ public class ConfigService
         cfg.Ui.WallShowTitle = dto.Ui.WallShowTitle;
         cfg.Ui.WallPlayback = dto.Ui.WallPlayback;
         cfg.Ui.WallPreviewType = string.IsNullOrWhiteSpace(dto.Ui.WallPreviewType) ? "video" : dto.Ui.WallPreviewType.Trim();
+        cfg.Ui.FeedVideoSource = string.Equals(dto.Ui.FeedVideoSource, "video", StringComparison.OrdinalIgnoreCase) ? "video" : "preview";
+        cfg.Ui.FeedVideoSound = dto.Ui.FeedVideoSound;
+        cfg.Ui.FeedVideoStartPercent = Math.Clamp(dto.Ui.FeedVideoStartPercent, 0, 95);
+        cfg.Ui.FeedVideoStartMinDuration = Math.Max(0, dto.Ui.FeedVideoStartMinDuration);
         cfg.Ui.DeleteFileDefault = dto.Ui.DeleteFileDefault;
         cfg.Ui.SlideshowDelay = dto.Ui.SlideshowDelay;
         cfg.Ui.NoBrowser = dto.Ui.NoBrowser;

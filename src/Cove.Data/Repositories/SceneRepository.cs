@@ -329,9 +329,9 @@ public class SceneRepository : ISceneRepository
                 var orientation = filter.OrientationCriterion.Value.ToLower();
                 query = orientation switch
                 {
-                    "landscape" => query.Where(s => s.HasLandscapeFiles),
-                    "portrait" => query.Where(s => s.HasPortraitFiles),
-                    "square" => query.Where(s => s.HasSquareFiles),
+                    "landscape" => query.Where(s => s.HasLandscapeFiles || s.Files.Any(file => file.Width > file.Height)),
+                    "portrait" => query.Where(s => s.HasPortraitFiles || s.Files.Any(file => file.Height > file.Width)),
+                    "square" => query.Where(s => s.HasSquareFiles || s.Files.Any(file => file.Width > 0 && file.Width == file.Height)),
                     _ => query,
                 };
             }

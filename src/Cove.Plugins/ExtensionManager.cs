@@ -579,6 +579,7 @@ public class ExtensionManager
             manifest.PageOverrides.AddRange(extManifest.PageOverrides);
             manifest.DialogOverrides.AddRange(extManifest.DialogOverrides);
             manifest.Actions.AddRange(extManifest.Actions);
+            manifest.TutorialTopics.AddRange(extManifest.TutorialTopics);
         }
 
         // Collect actions from IActionExtension instances
@@ -595,6 +596,7 @@ public class ExtensionManager
         manifest.ComponentOverrides.Sort((a, b) => b.Priority.CompareTo(a.Priority));
         manifest.SelectorOverrides.Sort((a, b) => b.Priority.CompareTo(a.Priority));
         manifest.Actions.Sort((a, b) => a.Order.CompareTo(b.Order));
+        manifest.TutorialTopics.Sort((a, b) => a.Order.CompareTo(b.Order));
         return manifest;
     }
 

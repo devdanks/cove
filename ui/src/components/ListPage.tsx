@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, Plus, X } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, Plus, X, Rows3, MonitorPlay, Play, Pause } from "lucide-react";
 import type { CriterionModifier, CustomFieldCriterion, CustomFieldDefinition, CustomFieldEntityType, CustomFieldType, FindFilter } from "../api/types";
 import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, tagGroups as tagGroupsApi } from "../api/client";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { SavedFilterMenu } from "./SavedFilterMenu";
+import { InfiniteScrollSentinel } from "./InfiniteScrollSentinel";
 import { FilterDialog, FilterButton, type CriterionDefinition, type FilterDialogCustomSection } from "./FilterDialog";
 import { EntityReferenceSelector, getEntityReferenceLabel, isEntityReferenceType, parseEntityReferenceId } from "./EntityReferenceSelector";
 import { useResolvedKeybindingOverrides } from "../hooks/useResolvedKeybindingOverrides";
@@ -15,7 +16,7 @@ import { useCustomFieldDefinitions } from "../hooks/useCustomFieldDefinitions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { trackInteraction } from "../utils/interactionTracking";
 
-export type DisplayMode = "grid" | "list" | "wall" | "tagger" | "graph" | "byGroup";
+export type DisplayMode = "grid" | "list" | "wall" | "tagger" | "graph" | "byGroup" | "feed" | "vertical";
 
 interface ListPageProps {
   title: string;
@@ -29,11 +30,17 @@ interface ListPageProps {
   displayMode?: DisplayMode;
   onDisplayModeChange?: (mode: DisplayMode) => void;
   availableDisplayModes?: DisplayMode[];
+  allowInfinitePageSize?: boolean;
+  infinitePageSizeOnly?: boolean;
   selectedIds?: Set<string | number>;
   onSelectAll?: () => void;
+  onSelectAllMatching?: () => void;
   onSelectNone?: () => void;
   onInvertSelection?: () => void;
   selectionActions?: ReactNode;
+  selectAllLabel?: string;
+  selectAllMatchingLabel?: string;
+  selectAllMatchingPending?: boolean;
   metadataByline?: ReactNode;
   onNew?: () => void;
   renderOperations?: () => ReactNode;
@@ -48,6 +55,19 @@ interface ListPageProps {
   onObjectFilterChange?: (filter: Record<string, unknown>) => void;
   wallColumnCount?: number;
   onWallColumnCountChange?: (count: number) => void;
+  autoScrollContainerRef?: RefObject<HTMLElement | null>;
+  infiniteScroll?: {
+    hasNextPage?: boolean;
+    hasPreviousPage?: boolean;
+    isFetchingNextPage?: boolean;
+    isFetchingPreviousPage?: boolean;
+    onLoadMore: () => void;
+    onLoadPrevious?: () => void | Promise<unknown>;
+    loadedCount: number;
+    previousLoadedCount?: number;
+    totalCount: number;
+  };
+  showAutoScrollControls?: boolean;
   showPagingControls?: boolean;
   customFilterSections?: FilterDialogCustomSection[];
   showClearAllObjectFilters?: boolean;
@@ -574,11 +594,17 @@ export function ListPage({
   displayMode,
   onDisplayModeChange,
   availableDisplayModes,
+  allowInfinitePageSize = false,
+  infinitePageSizeOnly = false,
   selectedIds,
   onSelectAll,
+  onSelectAllMatching,
   onSelectNone,
   onInvertSelection,
   selectionActions,
+  selectAllLabel = "Select all",
+  selectAllMatchingLabel = "Select all matching",
+  selectAllMatchingPending = false,
   metadataByline,
   onNew,
   renderOperations,
@@ -592,6 +618,9 @@ export function ListPage({
   onObjectFilterChange,
   wallColumnCount,
   onWallColumnCountChange,
+  autoScrollContainerRef,
+  infiniteScroll,
+  showAutoScrollControls = true,
   showPagingControls = true,
   customFilterSections,
   showClearAllObjectFilters = true,
@@ -600,6 +629,9 @@ export function ListPage({
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [filterDialogPreselect, setFilterDialogPreselect] = useState<string | undefined>();
   const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM_LEVEL); // 0-5 range: 0=smallest (240px), 5=largest (540px)
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(false);
+  const [autoScrollSpeed, setAutoScrollSpeed] = useState(120);
+  const [autoScrollControlsAwake, setAutoScrollControlsAwake] = useState(true);
   const restoredPrefsRef = useRef(false);
   const { config } = useAppConfig();
   const keybindingOverrides = useResolvedKeybindingOverrides();
@@ -674,17 +706,23 @@ export function ListPage({
     return maps;
   }, [tagEntities, performerEntities, studioEntities, groupEntities, tagGroupEntities]);
   const perPage = filter.perPage ?? 25;
+  const infinitePageSize = allowInfinitePageSize && (perPage === 0 || infinitePageSizeOnly);
   const perPageOptions = useMemo(() => {
-    if (PER_PAGE_OPTIONS.includes(perPage)) {
+    if (infinitePageSizeOnly) {
+      return [];
+    }
+
+    if (infinitePageSize || PER_PAGE_OPTIONS.includes(perPage)) {
       return PER_PAGE_OPTIONS;
     }
 
     return [...PER_PAGE_OPTIONS, perPage].sort((left, right) => left - right);
-  }, [perPage]);
+  }, [infinitePageSize, infinitePageSizeOnly, perPage]);
   const page = filter.page ?? 1;
-  const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
-  const start = (page - 1) * perPage + 1;
-  const end = Math.min(page * perPage, totalCount);
+  const effectivePerPage = infinitePageSize ? Math.max(totalCount, 1) : perPage;
+  const totalPages = Math.max(1, Math.ceil(totalCount / effectivePerPage));
+  const start = totalCount > 0 ? (infinitePageSize ? 1 : (page - 1) * effectivePerPage + 1) : 0;
+  const end = infinitePageSize ? totalCount : Math.min(page * effectivePerPage, totalCount);
   const sortedSortOptions = useMemo(() => {
     const customSortOptions = customFieldDefinitions
       .filter((definition) => definition.sortable)
@@ -694,9 +732,99 @@ export function ListPage({
   }, [customFieldDefinitions, sortOptions]);
   const slotContext = { pageKey, title, filter, onFilterChange, totalCount, isLoading };
   const selecting = selectedIds && selectedIds.size > 0;
+  const showSelectionBar = Boolean(selectedIds && selecting);
+  const showInfiniteAutoScrollControls = infinitePageSize && showAutoScrollControls;
+  const wakeAutoScrollControls = useCallback(() => setAutoScrollControlsAwake(true), []);
   const toolbarSegmentClass = "flex items-center gap-1 rounded-lg border border-border bg-card/70 px-1.5 py-1 shadow-sm";
   const toolbarSelectClass = "min-h-[30px] rounded-md border border-border/60 bg-input px-2 py-1 text-xs text-foreground shadow-inner focus:outline-none focus:border-accent";
   const toolbarIconButtonClass = "rounded-md border border-transparent p-1.5 text-secondary hover:bg-card/80 hover:text-foreground focus:outline-none focus:border-accent";
+
+  const loadPreviousInfinitePage = useCallback(() => {
+    if (!infiniteScroll?.onLoadPrevious) {
+      return;
+    }
+
+    const scrollingElement = document.scrollingElement ?? document.documentElement;
+    const previousHeight = scrollingElement.scrollHeight;
+    const previousTop = window.scrollY;
+    const result = infiniteScroll.onLoadPrevious();
+    void Promise.resolve(result).then(() => {
+      window.requestAnimationFrame(() => {
+        const nextHeight = scrollingElement.scrollHeight;
+        window.scrollTo({ top: previousTop + (nextHeight - previousHeight), behavior: "auto" });
+      });
+    });
+  }, [infiniteScroll]);
+
+  useEffect(() => {
+    if ((!infinitePageSize || !showAutoScrollControls) && autoScrollEnabled) {
+      setAutoScrollEnabled(false);
+    }
+  }, [autoScrollEnabled, infinitePageSize, showAutoScrollControls]);
+
+  useEffect(() => {
+    if (!showInfiniteAutoScrollControls || !autoScrollControlsAwake) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setAutoScrollControlsAwake(false), autoScrollEnabled ? 2600 : 3600);
+    return () => window.clearTimeout(timeoutId);
+  }, [autoScrollControlsAwake, autoScrollEnabled, autoScrollSpeed, showInfiniteAutoScrollControls]);
+
+  useEffect(() => {
+    if (!showInfiniteAutoScrollControls || !autoScrollEnabled) {
+      return;
+    }
+
+    const container = autoScrollContainerRef?.current;
+    const previousSnapType = container?.style.scrollSnapType;
+    let previousTime = performance.now();
+    let pendingDistance = 0;
+    let frameId = 0;
+
+    if (container) {
+      container.style.scrollSnapType = "none";
+    }
+
+    const step = (currentTime: number) => {
+      const deltaSeconds = Math.min(0.05, Math.max(0, (currentTime - previousTime) / 1000));
+      previousTime = currentTime;
+      pendingDistance += autoScrollSpeed * deltaSeconds;
+      const distance = Math.floor(pendingDistance);
+
+      if (distance < 1) {
+        frameId = window.requestAnimationFrame(step);
+        return;
+      }
+
+      pendingDistance -= distance;
+
+      if (container) {
+        const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+        if (container.scrollTop < maxScrollTop - 1) {
+          container.scrollTop = Math.min(maxScrollTop, container.scrollTop + distance);
+        }
+      } else {
+        const scrollingElement = document.scrollingElement ?? document.documentElement;
+        const maxScrollTop = Math.max(0, scrollingElement.scrollHeight - window.innerHeight);
+        if (window.scrollY < maxScrollTop - 1) {
+          window.scrollTo({ top: Math.min(maxScrollTop, window.scrollY + distance), behavior: "auto" });
+        }
+      }
+
+      frameId = window.requestAnimationFrame(step);
+    };
+
+    frameId = window.requestAnimationFrame(step);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (container) {
+        container.style.scrollSnapType = previousSnapType ?? "";
+      }
+    };
+  }, [autoScrollContainerRef, autoScrollEnabled, autoScrollSpeed, showInfiniteAutoScrollControls]);
+
   useEffect(() => {
     if (!pageKey || restoredPrefsRef.current) {
       return;
@@ -720,13 +848,14 @@ export function ListPage({
       }
 
       const hasPerPageOverride = new URLSearchParams(window.location.search).has("perPage");
-      if (!hasPerPageOverride && typeof parsed.perPage === "number" && parsed.perPage > 0 && parsed.perPage !== perPage) {
+      const persistedPerPageAllowed = typeof parsed.perPage === "number" && (parsed.perPage > 0 || (allowInfinitePageSize && parsed.perPage === 0));
+      if (!hasPerPageOverride && persistedPerPageAllowed && parsed.perPage !== perPage) {
         onFilterChange({ ...filter, perPage: parsed.perPage, page: 1 });
       }
     } catch {
       // Ignore invalid persisted list preferences.
     }
-  }, [filter, onFilterChange, onWallColumnCountChange, pageKey, perPage]);
+  }, [allowInfinitePageSize, filter, onFilterChange, onWallColumnCountChange, pageKey, perPage]);
 
   useEffect(() => {
     if (!pageKey) {
@@ -797,6 +926,8 @@ export function ListPage({
       ...(availableDisplayModes.includes("tagger") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.tagger", "v t"), action: () => onDisplayModeChange("tagger") }] : []),
       ...(availableDisplayModes.includes("graph") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.graph", "v h"), action: () => onDisplayModeChange("graph") }] : []),
       ...(availableDisplayModes.includes("byGroup") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.group", "v b"), action: () => onDisplayModeChange("byGroup") }] : []),
+      ...(availableDisplayModes.includes("feed") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.feed", "v f"), action: () => onDisplayModeChange("feed") }] : []),
+      ...(availableDisplayModes.includes("vertical") ? [{ keys: resolveKeybinding(keybindingOverrides, "list.view.vertical", "v k"), action: () => onDisplayModeChange("vertical") }] : []),
     ] : []),
     // Selection
     ...(onSelectAll ? [{ keys: resolveKeybinding(keybindingOverrides, "list.select.all", "s a"), action: onSelectAll }] : []),
@@ -917,7 +1048,7 @@ export function ListPage({
             mode={filterMode}
             currentFilter={filter}
             currentObjectFilter={objectFilter}
-            currentUIOptions={displayMode ? { displayMode } : undefined}
+            currentUIOptions={{ displayMode }}
             onApplyFilter={(nextFilter) => onFilterChange(withSeededRandomSort(filter, nextFilter))}
             onApplyObjectFilter={onObjectFilterChange}
             onApplyUIOptions={(options) => {
@@ -992,18 +1123,37 @@ export function ListPage({
                 <FolderTree className="w-3.5 h-3.5" />
               </button>
             )}
+            {availableDisplayModes.includes("feed") && (
+              <button
+                onClick={() => onDisplayModeChange("feed")}
+                className={`rounded-md p-1.5 ${displayMode === "feed" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                title="Feed"
+              >
+                <Rows3 className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {availableDisplayModes.includes("vertical") && (
+              <button
+                onClick={() => onDisplayModeChange("vertical")}
+                className={`rounded-md p-1.5 ${displayMode === "vertical" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                title="Vertical Viewer"
+              >
+                <MonitorPlay className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         )}
 
         {/* Per page */}
-        {showPagingControls && (
         <div className={toolbarSegmentClass}>
           <select
-            value={perPage}
-            onChange={(e) => onFilterChange({ ...filter, perPage: Number(e.target.value), page: 1 })}
+            value={infinitePageSize ? "infinite" : String(perPage)}
+            onChange={(e) => onFilterChange({ ...filter, perPage: e.target.value === "infinite" ? 0 : Number(e.target.value), page: 1 })}
             className={`${toolbarSelectClass} min-w-[4.75rem]`}
             title="Items per page"
+            disabled={infinitePageSizeOnly}
           >
+            {allowInfinitePageSize ? <option value="infinite">Infinite</option> : null}
             {perPageOptions.map((n) => (
               <option key={n} value={n}>{n}</option>
             ))}
@@ -1043,7 +1193,6 @@ export function ListPage({
             </div>
           )}
         </div>
-        )}
 
         {/* Operations */}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
@@ -1060,6 +1209,48 @@ export function ListPage({
           )}
         </div>
       </div>
+
+      {showInfiniteAutoScrollControls && (
+        <div className="pointer-events-none fixed right-3 top-[24%] z-[90] -translate-y-1/2 sm:right-5">
+          <div
+            className="pointer-events-auto relative flex min-h-36 w-12 items-center justify-end"
+            onPointerEnter={wakeAutoScrollControls}
+            onPointerMove={wakeAutoScrollControls}
+            onFocusCapture={wakeAutoScrollControls}
+          >
+            {!autoScrollControlsAwake && <div className="absolute right-0 h-12 w-1.5 rounded-l-full bg-accent/70 shadow-lg" aria-hidden="true" />}
+            <div className={`flex flex-col items-center gap-2 rounded-xl border border-border bg-card/95 px-2 py-2 shadow-2xl backdrop-blur transition-all duration-300 ${autoScrollControlsAwake ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0"}`}>
+            <button
+              type="button"
+              onClick={() => {
+                wakeAutoScrollControls();
+                setAutoScrollEnabled((current) => !current);
+              }}
+              className={`${toolbarIconButtonClass} ${autoScrollEnabled ? "bg-background/60 text-accent shadow-sm" : ""}`}
+              aria-label={autoScrollEnabled ? "Pause auto-scroll" : "Start auto-scroll"}
+              title={autoScrollEnabled ? "Pause auto-scroll" : "Start auto-scroll"}
+            >
+              {autoScrollEnabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            </button>
+            <input
+              type="range"
+              min={10}
+              max={360}
+              step={10}
+              value={autoScrollSpeed}
+              onChange={(event) => {
+                wakeAutoScrollControls();
+                setAutoScrollSpeed(Number(event.target.value));
+              }}
+              className="h-24 w-1 accent-accent [writing-mode:vertical-lr]"
+              aria-label="Floating auto-scroll speed"
+              title={`Auto-scroll speed: ${autoScrollSpeed}px/s`}
+            />
+            <span className="text-[10px] text-muted tabular-nums [writing-mode:vertical-lr]">{autoScrollSpeed}px/s</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Active filter tags (criterion badges) */}
       {objectFilter && onObjectFilterChange && criteriaDefinitions && Object.keys(objectFilter).length > 0 && (
@@ -1125,14 +1316,19 @@ export function ListPage({
       )}
 
       {/* Selection bar */}
-      {selecting && (
+      {showSelectionBar && (
         <div className="flex items-center gap-3 bg-card/80 border border-border rounded-lg px-3 py-1.5 mx-1 mt-1">
           <span className="text-xs text-secondary">
             {selectedIds!.size} selected
           </span>
-          <button onClick={onSelectAll} className="text-xs text-accent hover:underline">Select all</button>
+          {onSelectAll && <button onClick={onSelectAll} className="text-xs text-accent hover:underline">{selectAllLabel}</button>}
+          {onSelectAllMatching && (
+            <button onClick={onSelectAllMatching} disabled={selectAllMatchingPending} className="text-xs text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-60">
+              {selectAllMatchingPending ? "Selecting..." : selectAllMatchingLabel}
+            </button>
+          )}
           {onInvertSelection && <button onClick={onInvertSelection} className="text-xs text-secondary hover:text-foreground">Invert</button>}
-          <button onClick={onSelectNone} className="text-xs text-secondary hover:text-foreground">Deselect all</button>
+          {onSelectNone && <button onClick={onSelectNone} className="text-xs text-secondary hover:text-foreground">Deselect all</button>}
           {selectionActions}
         </div>
       )}
@@ -1151,7 +1347,27 @@ export function ListPage({
         </div>
       ) : (
         <div className="pt-3" style={{ "--card-min-width": `${Math.round(240 + zoomLevel * 60)}px` } as React.CSSProperties}>
+          {infinitePageSize && infiniteScroll?.onLoadPrevious && (infiniteScroll.hasPreviousPage || infiniteScroll.isFetchingPreviousPage) && (
+            <InfiniteScrollSentinel
+              direction="previous"
+              hasMore={Boolean(infiniteScroll.hasPreviousPage)}
+              isLoading={Boolean(infiniteScroll.isFetchingPreviousPage)}
+              onLoadMore={loadPreviousInfinitePage}
+              loadedCount={infiniteScroll.previousLoadedCount ?? 0}
+              totalCount={infiniteScroll.totalCount}
+              className="pt-2"
+            />
+          )}
           {children}
+          {infinitePageSize && infiniteScroll && (
+            <InfiniteScrollSentinel
+              hasMore={Boolean(infiniteScroll.hasNextPage)}
+              isLoading={Boolean(infiniteScroll.isFetchingNextPage)}
+              onLoadMore={infiniteScroll.onLoadMore}
+              loadedCount={infiniteScroll.loadedCount}
+              totalCount={infiniteScroll.totalCount}
+            />
+          )}
         </div>
       )}
 

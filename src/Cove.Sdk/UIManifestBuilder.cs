@@ -169,6 +169,26 @@ public class UIManifestBuilder
         return this;
     }
 
+    /// <summary>Add an in-app tutorial/manual topic with one or more slides.</summary>
+    public UIManifestBuilder AddTutorialTopic(
+        string id,
+        string title,
+        string? description = null,
+        string[]? pages = null,
+        IEnumerable<UITutorialSlide>? slides = null,
+        int order = 100)
+    {
+        _manifest.TutorialTopics.Add(new UITutorialTopic(
+            id,
+            title,
+            description,
+            pages,
+            _extensionId,
+            order,
+            slides?.ToList() ?? []));
+        return this;
+    }
+
     /// <summary>Build the final manifest.</summary>
     public UIManifest Build() => _manifest;
 }

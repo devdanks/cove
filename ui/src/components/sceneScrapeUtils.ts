@@ -335,6 +335,143 @@ export function matchesUrlPattern(scraper: ScraperSummary, url: string) {
   });
 }
 
+const DIRECT_ASSET_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "mp4",
+  "webm",
+  "m4v",
+  "mov",
+  "avi",
+  "mkv",
+  "mp3",
+  "m4a",
+  "wav",
+  "flac",
+  "ogg",
+  "opus",
+  "pdf",
+  "txt",
+  "epub",
+]);
+
+const PAGE_LIKE_PATH_HINTS = [
+  "/comments/",
+  "/comment/",
+  "/post/",
+  "/posts/",
+  "/watch",
+  "/video/",
+  "/videos/",
+  "/gallery/",
+  "/galleries/",
+  "/album/",
+  "/story/",
+  "/read/",
+  "/performer/",
+  "/model/",
+  "/s/",
+];
+
+const CDN_HOST_HINTS = ["preview.", "cdn.", "static.", "media.", "img.", "images.", "i."];
+
+export function normalizeSourceUrls(urls: string[]) {
+  return urls
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, items) => items.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index);
+}
+
+export function getScraperUrlMatchScore(scraper: ScraperSummary | undefined, url: string) {
+  const normalizedUrl = url.trim().toLowerCase();
+  if (!scraper || !normalizedUrl) {
+    return 0;
+  }
+
+  return scraper.urls.reduce((bestScore, pattern) => {
+    const normalizedPattern = pattern.trim().toLowerCase();
+    if (!normalizedPattern) {
+      return bestScore;
+    }
+
+    const fragments = normalizedPattern.split("*").filter(Boolean);
+    if (fragments.length === 0 || !fragments.every((fragment) => normalizedUrl.includes(fragment))) {
+      return bestScore;
+    }
+
+    const score = fragments.length * 1000 + fragments.reduce((sum, fragment) => sum + fragment.length, 0);
+    return Math.max(bestScore, score);
+  }, 0);
+}
+
+function getSourceUrlPreferenceScore(url: string) {
+  const normalizedUrl = url.trim();
+  if (!normalizedUrl) {
+    return 0;
+  }
+
+  try {
+    const parsed = new URL(normalizedUrl);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase().replace(/\/+$/, "");
+    const segments = path.split("/").filter(Boolean);
+    const extensionMatch = path.match(/\.([a-z0-9]{2,5})$/i);
+    const extension = extensionMatch?.[1]?.toLowerCase();
+
+    let score = 0;
+
+    if (PAGE_LIKE_PATH_HINTS.some((hint) => path.includes(hint))) {
+      score += 40;
+    }
+
+    if (segments.length >= 2) {
+      score += 8;
+    }
+
+    if (parsed.search.length > 0) {
+      score += 2;
+    }
+
+    if (extension && DIRECT_ASSET_EXTENSIONS.has(extension)) {
+      score -= 30;
+    }
+
+    if (CDN_HOST_HINTS.some((hint) => host.startsWith(hint)) || host.includes(".cdn.") || host.includes(".static.") || host.includes(".media.")) {
+      score -= 20;
+    }
+
+    return score;
+  } catch {
+    return 0;
+  }
+}
+
+export function pickBestSourceUrl(urls: string[], scraper?: ScraperSummary) {
+  const normalizedUrls = normalizeSourceUrls(urls);
+  if (normalizedUrls.length === 0) {
+    return undefined;
+  }
+
+  return [...normalizedUrls].sort((left, right) => {
+    const matchScoreDelta = getScraperUrlMatchScore(scraper, right) - getScraperUrlMatchScore(scraper, left);
+    if (matchScoreDelta !== 0) {
+      return matchScoreDelta;
+    }
+
+    const preferenceDelta = getSourceUrlPreferenceScore(right) - getSourceUrlPreferenceScore(left);
+    if (preferenceDelta !== 0) {
+      return preferenceDelta;
+    }
+
+    return normalizedUrls.indexOf(left) - normalizedUrls.indexOf(right);
+  })[0];
+}
+
 export function getScraperSiteKey(value: string | undefined) {
   const trimmed = value?.trim().toLowerCase();
   if (!trimmed) {

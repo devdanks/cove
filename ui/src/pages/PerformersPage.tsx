@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { performers, entityImages } from "../api/client";
 import type { EntityEngagement, FindFilter, Performer, PerformerCreate, PerformerFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
@@ -17,6 +17,7 @@ import { PerformerTagger } from "../components/PerformerTagger";
 import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, GalleriesPopoverContent } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
@@ -55,12 +56,14 @@ export function PerformersPage({ onNavigate }: Props) {
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list", "wall", "tagger"] as const,
+    allowInfinitePageSize: true,
   });
   const [wallColumnCount, setWallColumnCount] = useState(6);
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showMetadataBatch, setShowMetadataBatch] = useState(false);
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWritePerformer = canWriteEntity("performer", hasPermission);
@@ -68,20 +71,32 @@ export function PerformersPage({ onNavigate }: Props) {
   const canMetadataBatch = hasPermission("library.autotag") && canWritePerformer;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-
-  const { data, isLoading } = useQuery({
+  const listData = useInfiniteListData<Performer>({
     queryKey: ["performers", filter, objectFilter],
-    queryFn: () =>
+    filter,
+    chunkSize: defaultState.filter.perPage ?? 40,
+    queryPage: (nextFilter) =>
       hasObjectFilter
-        ? performers.findFiltered({ findFilter: filter, objectFilter: objectFilter as PerformerFilterCriteria })
-        : performers.find(filter),
+        ? performers.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as PerformerFilterCriteria })
+        : performers.find(nextFilter),
   });
 
-  const items = data?.items ?? [];
+  const items = listData.items;
+  const totalCount = listData.totalCount;
+  const isLoading = listData.isLoading;
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { engagementById } = useEntityEngagementBatch("performer", items.map((item) => item.id));
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter }), [listData.infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await listData.fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
 
   const bulkDeleteMut = useMutation({
     mutationFn: () => performers.bulkDelete([...selectedIds]),
@@ -114,12 +129,29 @@ export function PerformersPage({ onNavigate }: Props) {
         filterMode="performers"
         filter={filter}
         onFilterChange={setFilter}
-        totalCount={data?.totalCount ?? 0}
+        totalCount={totalCount}
         isLoading={isLoading}
         sortOptions={SORT_OPTIONS}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
         availableDisplayModes={["grid", "list", "wall", "tagger"]}
+        allowInfinitePageSize
+        showPagingControls={!listData.infinitePageSize}
+        selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
+        onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
+        selectAllMatchingLabel={`Select all ${totalCount} matching`}
+        selectAllMatchingPending={selectAllMatchingPending}
+        infiniteScroll={listData.infinitePageSize ? {
+          hasNextPage: listData.infiniteQuery.hasNextPage,
+          hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
+          isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
+          isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
+          onLoadMore: listData.loadMore,
+          onLoadPrevious: listData.loadPrevious,
+          loadedCount: listData.infiniteQuery.loadedThroughCount,
+          previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
+          totalCount,
+        } : undefined}
         wallColumnCount={wallColumnCount}
         onWallColumnCountChange={setWallColumnCount}
         onNew={canWritePerformer ? () => setShowCreate(true) : undefined}
@@ -173,7 +205,7 @@ export function PerformersPage({ onNavigate }: Props) {
         }
       >
       {displayMode === "tagger" ? (
-        <PerformerTagger performers={items} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
+        <PerformerTagger performers={items} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} onNavigate={(performerId) => onNavigate({ page: "performer", id: performerId })} />
       ) : displayMode === "wall" ? (
         <div className="flex gap-1 px-2">
           {wallColumns.map((column, columnIndex) => (

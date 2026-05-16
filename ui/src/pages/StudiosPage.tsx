@@ -16,6 +16,7 @@ import { StudioTagger } from "../components/StudioTagger";
 import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { useRouteRegistry } from "../router/RouteRegistry";
 import { useAuth } from "../auth/AuthContext";
@@ -61,12 +62,14 @@ export function StudiosPage({ onNavigate }: Props) {
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list", "wall", "tagger"] as const,
+    allowInfinitePageSize: true,
   });
   const [wallColumnCount, setWallColumnCount] = useState(6);
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showMetadataBatch, setShowMetadataBatch] = useState(false);
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWriteStudio = canWriteEntity("studio", hasPermission);
@@ -74,19 +77,32 @@ export function StudiosPage({ onNavigate }: Props) {
   const canMetadataBatch = hasPermission("library.autotag") && canWriteStudio;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const { data, isLoading } = useQuery({
+  const listData = useInfiniteListData<Studio>({
     queryKey: ["studios", filter, objectFilter],
-    queryFn: () =>
+    filter,
+    chunkSize: defaultState.filter.perPage ?? 40,
+    queryPage: (nextFilter) =>
       hasObjectFilter
-        ? studios.findFiltered({ findFilter: filter, objectFilter: objectFilter as StudioFilterCriteria })
-        : studios.find(filter),
+        ? studios.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as StudioFilterCriteria })
+        : studios.find(nextFilter),
   });
 
-  const items = data?.items ?? [];
+  const items = listData.items;
+  const totalCount = listData.totalCount;
+  const isLoading = listData.isLoading;
   const wallColumns = useWallColumns(items, wallColumnCount);
   const { engagementById } = useEntityEngagementBatch("studio", items.map((item) => item.id));
-  const { selectedIds, toggle, selectAll, selectNone, invertSelection } = useMultiSelect(items);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter }), [listData.infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await listData.fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
 
   const bulkDeleteMut = useMutation({
     mutationFn: () => studios.bulkDelete([...selectedIds]),
@@ -119,12 +135,29 @@ export function StudiosPage({ onNavigate }: Props) {
         filterMode="studios"
         filter={filter}
         onFilterChange={setFilter}
-        totalCount={data?.totalCount ?? 0}
+        totalCount={totalCount}
         isLoading={isLoading}
         sortOptions={SORT_OPTIONS}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
         availableDisplayModes={["grid", "list", "wall", "tagger"]}
+        allowInfinitePageSize
+        showPagingControls={!listData.infinitePageSize}
+        selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
+        onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
+        selectAllMatchingLabel={`Select all ${totalCount} matching`}
+        selectAllMatchingPending={selectAllMatchingPending}
+        infiniteScroll={listData.infinitePageSize ? {
+          hasNextPage: listData.infiniteQuery.hasNextPage,
+          hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
+          isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
+          isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
+          onLoadMore: listData.loadMore,
+          onLoadPrevious: listData.loadPrevious,
+          loadedCount: listData.infiniteQuery.loadedThroughCount,
+          previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
+          totalCount,
+        } : undefined}
         wallColumnCount={wallColumnCount}
         onWallColumnCountChange={setWallColumnCount}
         criteriaDefinitions={STUDIO_CRITERIA}

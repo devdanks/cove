@@ -9,7 +9,11 @@ interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   videoStatusSrc?: string | null;
   useVideo?: boolean;
   muted?: boolean;
+  videoStartTimeSec?: number;
+  videoLoadRootMargin?: string;
+  videoPlayThreshold?: number;
   aspectRatio?: string;
+  fillMedia?: boolean;
   fallback?: ReactNode;
   imageClassName?: string;
 }
@@ -22,16 +26,23 @@ export function WallMediaCard({
   videoStatusSrc,
   useVideo = false,
   muted = true,
+  videoStartTimeSec = 0,
+  videoLoadRootMargin = "320px 0px",
+  videoPlayThreshold = 0.6,
   aspectRatio = "1 / 1",
+  fillMedia = false,
   fallback,
   imageClassName = "object-cover",
   className,
   children,
   ...props
 }: WallMediaCardProps) {
+  const mediaRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoFailed, setVideoFailed] = useState(false);
   const [videoAvailable, setVideoAvailable] = useState(false);
+  const [shouldLoadVideo, setShouldLoadVideo] = useState(false);
+  const [shouldPlayVideo, setShouldPlayVideo] = useState(false);
   const [resolvedImageSrc, setResolvedImageSrc] = useState<string | null>(imageSrc ?? imageFallbackSrc ?? null);
 
   useEffect(() => {
@@ -44,20 +55,45 @@ export function WallMediaCard({
 
   useEffect(() => {
     if (!useVideo || !videoSrc) {
+      setShouldLoadVideo(false);
+      setShouldPlayVideo(false);
+      return;
+    }
+
+    const element = mediaRef.current;
+    if (!element) return;
+
+    const loadObserver = new IntersectionObserver(([entry]) => {
+      setShouldLoadVideo(entry.isIntersecting);
+    }, { rootMargin: videoLoadRootMargin, threshold: 0 });
+    const playObserver = new IntersectionObserver(([entry]) => {
+      setShouldPlayVideo(entry.isIntersecting && entry.intersectionRatio >= videoPlayThreshold);
+    }, { threshold: [0, Math.min(1, Math.max(0.01, videoPlayThreshold)), 1] });
+
+    loadObserver.observe(element);
+    playObserver.observe(element);
+    return () => {
+      loadObserver.disconnect();
+      playObserver.disconnect();
+    };
+  }, [useVideo, videoLoadRootMargin, videoPlayThreshold, videoSrc]);
+
+  useEffect(() => {
+    if (!useVideo || !videoSrc || !shouldLoadVideo) {
       setVideoAvailable(false);
+      return;
+    }
+
+    if (!videoStatusSrc) {
+      setVideoAvailable(true);
       return;
     }
 
     const controller = new AbortController();
     setVideoAvailable(false);
-    fetch(videoStatusSrc ?? videoSrc, { method: videoStatusSrc ? "GET" : "HEAD", signal: controller.signal })
+    fetch(videoStatusSrc, { method: "GET", signal: controller.signal })
       .then((response) => {
-        if (videoStatusSrc) {
-          return response.ok ? response.json() as Promise<{ available?: boolean }> : { available: false };
-        }
-
-        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-        return { available: response.ok && contentType.startsWith("video/") };
+        return response.ok ? response.json() as Promise<{ available?: boolean }> : { available: false };
       })
       .then((status) => {
         if (!controller.signal.aborted) setVideoAvailable(status.available === true);
@@ -67,22 +103,30 @@ export function WallMediaCard({
       });
 
     return () => controller.abort();
-  }, [useVideo, videoSrc, videoStatusSrc]);
+  }, [shouldLoadVideo, useVideo, videoSrc, videoStatusSrc]);
+
+  const seekToStartTime = () => {
+    const video = videoRef.current;
+    if (!video || videoStartTimeSec <= 0 || !Number.isFinite(video.duration)) return;
+    if (video.duration > videoStartTimeSec + 1) {
+      video.currentTime = videoStartTimeSec;
+    }
+  };
+
+  useEffect(() => {
+    seekToStartTime();
+  }, [videoSrc, videoStartTimeSec, videoAvailable, shouldLoadVideo]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !useVideo || !videoSrc || !videoAvailable || videoFailed) return;
 
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) video.play().catch(() => {});
-        else video.pause();
-      }
-    }, { threshold: 0.15 });
-
-    observer.observe(video);
-    return () => observer.disconnect();
-  }, [useVideo, videoSrc, videoAvailable, videoFailed]);
+    if (shouldPlayVideo) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }, [shouldPlayVideo, useVideo, videoSrc, videoAvailable, videoFailed]);
 
   return (
     <div
@@ -90,8 +134,8 @@ export function WallMediaCard({
       className={`cursor-pointer rounded overflow-hidden border border-border hover:border-accent/60 transition-all ${className ?? ""}`.trim()}
       title={title}
     >
-      <div className="relative w-full bg-surface" style={{ aspectRatio }}>
-        {useVideo && videoSrc && videoAvailable && !videoFailed ? (
+      <div ref={mediaRef} className={`relative w-full bg-surface ${fillMedia ? "h-full" : ""}`} style={fillMedia ? undefined : { aspectRatio }}>
+        {useVideo && videoSrc && shouldLoadVideo && videoAvailable && !videoFailed ? (
           <video
             ref={videoRef}
             src={videoSrc}
@@ -100,7 +144,8 @@ export function WallMediaCard({
             muted={muted}
             playsInline
             loop
-            preload="metadata"
+            preload={shouldPlayVideo ? "auto" : "metadata"}
+            onLoadedMetadata={seekToStartTime}
             onError={() => setVideoFailed(true)}
           />
         ) : resolvedImageSrc ? (

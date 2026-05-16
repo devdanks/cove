@@ -55,7 +55,7 @@ export function AspectRatingsPanel({ hostType, hostId, canRate, className }: Pro
   return (
     <section className={className}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Detailed Ratings</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Rating Breakdown</h3>
         {isLoading ? <span className="text-xs text-muted">Loading...</span> : null}
       </div>
       <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">

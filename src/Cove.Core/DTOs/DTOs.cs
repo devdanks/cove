@@ -1168,6 +1168,8 @@ public record UiConfigDto
     public bool AutoplayOnListClick { get; init; }
     public int MaxLoopDuration { get; init; }
     public bool AlwaysResumeOnPlayback { get; init; } = true;
+    public double PlayerVideoStartPercent { get; init; }
+    public double PlayerVideoStartMinDuration { get; init; }
     public bool ContinuePlaylistDefault { get; init; }
     public bool ShowAbLoopControls { get; init; } = true;
     public bool SoundOnPreview { get; init; }
@@ -1178,6 +1180,10 @@ public record UiConfigDto
     public bool WallShowTitle { get; init; } = true;
     public int WallPlayback { get; init; } = 1;
     public string WallPreviewType { get; init; } = "video";
+    public string FeedVideoSource { get; init; } = "preview";
+    public bool FeedVideoSound { get; init; }
+    public double FeedVideoStartPercent { get; init; }
+    public double FeedVideoStartMinDuration { get; init; }
     public bool DeleteFileDefault { get; init; }
     public int SlideshowDelay { get; init; } = 5000;
     public bool NoBrowser { get; init; }
@@ -1274,7 +1280,12 @@ public record MetadataServerPerformerMatchDto(
     List<string> Urls
 );
 
-public record MetadataServerPerformerImportRequestDto(string Endpoint, string PerformerId);
+public record MetadataServerPerformerImportRequestDto
+{
+    public string Endpoint { get; init; } = string.Empty;
+    public string PerformerId { get; init; } = string.Empty;
+    public Dictionary<string, string>? FieldStrategies { get; init; }
+}
 
 public record MetadataServerStudioMatchDto(
     string Endpoint,
@@ -1477,7 +1488,13 @@ public record PerformerScrapeRequestDto(string? InputKind, string? ScraperId, st
 
 public record PerformerScrapePreviewDto(ScrapedPerformerDto Scraped, string InputKind, string? SourceValue);
 
-public record PerformerApplyScrapedRequestDto(ScrapedPerformerDto Scraped, bool CreateMissingTags = true);
+public record PerformerApplyScrapedRequestDto
+{
+    public ScrapedPerformerDto Scraped { get; init; } = new();
+    public bool CreateMissingTags { get; init; } = true;
+    public List<string>? ReplaceFields { get; init; }
+    public Dictionary<string, string>? CollectionModes { get; init; }
+}
 
 public record DownloaderDescriptorDto(
     string Id,

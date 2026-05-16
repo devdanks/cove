@@ -69,6 +69,7 @@ interface ImageMetadataModalProps {
   onDismissNoDownloader?: () => void;
   onCreateFromFile?: (filePath: string, data: ImageCreate) => void;
   onCreateFromUrl?: (url: string, data: ImageCreate, downloadMode: UrlDownloadMode, scrapeMetadata: boolean) => void;
+  renderMode?: "modal" | "panel";
 }
 
 const EMPTY_FORM_STATE: ImageFormState = {
@@ -127,7 +128,7 @@ function cloneFormState(state: ImageFormState): ImageFormState {
   };
 }
 
-function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPending, error, image, resetSignal, createAnother, onCreateAnotherChange, sourceMode = "metadata", onSourceModeChange, filePath = "", onFilePathChange, url = "", onUrlChange, urlDownloadMode = "now", onUrlDownloadModeChange, scrapeMetadata = false, onScrapeMetadataChange, noDownloaderFound = false, onCreateWithoutDownload, onDismissNoDownloader, onCreateFromFile, onCreateFromUrl }: ImageMetadataModalProps) {
+function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPending, error, image, resetSignal, createAnother, onCreateAnotherChange, sourceMode = "metadata", onSourceModeChange, filePath = "", onFilePathChange, url = "", onUrlChange, urlDownloadMode = "now", onUrlDownloadModeChange, scrapeMetadata = false, onScrapeMetadataChange, noDownloaderFound = false, onCreateWithoutDownload, onDismissNoDownloader, onCreateFromFile, onCreateFromUrl, renderMode = "modal" }: ImageMetadataModalProps) {
   const [form, setForm] = useState<ImageFormState>(() => cloneFormState(initialState));
   const [tagSearch, setTagSearch] = useState("");
   const [perfSearch, setPerfSearch] = useState("");
@@ -225,8 +226,8 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
   const selectedTags = allTags?.items.filter((tag) => form.selectedTagIds.includes(tag.id)) ?? image?.tags ?? [];
   const selectedPerformers = allPerformers?.items.filter((performer) => form.selectedPerformerIds.includes(performer.id)) ?? image?.performers ?? [];
 
-  return (
-    <EditModal title={title} open={open} onClose={onClose}>
+  const formContent = (
+    <>
       {onSourceModeChange && onFilePathChange ? (
         <FileBackedCreateSource
           mode={sourceMode}
@@ -436,7 +437,44 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
         </div>
       )}
       </>
+    </>
+  );
+
+  if (renderMode === "panel") {
+    return <div className="space-y-4">{formContent}</div>;
+  }
+
+  return (
+    <EditModal title={title} open={open} onClose={onClose}>
+      {formContent}
     </EditModal>
+  );
+}
+
+export function ImageEditPanel({ image, onSaved }: { image: Image; onSaved?: () => void }) {
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: (data: ImageCreate) => images.update(image.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["image", image.id] });
+      queryClient.invalidateQueries({ queryKey: ["images"] });
+      onSaved?.();
+    },
+  });
+
+  return (
+    <ImageMetadataModal
+      title="Edit Image"
+      open
+      onClose={() => onSaved?.()}
+      initialState={toFormState(image)}
+      onSubmit={(data) => mutation.mutate(data)}
+      isPending={mutation.isPending}
+      error={mutation.error as Error | null}
+      image={image}
+      renderMode="panel"
+    />
   );
 }
 

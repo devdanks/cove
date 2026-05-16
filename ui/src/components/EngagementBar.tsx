@@ -12,6 +12,8 @@ export function EngagementBar({
   additionalMetrics = [],
   className,
 }: EngagementBarProps) {
+  const favoriteTitle = favorite ? "Remove from favorites" : "Add to favorites";
+
   return (
     <div
       className={[
@@ -26,17 +28,21 @@ export function EngagementBar({
           <button
             type="button"
             aria-pressed={favorite}
+            aria-label={favoriteTitle}
+            title={favoriteTitle}
             disabled={favoritePending}
             onClick={() => onFavoriteChange(!favorite)}
-            className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-foreground transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-foreground transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Heart className={["h-3.5 w-3.5", favorite ? "fill-current text-red-300" : "text-muted"].join(" ")} />
-            {favorite ? "Favorite" : "Add Favorite"}
           </button>
         ) : (
-          <span className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-foreground">
+          <span
+            aria-label={favorite ? "Favorite" : "Not favorite"}
+            title={favorite ? "Favorite" : "Not favorite"}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-foreground"
+          >
             <Heart className={["h-3.5 w-3.5", favorite ? "fill-current text-red-300" : "text-muted"].join(" ")} />
-            {favorite ? "Favorite" : "Not Favorite"}
           </span>
         )
       ) : null}

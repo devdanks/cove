@@ -513,6 +513,7 @@ public class UIManifest
     public List<UIPageOverride> PageOverrides { get; set; } = [];
     public List<UIDialogOverride> DialogOverrides { get; set; } = [];
     public List<ExtensionAction> Actions { get; set; } = [];
+    public List<UITutorialTopic> TutorialTopics { get; set; } = [];
 
     /// <summary>Version of the frontend runtime contract used to load extension bundles.</summary>
     public string? FrontendRuntimeVersion { get; set; }
@@ -521,6 +522,28 @@ public class UIManifest
     /// <summary>URL of additional CSS to load.</summary>
     public string? CssBundleUrl { get; set; }
 }
+
+/// <summary>In-app tutorial/manual topic contributed by Cove or an extension.</summary>
+public record UITutorialTopic(
+    string Id,
+    string Title,
+    string? Description = null,
+    string[]? Pages = null,
+    string? ExtensionId = null,
+    int Order = 100,
+    List<UITutorialSlide>? Slides = null
+);
+
+/// <summary>Single tutorial slide shown inside a tutorial topic.</summary>
+public record UITutorialSlide(
+    string Id,
+    string Title,
+    string Caption,
+    string[]? Points = null,
+    string? ImageSrc = null,
+    string? ImageAlt = null,
+    string? MockKind = null
+);
 
 /// <summary>A new page contributed by an extension.</summary>
 public record UIPageDefinition(
@@ -679,6 +702,7 @@ public class UIRegistry
     private readonly List<UIPageOverride> _pageOverrides = [];
     private readonly List<UIDialogOverride> _dialogOverrides = [];
     private readonly List<ExtensionAction> _actions = [];
+    private readonly List<UITutorialTopic> _tutorialTopics = [];
 
     public IReadOnlyList<UIPageDefinition> Pages => _pages;
     public IReadOnlyList<UISlotContribution> Slots => _slots;
@@ -693,6 +717,7 @@ public class UIRegistry
     public IReadOnlyList<UIPageOverride> PageOverrides => _pageOverrides;
     public IReadOnlyList<UIDialogOverride> DialogOverrides => _dialogOverrides;
     public IReadOnlyList<ExtensionAction> Actions => _actions;
+    public IReadOnlyList<UITutorialTopic> TutorialTopics => _tutorialTopics;
 
     public void RegisterPage(UIPageDefinition page) => _pages.Add(page);
     public void RegisterSlot(UISlotContribution slot) => _slots.Add(slot);
@@ -707,6 +732,7 @@ public class UIRegistry
     public void RegisterPageOverride(UIPageOverride ov) => _pageOverrides.Add(ov);
     public void RegisterDialogOverride(UIDialogOverride ov) => _dialogOverrides.Add(ov);
     public void RegisterAction(ExtensionAction action) => _actions.Add(action);
+    public void RegisterTutorialTopic(UITutorialTopic topic) => _tutorialTopics.Add(topic);
 
     public UIManifest ToManifest() => new()
     {
@@ -723,5 +749,6 @@ public class UIRegistry
         PageOverrides = [.. _pageOverrides],
         DialogOverrides = [.. _dialogOverrides],
         Actions = [.. _actions],
+        TutorialTopics = [.. _tutorialTopics],
     };
 }

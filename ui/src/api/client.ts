@@ -549,7 +549,7 @@ export const performers = {
   scrapeUrl: (id: number, data?: { url?: string; createMissingTags?: boolean }) =>
     request<Performer>(`/performers/${id}/scrape-url`, { method: "POST", body: JSON.stringify(data ?? {}) }),
   previewScrape: (id: number, data: PerformerScrapeRequest) => request<import("./types").PerformerScrapePreview>(`/performers/${id}/scrape-preview`, { method: "POST", body: JSON.stringify(data) }),
-  applyScraped: (id: number, data: { scraped: import("./types").ScrapedPerformer; createMissingTags?: boolean }) => request<Performer>(`/performers/${id}/apply-scraped`, { method: "POST", body: JSON.stringify(data) }),
+  applyScraped: (id: number, data: { scraped: import("./types").ScrapedPerformer; createMissingTags?: boolean; replaceFields?: string[]; collectionModes?: Record<string, string> }) => request<Performer>(`/performers/${id}/apply-scraped`, { method: "POST", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkPerformerUpdate) => request<void>("/performers/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/performers/${id}`, { method: "DELETE" }),
   bulkDelete: (ids: number[]) => request<void>("/performers/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),

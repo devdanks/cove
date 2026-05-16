@@ -19,8 +19,8 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import type { FaceHostFace } from "../api/types";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 import { ImageVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { ImageEditPanel } from "./ImageEditModal";
 
-const ImageEditModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageEditModal })));
 const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
 const MediaScrapeDialog = lazy(() => import("../components/MediaScrapeDialog").then((module) => ({ default: module.MediaScrapeDialog })));
 
@@ -29,7 +29,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type ImageTab = "details" | "file-info" | "similar" | "detections" | "related";
+type ImageTab = "details" | "file-info" | "similar" | "detections" | "related" | "edit";
 
 export function ImageDetailPage({ id, onNavigate }: Props) {
   const { data: image, isLoading } = useQuery({
@@ -37,7 +37,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     queryFn: () => images.get(id),
   });
   const { hasPermission, user } = useAuth();
-  const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
@@ -103,9 +102,10 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         label: "Related",
         count: (image?.performers.length ?? 0) + (image?.tags.length ?? 0) + (image?.studioId ? 1 : 0),
       },
+      ...(canWriteImage ? [{ key: "edit", label: "Edit" }] : []),
     ];
     return nextTabs;
-  }, [canReadFiles, image?.files.length, image?.performers.length, image?.studioId, image?.tags.length, imageFaces.length]);
+  }, [canReadFiles, canWriteImage, image?.files.length, image?.performers.length, image?.studioId, image?.tags.length, imageFaces.length]);
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
@@ -206,10 +206,10 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const imageKeyboardShortcuts = useMemo(() => ([
     {
       key: "e",
-      description: "Edit image",
+      description: "Open edit tab",
       handler: () => {
         if (canWriteImage) {
-          setEditing(true);
+          setActiveTab("edit");
         }
       },
     },
@@ -443,12 +443,13 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       ? detectionsContent
       : activeTab === "related"
         ? relatedContent
-        : detailsContent;
+        : activeTab === "edit"
+          ? <ImageEditPanel image={image} onSaved={() => setActiveTab("details")} />
+          : detailsContent;
 
   return (
     <>
       <Suspense fallback={null}>
-        {editing ? <ImageEditModal image={image} open={editing} onClose={() => setEditing(false)} /> : null}
         {showDownloadDialog ? (
           <ImageDownloadDialog
             open={showDownloadDialog}
@@ -597,7 +598,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             {canWriteImage ? (
               <button
                 type="button"
-                onClick={() => setEditing(true)}
+                onClick={() => setActiveTab("edit")}
                 className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
                 title="Edit"
               >

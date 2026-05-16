@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { studios } from "../api/client";
 import type { Studio, MetadataServerStudioMatch, MetadataServerStudioImportRequest } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
+import { DEFAULT_TAGGER_BLACKLIST, TaggerSettingsPanel, TaggerToolbar, cleanTaggerQueryString } from "./TaggerShared";
 import {
   Search, Loader2, Check, X, AlertCircle,
   CloudDownload, Fingerprint, Eye, EyeOff,
@@ -18,6 +19,7 @@ interface StudioTaggerProps {
 interface TaggerConfig {
   selectedEndpoint: string;
   showTagged: boolean;
+  blacklist: string[];
 }
 
 interface StudioSearchState {
@@ -48,10 +50,12 @@ export function StudioTagger({ studios: studioList, selectedIds, selecting = fal
   const [taggerConfig, setTaggerConfig] = useState<TaggerConfig>({
     selectedEndpoint: metadataServers[0]?.endpoint ?? "",
     showTagged: true,
+    blacklist: [...DEFAULT_TAGGER_BLACKLIST],
   });
 
   const [searchStates, setSearchStates] = useState<Record<number, StudioSearchState>>({});
   const [queryOverrides, setQueryOverrides] = useState<Record<number, string>>({});
+  const [showSettings, setShowSettings] = useState(false);
 
   const updateSearchState = useCallback(
     (studioId: number, update: Partial<StudioSearchState>) => {
@@ -62,7 +66,7 @@ export function StudioTagger({ studios: studioList, selectedIds, selecting = fal
 
   const searchStudio = useCallback(
     async (studio: Studio) => {
-      const query = queryOverrides[studio.id] ?? studio.name;
+      const query = queryOverrides[studio.id] ?? cleanTaggerQueryString(studio.name, taggerConfig.blacklist);
       updateSearchState(studio.id, { loading: true, error: undefined, results: undefined, saved: false });
       try {
         const endpoint = taggerConfig.selectedEndpoint || undefined;
@@ -79,7 +83,7 @@ export function StudioTagger({ studios: studioList, selectedIds, selecting = fal
         });
       }
     },
-    [queryOverrides, taggerConfig.selectedEndpoint, updateSearchState]
+    [queryOverrides, taggerConfig.blacklist, taggerConfig.selectedEndpoint, updateSearchState]
   );
 
   const [batchSearching, setBatchSearching] = useState(false);
@@ -117,53 +121,29 @@ export function StudioTagger({ studios: studioList, selectedIds, selecting = fal
 
   return (
     <div className="space-y-0">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 bg-surface border-b border-border px-4 py-2">
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-muted whitespace-nowrap">Source:</label>
-          <select
-            value={taggerConfig.selectedEndpoint}
-            onChange={(e) => setTaggerConfig((c) => ({ ...c, selectedEndpoint: e.target.value }))}
-            className="bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
-          >
-            {metadataServers.map((sb) => (
-              <option key={sb.endpoint} value={sb.endpoint}>
-                {sb.name || sb.endpoint}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          onClick={() => setTaggerConfig((c) => ({ ...c, showTagged: !c.showTagged }))}
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs border border-border bg-input text-secondary hover:text-foreground"
-        >
-          {taggerConfig.showTagged ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-          {taggerConfig.showTagged ? "Hide Already Tagged" : "Show All Studios"}
-        </button>
-
-        {batchSearching ? (
-          <button
-            onClick={cancelBatchSearch}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-red-600 text-white hover:bg-red-500"
-          >
-            <X className="w-3.5 h-3.5" />
-            Cancel
-          </button>
-        ) : (
-          <button
-            onClick={searchAll}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-accent text-white hover:bg-accent-hover"
-          >
-            <CloudDownload className="w-3.5 h-3.5" />
-            Scrape All
-          </button>
-        )}
-
-        <span className="text-xs text-muted ml-auto">
-          {visibleStudios.length} studio{visibleStudios.length !== 1 ? "s" : ""}
-        </span>
-      </div>
+      <TaggerToolbar
+        sources={metadataServers.map((server) => ({ value: server.endpoint, label: server.name || server.endpoint }))}
+        selectedSource={taggerConfig.selectedEndpoint}
+        onSourceChange={(value) => setTaggerConfig((current) => ({ ...current, selectedEndpoint: value }))}
+        showToggle={{
+          value: taggerConfig.showTagged,
+          onChange: (value) => setTaggerConfig((current) => ({ ...current, showTagged: value })),
+          enabledLabel: "Hide Already Tagged",
+          disabledLabel: "Show All Studios",
+        }}
+        batchSearching={batchSearching}
+        onCancelBatch={cancelBatchSearch}
+        onRunAll={searchAll}
+        countLabel={`${visibleStudios.length} studio${visibleStudios.length !== 1 ? "s" : ""}`}
+        settingsOpen={showSettings}
+        onToggleSettings={() => setShowSettings((current) => !current)}
+      />
+      {showSettings && (
+        <TaggerSettingsPanel
+          blacklist={taggerConfig.blacklist}
+          onBlacklistChange={(items) => setTaggerConfig((current) => ({ ...current, blacklist: items }))}
+        />
+      )}
 
       {/* Studio list */}
       <div className="divide-y divide-border">
@@ -177,7 +157,7 @@ export function StudioTagger({ studios: studioList, selectedIds, selecting = fal
             key={studio.id}
             studio={studio}
             state={searchStates[studio.id]}
-            query={queryOverrides[studio.id] ?? studio.name}
+            query={queryOverrides[studio.id] ?? cleanTaggerQueryString(studio.name, taggerConfig.blacklist)}
             onQueryChange={(q) => setQueryOverrides((prev) => ({ ...prev, [studio.id]: q }))}
             onSearch={() => searchStudio(studio)}
             onUpdateState={(update) => updateSearchState(studio.id, update)}

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Navbar } from "./components/Navbar";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
+import { TutorialStoryboardDialog, TUTORIAL_STORYBOARD_EVENT, hasCompletedTutorialStoryboard, type TutorialOpenRequest } from "./components/TutorialStoryboardDialog";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteRegistryProvider, useRouteRegistry } from "./router/RouteRegistry";
 import { AppConfigProvider, useAppConfig } from "./state/AppConfigContext";
@@ -281,10 +282,42 @@ function AuthGateInner({ children }: { children: React.ReactNode }) {
 
 function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => void }) {
   const { config, configLoading, status, statusLoading } = useAppConfig();
+  const { manifest } = useExtensions();
   const [setupDismissed, setSetupDismissed] = useState(() => sessionStorage.getItem("cove-setup-dismissed") === "true");
+  const [setupFlowActive, setSetupFlowActive] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [tutorialRequest, setTutorialRequest] = useState<TutorialOpenRequest | undefined>();
 
   // Show setup wizard if config has no library paths and user hasn't dismissed it
   const needsSetup = config && config.covePaths.filter(p => p.path.trim() !== "").length === 0 && !setupDismissed;
+
+  useEffect(() => {
+    if (needsSetup) {
+      setSetupFlowActive(true);
+    }
+  }, [needsSetup]);
+
+  useEffect(() => {
+    const openTutorial = (event: Event) => {
+      setTutorialRequest(event instanceof CustomEvent ? event.detail : undefined);
+      setTutorialOpen(true);
+    };
+    window.addEventListener(TUTORIAL_STORYBOARD_EVENT, openTutorial);
+    return () => window.removeEventListener(TUTORIAL_STORYBOARD_EVENT, openTutorial);
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const topicId = params.get("tutorial") ?? undefined;
+    if (!topicId) {
+      return;
+    }
+
+    setTutorialRequest({ topicId, slideId: params.get("tutorialSlide") ?? params.get("slide") ?? undefined });
+    setTutorialOpen(true);
+  }, [route]);
+
+  const showSetupWizard = Boolean(config) && !setupDismissed && (needsSetup || setupFlowActive);
 
   if (configLoading || statusLoading) {
     return (
@@ -320,13 +353,18 @@ function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => v
     );
   }
 
-  if (needsSetup && config) {
+  if (showSetupWizard && config) {
     return (
       <SetupWizardPage
         config={config}
-        onComplete={() => {
+        onComplete={(options) => {
+          setSetupFlowActive(false);
           setSetupDismissed(true);
           sessionStorage.setItem("cove-setup-dismissed", "true");
+          if (options?.showTutorial && !hasCompletedTutorialStoryboard()) {
+            setTutorialRequest({ topicId: "getting-started" });
+            setTutorialOpen(true);
+          }
         }}
       />
     );
@@ -342,6 +380,13 @@ function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => v
           </Suspense>
         </ErrorBoundary>
       </main>
+      <TutorialStoryboardDialog
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
+        request={tutorialRequest}
+        currentPage={route.page}
+        extensionTopics={manifest?.tutorialTopics ?? []}
+      />
     </div>
   );
 }
