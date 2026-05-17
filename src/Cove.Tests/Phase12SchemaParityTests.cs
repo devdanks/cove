@@ -1,8 +1,5 @@
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
-using Cove.Api.Startup;
 using Cove.Core.Interfaces;
 using Cove.Data;
 using Microsoft.EntityFrameworkCore;
@@ -19,88 +16,47 @@ namespace Cove.Tests;
 [Collection("Managed Postgres integration")]
 public sealed class Phase12SchemaParityTests
 {
+    private const string V1BaselineMigrationId = "20260516223910_V1_0";
+
     [Fact]
-    public async Task Program_AddColumnIfMissing_IsIdempotent()
+    public void MigrationAssembly_ContainsOnlyV1Baseline()
+    {
+        using var context = CreateContext(5432, "unused");
+        var migrations = context.GetService<IMigrationsAssembly>().Migrations.Keys.ToArray();
+
+        Assert.Equal([V1BaselineMigrationId], migrations);
+        AssertNoPendingModelChanges(context);
+    }
+
+    [Fact]
+    public async Task V1BaselineMigration_CreatesFreshDatabaseSchema()
     {
         var managedRoot = ResolveManagedPostgresRoot();
         if (managedRoot == null)
             return;
 
-        var databaseName = $"phase12_idempotent_{Guid.NewGuid():N}";
+        var databaseName = $"v1_baseline_{Guid.NewGuid():N}";
         await using var environment = await CreateEnvironmentAsync(managedRoot);
         await CreateDatabaseAsync(environment.AdminConnectionString, databaseName);
 
         try
         {
-            await using (var context = CreateContext(environment.Port, databaseName))
-            {
-                AssertNoPendingModelChanges(context);
-                await context.Database.MigrateAsync();
-                await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(context);
-                await SchemaCompatibilityBootstrap.NormalizeOshashAndIndexesAsync(context);
-            }
+            await using var context = CreateContext(environment.Port, databaseName);
+            AssertNoPendingModelChanges(context);
 
-            var before = await DumpSchemaAsync(environment.PgDumpPath, environment.Port, databaseName);
+            await context.Database.MigrateAsync();
 
-            await using (var context = CreateContext(environment.Port, databaseName))
-            {
-                await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(context);
-                await SchemaCompatibilityBootstrap.NormalizeOshashAndIndexesAsync(context);
-            }
+            var applied = (await context.Database.GetAppliedMigrationsAsync()).ToArray();
+            var pending = (await context.Database.GetPendingMigrationsAsync()).ToArray();
 
-            var after = await DumpSchemaAsync(environment.PgDumpPath, environment.Port, databaseName);
+            Assert.Equal([V1BaselineMigrationId], applied);
+            Assert.Empty(pending);
 
-            Assert.Equal(before, after);
+            await AssertAuthFunctionsCreatedAsync(environment.Port, databaseName);
         }
         finally
         {
             await DropDatabaseAsync(environment.AdminConnectionString, databaseName);
-        }
-    }
-
-    [Fact]
-    public async Task BootstrapUpgradePath_MatchesFreshMigrationSchema()
-    {
-        var managedRoot = ResolveManagedPostgresRoot();
-        if (managedRoot == null)
-            return;
-
-        var freshDatabaseName = $"phase12_fresh_{Guid.NewGuid():N}";
-        var bootstrapDatabaseName = $"phase12_bootstrap_{Guid.NewGuid():N}";
-
-        await using var environment = await CreateEnvironmentAsync(managedRoot);
-        await CreateDatabaseAsync(environment.AdminConnectionString, freshDatabaseName);
-        await CreateDatabaseAsync(environment.AdminConnectionString, bootstrapDatabaseName);
-
-        try
-        {
-            await using (var context = CreateContext(environment.Port, freshDatabaseName))
-            {
-                AssertNoPendingModelChanges(context);
-                await context.Database.MigrateAsync();
-                await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(context);
-                await SchemaCompatibilityBootstrap.NormalizeOshashAndIndexesAsync(context);
-            }
-
-            await using (var context = CreateContext(environment.Port, bootstrapDatabaseName))
-            {
-                AssertNoPendingModelChanges(context);
-                await context.Database.MigrateAsync("20260419000753_InitialCreate");
-                await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(context);
-                await context.Database.MigrateAsync();
-                await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(context);
-                await SchemaCompatibilityBootstrap.NormalizeOshashAndIndexesAsync(context);
-            }
-
-            var freshSchema = await DumpSchemaAsync(environment.PgDumpPath, environment.Port, freshDatabaseName);
-            var bootstrapSchema = await DumpSchemaAsync(environment.PgDumpPath, environment.Port, bootstrapDatabaseName);
-
-            AssertSchemasEqual(freshSchema, bootstrapSchema);
-        }
-        finally
-        {
-            await DropDatabaseAsync(environment.AdminConnectionString, freshDatabaseName);
-            await DropDatabaseAsync(environment.AdminConnectionString, bootstrapDatabaseName);
         }
     }
 
@@ -146,145 +102,6 @@ public sealed class Phase12SchemaParityTests
             _ => operation.GetType().Name,
         };
 
-    private static async Task<string> DumpSchemaAsync(string pgDumpPath, int port, string databaseName)
-    {
-        var psi = new ProcessStartInfo(pgDumpPath, $"-h 127.0.0.1 -p {port} -U postgres -d {databaseName} -s --no-owner --no-privileges")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start pg_dump.");
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"pg_dump failed for {databaseName}: {stderr}");
-
-        return NormalizeSchemaDump(stdout);
-    }
-
-    private static string NormalizeSchemaDump(string dump)
-    {
-        var statements = new List<string>();
-        var current = new StringBuilder();
-
-        foreach (var rawLine in dump.Split('\n'))
-        {
-            var line = rawLine.Trim();
-            if (string.IsNullOrWhiteSpace(line)
-                || line.StartsWith("--", StringComparison.Ordinal)
-                || line.StartsWith("SET ", StringComparison.Ordinal)
-                || line.StartsWith("SELECT pg_catalog.set_config", StringComparison.Ordinal)
-                || line.StartsWith("\\", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            current.Append(line).Append(' ');
-            if (line.EndsWith(';'))
-            {
-                statements.Add(CanonicalizeStatement(current.ToString().Trim()));
-                current.Clear();
-            }
-        }
-
-        if (current.Length > 0)
-            statements.Add(CanonicalizeStatement(current.ToString().Trim()));
-
-        return string.Join('\n', statements.OrderBy(statement => statement, StringComparer.Ordinal));
-    }
-
-    private static string CanonicalizeStatement(string statement)
-    {
-        if (!statement.StartsWith("CREATE TABLE public.", StringComparison.Ordinal))
-            return statement;
-
-        var openParen = statement.IndexOf('(');
-        var closeParen = statement.LastIndexOf(')');
-        if (openParen < 0 || closeParen <= openParen)
-            return statement;
-
-        var prefix = statement[..openParen].TrimEnd();
-        var suffix = statement[(closeParen + 1)..].Trim();
-        var items = SplitTopLevel(statement[(openParen + 1)..closeParen])
-            .Select(item => item.Trim())
-            .Where(item => item.Length > 0)
-            .OrderBy(item => item, StringComparer.Ordinal);
-
-        var rebuilt = $"{prefix} ( {string.Join(", ", items)} )";
-        return suffix.Length == 0 ? rebuilt : $"{rebuilt} {suffix}";
-    }
-
-    private static IEnumerable<string> SplitTopLevel(string text)
-    {
-        var start = 0;
-        var depth = 0;
-        var inSingleQuote = false;
-
-        for (var index = 0; index < text.Length; index++)
-        {
-            var ch = text[index];
-            if (ch == '\'' && (index == 0 || text[index - 1] != '\\'))
-            {
-                inSingleQuote = !inSingleQuote;
-                continue;
-            }
-
-            if (inSingleQuote)
-                continue;
-
-            switch (ch)
-            {
-                case '(':
-                    depth++;
-                    break;
-                case ')':
-                    depth--;
-                    break;
-                case ',' when depth == 0:
-                    yield return text[start..index];
-                    start = index + 1;
-                    break;
-            }
-        }
-
-        yield return text[start..];
-    }
-
-    private static void AssertSchemasEqual(string expectedSchema, string actualSchema)
-    {
-        if (string.Equals(expectedSchema, actualSchema, StringComparison.Ordinal))
-            return;
-
-        var expectedStatements = expectedSchema.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        var actualStatements = actualSchema.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-        var missing = expectedStatements.Except(actualStatements, StringComparer.Ordinal).Take(10).ToArray();
-        var extra = actualStatements.Except(expectedStatements, StringComparer.Ordinal).Take(10).ToArray();
-
-        var message = new StringBuilder();
-        message.AppendLine("Normalized schema dumps differ.");
-        if (missing.Length > 0)
-        {
-            message.AppendLine("Missing statements:");
-            foreach (var statement in missing)
-                message.AppendLine(statement);
-        }
-
-        if (extra.Length > 0)
-        {
-            message.AppendLine("Extra statements:");
-            foreach (var statement in extra)
-                message.AppendLine(statement);
-        }
-
-        throw new Xunit.Sdk.XunitException(message.ToString().TrimEnd());
-    }
-
     private static async Task CreateDatabaseAsync(string adminConnectionString, string databaseName)
     {
         await using var conn = new NpgsqlConnection(adminConnectionString);
@@ -315,6 +132,28 @@ public sealed class Phase12SchemaParityTests
         await drop.ExecuteNonQueryAsync();
     }
 
+    private static async Task AssertAuthFunctionsCreatedAsync(int port, string databaseName)
+    {
+        await using var conn = new NpgsqlConnection(BuildConnectionString(port, databaseName));
+        await conn.OpenAsync();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT public.cove_authz_can_read(
+                true,
+                false,
+                false,
+                ARRAY[]::text[],
+                NULL::uuid,
+                'scene',
+                1
+            )
+            """;
+        var result = await cmd.ExecuteScalarAsync();
+
+        Assert.True(result is bool value && value);
+    }
+
     private static async Task<PostgresTestEnvironment> CreateEnvironmentAsync(string managedRoot)
     {
         Exception? lastError = null;
@@ -335,9 +174,7 @@ public sealed class Phase12SchemaParityTests
             try
             {
                 await manager.StartAsync(CancellationToken.None);
-
-                var pgDumpPath = Path.Combine(managedRoot, "pgsql", "bin", Exe("pg_dump"));
-                return new PostgresTestEnvironment(manager, port, BuildConnectionString(port, "postgres"), pgDumpPath);
+                return new PostgresTestEnvironment(manager, port, BuildConnectionString(port, "postgres"));
             }
             catch (Exception ex) when (attempt < 4)
             {
@@ -352,7 +189,7 @@ public sealed class Phase12SchemaParityTests
             }
         }
 
-        throw new InvalidOperationException("Failed to start managed Postgres for schema parity tests.", lastError);
+        throw new InvalidOperationException("Failed to start managed Postgres for V1 baseline migration tests.", lastError);
     }
 
     private static int ReserveLoopbackPort()
@@ -378,11 +215,10 @@ public sealed class Phase12SchemaParityTests
     private static string Exe(string toolName)
         => OperatingSystem.IsWindows() ? toolName + ".exe" : toolName;
 
-    private sealed class PostgresTestEnvironment(PostgresManagerService manager, int port, string adminConnectionString, string pgDumpPath) : IAsyncDisposable
+    private sealed class PostgresTestEnvironment(PostgresManagerService manager, int port, string adminConnectionString) : IAsyncDisposable
     {
         public int Port { get; } = port;
         public string AdminConnectionString { get; } = adminConnectionString;
-        public string PgDumpPath { get; } = pgDumpPath;
 
         public async ValueTask DisposeAsync()
         {

@@ -17,7 +17,9 @@ interface SourceDownloadPreferences {
 
 interface SourceDownloadMetadata {
   title?: string;
+  details?: string;
   date?: string;
+  rating?: number;
   studioId?: number;
   tagIds?: number[];
   performerIds?: number[];
@@ -137,6 +139,8 @@ export function SourceDownloadDialog({ open, entity, sourceUrl, matches, baseTit
           tagIds: metadata?.tagIds,
           studioId: metadata?.studioId,
           date: metadata?.date,
+          synopsis: metadata?.details,
+          rating: metadata?.rating,
         });
         groupId = group.id;
 

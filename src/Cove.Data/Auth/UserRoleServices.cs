@@ -551,13 +551,13 @@ public sealed class UserService : IUserService
             "user", userId.ToString(), null, ct);
     }
 
-    private static UserDto Map(User u) => new(
+    private UserDto Map(User u) => new(
         u.Id, u.Username, u.DisplayName, u.Email,
         u.IsActive, u.IsLocked, u.IsSystem, u.MustChangePassword,
         !string.IsNullOrWhiteSpace(u.PasswordHash),
         u.LastLoginAt, u.LastLoginIp, u.CreatedAt,
         u.Roles.Select(r => r.Role!.Name).ToList(),
-        ParseUiPreferences(u.UiPreferencesJson));
+        ParseUiPreferences(u.UiPreferencesJson, _log));
 
     private async Task<Role> EnsureOwnerRoleAsync(CancellationToken ct)
     {
@@ -625,7 +625,7 @@ public sealed class UserService : IUserService
         return $"{normalizedBase}/auth/redeem-invite?token={Uri.EscapeDataString(token)}";
     }
 
-    public static UserUiPreferencesDto? ParseUiPreferences(string? raw)
+    public static UserUiPreferencesDto? ParseUiPreferences(string? raw, ILogger? logger = null)
     {
         if (string.IsNullOrWhiteSpace(raw))
         {
@@ -649,8 +649,14 @@ public sealed class UserService : IUserService
 
             return NormalizeUiPreferences(parsed);
         }
-        catch
+        catch (JsonException ex)
         {
+            logger?.LogWarning(ex, "Ignoring malformed user UI preferences JSON");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Ignoring invalid user UI preferences");
             return null;
         }
     }

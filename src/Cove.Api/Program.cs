@@ -1,7 +1,6 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
-using System.Data.Common;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -11,7 +10,6 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Cove.Api.Hubs;
-using Cove.Api.Startup;
 using Cove.Api.Services;
 using Cove.Core.Entities.Galleries;
 using Cove.Core.Events;
@@ -22,6 +20,60 @@ using Cove.Plugins;
 
 // Ensure enough threads for async I/O under concurrent load
 ThreadPool.SetMinThreads(Environment.ProcessorCount * 4, Environment.ProcessorCount * 4);
+
+static async Task EnsurePostgresMigrationInfrastructureAsync(CoveContext db)
+{
+    var conn = db.Database.GetDbConnection();
+    var shouldClose = conn.State != System.Data.ConnectionState.Open;
+    if (shouldClose)
+        await conn.OpenAsync();
+
+    try
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE SCHEMA IF NOT EXISTS public;
+            CREATE TABLE IF NOT EXISTS public."__EFMigrationsHistory" (
+                "MigrationId" character varying(150) NOT NULL,
+                "ProductVersion" character varying(32) NOT NULL,
+                CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+            );
+            """;
+        await cmd.ExecuteNonQueryAsync();
+    }
+    finally
+    {
+        if (shouldClose)
+            await conn.CloseAsync();
+    }
+}
+
+static async Task<bool> HasPostgresApplicationTablesAsync(CoveContext db)
+{
+    var conn = db.Database.GetDbConnection();
+    var shouldClose = conn.State != System.Data.ConnectionState.Open;
+    if (shouldClose)
+        await conn.OpenAsync();
+
+    try
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_type = 'BASE TABLE'
+              AND table_name <> '__EFMigrationsHistory'
+            LIMIT 1
+            """;
+        return await cmd.ExecuteScalarAsync() != null;
+    }
+    finally
+    {
+        if (shouldClose)
+            await conn.CloseAsync();
+    }
+}
 
 try
 {
@@ -102,6 +154,7 @@ try
     builder.Services.AddSingleton<ScraperService>();
     builder.Services.AddSingleton<ISceneCoverService, SceneCoverService>();
     builder.Services.AddScoped<ISceneMetadataApplyService, SceneMetadataApplyService>();
+    builder.Services.AddScoped<IGroupMetadataApplyService, GroupMetadataApplyService>();
     builder.Services.AddScoped<PerformerScrapeService>();
     builder.Services.AddScoped<ScrapeAttemptService>();
     builder.Services.AddScoped<SceneBatchScrapeService>();
@@ -427,10 +480,11 @@ try
             }
         }
 
-        // Auto-migrate database + pre-warm EF Core and connection pool
+        // Prepare database + pre-warm EF Core and connection pool
         using (var scope = app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+            var schemaCurrent = true;
 
             var isPostgresProvider = string.Equals(
                 db.Database.ProviderName,
@@ -439,91 +493,29 @@ try
 
             if (isPostgresProvider)
             {
-                // Determine if this is a brand-new database or an existing one that predates migrations.
-                var canConnect = await db.Database.CanConnectAsync();
-                var hasMigrationHistory = false;
-                if (canConnect)
+                await EnsurePostgresMigrationInfrastructureAsync(db);
+
+                if (!await HasPostgresApplicationTablesAsync(db))
                 {
-                    // Check if __EFMigrationsHistory table exists (indicates migrations-aware DB)
-                    var conn = db.Database.GetDbConnection();
-                    await conn.OpenAsync();
-                    await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='__EFMigrationsHistory'";
-                    hasMigrationHistory = await cmd.ExecuteScalarAsync() != null;
-                    await conn.CloseAsync();
-                }
-
-                var hasTables = false;
-                if (canConnect && !hasMigrationHistory)
-                {
-                    // Check if core tables exist (pre-migration database)
-                    var conn = db.Database.GetDbConnection();
-                    await conn.OpenAsync();
-                    await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='scenes'";
-                    hasTables = await cmd.ExecuteScalarAsync() != null;
-                    await conn.CloseAsync();
-                }
-
-                if (hasTables && !hasMigrationHistory)
-                {
-                    // Existing database created with EnsureCreatedAsync — baseline it.
-                    // Mark the initial migration as already applied so MigrateAsync only runs future migrations.
-                    Log.Information("Existing database detected — baselining migration history");
-                    var conn = db.Database.GetDbConnection();
-                    await conn.OpenAsync();
-
-                    await using var createHistory = conn.CreateCommand();
-                    createHistory.CommandText = """
-                        CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
-                            "MigrationId" character varying(150) NOT NULL,
-                            "ProductVersion" character varying(32) NOT NULL,
-                            CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
-                        )
-                    """;
-                    await createHistory.ExecuteNonQueryAsync();
-
-                    await using var insertBaseline = conn.CreateCommand();
-                    insertBaseline.CommandText = """
-                        INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-                        VALUES ('20260419000753_InitialCreate', '10.0.5')
-                        ON CONFLICT DO NOTHING
-                    """;
-                    await insertBaseline.ExecuteNonQueryAsync();
-                    await conn.CloseAsync();
-
-                    // Still run compatibility patches for pre-migration databases
-                    await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(db);
-
-                    Log.Information("Migration history baselined — future migrations will apply automatically");
-                }
-
-                // Check for pending migrations
-                var pendingMigrations = (await db.Database.GetPendingMigrationsAsync()).ToArray();
-
-                if (pendingMigrations.Length > 0)
-                {
-                    Log.Information("Applying {Count} pending migration(s): {Migrations}",
-                        pendingMigrations.Length, string.Join(", ", pendingMigrations));
-
-                    // Automatic backup before migration
-                    var backupSvc = scope.ServiceProvider.GetRequiredService<IBackupService>();
-                    var backup = await backupSvc.CreateBackupAsync("pre_migration");
-                    Log.Information("Pre-migration backup created at {Path}", backup.BackupPath);
-
+                    Log.Information("Empty database detected - applying V1.0 baseline migration");
                     await db.Database.MigrateAsync();
-                    Log.Information("Database migrations applied successfully");
-                }
-                else if (!hasTables && !hasMigrationHistory)
-                {
-                    // Brand new database — apply all migrations from scratch
-                    Log.Information("New database detected — applying all migrations");
-                    await db.Database.MigrateAsync();
-                    Log.Information("Database created via migrations");
+                    Log.Information("Database created via V1.0 baseline migration");
                 }
                 else
                 {
-                    Log.Information("Database is up to date");
+                    var pendingMigrations = (await db.Database.GetPendingMigrationsAsync()).ToArray();
+                    if (pendingMigrations.Length > 0)
+                    {
+                        schemaCurrent = false;
+                        Log.Warning(
+                            "Database has {Count} pending migration(s): {Migrations}. Startup will not apply them automatically; use the migration gate or POST /api/database/migrate.",
+                            pendingMigrations.Length,
+                            string.Join(", ", pendingMigrations));
+                    }
+                    else
+                    {
+                        Log.Information("Database is up to date");
+                    }
                 }
             }
             else
@@ -531,21 +523,22 @@ try
                 await db.Database.EnsureCreatedAsync();
             }
 
-            // Compatibility columns must exist before any startup queries touch the model.
-            await SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaAsync(db);
-
-            // Fix oshash values: Go uses %016x (zero-padded 16 chars), ensure all values match
-            await SchemaCompatibilityBootstrap.NormalizeOshashAndIndexesAsync(db);
-
-            // Pre-warm: compile EF Core query cache, prime connection pool, JIT hot paths
-            _ = await db.Scenes.CountAsync();
-            _ = await db.Scenes.AsNoTracking()
-                .OrderBy(s => s.Id)
-                .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
-                .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
-                .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
-                .Take(1).AsSplitQuery().ToListAsync();
-            Log.Information("EF Core and connection pool pre-warmed");
+            if (schemaCurrent)
+            {
+                // Pre-warm: compile EF Core query cache, prime connection pool, JIT hot paths
+                _ = await db.Scenes.CountAsync();
+                _ = await db.Scenes.AsNoTracking()
+                    .OrderBy(s => s.Id)
+                    .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
+                    .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
+                    .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
+                    .Take(1).AsSplitQuery().ToListAsync();
+                Log.Information("EF Core and connection pool pre-warmed");
+            }
+            else
+            {
+                Log.Warning("Skipping EF Core pre-warm because database migrations are pending manual approval");
+            }
         }
 
         // Initialize extensions after database is ready
@@ -561,8 +554,20 @@ try
                     try
                     {
                         var contributed = pc.ContributePermissions().ToList();
-                        permissionRegistry.RegisterExtensionPermissions(ext.Id, contributed);
-                        Log.Information("Extension {Id} contributed {Count} permission(s)", ext.Id, contributed.Count);
+                        var rejected = permissionRegistry.RegisterExtensionPermissions(ext.Id, contributed);
+                        foreach (var rejection in rejected)
+                        {
+                            Log.Warning(
+                                "Extension {Id} permission {PermissionKey} rejected: {Reason}",
+                                ext.Id,
+                                rejection.PermissionKey,
+                                rejection.Reason);
+                        }
+                        Log.Information(
+                            "Extension {Id} contributed {AcceptedCount} permission(s); {RejectedCount} rejected",
+                            ext.Id,
+                            contributed.Count - rejected.Count,
+                            rejected.Count);
                     }
                     catch (Exception ex)
                     {

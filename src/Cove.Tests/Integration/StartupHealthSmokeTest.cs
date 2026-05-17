@@ -1,41 +1,57 @@
 using System.Net;
-
-using Cove.Api.Startup;
-using Cove.Core.Entities.Auth;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Tests.Integration;
 
 public sealed class StartupHealthSmokeTests
 {
     [Fact]
-    public async Task HealthEndpoint_ReturnsOk_AfterStartupBootstrapRuns()
+    public async Task HealthEndpoint_ReturnsOk_AfterStartup()
     {
-        SchemaCompatibilityBootstrap.ResetTestState();
-
         using var factory = new CoveWebApplicationFactory("IntegrationStartup");
         using var client = factory.CreateAuthenticatedClient();
 
-        for (var attempt = 0; attempt < 50 && SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaInvocationCount == 0; attempt++)
-            await Task.Delay(100);
-
-        Assert.True(SchemaCompatibilityBootstrap.EnsureCompatibilitySchemaInvocationCount > 0);
-
-        await factory.WithDbContextAsync(async db =>
-        {
-            db.Users.Add(new User
-            {
-                Id = CoveWebApplicationFactory.TestUserId,
-                Username = "integration-user",
-                PasswordHash = "integration-test",
-                PasswordAlgo = "integration-test",
-                IsActive = true,
-                IsSystem = true,
-            });
-            await db.SaveChangesAsync();
-        });
+        await WaitForStartupDatabaseAsync(factory);
 
         var response = await client.GetAsync("/health");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private static async Task WaitForStartupDatabaseAsync(CoveWebApplicationFactory factory)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        Exception? lastError = null;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                var isReady = await factory.WithDbContextAsync(async db =>
+                {
+                    try
+                    {
+                        await db.Users.AsNoTracking().AnyAsync();
+                        return true;
+                    }
+                    catch (SqliteException exception) when (exception.SqliteErrorCode == 1 && exception.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+                });
+
+                if (isReady)
+                    return;
+            }
+            catch (Exception exception)
+            {
+                lastError = exception;
+            }
+
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException("Startup database schema was not ready in time.", lastError);
     }
 }

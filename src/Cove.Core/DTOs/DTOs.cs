@@ -1037,7 +1037,9 @@ public record SystemStatusDto(
     string DatabasePath,
     bool MigrationRequired = false,
     string[]? PendingMigrations = null,
-    bool AuthEnabled = false);
+    bool AuthEnabled = false,
+    bool MigrationStatusUnknown = false,
+    string? MigrationStatusError = null);
 
 public record CoveConfigDto
 {
@@ -1925,6 +1927,13 @@ public record ConfigBackupResultDto(string BackupPath, long SizeBytes, string Ti
 
 public record WipeResultDto(string Message, string BackupPath, string Timestamp, string? ConfigBackupPath);
 public record RestoreBackupRequestDto(string BackupPath);
+public record RestoreBackupResultDto(string Message, string BackupPath, string? PreRestoreBackupPath);
+public record DatabaseMigrationResultDto(
+    string Message,
+    string[] AppliedMigrations,
+    string[] PendingMigrations,
+    string? PreMigrationBackupPath,
+    bool MigrationRequired);
 
 // ===== SCRAPER DTOs =====
 public record ScrapeUrlDto(string Url, string ContentType);
@@ -2022,8 +2031,13 @@ public record ScrapedTextDto
 public record ScrapedGroupDto
 {
     public string? Name { get; init; }
+    public List<string> Aliases { get; init; } = [];
+    public int? Duration { get; init; }
     public string? Date { get; init; }
+    public string? Director { get; init; }
     public string? Details { get; init; }
+    public string? Synopsis { get; init; }
+    public int? Rating { get; init; }
     public string? ImageUrl { get; init; }
     public List<string> Urls { get; init; } = [];
     public string? StudioName { get; init; }
@@ -2131,8 +2145,12 @@ public record GroupScrapeInput
     public string? Url { get; init; }
     public List<string> Urls { get; init; } = [];
     public string? Name { get; init; }
+    public string? Aliases { get; init; }
+    public int? Duration { get; init; }
     public string? Date { get; init; }
+    public string? Director { get; init; }
     public string? Details { get; init; }
+    public string? Synopsis { get; init; }
 }
 
 // ===== SCRAPER EXECUTION REQUEST DTOs =====

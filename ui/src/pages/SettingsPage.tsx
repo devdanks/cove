@@ -3630,7 +3630,12 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
     ? { type: "error" as const, text: "AI tag import was cancelled." }
     : null;
   const restoreStatus = restoreMut.isSuccess
-    ? { type: "success" as const, text: `Restore completed from ${restoreBackupPath}. Reloading...` }
+    ? {
+        type: "success" as const,
+        text: restoreMut.data?.preRestoreBackupPath
+          ? `Restore completed from ${restoreBackupPath}. Pre-restore backup saved to ${restoreMut.data.preRestoreBackupPath}. Reloading...`
+          : `Restore completed from ${restoreBackupPath}. Reloading...`,
+      }
     : restoreMut.isError
     ? { type: "error" as const, text: `Restore failed: ${restoreMut.error instanceof Error ? restoreMut.error.message : "Unknown error"}` }
     : null;

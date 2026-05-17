@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cove.Api.Services;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Events;
 using Cove.Core.Interfaces;
 using Cove.Data;
 using Microsoft.EntityFrameworkCore;
@@ -65,6 +66,7 @@ public class ScrapeAttemptServiceTests
             null!,
             null!,
             new NoOpTagProvenanceService(),
+            null!,
             NullLogger<ScrapeAttemptService>.Instance);
 
         var result = await service.ApplyAttemptAsync(
@@ -157,6 +159,7 @@ public class ScrapeAttemptServiceTests
             null!,
             null!,
             new NoOpTagProvenanceService(),
+            null!,
             NullLogger<ScrapeAttemptService>.Instance);
 
         var result = await service.ApplyAttemptAsync(
@@ -196,6 +199,106 @@ public class ScrapeAttemptServiceTests
         Assert.Equal(["Created Performer", "Existing Performer"], updatedText.TextPerformers.Select(item => item.Performer!.Name).OrderBy(item => item).ToArray());
         Assert.False(await db.Tags.AnyAsync(item => item.Name == "Skipped Tag"));
         Assert.False(await db.Performers.AnyAsync(item => item.Name == "Skipped Performer"));
+    }
+
+    [Fact]
+    public async Task ApplyAttemptAsync_GroupAttemptAppliesMetadataAndRelations()
+    {
+        var dbName = $"scrape-attempt-service-{Guid.NewGuid():N}";
+        await using var db = CreateDbContext(dbName);
+
+        var existingTag = new Tag { Name = "Legacy" };
+        var group = new Group
+        {
+            Name = "Current Group",
+            Aliases = "Old Alias",
+            Urls = [new GroupUrl { Url = "https://existing.example/group" }],
+            GroupTags = [new GroupTag { Tag = existingTag }],
+        };
+
+        db.Groups.Add(group);
+        await db.SaveChangesAsync();
+
+        var attempt = new ScrapeAttempt
+        {
+            ScraperId = "tests.fake-scraper/group",
+            EntityType = EntityKinds.Group,
+            EntityId = group.Id,
+            InputKind = "url",
+            InputJson = JsonSerializer.Serialize(new { url = "https://example.com/group" }),
+            ResultJson = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["Name"] = "Scraped Group",
+                ["Aliases"] = new[] { "Alias A" },
+                ["Duration"] = 120,
+                ["Date"] = "2025-01-02",
+                ["Director"] = "Scraped Director",
+                ["Synopsis"] = "Scraped synopsis",
+                ["URLs"] = new[] { "https://existing.example/group", "https://new.example/group" },
+                ["TagNames"] = new[] { "New Tag" },
+                ["StudioName"] = "Scraped Studio",
+            }),
+        };
+
+        db.ScrapeAttempts.Add(attempt);
+        await db.SaveChangesAsync();
+
+        var tagProvenanceService = new NoOpTagProvenanceService();
+        var groupApplyService = new GroupMetadataApplyService(
+            db,
+            null!,
+            null!,
+            new EventBus(),
+            new NoOpUserEngagementService(),
+            tagProvenanceService,
+            null,
+            NullLogger<GroupMetadataApplyService>.Instance);
+
+        var service = new ScrapeAttemptService(
+            db,
+            null!,
+            null!,
+            null!,
+            tagProvenanceService,
+            groupApplyService,
+            NullLogger<ScrapeAttemptService>.Instance);
+
+        var result = await service.ApplyAttemptAsync(
+            attempt.Id,
+            new ApplySceneScrapeAttemptDto(
+                ReplaceFields: ["name", "duration", "date", "director", "details"],
+                CollectionModes: new Dictionary<string, string>
+                {
+                    ["aliases"] = "merge",
+                    ["urls"] = "merge",
+                    ["tags"] = "replace",
+                    ["studio"] = "replace",
+                },
+                CreateMissingTags: true,
+                CreateMissingStudio: true),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal("Applied", result!.Status);
+        Assert.NotNull(result.EntitySnapshotJson);
+
+        var updatedGroup = await db.Groups
+            .Include(item => item.Urls)
+            .Include(item => item.GroupTags).ThenInclude(item => item.Tag)
+            .Include(item => item.Studio)
+            .SingleAsync(item => item.Id == group.Id);
+
+        Assert.Equal("Scraped Group", updatedGroup.Name);
+        Assert.Equal("Old Alias, Alias A", updatedGroup.Aliases);
+        Assert.Equal(120, updatedGroup.Duration);
+        Assert.Equal(new DateOnly(2025, 1, 2), updatedGroup.Date);
+        Assert.Equal("Scraped Director", updatedGroup.Director);
+        Assert.Equal("Scraped synopsis", updatedGroup.Synopsis);
+        Assert.Equal("Scraped Studio", updatedGroup.Studio?.Name);
+        Assert.Equal(
+            ["https://existing.example/group", "https://new.example/group"],
+            updatedGroup.Urls.Select(item => item.Url).OrderBy(item => item).ToArray());
+        Assert.Equal(["New Tag"], updatedGroup.GroupTags.Select(item => item.Tag!.Name).OrderBy(item => item).ToArray());
     }
 
     private static CoveContext CreateDbContext(string dbName)

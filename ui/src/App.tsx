@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, CheckCircle2, Database, Loader2 } from "lucide-react";
 import { Navbar } from "./components/Navbar";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { TutorialStoryboardDialog, TUTORIAL_STORYBOARD_EVENT, hasCompletedTutorialStoryboard, type TutorialOpenRequest } from "./components/TutorialStoryboardDialog";
@@ -13,6 +14,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { AuthBootstrapPage } from "./pages/AuthBootstrapPage";
 import { RedeemInvitePage } from "./pages/RedeemInvitePage";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { database } from "./api/client";
 import { useKeySequence } from "./hooks/useKeySequence";
 import { useResolvedKeybindingOverrides } from "./hooks/useResolvedKeybindingOverrides";
 import { resolveKeybinding } from "./keyboard/keybindings";
@@ -283,6 +285,13 @@ function AuthGateInner({ children }: { children: React.ReactNode }) {
 function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => void }) {
   const { config, configLoading, status, statusLoading } = useAppConfig();
   const { manifest } = useExtensions();
+  const queryClient = useQueryClient();
+  const migrateMutation = useMutation({
+    mutationFn: database.migrate,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["system-status"] });
+    },
+  });
   const [setupDismissed, setSetupDismissed] = useState(() => sessionStorage.getItem("cove-setup-dismissed") === "true");
   const [setupFlowActive, setSetupFlowActive] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -327,15 +336,41 @@ function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => v
     );
   }
 
-  // Migration gate: block the app until migrations are applied (they run on next restart)
-  if (status?.migrationRequired) {
+  if (status?.migrationStatusUnknown) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="max-w-md text-center space-y-4 p-8">
-          <div className="text-4xl">⚙️</div>
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="max-w-lg text-center space-y-4 rounded border border-yellow-500/30 bg-surface p-6 shadow-lg">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-yellow-500/15 text-yellow-200">
+            <AlertTriangle className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <h1 className="text-xl font-semibold text-foreground">Database Status Unavailable</h1>
+          <p className="text-sm text-muted-foreground">
+            Cove could not determine whether database migrations are pending. Check the server logs before continuing.
+          </p>
+          {status.migrationStatusError ? (
+            <div className="break-words rounded bg-background/70 p-3 text-left text-xs text-muted-foreground">
+              {status.migrationStatusError}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  // Migration gate: block the app until migrations are explicitly applied.
+  if (status?.migrationRequired) {
+    const migrationError = migrateMutation.error instanceof Error ? migrateMutation.error.message : null;
+    const migrationResult = migrateMutation.data;
+
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="max-w-lg text-center space-y-4 rounded border border-border bg-surface p-6 shadow-lg">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
+            <Database className="h-6 w-6" aria-hidden="true" />
+          </div>
           <h1 className="text-xl font-semibold text-foreground">Database Update Required</h1>
           <p className="text-sm text-muted-foreground">
-            Cove needs to update the database schema. This will happen automatically — please restart the server.
+            Cove needs to apply database migrations before the library can open.
           </p>
           {status.pendingMigrations && (
             <div className="text-xs text-muted-foreground bg-surface rounded p-3 text-left">
@@ -346,8 +381,31 @@ function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => v
             </div>
           )}
           <p className="text-xs text-muted-foreground">
-            A backup will be created automatically before applying changes.
+            A database backup will be created before any migration runs.
           </p>
+          <button
+            type="button"
+            onClick={() => migrateMutation.mutate()}
+            disabled={migrateMutation.isPending}
+            className="inline-flex items-center justify-center gap-2 rounded bg-accent px-4 py-2 text-sm font-medium text-background transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {migrateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Database className="h-4 w-4" aria-hidden="true" />}
+            Run Migration
+          </button>
+          {migrationResult?.preMigrationBackupPath ? (
+            <div className="rounded bg-background/70 p-3 text-left text-xs text-muted-foreground">
+              <div className="mb-1 flex items-center gap-2 font-medium text-foreground">
+                <CheckCircle2 className="h-4 w-4 text-green-400" aria-hidden="true" />
+                Backup created
+              </div>
+              <div className="break-all font-mono">{migrationResult.preMigrationBackupPath}</div>
+            </div>
+          ) : null}
+          {migrationError ? (
+            <div className="rounded border border-red-500/40 bg-red-500/10 p-3 text-left text-xs text-red-100">
+              {migrationError}
+            </div>
+          ) : null}
         </div>
       </div>
     );

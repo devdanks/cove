@@ -1412,8 +1412,12 @@ public class ScraperService
             Url = primaryUrl,
             Urls = urls,
             Name = GetFragmentString(fragment, "name", "title"),
+            Aliases = GetFragmentString(fragment, "aliases", "alias"),
+            Duration = GetFragmentInt(fragment, "duration", "durationSeconds"),
             Date = GetFragmentString(fragment, "date"),
+            Director = GetFragmentString(fragment, "director"),
             Details = GetFragmentString(fragment, "details", "description"),
+            Synopsis = GetFragmentString(fragment, "synopsis", "description"),
         };
     }
 
@@ -1465,6 +1469,31 @@ public class ScraperService
             var converted = ConvertFragmentString(value);
             if (!string.IsNullOrWhiteSpace(converted))
                 return converted;
+        }
+
+        return null;
+    }
+
+    private static int? GetFragmentInt(IReadOnlyDictionary<string, object> fragment, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var value = fragment.FirstOrDefault(item => string.Equals(item.Key, name, StringComparison.OrdinalIgnoreCase)).Value;
+            if (value is JsonElement element)
+            {
+                if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var intValue))
+                    return intValue;
+                if (element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out var parsedValue))
+                    return parsedValue;
+            }
+            else if (value is int intValue)
+            {
+                return intValue;
+            }
+            else if (value != null && int.TryParse(value.ToString(), out var parsedValue))
+            {
+                return parsedValue;
+            }
         }
 
         return null;

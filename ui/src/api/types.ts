@@ -1540,6 +1540,16 @@ export interface SystemStatus {
   migrationRequired: boolean;
   pendingMigrations: string[] | null;
   authEnabled?: boolean;
+  migrationStatusUnknown?: boolean;
+  migrationStatusError?: string | null;
+}
+
+export interface DatabaseMigrationResult {
+  message: string;
+  appliedMigrations: string[];
+  pendingMigrations: string[];
+  preMigrationBackupPath: string | null;
+  migrationRequired: boolean;
 }
 
 export type RatingSystemType = "stars" | "decimal";

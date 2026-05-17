@@ -245,7 +245,11 @@ public class PostgresManagerService : IHostedService
                     {
                         var pgsqlDir = Path.Combine(CoveDir, "pgsql");
                         Directory.CreateDirectory(pgsqlDir);
-                        try { Directory.CreateSymbolicLink(BinDir, systemBin); } catch { }
+                        try { Directory.CreateSymbolicLink(BinDir, systemBin); }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to link system PostgreSQL bin directory {SystemBin} to {BinDir}; falling back to package extraction", systemBin, BinDir);
+                        }
                     }
                 }
                 return;
@@ -335,7 +339,10 @@ public class PostgresManagerService : IHostedService
                     await DownloadFileAsync($"{pgdgBase}/{pkgName}", Path.Combine(tempDir, pkgName), ct);
                     break;
                 }
-                catch { /* client package is optional */ }
+                catch (Exception ex)
+                {
+                    _logger.LogInformation(ex, "Optional PostgreSQL client package {PackageName} was not available; continuing", pkgName);
+                }
             }
 
             // Extract .deb packages
@@ -525,10 +532,19 @@ public class PostgresManagerService : IHostedService
         {
             await RunAsync(Exe("pg_ctl"), $"stop -D \"{DataDir}\" -m fast", BinDir, ct);
         }
-        catch
+        catch (Exception ex)
         {
             // If it fails (process already dead), just remove the pid file
-            try { File.Delete(pidFile); } catch { }
+            _logger.LogWarning(ex, "Failed to stop stale PostgreSQL instance; attempting to delete {PidFile}", pidFile);
+            try
+            {
+                File.Delete(pidFile);
+                _logger.LogInformation("Deleted stale PostgreSQL pid file {PidFile}", pidFile);
+            }
+            catch (Exception deleteEx)
+            {
+                _logger.LogWarning(deleteEx, "Failed to delete stale PostgreSQL pid file {PidFile}", pidFile);
+            }
         }
     }
 
@@ -564,9 +580,11 @@ public class PostgresManagerService : IHostedService
             _logger.LogDebug("Database '{Db}' already exists", _config.Database);
 
             // Ensure pgvector extension is created
-            await RunAsync(Exe("psql"),
+            var vectorExitCode = await RunAsync(Exe("psql"),
                 $"-h 127.0.0.1 -p {_config.Port} -U postgres -d {_config.Database} -c \"CREATE EXTENSION IF NOT EXISTS vector\"",
                 BinDir, ct);
+            if (vectorExitCode != 0)
+                _logger.LogWarning("pgvector extension not available in existing database '{Db}' — vector search features will be disabled", _config.Database);
             return;
         }
 

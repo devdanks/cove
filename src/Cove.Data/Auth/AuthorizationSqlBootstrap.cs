@@ -1,12 +1,8 @@
-using Microsoft.EntityFrameworkCore;
-
 namespace Cove.Data.Auth;
 
-public static class AuthorizationSqlBootstrap
+public static class AuthorizationSqlDefinitions
 {
-    public static async Task EnsureAsync(CoveContext db, CancellationToken ct)
-    {
-        const string sql = """
+    public const string CreateFunctionsSql = """
             CREATE OR REPLACE FUNCTION public.cove_authz_entity_has_tag(
                 p_kind text,
                 p_entity_id integer,
@@ -519,21 +515,17 @@ public static class AuthorizationSqlBootstrap
             $$;
             """;
 
-        var connection = db.Database.GetDbConnection();
-        var shouldClose = connection.State != System.Data.ConnectionState.Open;
-        if (shouldClose)
-            await connection.OpenAsync(ct);
-
-        try
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            await command.ExecuteNonQueryAsync(ct);
-        }
-        finally
-        {
-            if (shouldClose)
-                await connection.CloseAsync();
-        }
-    }
+    public const string DropFunctionsSql = """
+            DROP FUNCTION IF EXISTS public.cove_authz_can_read(boolean, boolean, boolean, text[], uuid, text, integer) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_can_access(boolean, boolean, text[], text, integer, text) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_rule_matches(text, integer, text, jsonb) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_entity_matches_expression(text, integer, jsonb) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_expression_rule_matches(text, integer, jsonb) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_entity_matches_attribute(text, integer, jsonb) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_json_scalar_text(jsonb) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_entity_json(text, integer) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_entity_matches_identifier(text, integer, jsonb) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_entity_has_studio(text, integer, integer) CASCADE;
+            DROP FUNCTION IF EXISTS public.cove_authz_entity_has_tag(text, integer, integer) CASCADE;
+            """;
 }

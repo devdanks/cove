@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Api.Services;
 
-public class ScrapeAttemptService(CoveContext db, ScraperService scraperService, ISceneCoverService sceneCoverService, PerformerScrapeService performerScrapeService, ITagProvenanceService tagProvenanceService, ILogger<ScrapeAttemptService> logger, IFieldProvenanceService? fieldProvenanceService = null)
+public class ScrapeAttemptService(CoveContext db, ScraperService scraperService, ISceneCoverService sceneCoverService, PerformerScrapeService performerScrapeService, ITagProvenanceService tagProvenanceService, IGroupMetadataApplyService groupMetadataApplyService, ILogger<ScrapeAttemptService> logger, IFieldProvenanceService? fieldProvenanceService = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -165,6 +165,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             EntityKinds.Audio => await ApplyAudioAttemptInternalAsync(attempt, dto, resultJson, ct),
             EntityKinds.Text => await ApplyTextAttemptInternalAsync(attempt, dto, resultJson, ct),
             EntityKinds.Image => await ApplyImageAttemptInternalAsync(attempt, dto, resultJson, ct),
+            EntityKinds.Group => await ApplyGroupAttemptInternalAsync(attempt, dto, resultJson, ct),
             _ => throw new InvalidOperationException($"Scrape apply is not supported for entity type '{attempt.EntityType}'."),
         };
     }
@@ -299,6 +300,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             EntityKinds.Audio => await BuildAudioSnapshotJsonAsync(entityId.Value, ct),
             EntityKinds.Text => await BuildTextSnapshotJsonAsync(entityId.Value, ct),
             EntityKinds.Image => await BuildImageSnapshotJsonAsync(entityId.Value, ct),
+            EntityKinds.Group => await BuildGroupSnapshotJsonAsync(entityId.Value, ct),
             _ => null,
         };
     }
@@ -416,6 +418,35 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             tags = image.ImageTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
             performers = image.ImagePerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
             organized = image.Organized,
+        };
+
+        return JsonSerializer.Serialize(snapshot, JsonOptions);
+    }
+
+    private async Task<string?> BuildGroupSnapshotJsonAsync(int groupId, CancellationToken ct)
+    {
+        var group = await db.Groups
+            .AsNoTracking()
+            .Include(item => item.Urls)
+            .Include(item => item.GroupTags).ThenInclude(item => item.Tag)
+            .Include(item => item.Studio)
+            .FirstOrDefaultAsync(item => item.Id == groupId, ct);
+
+        if (group == null)
+            return null;
+
+        var snapshot = new
+        {
+            name = group.Name,
+            aliases = SplitTextValues(group.Aliases),
+            duration = group.Duration,
+            date = group.Date?.ToString("yyyy-MM-dd"),
+            director = group.Director,
+            details = group.Synopsis,
+            urls = group.Urls.Select(item => item.Url).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            studio = group.Studio?.Name,
+            tags = group.GroupTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            hasFrontImage = !string.IsNullOrWhiteSpace(group.FrontImageBlobId),
         };
 
         return JsonSerializer.Serialize(snapshot, JsonOptions);
@@ -645,6 +676,42 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         await db.SaveChangesAsync(ct);
         await RefreshImageArraysAsync(image, ct);
         return MapAttempt(attempt);
+    }
+
+    private async Task<ScrapeAttemptDto?> ApplyGroupAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
+    {
+        if (!string.Equals(attempt.EntityType, EntityKinds.Group, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
+            return null;
+
+        if (!await db.Groups.AsNoTracking().AnyAsync(item => item.Id == attempt.EntityId.Value, ct))
+            return null;
+
+        attempt.EntitySnapshotJson = await BuildGroupSnapshotJsonAsync(attempt.EntityId.Value, ct);
+
+        using var resultDocument = JsonDocument.Parse(resultJson);
+        var root = resultDocument.RootElement;
+        var replaceFields = new HashSet<string>(dto.ReplaceFields ?? [], StringComparer.OrdinalIgnoreCase);
+        var collectionModes = new Dictionary<string, string>(dto.CollectionModes ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
+        var tagSelections = BuildSelectionLookup(dto.TagSelections);
+        var availableFields = GetAvailableGroupFields(root);
+
+        attempt.AppliedAt = DateTime.UtcNow;
+        attempt.Status = DetermineApplyStatus(availableFields, replaceFields, collectionModes, dto);
+
+        var applied = await groupMetadataApplyService.ApplyAsync(
+            attempt.EntityId.Value,
+            BuildScrapedGroup(root),
+            new DownloaderMetadataApplyOptions(
+                CreateMissingTags: dto.CreateMissingTags,
+                CreateMissingStudio: dto.CreateMissingStudio,
+                MarkOrganized: dto.MarkOrganized),
+            replaceFields,
+            collectionModes,
+            tagSelections,
+            sourceRunId: attempt.Id.ToString(),
+            ct);
+
+        return applied ? MapAttempt(attempt) : null;
     }
 
     private static void ApplyAudioUrls(Audio audio, JsonElement root, IDictionary<string, string> collectionModes)
@@ -1524,11 +1591,28 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return available;
     }
 
+    private static HashSet<string> GetAvailableGroupFields(JsonElement root)
+    {
+        var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Name", "Title"))) available.Add("name");
+        if (GetStringList(root, "Aliases", "Alias").Count > 0) available.Add("aliases");
+        if (GetInt(root, "Duration", "DurationSeconds") != null) available.Add("duration");
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Date", "ReleaseDate"))) available.Add("date");
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Director"))) available.Add("director");
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Details", "Description", "Synopsis"))) available.Add("details");
+        if (GetInt(root, "Rating") != null) available.Add("rating");
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Image", "ImageUrl", "ImageURL", "FrontImage", "FrontImageUrl", "FrontImageURL"))) available.Add("image");
+        if (GetStringList(root, "URLs", "Url", "URL").Count > 0) available.Add("urls");
+        if (GetTagNames(root, "Tags", "Tag", "TagNames").Count > 0) available.Add("tags");
+        if (!string.IsNullOrWhiteSpace(GetNamedItems(root, "Studio", "StudioName").FirstOrDefault() ?? GetString(root, "Studio", "StudioName"))) available.Add("studio");
+        return available;
+    }
+
     private static string DetermineApplyStatus(HashSet<string> availableFields, HashSet<string> replaceFields, IDictionary<string, string> collectionModes, ApplySceneScrapeAttemptDto dto)
     {
         var skipped = availableFields.Any(field => field switch
         {
-            "title" or "code" or "details" or "director" or "photographer" or "date" or "image" => !replaceFields.Contains(field),
+            "title" or "name" or "code" or "details" or "director" or "photographer" or "date" or "duration" or "rating" or "image" => !replaceFields.Contains(field),
             _ => GetMode(collectionModes, field) == "skip",
         });
 
@@ -1808,6 +1892,33 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return normalizedLeft.SequenceEqual(normalizedRight, StringComparer.Ordinal);
     }
 
+    private static ScrapedGroupDto BuildScrapedGroup(JsonElement root)
+    {
+        return new ScrapedGroupDto
+        {
+            Name = GetString(root, "Name", "Title"),
+            Aliases = GetStringList(root, "Aliases", "Alias"),
+            Duration = GetInt(root, "Duration", "DurationSeconds"),
+            Date = GetString(root, "Date", "ReleaseDate"),
+            Director = GetString(root, "Director"),
+            Details = GetString(root, "Details", "Description", "Synopsis"),
+            Synopsis = GetString(root, "Synopsis", "Description", "Details"),
+            Rating = GetInt(root, "Rating"),
+            ImageUrl = GetString(root, "Image", "ImageUrl", "ImageURL", "FrontImage", "FrontImageUrl", "FrontImageURL"),
+            Urls = GetStringList(root, "URLs", "Url", "URL"),
+            StudioName = GetNamedItems(root, "Studio", "StudioName").FirstOrDefault() ?? GetString(root, "Studio", "StudioName"),
+            TagNames = GetTagNames(root, "Tags", "Tag", "TagNames"),
+        };
+    }
+
+    private static List<string> SplitTextValues(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
     private static string? GetNormalizedSceneDate(JsonElement root)
     {
         var date = GetString(root, "Date", "ReleaseDate");
@@ -1828,6 +1939,23 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
 
             if (value.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
                 return value.ToString();
+        }
+
+        return null;
+    }
+
+    private static int? GetInt(JsonElement root, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!TryGetProperty(root, name, out var value))
+                continue;
+
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var intValue))
+                return intValue;
+
+            if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsedValue))
+                return parsedValue;
         }
 
         return null;

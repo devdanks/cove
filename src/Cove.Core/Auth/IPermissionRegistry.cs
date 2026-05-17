@@ -14,8 +14,10 @@ public interface IPermissionRegistry
     HashSet<string> Expand(IEnumerable<string> grantedKeys);
 
     /// <summary>Register additional permissions (called by extension loader).</summary>
-    void RegisterExtensionPermissions(string extensionId, IEnumerable<PermissionDefinition> defs);
+    IReadOnlyList<PermissionRegistrationRejection> RegisterExtensionPermissions(string extensionId, IEnumerable<PermissionDefinition> defs);
 }
+
+public sealed record PermissionRegistrationRejection(string ExtensionId, string PermissionKey, string Reason);
 
 public sealed class PermissionRegistry : IPermissionRegistry
 {
@@ -71,19 +73,30 @@ public sealed class PermissionRegistry : IPermissionRegistry
         return result;
     }
 
-    public void RegisterExtensionPermissions(string extensionId, IEnumerable<PermissionDefinition> defs)
+    public IReadOnlyList<PermissionRegistrationRejection> RegisterExtensionPermissions(string extensionId, IEnumerable<PermissionDefinition> defs)
     {
         var prefix = extensionId + ".";
+        var rejected = new List<PermissionRegistrationRejection>();
         lock (_lock)
         {
             foreach (var raw in defs)
             {
                 var key = raw.Key;
                 // Defense-in-depth: enforce extension namespace prefix; reject "*" and core-namespaced keys.
-                if (key == "*") continue;
-                if (!key.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                if (key == "*")
+                {
+                    rejected.Add(new PermissionRegistrationRejection(extensionId, key, "Extensions cannot register the wildcard permission."));
+                    continue;
+                }
+                if (!key.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    rejected.Add(new PermissionRegistrationRejection(extensionId, key, $"Permission keys must start with '{prefix}'."));
+                    continue;
+                }
                 _byKey[key] = raw with { Source = "extension:" + extensionId };
             }
         }
+
+        return rejected;
     }
 }

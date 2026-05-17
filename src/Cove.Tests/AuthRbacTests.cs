@@ -94,39 +94,47 @@ public class PermissionRegistryTests
     }
 
     [Fact]
-    public void RegisterExtensionPermissions_silently_drops_unprefixed_keys()
+    public void RegisterExtensionPermissions_reports_unprefixed_keys()
     {
         var reg = new PermissionRegistry();
-        reg.RegisterExtensionPermissions("notif", new[]
+        var rejected = reg.RegisterExtensionPermissions("notif", new[]
         {
             new PermissionDefinition("totally.invalid", "Other", "x", false, null, "extension:notif"),
         });
         Assert.False(reg.IsKnown("totally.invalid"));
+        var rejection = Assert.Single(rejected);
+        Assert.Equal("notif", rejection.ExtensionId);
+        Assert.Equal("totally.invalid", rejection.PermissionKey);
+        Assert.Contains("notif.", rejection.Reason);
     }
 
     [Fact]
-    public void RegisterExtensionPermissions_silently_drops_wildcard()
+    public void RegisterExtensionPermissions_reports_wildcard()
     {
         var reg = new PermissionRegistry();
         var beforeCount = reg.All.Count;
-        reg.RegisterExtensionPermissions("notif", new[]
+        var rejected = reg.RegisterExtensionPermissions("notif", new[]
         {
             new PermissionDefinition("*", "Other", "x", false, null, "extension:notif"),
         });
         // "*" is a core meta-permission already; the extension cannot redefine it,
         // and no new keys should have been added.
         Assert.Equal(beforeCount, reg.All.Count);
+        var rejection = Assert.Single(rejected);
+        Assert.Equal("*", rejection.PermissionKey);
+        Assert.Contains("wildcard", rejection.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void RegisterExtensionPermissions_accepts_prefixed_keys()
     {
         var reg = new PermissionRegistry();
-        reg.RegisterExtensionPermissions("notif", new[]
+        var rejected = reg.RegisterExtensionPermissions("notif", new[]
         {
             new PermissionDefinition("notif.read", "Notif", "Read notifications", false, null, "extension:notif"),
             new PermissionDefinition("notif.write", "Notif", "Write notifications", false, ["notif.read"], "extension:notif"),
         });
+        Assert.Empty(rejected);
         Assert.True(reg.IsKnown("notif.read"));
         Assert.True(reg.IsKnown("notif.write"));
         var expanded = reg.Expand(["notif.write"]);

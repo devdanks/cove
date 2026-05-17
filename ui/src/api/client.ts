@@ -34,6 +34,7 @@ import type {
   EngagementInteraction, EngagementInteractionWrite,
   SceneHistory,
   PaginatedResponse, Stats, SystemStatus, CoveConfig, JobInfo,
+  DatabaseMigrationResult,
   ScraperSummary,
   DownloaderDescriptor,
   DownloaderBatchStartRequest,
@@ -1069,10 +1070,11 @@ export const metadata = {
 export const database = {
   backup: () => request<{ backupPath: string; sizeBytes: number; timestamp: string }>("/database/backup", { method: "POST" }),
   restore: (backupPath: string) =>
-    request<{ message: string; backupPath: string }>("/database/restore", {
+    request<{ message: string; backupPath: string; preRestoreBackupPath: string | null }>("/database/restore", {
       method: "POST",
       body: JSON.stringify({ backupPath }),
     }),
+  migrate: () => request<DatabaseMigrationResult>("/database/migrate", { method: "POST" }),
   latestBackup: async () => {
     const result = await requestOptional<{ path: string }>("/jobs/backup/latest");
     return result?.path ?? null;

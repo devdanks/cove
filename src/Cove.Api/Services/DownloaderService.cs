@@ -262,6 +262,7 @@ public class DownloaderService(
         var batchItems = items.Select((item, index) => new IndexedBatchItem(item, index)).ToList();
         var issues = new ConcurrentQueue<string>(expansion.Issues.Select(issue => $"{issue.Label}: {issue.Reason}"));
         var importedPaths = new ConcurrentBag<string>();
+        var successfulItems = new ConcurrentBag<DownloaderBatchItemDto>();
         var reservedDownloads = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         var processed = 0;
         var succeeded = 0;
@@ -299,6 +300,7 @@ public class DownloaderService(
                         importedPaths.Add(result.LocalPath);
                         if (importedEntityId.HasValue)
                             await AttachBatchRelationshipsAsync(resolvedItem.Request.Entity, importedEntityId.Value, batchItem.Item, token);
+                        successfulItems.Add(batchItem.Item);
                         Interlocked.Increment(ref succeeded);
                     }
                     else
@@ -334,6 +336,8 @@ public class DownloaderService(
                     progress?.Report(percent, BuildBatchProgressMessage(completed, batchItems.Count, label));
                 }
             });
+
+        await ApplyBatchGroupMetadataAsync(successfulItems.ToList(), followUp, progress, issues, ct);
 
         var followUpJobId = TryQueueFollowUpGenerateJob(followUp.Generate, importedPaths, progress);
         var summary = new DownloaderBatchExecutionSummary(
@@ -575,6 +579,37 @@ public class DownloaderService(
             : null;
     }
 
+    internal static ScrapedGroupDto? ConvertScrapeResultToGroupMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    {
+        if (result.Count == 0)
+            return null;
+
+        var dto = new ScrapedGroupDto
+        {
+            Name = GetScrapeResultString(result, "Name", "name", "Title", "title"),
+            Aliases = GetScrapeResultStringList(result, "Aliases", "aliases", "Alias", "alias"),
+            Duration = GetScrapeResultInt(result, "Duration", "duration", "DurationSeconds", "durationSeconds"),
+            Date = GetScrapeResultString(result, "Date", "date", "ReleaseDate", "releaseDate"),
+            Director = GetScrapeResultString(result, "Director", "director"),
+            Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
+            Synopsis = GetScrapeResultString(result, "Synopsis", "synopsis", "Description", "description", "Details", "details"),
+            Rating = GetScrapeResultInt(result, "Rating", "rating"),
+            ImageUrl = GetScrapeResultString(result, "Image", "image", "ImageUrl", "imageUrl", "FrontImage", "frontImage", "FrontImageUrl", "frontImageUrl"),
+            Urls = MergeDistinctStrings(GetScrapeResultStringList(result, "URLs", "urls", "URL", "url", "Links", "links"), sourceUrl),
+            StudioName = GetScrapeResultString(result, "Studio", "studio", "StudioName", "studioName"),
+            TagNames = GetScrapeResultStringList(result, "Tags", "tags", "Tag", "tag", "TagNames", "tagNames"),
+        };
+
+        return HasMetadataContent(dto.Name, dto.Details, dto.Synopsis, dto.Date, dto.Director, dto.StudioName, dto.ImageUrl)
+            || dto.Aliases.Count > 0
+            || dto.Duration.HasValue
+            || dto.Rating.HasValue
+            || dto.TagNames.Count > 0
+            || dto.Urls.Count > 0
+            ? dto
+            : null;
+    }
+
     internal static ScrapedAudioMetadata? MergeAudioMetadata(ScrapedAudioMetadata? primary, ScrapedAudioMetadata? secondary)
     {
         if (primary == null)
@@ -660,6 +695,31 @@ public class DownloaderService(
             PerformerNames = MergeDistinctStrings(primary.PerformerNames, secondary.PerformerNames),
             TagNames = ChoosePreferredNames(primary.TagNames, secondary.TagNames),
             GalleryTitle = ChooseValue(primary.GalleryTitle, secondary.GalleryTitle),
+        };
+    }
+
+    internal static ScrapedGroupDto? MergeGroupMetadata(ScrapedGroupDto? primary, ScrapedGroupDto? secondary)
+    {
+        if (primary == null)
+            return secondary;
+
+        if (secondary == null)
+            return primary;
+
+        return primary with
+        {
+            Name = ChooseValue(primary.Name, secondary.Name),
+            Aliases = MergeDistinctStrings(primary.Aliases, secondary.Aliases),
+            Duration = primary.Duration ?? secondary.Duration,
+            Date = ChooseValue(primary.Date, secondary.Date),
+            Director = ChooseValue(primary.Director, secondary.Director),
+            Details = ChooseValue(primary.Details, secondary.Details),
+            Synopsis = ChooseValue(primary.Synopsis, secondary.Synopsis),
+            Rating = primary.Rating ?? secondary.Rating,
+            ImageUrl = ChooseValue(primary.ImageUrl, secondary.ImageUrl),
+            Urls = MergeDistinctStrings(primary.Urls, secondary.Urls),
+            StudioName = ChooseValue(primary.StudioName, secondary.StudioName),
+            TagNames = ChoosePreferredNames(primary.TagNames, secondary.TagNames),
         };
     }
 
@@ -786,6 +846,97 @@ public class DownloaderService(
             ? null
             : ConvertScrapeResultToTextMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "text", ct) ?? [], secondaryUrl);
         return MergeTextMetadata(primary, secondary);
+    }
+
+    private async Task<ScrapedGroupDto?> BuildMergedGroupMetadataAsync(IServiceProvider services, IReadOnlyList<string> urls, CancellationToken ct)
+    {
+        var scraperService = services.GetRequiredService<ScraperService>();
+        ScrapedGroupDto? merged = null;
+        foreach (var url in urls.Where(url => !string.IsNullOrWhiteSpace(url)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var scraped = ConvertScrapeResultToGroupMetadata(await ScrapeMetadataAsync(scraperService, url, "group", ct) ?? [], url);
+            merged = MergeGroupMetadata(merged, scraped);
+        }
+
+        return merged;
+    }
+
+    private async Task ApplyBatchGroupMetadataAsync(
+        IReadOnlyList<DownloaderBatchItemDto> items,
+        DownloaderBatchFollowUpDto followUp,
+        Cove.Core.Interfaces.IJobProgress? progress,
+        ConcurrentQueue<string> issues,
+        CancellationToken ct)
+    {
+        var autoApplyItems = items
+            .Where(item => item.AutoApplyMetadata || followUp.AutoApplyMetadata)
+            .Where(item => item.GroupIds is { Count: > 0 })
+            .ToList();
+
+        if (autoApplyItems.Count == 0)
+            return;
+
+        var groupCounts = autoApplyItems
+            .SelectMany(item => item.GroupIds!.Select(group => group.GroupId))
+            .Where(groupId => groupId > 0)
+            .GroupBy(groupId => groupId)
+            .Where(group => group.Count() > 1)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        if (groupCounts.Count == 0)
+            return;
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+        var metadataApplyService = scope.ServiceProvider.GetRequiredService<IGroupMetadataApplyService>();
+        var groups = await db.Groups
+            .AsNoTracking()
+            .Include(group => group.Urls)
+            .Where(group => groupCounts.Keys.Contains(group.Id))
+            .ToListAsync(ct);
+
+        foreach (var group in groups)
+        {
+            var urls = group.Urls
+                .Select(url => url.Url)
+                .Where(url => !string.IsNullOrWhiteSpace(url))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (urls.Count == 0)
+                continue;
+
+            try
+            {
+                progress?.Report(0.965d, $"Looking up group metadata for {group.Name}...");
+                var metadata = await BuildMergedGroupMetadataAsync(scope.ServiceProvider, urls, ct);
+                if (metadata == null)
+                    continue;
+
+                var options = BuildBatchGroupMetadataApplyOptions(group.Id, autoApplyItems, followUp);
+                progress?.Report(0.975d, $"Applying group metadata for {group.Name}...");
+                await metadataApplyService.ApplyAsync(group.Id, metadata, options, ct: ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                issues.Enqueue($"{group.Name}: failed to apply group metadata ({ex.Message}).");
+                logger.LogWarning(ex, "Batch group metadata apply failed for group {GroupId}", group.Id);
+            }
+        }
+    }
+
+    private static DownloaderMetadataApplyOptions BuildBatchGroupMetadataApplyOptions(int groupId, IReadOnlyList<DownloaderBatchItemDto> items, DownloaderBatchFollowUpDto followUp)
+    {
+        var groupItems = items.Where(item => item.GroupIds?.Any(group => group.GroupId == groupId) == true).ToList();
+        return new DownloaderMetadataApplyOptions(
+            CreateMissingTags: groupItems.Any(item => item.CreateMissingTags) || followUp.CreateMissingTags,
+            CreateMissingPerformers: false,
+            CreateMissingStudio: groupItems.Any(item => item.CreateMissingStudio) || followUp.CreateMissingStudio,
+            MarkOrganized: groupItems.Any(item => item.MarkOrganized) || followUp.MarkOrganized);
     }
 
     internal async Task<bool> ApplyAudioMetadataAsync(int audioId, ScrapedAudioMetadata metadata, CancellationToken ct, DownloaderMetadataApplyOptions? options = null)
@@ -1146,6 +1297,36 @@ public class DownloaderService(
         }
 
         return NormalizeNames(values);
+    }
+
+    private static int? GetScrapeResultInt(IReadOnlyDictionary<string, object> result, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            foreach (var (entryKey, entryValue) in result)
+            {
+                if (!string.Equals(entryKey, key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (entryValue is JsonElement element)
+                {
+                    if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var intValue))
+                        return intValue;
+                    if (element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out var parsedValue))
+                        return parsedValue;
+                }
+                else if (entryValue is int intValue)
+                {
+                    return intValue;
+                }
+                else if (entryValue != null && int.TryParse(entryValue.ToString(), out var parsedValue))
+                {
+                    return parsedValue;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static void AddJsonElementStringListValues(List<string> values, JsonElement element)

@@ -88,9 +88,8 @@ public sealed class BootstrapAuthService : IHostedService
             using var scope = _services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
 
-            await AuthorizationSqlBootstrap.EnsureAsync(db, ct);
-            await UpsertPermissionsAsync(db, ct);
-            await SeedBuiltinRolesAsync(db, ct);
+            var livePermissions = await UpsertPermissionsAsync(db, ct);
+            await SeedBuiltinRolesAsync(db, livePermissions, ct);
             if (includeOwnerUser)
                 await EnsureOwnerUserAsync(db, ct);
 
@@ -143,10 +142,11 @@ public sealed class BootstrapAuthService : IHostedService
         }
     }
 
-    private async Task UpsertPermissionsAsync(CoveContext db, CancellationToken ct)
+    private async Task<IReadOnlyList<PermissionDefinition>> UpsertPermissionsAsync(CoveContext db, CancellationToken ct)
     {
         var existing = await db.Permissions.ToDictionaryAsync(p => p.Key, ct);
-        var live = _registry.All.ToDictionary(p => p.Key);
+        var livePermissions = _registry.All;
+        var live = livePermissions.ToDictionary(p => p.Key);
 
         foreach (var def in live.Values)
         {
@@ -183,9 +183,10 @@ public sealed class BootstrapAuthService : IHostedService
         }
 
         await db.SaveChangesAsync(ct);
+        return livePermissions;
     }
 
-    private async Task SeedBuiltinRolesAsync(CoveContext db, CancellationToken ct)
+    private async Task SeedBuiltinRolesAsync(CoveContext db, IReadOnlyList<PermissionDefinition> livePermissions, CancellationToken ct)
     {
         var byName = await db.Roles.Include(r => r.Permissions).ToDictionaryAsync(r => r.Name, ct);
 
@@ -224,7 +225,7 @@ public sealed class BootstrapAuthService : IHostedService
         // Owner: always has *, even after upgrades.
         EnsurePermissions(db, owner, ["*"]);
         EnsurePermissions(db, admin, [Permissions.ApiTokensWrite, Permissions.ShareLinksWrite, Permissions.AiDataRead, Permissions.AiDataClear]);
-        EnsurePermissions(db, admin, _registry.All
+        EnsurePermissions(db, admin, livePermissions
             .Where(IsDefaultAdminExtensionPermission)
             .Select(permission => permission.Key)
             .ToArray());

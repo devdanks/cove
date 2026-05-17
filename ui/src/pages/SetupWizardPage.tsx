@@ -30,6 +30,7 @@ type SetupMode = "fresh" | "stash" | "backup" | null;
 
 interface BackupRestoreResultSummary {
   backupPath: string;
+  preRestoreBackupPath: string | null;
   configBackupPath: string | null;
 }
 
@@ -486,12 +487,12 @@ export function SetupWizardPage({ config, onComplete }: Props) {
         throw new Error("Confirm that restoring will replace the current Cove data first.");
       }
 
-      await database.restore(backupPath);
+      const restoreResult = await database.restore(backupPath);
       if (configBackupPath) {
         await database.restoreConfig(configBackupPath);
       }
 
-      return { backupPath, configBackupPath: configBackupPath || null };
+      return { backupPath, preRestoreBackupPath: restoreResult.preRestoreBackupPath, configBackupPath: configBackupPath || null };
     },
     onSuccess: async (result) => {
       setError(null);
@@ -1139,6 +1140,11 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                     <div>
                       <span className="font-medium text-foreground">Database backup:</span> {backupRestoreResult.backupPath}
                     </div>
+                    {backupRestoreResult.preRestoreBackupPath ? (
+                      <div>
+                        <span className="font-medium text-foreground">Pre-restore backup:</span> {backupRestoreResult.preRestoreBackupPath}
+                      </div>
+                    ) : null}
                     {backupRestoreResult.configBackupPath ? (
                       <div>
                         <span className="font-medium text-foreground">Config backup:</span> {backupRestoreResult.configBackupPath}

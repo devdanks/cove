@@ -26,12 +26,14 @@ public sealed class CoveWebApplicationFactory : WebApplicationFactory<Program>
 
     private readonly string _environmentName;
     private readonly int _port = ReserveLoopbackPort();
-    private readonly SqliteConnection _connection = CreateOpenConnection();
+    private readonly string _connectionString = $"Data Source=file:cove-{Guid.NewGuid():N}?mode=memory&cache=shared";
+    private readonly SqliteConnection _connection;
     private bool _serverStarted;
 
     public CoveWebApplicationFactory(string environmentName = "IntegrationTest")
     {
         _environmentName = environmentName;
+        _connection = CreateOpenConnection(_connectionString);
         UseKestrel(_port);
         ClientOptions.BaseAddress = new Uri($"http://127.0.0.1:{_port}");
     }
@@ -58,7 +60,7 @@ public sealed class CoveWebApplicationFactory : WebApplicationFactory<Program>
 
             services.AddScoped<ITokenService, IntegrationTestTokenService>();
             services.AddScoped(_ => new DbContextOptionsBuilder<CoveContext>()
-                .UseSqlite(_connection)
+                .UseSqlite(_connectionString)
                 .Options);
             services.AddScoped<CoveContext>(sp => new IntegrationTestCoveContext(
                 sp.GetRequiredService<DbContextOptions<CoveContext>>(),
@@ -123,9 +125,9 @@ public sealed class CoveWebApplicationFactory : WebApplicationFactory<Program>
             _connection.Dispose();
     }
 
-    private static SqliteConnection CreateOpenConnection()
+    private static SqliteConnection CreateOpenConnection(string connectionString)
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var connection = new SqliteConnection(connectionString);
         connection.Open();
         return connection;
     }

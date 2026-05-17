@@ -23,14 +23,55 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
 
     [HttpPost("restore")]
     [RequiresPermission(Permissions.SystemRestore)]
-    public async Task<IActionResult> RestoreDatabase([FromBody] RestoreBackupRequestDto request, CancellationToken ct)
+    public async Task<ActionResult<RestoreBackupResultDto>> RestoreDatabase([FromBody] RestoreBackupRequestDto request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.BackupPath))
             return BadRequest(new { message = "Backup path is required." });
 
         logger.LogWarning("Database restore initiated from {Path}", request.BackupPath);
+        var preRestoreBackup = await backupService.CreateBackupAsync("pre_restore", ct);
+        logger.LogInformation("Pre-restore database backup created at {Path}", preRestoreBackup.BackupPath);
         await backupService.RestoreBackupAsync(request.BackupPath, ct);
-        return Ok(new { message = "Database restored successfully", backupPath = request.BackupPath });
+        return Ok(new RestoreBackupResultDto("Database restored successfully", request.BackupPath, preRestoreBackup.BackupPath));
+    }
+
+    [HttpPost("migrate")]
+    [RequiresPermission(Permissions.SystemSettingsWrite)]
+    public async Task<ActionResult<DatabaseMigrationResultDto>> MigrateDatabase(CancellationToken ct)
+    {
+        var pendingMigrations = (await db.Database.GetPendingMigrationsAsync(ct)).ToArray();
+        if (pendingMigrations.Length == 0)
+        {
+            return Ok(new DatabaseMigrationResultDto(
+                "Database is already up to date",
+                [],
+                [],
+                null,
+                MigrationRequired: false));
+        }
+
+        logger.LogWarning(
+            "Manual database migration initiated for {Count} pending migration(s): {Migrations}",
+            pendingMigrations.Length,
+            string.Join(", ", pendingMigrations));
+
+        var backup = await backupService.CreateBackupAsync("pre_migration", ct);
+        logger.LogInformation("Pre-migration database backup created at {Path}", backup.BackupPath);
+
+        await db.Database.MigrateAsync(ct);
+
+        var remainingMigrations = (await db.Database.GetPendingMigrationsAsync(ct)).ToArray();
+        logger.LogInformation(
+            "Manual database migration completed. Applied {Count} migration(s); {RemainingCount} remain pending",
+            pendingMigrations.Length,
+            remainingMigrations.Length);
+
+        return Ok(new DatabaseMigrationResultDto(
+            "Database migrations applied successfully",
+            pendingMigrations,
+            remainingMigrations,
+            backup.BackupPath,
+            MigrationRequired: remainingMigrations.Length > 0));
     }
 
     [HttpPost("optimize")]

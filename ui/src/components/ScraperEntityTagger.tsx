@@ -32,17 +32,23 @@ import {
 } from "./TaggerShared";
 import { AlertCircle, Check, FileQuestion, Loader2, Search } from "lucide-react";
 
-type SupportedScraperEntity = "image" | "audio" | "text";
+type SupportedScraperEntity = "image" | "audio" | "text" | "group";
 
 interface ScraperEntityItem {
   id: number;
+  name?: string;
   title?: string;
+  aliases?: string;
+  duration?: number;
   code?: string;
   date?: string;
   details?: string;
+  director?: string;
+  synopsis?: string;
   studioName?: string;
   urls: string[];
   imagePath?: string | null;
+  frontImagePath?: string | null;
   tags?: Array<{ name: string }>;
   performers?: Array<{ name: string }>;
   updatedAt?: string;
@@ -76,9 +82,13 @@ interface ScraperResultMatch {
   selectedCandidateIndex?: number;
   scraperName: string;
   title?: string;
+  aliases: string[];
+  duration?: string;
   code?: string;
   date?: string;
   details?: string;
+  director?: string;
+  rating?: string;
   studioName?: string;
   creator?: string;
   imageUrl?: string;
@@ -90,8 +100,12 @@ interface ScraperResultMatch {
 
 interface ScraperReviewData {
   title?: string;
+  aliases: string[];
+  duration?: string;
   code?: string;
   details?: string;
+  director?: string;
+  rating?: string;
   creator?: string;
   date?: string;
   studio?: string;
@@ -156,6 +170,11 @@ function asStringList(value: unknown): string[] {
   return text.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+function splitAliases(value?: string) {
+  if (!value) return [];
+  return value.split(/[,;\n\r]/).map((item) => item.trim()).filter(Boolean);
+}
+
 function pickString(result: Record<string, unknown>, ...keys: string[]) {
   for (const key of keys) {
     const entry = Object.entries(result).find(([entryKey]) => entryKey.toLowerCase() === key.toLowerCase());
@@ -199,9 +218,9 @@ function getPerformerNamesForEntity(entityType: SupportedScraperEntity, rawResul
       ? pickStringList(rawResult, "Artist", "artist", "Creator", "creator", "Author", "author")
       : entityType === "text"
         ? pickStringList(rawResult, "Author", "author", "Creator", "creator", "Artist", "artist")
-        : [];
+          : [];
 
-  return [...new Set([...explicit, ...legacyValues])];
+        return entityType === "group" ? [] : [...new Set([...explicit, ...legacyValues])];
 }
 
 function parseAttemptResults(attempt: ScrapeAttempt): Record<string, unknown>[] {
@@ -233,12 +252,16 @@ function mapScraperResult(
     selectedCandidateIndex: index,
     scraperName: scraper.name,
     title: pickString(result, "Title", "Name"),
+    aliases: pickStringList(result, "Aliases", "Alias"),
+    duration: pickString(result, "Duration", "DurationSeconds"),
     code: pickString(result, "Code"),
     date: normalizeSceneDate(pickString(result, "Date", "ReleaseDate")),
     details: pickString(result, "Details", "Description", "Synopsis"),
+    director: pickString(result, "Director"),
+    rating: pickString(result, "Rating"),
     studioName: pickString(result, "Studio", "StudioName"),
     creator: entityType === "image" ? pickString(result, "Photographer") : undefined,
-    imageUrl: pickString(result, "Image", "ImageUrl", "ImageURL"),
+    imageUrl: pickString(result, "Image", "ImageUrl", "ImageURL", "FrontImage", "FrontImageUrl", "FrontImageURL"),
     urls: pickStringList(result, "URLs", "Url", "URL"),
     performerNames: getPerformerNamesForEntity(entityType, result),
     tagNames: normalizeTagList(pickStringList(result, "Tags", "Tag", "TagNames")),
@@ -248,9 +271,12 @@ function mapScraperResult(
 
 function buildCurrentReviewData(item: ScraperEntityItem): ScraperReviewData {
   return {
-    title: item.title,
+    title: item.title ?? item.name,
+    aliases: normalizeTagList(splitAliases(item.aliases)),
+    duration: item.duration == null ? undefined : String(item.duration),
     code: item.code,
-    details: item.details,
+    details: item.details ?? item.synopsis,
+    director: item.director,
     date: normalizeSceneDate(item.date),
     studio: item.studioName,
     urls: item.urls ?? [],
@@ -266,8 +292,12 @@ function buildScrapedReviewData(result?: ScraperResultMatch): ScraperReviewData 
 
   return {
     title: result.title,
+    aliases: result.aliases,
+    duration: result.duration,
     code: result.code,
     details: result.details,
+    director: result.director,
+    rating: result.rating,
     creator: result.creator,
     date: result.date,
     studio: result.studioName,
@@ -295,9 +325,12 @@ function buildDefaultApplyPlan(
   }
 
   const replaceFields: string[] = [];
-  if (scrapedData.title && scrapedData.title !== currentData.title) replaceFields.push("title");
+  if (scrapedData.title && scrapedData.title !== currentData.title) replaceFields.push(entityType === "group" ? "name" : "title");
   if (scrapedData.code && scrapedData.code !== currentData.code) replaceFields.push("code");
   if (scrapedData.details && scrapedData.details !== currentData.details) replaceFields.push("details");
+  if (entityType === "group" && scrapedData.director && scrapedData.director !== currentData.director) replaceFields.push("director");
+  if (entityType === "group" && scrapedData.duration && scrapedData.duration !== currentData.duration) replaceFields.push("duration");
+  if (entityType === "group" && scrapedData.rating && scrapedData.rating !== currentData.rating) replaceFields.push("rating");
   if (entityType === "image" && scrapedData.creator && scrapedData.creator !== currentData.creator) replaceFields.push("photographer");
   if (scrapedData.date && scrapedData.date !== currentData.date) replaceFields.push("date");
 
@@ -307,9 +340,10 @@ function buildDefaultApplyPlan(
     replaceFields,
     collectionModes: {
       studio: scrapedData.studio && scrapedData.studio !== currentData.studio ? "replace" : "skip",
+      aliases: entityType === "group" && scrapedData.aliases.length > 0 && !listsEqual(scrapedData.aliases, currentData.aliases) ? "merge" : "skip",
       urls: scrapedData.urls.length > 0 && !listsEqual(scrapedData.urls, currentData.urls) ? "merge" : "skip",
       tags: scrapedData.tags.length > 0 && !listsEqual(scrapedData.tags, currentData.tags) ? "merge" : "skip",
-      performers: scrapedData.performers.length > 0 && !listsEqual(scrapedData.performers, currentData.performers) ? "merge" : "skip",
+      performers: entityType !== "group" && scrapedData.performers.length > 0 && !listsEqual(scrapedData.performers, currentData.performers) ? "merge" : "skip",
     },
   };
 }
@@ -341,7 +375,7 @@ export function ScraperEntityTagger<T extends ScraperEntityItem>({ entityType, l
   const { data: tagPage } = useQuery({
     queryKey: ["scrape-dialog-tags"],
     queryFn: () => tags.find({ page: 1, perPage: 10000, sort: "name", direction: "asc" }),
-    enabled: items.length > 0,
+    enabled: items.length > 0 && entityType !== "group",
     staleTime: 60_000,
   });
   const { data: performerPage } = useQuery({
@@ -458,10 +492,12 @@ export function ScraperEntityTagger<T extends ScraperEntityItem>({ entityType, l
             <input type="checkbox" checked={preferences.createMissingTags} onChange={(event) => updatePreferences({ createMissingTags: event.target.checked })} className="rounded border-border" />
             Create missing tags
           </label>
-          <label className="flex items-center gap-2 text-xs text-foreground">
-            <input type="checkbox" checked={preferences.createMissingPerformers} onChange={(event) => updatePreferences({ createMissingPerformers: event.target.checked })} className="rounded border-border" />
-            Create missing performers
-          </label>
+          {entityType !== "group" && (
+            <label className="flex items-center gap-2 text-xs text-foreground">
+              <input type="checkbox" checked={preferences.createMissingPerformers} onChange={(event) => updatePreferences({ createMissingPerformers: event.target.checked })} className="rounded border-border" />
+              Create missing performers
+            </label>
+          )}
           <label className="flex items-center gap-2 text-xs text-foreground">
             <input type="checkbox" checked={preferences.createMissingStudio} onChange={(event) => updatePreferences({ createMissingStudio: event.target.checked })} className="rounded border-border" />
             Create missing studios
@@ -475,7 +511,7 @@ export function ScraperEntityTagger<T extends ScraperEntityItem>({ entityType, l
             entityType={entityType}
             item={item}
             title={getTitle(item)}
-            imageUrl={getImageUrl?.(item) ?? item.imagePath ?? undefined}
+            imageUrl={getImageUrl?.(item) ?? item.imagePath ?? item.frontImagePath ?? undefined}
             route={getRoute?.(item)}
             state={searchStates[item.id]}
             query={getQuery(item)}
@@ -685,17 +721,23 @@ function ScraperResultRow({
   saved?: boolean;
 }) {
   const scalarRows = [
-    { key: "title", label: "Title", current: currentData.title, scraped: result.title },
-    { key: "code", label: "Code", current: currentData.code, scraped: result.code },
+    { key: entityType === "group" ? "name" : "title", label: entityType === "group" ? "Name" : "Title", current: currentData.title, scraped: result.title },
+    ...(entityType === "group" ? [] : [{ key: "code", label: "Code", current: currentData.code, scraped: result.code }]),
     { key: "details", label: "Details", current: currentData.details, scraped: result.details, multiline: true },
+    ...(entityType === "group" ? [
+      { key: "director", label: "Director", current: currentData.director, scraped: result.director },
+      { key: "duration", label: "Duration", current: currentData.duration, scraped: result.duration },
+      { key: "rating", label: "Rating", current: currentData.rating, scraped: result.rating },
+    ] : []),
     ...(entityType === "image" ? [{ key: "photographer", label: "Photographer", current: currentData.creator, scraped: result.creator }] : []),
     { key: "date", label: "Date", current: currentData.date, scraped: result.date },
   ].filter((row) => Boolean(row.scraped));
 
   const collectionRows = [
+    ...(entityType === "group" ? [{ key: "aliases", label: "Aliases", current: currentData.aliases, scraped: result.aliases }] : []),
     { key: "urls", label: "URLs", current: currentData.urls, scraped: result.urls },
     { key: "tags", label: "Tags", current: currentData.tags, scraped: result.tagNames },
-    { key: "performers", label: "Performers", current: currentData.performers, scraped: result.performerNames },
+    ...(entityType === "group" ? [] : [{ key: "performers", label: "Performers", current: currentData.performers, scraped: result.performerNames }]),
   ].filter((row) => row.scraped.length > 0);
 
   return (
@@ -714,7 +756,7 @@ function ScraperResultRow({
             {result.date && <span>{result.date}</span>}
             {result.studioName && <span>{result.studioName}</span>}
             {result.tagNames.length > 0 && <span>{result.tagNames.length} tag(s)</span>}
-            {result.performerNames.length > 0 && <span>{result.performerNames.length} performer(s)</span>}
+            {entityType !== "group" && result.performerNames.length > 0 && <span>{result.performerNames.length} performer(s)</span>}
           </div>
         </div>
         {isSelected && onSave && !saved && (

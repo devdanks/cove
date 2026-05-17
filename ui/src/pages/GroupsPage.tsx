@@ -21,6 +21,7 @@ import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
 import { DynamicGroupFilterEditor, FILTER_DYNAMIC_SOURCE_KEY, defaultDynamicGroupFilterQueryJson } from "../components/DynamicGroupFilterEditor";
+import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 
 const SORT_OPTIONS = [
   { value: "sort_order", label: "Manual Order" },
@@ -53,7 +54,7 @@ export function GroupsPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list"] as const,
+    allowedDisplayModes: ["grid", "list", "tagger"] as const,
     allowInfinitePageSize: true,
   });
   const [showCreate, setShowCreate] = useState(false);
@@ -139,7 +140,7 @@ export function GroupsPage({ onNavigate }: Props) {
         sortOptions={SORT_OPTIONS}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
-        availableDisplayModes={["grid", "list"]}
+        availableDisplayModes={["grid", "list", "tagger"]}
         allowInfinitePageSize
         showPagingControls={!listData.infinitePageSize}
         selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
@@ -189,7 +190,20 @@ export function GroupsPage({ onNavigate }: Props) {
           </>
         }
       >
-      {displayMode === "grid" ? (
+      {displayMode === "tagger" ? (
+        <ScraperEntityTagger
+          entityType="group"
+          label="Group"
+          items={items}
+          selectedIds={selectedIds}
+          selecting={selecting}
+          onSelect={toggle}
+          getTitle={(group) => group.name}
+          getImageUrl={(group) => group.frontImagePath}
+          getRoute={(group) => ({ page: "group", id: group.id })}
+          queryKey="groups"
+        />
+      ) : displayMode === "grid" ? (
         manualOrderingEnabled ? (
           <SortableList
             items={items}

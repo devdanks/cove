@@ -279,7 +279,10 @@ public sealed class TokenService : ITokenService
                     expanded.IntersectWith(scopeSet);
                 }
             }
-            catch { /* ignore malformed scope */ }
+            catch (JsonException ex)
+            {
+                _log.LogWarning(ex, "Ignoring malformed scope permissions for API token {TokenId}", record.Id);
+            }
         }
 
         // best-effort last-used update (don't await)
@@ -291,7 +294,10 @@ public sealed class TokenService : ITokenService
                     .Where(t => t.Id == tokenId)
                     .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastUsedAt, DateTime.UtcNow));
             }
-            catch { /* swallow */ }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Failed to update LastUsedAt for API token {TokenId}", tokenId);
+            }
         }, CancellationToken.None);
 
         return new CovePrincipal
@@ -386,7 +392,11 @@ public sealed class TokenService : ITokenService
             List<string>? scope = null;
             if (!string.IsNullOrEmpty(t.ScopePermissions))
             {
-                try { scope = JsonSerializer.Deserialize<List<string>>(t.ScopePermissions); } catch { }
+                try { scope = JsonSerializer.Deserialize<List<string>>(t.ScopePermissions); }
+                catch (JsonException ex)
+                {
+                    _log.LogWarning(ex, "Ignoring malformed scope permissions while listing API token {TokenId}", t.Id);
+                }
             }
             return new ApiTokenDto(t.Id, t.Name, t.Prefix, scope, t.CreatedAt, t.LastUsedAt, t.ExpiresAt);
         }).ToList();
@@ -421,7 +431,7 @@ public sealed class TokenService : ITokenService
             user.IsActive, user.IsLocked, user.IsSystem, user.MustChangePassword,
             !string.IsNullOrWhiteSpace(user.PasswordHash),
             user.LastLoginAt, user.LastLoginIp, user.CreatedAt, roleNames,
-            UserService.ParseUiPreferences(user.UiPreferencesJson));
+            UserService.ParseUiPreferences(user.UiPreferencesJson, _log));
     }
 
     public static string HashToken(string raw)

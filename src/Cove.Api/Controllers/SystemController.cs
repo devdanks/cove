@@ -26,7 +26,8 @@ public class SystemController(
     CoveContext db,
     ICurrentPrincipalAccessor principalAccessor,
     IAuditService auditService,
-    IHostApplicationLifetime applicationLifetime) : ControllerBase
+    IHostApplicationLifetime applicationLifetime,
+    ILogger<SystemController> logger) : ControllerBase
 {
     private static readonly Dictionary<string, string> UiAssetContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -41,7 +42,9 @@ public class SystemController(
     [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public async Task<ActionResult<SystemStatusDto>> GetStatus()
     {
-        string[] pending;
+        string[]? pending;
+        var migrationStatusUnknown = false;
+        string? migrationStatusError = null;
         try
         {
             if (!await db.Database.CanConnectAsync(HttpContext.RequestAborted))
@@ -50,28 +53,36 @@ public class SystemController(
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, DatabaseUnavailableMiddleware.CreateResponse());
             }
 
-            pending = (await db.Database.GetPendingMigrationsAsync()).ToArray();
+            pending = (await db.Database.GetPendingMigrationsAsync(HttpContext.RequestAborted)).ToArray();
         }
         catch (Exception ex) when (DatabaseUnavailableExceptionClassifier.IsTransientDatabaseConnectionFailure(ex))
         {
             Response.Headers.RetryAfter = DatabaseUnavailableMiddleware.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             return StatusCode(StatusCodes.Status503ServiceUnavailable, DatabaseUnavailableMiddleware.CreateResponse());
         }
-        catch
+        catch (Exception ex)
         {
-            pending = [];
+            logger.LogError(ex, "Failed to determine pending database migrations");
+            pending = null;
+            migrationStatusUnknown = true;
+            migrationStatusError = ex.Message;
         }
 
         var canSeeSensitivePaths = principalAccessor.Current?.Has(Permissions.SystemSettingsWrite) == true;
+        var migrationRequired = pending is { Length: > 0 };
 
         return Ok(new SystemStatusDto(
             Version: GetType().Assembly.GetName().Version?.ToString() ?? "0.1.0",
             AppDir: canSeeSensitivePaths ? AppContext.BaseDirectory : null,
             ConfigFile: canSeeSensitivePaths ? configService.ConfigPath : null,
             DatabasePath: "PostgreSQL",
-            MigrationRequired: pending.Length > 0,
-            PendingMigrations: pending.Length > 0 ? pending : null,
-            AuthEnabled: coveConfiguration.Auth?.Enabled ?? false
+            MigrationRequired: migrationRequired,
+            PendingMigrations: migrationRequired ? pending : null,
+            AuthEnabled: coveConfiguration.Auth?.Enabled ?? false,
+            MigrationStatusUnknown: migrationStatusUnknown,
+            MigrationStatusError: canSeeSensitivePaths
+                ? migrationStatusError
+                : migrationStatusUnknown ? "Migration status check failed. See server logs." : null
         ));
     }
 

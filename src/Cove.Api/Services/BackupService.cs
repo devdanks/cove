@@ -11,7 +11,8 @@ namespace Cove.Api.Services;
 public class BackupService(
     IJobService jobService,
     CoveConfiguration config,
-    ILogger<BackupService> logger) : IBackupService
+    ILogger<BackupService> logger,
+    string? dataRootOverride = null) : IBackupService
 {
     private enum BackupFormat
     {
@@ -19,7 +20,11 @@ public class BackupService(
         CustomDump,
     }
 
-    private static string BackupDir => CoveDefaultPaths.GetDataSubdirectory("backups");
+    private string DataRoot => dataRootOverride ?? Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "cove");
+
+    private string BackupDir => Path.Combine(DataRoot, "backups");
 
     public async Task<BackupResultDto> CreateBackupAsync(string? reason = null, CancellationToken ct = default)
     {
@@ -130,14 +135,7 @@ public class BackupService(
         return Task.FromResult(latest);
     }
 
-    private static string ConfigSourcePath
-    {
-        get
-        {
-            var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            return Path.Combine(baseDir, "cove", "cove-config.json");
-        }
-    }
+    private string ConfigSourcePath => Path.Combine(DataRoot, "cove-config.json");
 
     public Task<ConfigBackupResultDto?> CreateConfigBackupAsync(string? reason = null, CancellationToken ct = default)
     {
