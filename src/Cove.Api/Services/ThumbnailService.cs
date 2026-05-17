@@ -142,6 +142,10 @@ public class ThumbnailService(
     private const int SpriteFrameCount = 81; // 9x9 grid
     private const int SpriteFrameSize = 160; // px
 
+    // Corrupt media can crash FFmpeg.AutoGen in-process and take down the API.
+    // Keep thumbnail extraction out-of-process so failures stay isolated to ffmpeg.
+    private static bool UseInProcessVideoFrameExtraction => false;
+
     public Task<string?> GetSceneThumbnailPathAsync(int sceneId, CancellationToken ct)
     {
         // Cover images are only created by an explicit generate task, never on-demand.
@@ -944,6 +948,9 @@ public class ThumbnailService(
 
     private async Task<bool> TryGenerateSceneThumbnailViaInProcessAsync(string ffmpegPath, string filePath, string thumbPath, string tempPath, double seekSeconds, CancellationToken ct)
     {
+        if (!UseInProcessVideoFrameExtraction)
+            return false;
+
         FfmpegInProcess.EnsureInitialized(ffmpegPath, config.EnableFfmpegHwAccel);
         if (!FfmpegInProcess.IsAvailable)
             return false;
@@ -1264,6 +1271,9 @@ public class ThumbnailService(
 
     private async Task<bool> TryGenerateSceneSpriteViaInProcessAsync(string ffmpegPath, string filePath, string spritePath, string vttPath, int frameCount, int cols, int rows, double interval, double duration, CancellationToken ct)
     {
+        if (!UseInProcessVideoFrameExtraction)
+            return false;
+
         FfmpegInProcess.EnsureInitialized(ffmpegPath, config.EnableFfmpegHwAccel);
         if (!FfmpegInProcess.IsAvailable)
             return false;

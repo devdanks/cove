@@ -84,6 +84,63 @@ public class TagsControllerSegmentTests
     }
 
     [Fact]
+    public async Task TagDetail_UsesLiveUsageCountsInsteadOfStoredCounters()
+    {
+        await using var context = CreateContext();
+
+        var tag = new Tag { Name = "Body" };
+        var scene = new Scene { Title = "Imported Scene" };
+        var performer = new Performer { Name = "Performer" };
+        var studio = new Studio { Name = "Studio" };
+        var image = new Image { Title = "Image" };
+        var gallery = new Gallery { Title = "Gallery" };
+        var group = new Group { Name = "Group" };
+        context.AddRange(tag, scene, performer, studio, image, gallery, group);
+        await context.SaveChangesAsync();
+
+        context.AddRange(
+            new SceneTag { SceneId = scene.Id, TagId = tag.Id },
+            new ImageTag { ImageId = image.Id, TagId = tag.Id },
+            new GalleryTag { GalleryId = gallery.Id, TagId = tag.Id },
+            new GroupTag { GroupId = group.Id, TagId = tag.Id },
+            new PerformerTag { PerformerId = performer.Id, TagId = tag.Id },
+            new StudioTag { StudioId = studio.Id, TagId = tag.Id },
+            new Segment
+            {
+                HostType = SegmentHostType.Scene,
+                HostId = scene.Id,
+                TagId = tag.Id,
+                Kind = "tag",
+                SourceKey = "user",
+                StartSec = 1,
+                EndSec = 2,
+            });
+        await context.SaveChangesAsync();
+
+        var storedTag = await context.Tags.SingleAsync(candidate => candidate.Id == tag.Id);
+        storedTag.SceneCount = 0;
+        storedTag.ImageCount = 0;
+        storedTag.GalleryCount = 0;
+        storedTag.GroupCount = 0;
+        storedTag.PerformerCount = 0;
+        storedTag.StudioCount = 0;
+        await context.SaveChangesAsync();
+
+        var controller = new TagsController(null!, context, null!, new CustomFieldService(context));
+
+        var detailResult = await controller.GetById(tag.Id, CancellationToken.None);
+        var detail = Assert.IsType<OkObjectResult>(detailResult.Result).Value as TagDetailDto;
+        Assert.NotNull(detail);
+        Assert.Equal(1, detail!.SceneCount);
+        Assert.Equal(1, detail.ImageCount);
+        Assert.Equal(1, detail.GalleryCount);
+        Assert.Equal(1, detail.GroupCount);
+        Assert.Equal(1, detail.PerformerCount);
+        Assert.Equal(1, detail.StudioCount);
+        Assert.Equal(1, detail.SegmentCount);
+    }
+
+    [Fact]
     public async Task TagSceneMarkerCount_TracksSceneSegmentsInsteadOfLegacyMarkers()
     {
         await using var context = CreateContext();

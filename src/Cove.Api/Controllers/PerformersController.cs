@@ -17,6 +17,8 @@ namespace Cove.Api.Controllers;
 [RequiresPermission(Permissions.PerformersRead)]
 public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
 {
+    private sealed record PerformerUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount);
+
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<PaginatedResponse<PerformerDto>>> Find(
@@ -37,7 +39,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         };
 
         var (items, totalCount) = await performerRepo.FindAsync(filter, findFilter, ct);
-        var dtos = items.Select(p => MapToDto(p)).ToList();
+        var usageCountsByPerformerId = await LoadPerformerUsageCountsAsync(items.Select(item => item.Id), ct);
+        var dtos = items.Select(p => MapToDto(p, usageCountsByPerformerId.GetValueOrDefault(p.Id))).ToList();
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, page, perPage));
     }
 
@@ -47,7 +50,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new PerformerFilter();
         var (items, totalCount) = await performerRepo.FindAsync(filter, findFilter, ct);
-        var dtos = items.Select(p => MapToDto(p)).ToList();
+        var usageCountsByPerformerId = await LoadPerformerUsageCountsAsync(items.Select(item => item.Id), ct);
+        var dtos = items.Select(p => MapToDto(p, usageCountsByPerformerId.GetValueOrDefault(p.Id))).ToList();
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -57,7 +61,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     {
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
         if (performer == null) return NotFound();
-        return Ok(MapToDto(performer));
+        return Ok(await MapToDetailDtoAsync(performer, ct));
     }
 
     [HttpPost]
@@ -90,7 +94,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.Aliases?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Performer, performer.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await performerRepo.GetByIdWithRelationsAsync(performer.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = performer.Id }, MapToDto(result!));
+        return CreatedAtAction(nameof(GetById), new { id = performer.Id }, await MapToDetailDtoAsync(result!, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -149,7 +153,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (dto.Aliases != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Performer, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     [HttpPost("{id:int}/scrape-url")]
@@ -177,7 +181,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         await performerRepo.UpdateAsync(performer, ct);
 
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     [HttpPost("{id:int}/scrape-preview")]
@@ -208,7 +212,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         await performerRepo.UpdateAsync(performer, ct);
 
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     private async Task<ResolvedPerformerScrape> ResolveScrapeAsync(Performer performer, PerformerScrapeRequestDto dto, CancellationToken ct)
@@ -298,7 +302,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
 
         await performerRepo.UpdateAsync(performer, ct);
         var updated = await performerRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]
@@ -365,7 +369,13 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         return NoContent();
     }
 
-    private PerformerDto MapToDto(Performer p, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null) => new(
+    private async Task<PerformerDto> MapToDetailDtoAsync(Performer performer, CancellationToken ct)
+    {
+        var usageCounts = (await LoadPerformerUsageCountsAsync([performer.Id], ct)).GetValueOrDefault(performer.Id);
+        return MapToDto(performer, usageCounts);
+    }
+
+    private PerformerDto MapToDto(Performer p, PerformerUsageCounts? usageCounts = null) => new(
         p.Id, p.Name, p.Disambiguation, p.Gender?.ToString(),
         p.Birthdate?.ToString("yyyy-MM-dd"), p.DeathDate?.ToString("yyyy-MM-dd"),
         p.Ethnicity, p.Country, p.EyeColor, p.HairColor, p.HeightCm, p.Weight,
@@ -376,11 +386,69 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         p.Aliases.Select(a => a.Alias).ToList(),
         p.PerformerTags.Where(pt => pt.Tag != null).Select(pt => TagDtoMapping.MapTagDto(pt.Tag!)).ToList(),
         p.RemoteIds.Select(remoteId => new PerformerRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
-        sceneCount ?? p.SceneCount, imageCount ?? p.ImageCount, galleryCount ?? p.GalleryCount, groupCount ?? 0,
+        usageCounts?.SceneCount ?? p.SceneCount,
+        usageCounts?.ImageCount ?? p.ImageCount,
+        usageCounts?.GalleryCount ?? p.GalleryCount,
+        usageCounts?.GroupCount ?? 0,
         p.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, p.Id, p.UpdatedAt) : null,
         p.CustomFields,
         p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o")
     );
+
+    private async Task<Dictionary<int, PerformerUsageCounts>> LoadPerformerUsageCountsAsync(IEnumerable<int> performerIds, CancellationToken ct)
+    {
+        var ids = performerIds
+            .Where(performerId => performerId > 0)
+            .Distinct()
+            .ToArray();
+
+        if (ids.Length == 0)
+            return [];
+
+        var sceneCounts = await db.Set<ScenePerformer>()
+            .AsNoTracking()
+            .Where(scenePerformer => ids.Contains(scenePerformer.PerformerId))
+            .GroupBy(scenePerformer => scenePerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Select(scenePerformer => scenePerformer.SceneId).Distinct().Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var imageCounts = await db.Set<ImagePerformer>()
+            .AsNoTracking()
+            .Where(imagePerformer => ids.Contains(imagePerformer.PerformerId))
+            .GroupBy(imagePerformer => imagePerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Select(imagePerformer => imagePerformer.ImageId).Distinct().Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var galleryCounts = await db.Set<GalleryPerformer>()
+            .AsNoTracking()
+            .Where(galleryPerformer => ids.Contains(galleryPerformer.PerformerId))
+            .GroupBy(galleryPerformer => galleryPerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Select(galleryPerformer => galleryPerformer.GalleryId).Distinct().Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+
+        var directGroupRows = await db.GroupItems
+            .AsNoTracking()
+            .Where(groupItem => groupItem.HostType == "performer" && ids.Contains(groupItem.HostId))
+            .Select(groupItem => new { PerformerId = groupItem.HostId, groupItem.GroupId })
+            .ToListAsync(ct);
+        var sceneGroupRows = await (
+            from scenePerformer in db.Set<ScenePerformer>().AsNoTracking()
+            join groupItem in db.GroupItems.AsNoTracking().Where(item => item.SceneId.HasValue)
+                on scenePerformer.SceneId equals groupItem.SceneId!.Value
+            where ids.Contains(scenePerformer.PerformerId)
+            select new { scenePerformer.PerformerId, groupItem.GroupId }
+        ).ToListAsync(ct);
+        var groupCounts = directGroupRows
+            .Concat(sceneGroupRows)
+            .GroupBy(item => item.PerformerId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.GroupId).Distinct().Count());
+
+        return ids.ToDictionary(
+            id => id,
+            id => new PerformerUsageCounts(
+                sceneCounts.GetValueOrDefault(id),
+                imageCounts.GetValueOrDefault(id),
+                galleryCounts.GetValueOrDefault(id),
+                groupCounts.GetValueOrDefault(id)));
+    }
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
     private static T? ParseEnum<T>(string? value) where T : struct, Enum => Enum.TryParse<T>(value, true, out var e) ? e : null;

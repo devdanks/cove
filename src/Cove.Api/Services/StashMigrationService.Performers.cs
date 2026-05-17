@@ -1,11 +1,26 @@
 using Microsoft.Data.Sqlite;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
+using System.Text;
 
 namespace Cove.Api.Services;
 
 public partial class StashMigrationService
 {
+    private static readonly HashSet<string> SupportedCustomPerformerImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".avif",
+        ".bmp",
+        ".gif",
+        ".heic",
+        ".jpeg",
+        ".jpg",
+        ".jxl",
+        ".png",
+        ".svg",
+        ".webp",
+    };
+
     private async Task<Dictionary<int, int>> ImportPerformersAsync(SqliteConnection conn, Dictionary<string, string> blobMap, Dictionary<int, int> tagIdMap, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -52,9 +67,20 @@ public partial class StashMigrationService
         }
 
         var idMap = new Dictionary<int, int>(rows.Count);
+        var customPerformerImageFiles = GetCustomPerformerImageFiles(_currentImportCustomPerformerImageLocation);
+        var customPerformerImageBlobIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         const int PerformerBatchSize = 500;
         var pendingBatch = new List<(int StashId, Performer Entity)>(PerformerBatchSize);
         progress.Report(startProgress, "Importing performers...");
+        if (!string.IsNullOrWhiteSpace(_currentImportCustomPerformerImageLocation)
+            && customPerformerImageFiles.Count == 0
+            && !Directory.Exists(_currentImportCustomPerformerImageLocation))
+        {
+            _logger.LogWarning(
+                "Configured Stash custom performer image location does not exist: {Path}",
+                _currentImportCustomPerformerImageLocation);
+        }
+
         _logger.LogDebug(
             "[StashTiming] phase=performers checkpoint=loaded rows={Rows} urlOwners={UrlOwners} aliasOwners={AliasOwners} tagOwners={TagOwners} remoteIdOwners={RemoteIdOwners} elapsedMs={ElapsedMilliseconds:F0}",
             rows.Count,
@@ -100,6 +126,16 @@ public partial class StashMigrationService
                 .DistinctBy(s => (s.Ep, s.Rid))
                 .ToList();
             var (careerStart, careerEnd) = ParseCareerLength(row.CareerLength);
+            var imageBlobId = GetBlobId(blobMap, row.ImageBlob);
+            if (imageBlobId is null && string.IsNullOrWhiteSpace(row.ImageBlob))
+            {
+                imageBlobId = await TryImportCustomPerformerImageAsync(
+                    customPerformerImageFiles,
+                    customPerformerImageBlobIds,
+                    row.Name,
+                    ct);
+            }
+
             var entity = new Performer
             {
                 Name = row.Name,
@@ -124,7 +160,7 @@ public partial class StashMigrationService
                 Favorite = row.Favorite,
                 Details = row.Details,
                 IgnoreAutoTag = row.IgnoreAutoTag,
-                ImageBlobId = GetBlobId(blobMap, row.ImageBlob),
+                ImageBlobId = imageBlobId,
                 Urls = performerUrls.Select(url => new PerformerUrl { Url = url }).ToList(),
                 Aliases = performerAliases.Select(alias => new PerformerAlias { Alias = alias }).ToList(),
                 PerformerTags = performerTags.Select(tagId => new PerformerTag { TagId = tagId }).ToList(),
@@ -146,6 +182,65 @@ public partial class StashMigrationService
 
         _logger.LogInformation("Imported {Count} performers in {Elapsed}", idMap.Count, stopwatch.Elapsed);
         return idMap;
+    }
+
+    private static IReadOnlyList<string> GetCustomPerformerImageFiles(string? customPerformerImageLocation)
+    {
+        if (string.IsNullOrWhiteSpace(customPerformerImageLocation) || !Directory.Exists(customPerformerImageLocation))
+            return [];
+
+        return Directory.EnumerateFiles(customPerformerImageLocation, "*", SearchOption.AllDirectories)
+            .Where(path => SupportedCustomPerformerImageExtensions.Contains(Path.GetExtension(path)))
+            .OrderBy(path => Path.GetRelativePath(customPerformerImageLocation, path).Replace('\\', '/'), StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private async Task<string?> TryImportCustomPerformerImageAsync(
+        IReadOnlyList<string> customPerformerImageFiles,
+        Dictionary<string, string> customPerformerImageBlobIds,
+        string performerName,
+        CancellationToken ct)
+    {
+        if (customPerformerImageFiles.Count == 0 || string.IsNullOrWhiteSpace(performerName))
+            return null;
+
+        var fileIndex = (int)(ComputeStablePerformerImageHash(performerName) % (ulong)customPerformerImageFiles.Count);
+        var sourcePath = customPerformerImageFiles[fileIndex];
+        if (customPerformerImageBlobIds.TryGetValue(sourcePath, out var existingBlobId))
+            return existingBlobId;
+
+        try
+        {
+            await using var sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+            var contentType = DetectImageContentType(sourceStream);
+            var blobId = await _blobService.StoreBlobAsync(sourceStream, contentType, ct);
+            customPerformerImageBlobIds[sourcePath] = blobId;
+            return blobId;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to import Stash custom performer image from {Path}", sourcePath);
+            return null;
+        }
+    }
+
+    private static ulong ComputeStablePerformerImageHash(string performerName)
+    {
+        const ulong offsetBasis = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+
+        var hash = offsetBasis;
+        foreach (var value in Encoding.UTF8.GetBytes(performerName))
+        {
+            hash ^= value;
+            hash *= prime;
+        }
+
+        return hash;
     }
 
     private async Task SaveImportedPerformerChildrenAsync(

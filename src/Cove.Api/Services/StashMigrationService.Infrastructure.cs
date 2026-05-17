@@ -354,7 +354,7 @@ WHERE files.zip_file_id IS NOT NULL";
     private static string GetImportedBaseFileKey(int parentFolderId, string basename)
         => $"{parentFolderId}|{basename}";
 
-    private async Task ImportLibraryPathsAsync(string stashDbPath, CancellationToken ct)
+    private async Task ImportStashConfigAsync(string stashDbPath, CancellationToken ct)
     {
         try
         {
@@ -362,40 +362,94 @@ WHERE files.zip_file_id IS NOT NULL";
             var configPath = Path.Combine(configDir, "config.yml");
             if (!File.Exists(configPath))
             {
-                _logger.LogWarning("Stash config.yml not found at {Path}, skipping library path import", configPath);
+                _logger.LogWarning("Stash config.yml not found at {Path}, skipping config import", configPath);
                 return;
             }
 
             var stashConfig = ParseStashConfig(configPath);
-            var paths = stashConfig.Paths;
-            if (paths.Count == 0)
+            var dto = _configService.GetConfig();
+            var (addedPaths, addedMetadataServers, updatedMetadataServers) = MergeStashConfigIntoCoveConfig(dto, stashConfig);
+            if (addedPaths == 0 && addedMetadataServers == 0 && updatedMetadataServers == 0)
             {
-                _logger.LogInformation("No library paths found in Stash config");
+                _logger.LogInformation("No Stash config paths or metadata servers required importing");
                 return;
             }
 
-            var existingPaths = new HashSet<string>(_config.CovePaths.Select(p => p.Path), StringComparer.OrdinalIgnoreCase);
-            var dto = _configService.GetConfig();
-            foreach (var (path, excludeImage, excludeVideo) in paths)
-            {
-                if (existingPaths.Contains(path)) continue;
-                dto.CovePaths.Add(new CovePathDto
-                {
-                    Path = path,
-                    ExcludeImage = excludeImage,
-                    ExcludeVideo = excludeVideo,
-                    ExcludeAudio = false,
-                    ExcludeText = false,
-                });
-            }
-
             await _configService.SaveConfigAsync(dto);
-            _logger.LogInformation("Imported {Count} library paths from Stash config", paths.Count);
+            _logger.LogInformation(
+                "Imported Stash config additions: {PathCount} library paths, {AddedMetadataServerCount} metadata servers added, {UpdatedMetadataServerCount} metadata servers updated",
+                addedPaths,
+                addedMetadataServers,
+                updatedMetadataServers);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to import library paths from Stash config");
+            _logger.LogWarning(ex, "Failed to import Stash config");
         }
+    }
+
+    private static (int AddedPaths, int AddedMetadataServers, int UpdatedMetadataServers) MergeStashConfigIntoCoveConfig(CoveConfigDto dto, StashConfigData stashConfig)
+    {
+        var addedPaths = 0;
+        var addedMetadataServers = 0;
+        var updatedMetadataServers = 0;
+
+        var existingPaths = new HashSet<string>(dto.CovePaths.Select(path => path.Path), StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, excludeImage, excludeVideo) in stashConfig.Paths)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !existingPaths.Add(path))
+                continue;
+
+            dto.CovePaths.Add(new CovePathDto
+            {
+                Path = path,
+                ExcludeImage = excludeImage,
+                ExcludeVideo = excludeVideo,
+                ExcludeAudio = false,
+                ExcludeText = false,
+            });
+            addedPaths++;
+        }
+
+        var metadataServers = dto.Scraping.MetadataServers;
+        var metadataServerIndexes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < metadataServers.Count; index++)
+        {
+            var endpoint = metadataServers[index].Endpoint;
+            if (!string.IsNullOrWhiteSpace(endpoint))
+                metadataServerIndexes[endpoint] = index;
+        }
+
+        foreach (var server in stashConfig.MetadataServers)
+        {
+            var endpoint = server.Endpoint.Trim();
+            if (string.IsNullOrWhiteSpace(endpoint))
+                continue;
+
+            var normalizedServer = new MetadataServerDto
+            {
+                Endpoint = endpoint,
+                ApiKey = server.ApiKey.Trim(),
+                Name = string.IsNullOrWhiteSpace(server.Name) ? endpoint : server.Name.Trim(),
+                MaxRequestsPerMinute = server.MaxRequestsPerMinute > 0 ? server.MaxRequestsPerMinute : 240,
+            };
+
+            if (metadataServerIndexes.TryGetValue(endpoint, out var existingIndex))
+            {
+                if (metadataServers[existingIndex] == normalizedServer)
+                    continue;
+
+                metadataServers[existingIndex] = normalizedServer;
+                updatedMetadataServers++;
+                continue;
+            }
+
+            metadataServers.Add(normalizedServer);
+            metadataServerIndexes[endpoint] = metadataServers.Count - 1;
+            addedMetadataServers++;
+        }
+
+        return (addedPaths, addedMetadataServers, updatedMetadataServers);
     }
 
     private async Task ApplyCoveGeneratedPathOverrideAsync(string? coveGeneratedPath, CancellationToken ct)
@@ -689,21 +743,60 @@ WHERE files.zip_file_id IS NOT NULL";
     private static StashConfigData ParseStashConfig(string configPath)
     {
         var paths = new List<(string Path, bool ExcludeImage, bool ExcludeVideo)>();
+        var metadataServers = new List<StashMetadataServerConfig>();
         string? generatedPath = null;
         string? videoFileNamingAlgorithm = null;
         string? blobFilesPath = null;
+        string? customPerformerImageLocation = null;
         bool? calculateMd5 = null;
 
         try
         {
             var lines = File.ReadAllLines(configPath);
             var inStashArray = false;
+            var inStashBoxesArray = false;
             string? currentPath = null;
             var currentExcludeImage = false;
             var currentExcludeVideo = false;
+            string? currentEndpoint = null;
+            string? currentApiKey = null;
+            string? currentName = null;
+            var currentMaxRequestsPerMinute = 240;
 
             foreach (var rawLine in lines)
             {
+                if (rawLine.Length > 0 && !char.IsWhiteSpace(rawLine[0]))
+                {
+                    if (inStashArray && !rawLine.StartsWith("stash:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (currentPath != null)
+                        {
+                            paths.Add((currentPath, currentExcludeImage, currentExcludeVideo));
+                            currentPath = null;
+                        }
+
+                        inStashArray = false;
+                    }
+
+                    if (inStashBoxesArray && !rawLine.StartsWith("stash_boxes:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.IsNullOrWhiteSpace(currentEndpoint))
+                        {
+                            metadataServers.Add(new StashMetadataServerConfig(
+                                currentEndpoint,
+                                currentApiKey ?? string.Empty,
+                                string.IsNullOrWhiteSpace(currentName) ? currentEndpoint : currentName,
+                                currentMaxRequestsPerMinute));
+                        }
+
+                        currentEndpoint = null;
+                        currentApiKey = null;
+                        currentName = null;
+                        currentMaxRequestsPerMinute = 240;
+                        inStashBoxesArray = false;
+                    }
+                }
+
                 var genMatch = Regex.Match(rawLine, @"^generated:\s*(.+)$");
                 if (genMatch.Success)
                 {
@@ -725,6 +818,13 @@ WHERE files.zip_file_id IS NOT NULL";
                     continue;
                 }
 
+                var customPerformerImageMatch = Regex.Match(rawLine, @"^custom_performer_image_location:\s*(.+)$", RegexOptions.IgnoreCase);
+                if (customPerformerImageMatch.Success)
+                {
+                    customPerformerImageLocation = customPerformerImageMatch.Groups[1].Value.Trim().Trim('"', '\'');
+                    continue;
+                }
+
                 var md5Match = Regex.Match(rawLine, @"^calculate_md5:\s*(true|false)$", RegexOptions.IgnoreCase);
                 if (md5Match.Success)
                 {
@@ -735,6 +835,14 @@ WHERE files.zip_file_id IS NOT NULL";
                 if (rawLine.TrimStart().StartsWith("stash:"))
                 {
                     inStashArray = true;
+                    inStashBoxesArray = false;
+                    continue;
+                }
+
+                if (rawLine.TrimStart().StartsWith("stash_boxes:"))
+                {
+                    inStashBoxesArray = true;
+                    inStashArray = false;
                     continue;
                 }
 
@@ -749,53 +857,131 @@ WHERE files.zip_file_id IS NOT NULL";
                     continue;
                 }
 
-                if (!inStashArray) continue;
-
-                var trimmed = rawLine.TrimStart();
-                if (trimmed.StartsWith("- "))
+                if (inStashArray)
                 {
-                    if (currentPath != null)
-                        paths.Add((currentPath, currentExcludeImage, currentExcludeVideo));
-                    currentPath = null;
-                    currentExcludeImage = false;
-                    currentExcludeVideo = false;
-                    trimmed = trimmed[2..].TrimStart();
+                    var trimmed = rawLine.TrimStart();
+                    if (trimmed.StartsWith("- "))
+                    {
+                        if (currentPath != null)
+                            paths.Add((currentPath, currentExcludeImage, currentExcludeVideo));
+                        currentPath = null;
+                        currentExcludeImage = false;
+                        currentExcludeVideo = false;
+                        trimmed = trimmed[2..].TrimStart();
+                    }
+
+                    var pathMatch = Regex.Match(trimmed, @"^path:\s*(.+)$");
+                    if (pathMatch.Success)
+                    {
+                        currentPath = pathMatch.Groups[1].Value.Trim().Trim('"', '\'');
+                        continue;
+                    }
+
+                    var exImgMatch = Regex.Match(trimmed, @"^excludeimage:\s*(true|false)$", RegexOptions.IgnoreCase);
+                    if (exImgMatch.Success)
+                    {
+                        currentExcludeImage = string.Equals(exImgMatch.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase);
+                        continue;
+                    }
+
+                    var exVidMatch = Regex.Match(trimmed, @"^excludevideo:\s*(true|false)$", RegexOptions.IgnoreCase);
+                    if (exVidMatch.Success)
+                    {
+                        currentExcludeVideo = string.Equals(exVidMatch.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase);
+                        continue;
+                    }
                 }
 
-                var pathMatch = Regex.Match(trimmed, @"^path:\s*(.+)$");
-                if (pathMatch.Success)
+                if (!inStashBoxesArray)
+                    continue;
+
+                var stashBoxLine = rawLine.TrimStart();
+                if (stashBoxLine.StartsWith("- "))
                 {
-                    currentPath = pathMatch.Groups[1].Value.Trim().Trim('"', '\'');
+                    if (!string.IsNullOrWhiteSpace(currentEndpoint))
+                    {
+                        metadataServers.Add(new StashMetadataServerConfig(
+                            currentEndpoint,
+                            currentApiKey ?? string.Empty,
+                            string.IsNullOrWhiteSpace(currentName) ? currentEndpoint : currentName,
+                            currentMaxRequestsPerMinute));
+                    }
+
+                    currentEndpoint = null;
+                    currentApiKey = null;
+                    currentName = null;
+                    currentMaxRequestsPerMinute = 240;
+                    stashBoxLine = stashBoxLine[2..].TrimStart();
+                }
+
+                var endpointMatch = Regex.Match(stashBoxLine, @"^endpoint:\s*(.+)$", RegexOptions.IgnoreCase);
+                if (endpointMatch.Success)
+                {
+                    currentEndpoint = endpointMatch.Groups[1].Value.Trim().Trim('"', '\'');
                     continue;
                 }
 
-                var exImgMatch = Regex.Match(trimmed, @"^excludeimage:\s*(true|false)$", RegexOptions.IgnoreCase);
-                if (exImgMatch.Success)
+                var apiKeyMatch = Regex.Match(stashBoxLine, @"^api_key:\s*(.+)$", RegexOptions.IgnoreCase);
+                if (apiKeyMatch.Success)
                 {
-                    currentExcludeImage = string.Equals(exImgMatch.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase);
+                    currentApiKey = apiKeyMatch.Groups[1].Value.Trim().Trim('"', '\'');
                     continue;
                 }
 
-                var exVidMatch = Regex.Match(trimmed, @"^excludevideo:\s*(true|false)$", RegexOptions.IgnoreCase);
-                if (exVidMatch.Success)
+                var nameMatch = Regex.Match(stashBoxLine, @"^name:\s*(.+)$", RegexOptions.IgnoreCase);
+                if (nameMatch.Success)
                 {
-                    currentExcludeVideo = string.Equals(exVidMatch.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase);
+                    currentName = nameMatch.Groups[1].Value.Trim().Trim('"', '\'');
+                    continue;
+                }
+
+                var maxRequestsMatch = Regex.Match(stashBoxLine, @"^max_requests_per_minute:\s*(-?\d+)$", RegexOptions.IgnoreCase);
+                if (maxRequestsMatch.Success && int.TryParse(maxRequestsMatch.Groups[1].Value, out var maxRequestsPerMinute))
+                {
+                    currentMaxRequestsPerMinute = maxRequestsPerMinute;
                     continue;
                 }
             }
 
             if (inStashArray && currentPath != null)
                 paths.Add((currentPath, currentExcludeImage, currentExcludeVideo));
+
+            if (inStashBoxesArray && !string.IsNullOrWhiteSpace(currentEndpoint))
+            {
+                metadataServers.Add(new StashMetadataServerConfig(
+                    currentEndpoint,
+                    currentApiKey ?? string.Empty,
+                    string.IsNullOrWhiteSpace(currentName) ? currentEndpoint : currentName,
+                    currentMaxRequestsPerMinute));
+            }
         }
         catch (Exception)
         {
         }
 
+        var configDirectory = Path.GetDirectoryName(configPath) ?? string.Empty;
+
         return new StashConfigData(
-            paths,
-            generatedPath,
+            paths
+                .Select(path => (ResolveStashConfigPath(configDirectory, path.Path) ?? path.Path, path.ExcludeImage, path.ExcludeVideo))
+                .ToList(),
+            ResolveStashConfigPath(configDirectory, generatedPath),
             videoFileNamingAlgorithm ?? (calculateMd5 == true ? "MD5" : "OSHASH"),
-            blobFilesPath);
+            ResolveStashConfigPath(configDirectory, blobFilesPath),
+            ResolveStashConfigPath(configDirectory, customPerformerImageLocation),
+            metadataServers);
+    }
+
+    private static string? ResolveStashConfigPath(string configDirectory, string? configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+            return null;
+
+        var trimmed = configuredPath.Trim();
+        if (Path.IsPathRooted(trimmed))
+            return Path.GetFullPath(trimmed);
+
+        return Path.GetFullPath(Path.Combine(configDirectory, trimmed));
     }
 
     private static bool TryResolveStashBlobFilePath(string blobFilesPath, string checksum, out string sourcePath)

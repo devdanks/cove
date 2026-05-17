@@ -1,5 +1,6 @@
 using System.Reflection;
 using Cove.Api.Services;
+using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Entities.Auth;
 using Cove.Core.Interfaces;
@@ -255,6 +256,161 @@ INSERT INTO performer_urls (performer_id, url) VALUES
             CancellationToken.None);
 
         Assert.Equal(["image/avif"], recordingBlobService.ContentTypes);
+    }
+
+    [Fact]
+    public async Task ParseStashConfig_ResolvesRelativePathsAndReadsMetadataServers()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"stash-config-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var configPath = Path.Combine(tempDir, "config.yml");
+
+        try
+        {
+            await File.WriteAllTextAsync(configPath, """
+generated: generated
+blob_files_path: blobs
+custom_performer_image_location: performer-images
+stash:
+  - path: library
+stash_boxes:
+  - endpoint: https://stash-box.example/graphql
+    api_key: secret-key
+    name: Example Box
+    max_requests_per_minute: 123
+""");
+
+            var stashConfig = InvokePrivateStatic(typeof(StashMigrationService), "ParseStashConfig", configPath);
+            Assert.NotNull(stashConfig);
+
+            Assert.Equal(
+                Path.GetFullPath(Path.Combine(tempDir, "generated")),
+                GetPrivateProperty<string>(stashConfig!, "GeneratedPath"));
+            Assert.Equal(
+                Path.GetFullPath(Path.Combine(tempDir, "blobs")),
+                GetPrivateProperty<string>(stashConfig!, "BlobFilesPath"));
+            Assert.Equal(
+                Path.GetFullPath(Path.Combine(tempDir, "performer-images")),
+                GetPrivateProperty<string>(stashConfig!, "CustomPerformerImageLocation"));
+
+            var metadataServers = Assert.IsAssignableFrom<System.Collections.IEnumerable>(GetPrivateProperty<object>(stashConfig!, "MetadataServers"));
+            var metadataServer = Assert.Single(metadataServers.Cast<object>());
+            Assert.Equal("https://stash-box.example/graphql", GetPrivateProperty<string>(metadataServer, "Endpoint"));
+            Assert.Equal("secret-key", GetPrivateProperty<string>(metadataServer, "ApiKey"));
+            Assert.Equal("Example Box", GetPrivateProperty<string>(metadataServer, "Name"));
+            Assert.Equal(123, GetPrivateProperty<int>(metadataServer, "MaxRequestsPerMinute"));
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
+        }
+    }
+
+    [Fact]
+    public void MergeStashConfigIntoCoveConfig_ImportsMetadataServers()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"stash-config-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var configPath = Path.Combine(tempDir, "config.yml");
+
+        try
+        {
+            File.WriteAllText(configPath, """
+stash_boxes:
+  - endpoint: https://stash-box.example/graphql
+    api_key: secret-key
+    name: Example Box
+    max_requests_per_minute: 123
+""");
+
+            var stashConfig = InvokePrivateStatic(typeof(StashMigrationService), "ParseStashConfig", configPath);
+            Assert.NotNull(stashConfig);
+
+            var dto = new CoveConfigDto();
+            var result = InvokePrivateStatic(typeof(StashMigrationService), "MergeStashConfigIntoCoveConfig", dto, stashConfig!);
+            Assert.IsType<ValueTuple<int, int, int>>(result);
+
+            var server = Assert.Single(dto.Scraping.MetadataServers);
+            Assert.Equal("https://stash-box.example/graphql", server.Endpoint);
+            Assert.Equal("secret-key", server.ApiKey);
+            Assert.Equal("Example Box", server.Name);
+            Assert.Equal(123, server.MaxRequestsPerMinute);
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
+        }
+    }
+
+    [Fact]
+    public async Task ImportPerformersAsync_UsesCustomPerformerImageLocationFallback()
+    {
+        await using var context = CreateContext();
+        var recordingBlobService = new RecordingBlobService();
+
+        await using var stash = new SqliteConnection("Data Source=:memory:");
+        await stash.OpenAsync();
+        await ExecuteSqlAsync(stash, @"
+CREATE TABLE performers (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  disambiguation TEXT,
+  gender TEXT,
+  birthdate TEXT,
+  ethnicity TEXT,
+  country TEXT,
+  eye_color TEXT,
+  hair_color TEXT,
+  height INTEGER,
+  weight INTEGER,
+  measurements TEXT,
+  fake_tits TEXT,
+  penis_length REAL,
+  circumcised TEXT,
+  career_length TEXT,
+  death_date TEXT,
+  tattoos TEXT,
+  piercings TEXT,
+  favorite INTEGER NOT NULL,
+  rating INTEGER,
+  details TEXT,
+  ignore_auto_tag INTEGER NOT NULL,
+  image_blob TEXT
+);
+CREATE TABLE performer_urls (performer_id INTEGER NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE performer_aliases (performer_id INTEGER NOT NULL, alias TEXT NOT NULL);
+CREATE TABLE performers_tags (performer_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+INSERT INTO performers (id, name, favorite, ignore_auto_tag, image_blob) VALUES (1, 'Fallback Performer', 0, 0, NULL);
+");
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"performer-fallback-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var imagePath = Path.Combine(tempDir, "fallback.png");
+        await File.WriteAllBytesAsync(imagePath, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+        try
+        {
+            var service = CreateService(context, recordingBlobService);
+            SetPrivateField(service, "_currentImportCustomPerformerImageLocation", tempDir);
+            await InvokePrivateAsync(
+                service,
+                "ImportPerformersAsync",
+                stash,
+                new Dictionary<string, string>(),
+                new Dictionary<int, int>(),
+                NullJobProgress.Instance,
+                0d,
+                1d,
+                CancellationToken.None);
+
+            var performer = await context.Performers.SingleAsync();
+            Assert.Equal("blob-1", performer.ImageBlobId);
+            Assert.Equal(["image/png"], recordingBlobService.ContentTypes);
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
+        }
     }
 
     [Fact]
@@ -1158,6 +1314,27 @@ VALUES (51, 41, 'scene', 3, 'tag', 'body', NULL, 7, 8.0, 11.0, '{""confidence"":
         return task!.GetType().GetProperty("Result")?.GetValue(task);
     }
 
+    private static object? InvokePrivateStatic(Type type, string methodName, params object?[] args)
+    {
+        var method = type.GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        return method!.Invoke(null, args);
+    }
+
+    private static T GetPrivateProperty<T>(object target, string propertyName)
+    {
+        var property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        Assert.NotNull(property);
+        return Assert.IsAssignableFrom<T>(property!.GetValue(target));
+    }
+
+    private static void SetPrivateField(object target, string fieldName, object? value)
+    {
+        var field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field!.SetValue(target, value);
+    }
+
     private static async Task ExecuteSqlAsync(SqliteConnection connection, string sql)
     {
         await using var command = connection.CreateCommand();
@@ -1183,6 +1360,21 @@ VALUES (51, 41, 'scene', 3, 'tag', 'body', NULL, 7, 8.0, 11.0, '{""confidence"":
         {
             if (File.Exists(path))
                 File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
         }
         catch (IOException)
         {

@@ -17,6 +17,8 @@ namespace Cove.Api.Controllers;
 [RequiresPermission(Permissions.StudiosRead)]
 public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
 {
+    private sealed record StudioUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount);
+
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<PaginatedResponse<StudioDto>>> Find(
@@ -36,7 +38,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         };
 
         var (items, totalCount) = await studioRepo.FindAsync(filter, findFilter, ct);
-        var dtos = MapListToDtos(items);
+        var usageCountsByStudioId = await LoadStudioUsageCountsAsync(items.Select(item => item.Id), ct);
+        var dtos = MapListToDtos(items, usageCountsByStudioId);
         return Ok(new PaginatedResponse<StudioDto>(dtos, totalCount, page, perPage));
     }
 
@@ -46,7 +49,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new StudioFilter();
         var (items, totalCount) = await studioRepo.FindAsync(filter, findFilter, ct);
-        var dtos = MapListToDtos(items);
+        var usageCountsByStudioId = await LoadStudioUsageCountsAsync(items.Select(item => item.Id), ct);
+        var dtos = MapListToDtos(items, usageCountsByStudioId);
         return Ok(new PaginatedResponse<StudioDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -56,7 +60,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     {
         var studio = await studioRepo.GetByIdWithRelationsAsync(id, ct);
         if (studio == null) return NotFound();
-        return Ok(MapToDto(studio));
+        return Ok(await MapToDetailDtoAsync(studio, ct));
     }
 
     [HttpPost]
@@ -82,7 +86,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (dto.Aliases?.Count > 0)
             await entityIdentifiers.SyncAsync(EntityKinds.Studio, studio.Id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var result = await studioRepo.GetByIdWithRelationsAsync(studio.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = studio.Id }, MapToDto(result!));
+        return CreatedAtAction(nameof(GetById), new { id = studio.Id }, await MapToDetailDtoAsync(result!, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -125,7 +129,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (dto.Aliases != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Studio, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
         var updated = await studioRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     [HttpDelete("{id:int}")]
@@ -186,26 +190,97 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
     // ===== Merge =====
 
-    private StudioDto MapToDto(Studio s, int? sceneCount = null, int? imageCount = null, int? galleryCount = null, int? groupCount = null, int? performerCount = null, int? childStudioCount = null) => new(
+    private async Task<StudioDto> MapToDetailDtoAsync(Studio studio, CancellationToken ct)
+    {
+        var usageCounts = (await LoadStudioUsageCountsAsync([studio.Id], ct)).GetValueOrDefault(studio.Id);
+        return MapToDto(studio, usageCounts);
+    }
+
+    private StudioDto MapToDto(Studio s, StudioUsageCounts? usageCounts = null) => new(
         s.Id, s.Name, s.ParentId, s.Parent?.Name, s.Favorite, s.Details, s.IgnoreAutoTag, s.Organized,
         s.Urls.Select(u => u.Url).ToList(),
         s.Aliases.Select(a => a.Alias).ToList(),
         s.StudioTags.Where(st => st.Tag != null).Select(st => TagDtoMapping.MapTagDto(st.Tag!)).ToList(),
         s.RemoteIds.Select(sid => new StudioRemoteIdDto(sid.Endpoint, sid.RemoteId)).ToList(),
-        sceneCount ?? s.SceneCount,
-        imageCount ?? s.ImageCount,
-        galleryCount ?? s.GalleryCount,
-        groupCount ?? s.GroupCount,
-        performerCount ?? s.PerformerCount,
-        childStudioCount ?? s.ChildStudioCount,
+        usageCounts?.SceneCount ?? s.SceneCount,
+        usageCounts?.ImageCount ?? s.ImageCount,
+        usageCounts?.GalleryCount ?? s.GalleryCount,
+        usageCounts?.GroupCount ?? s.GroupCount,
+        usageCounts?.PerformerCount ?? s.PerformerCount,
+        usageCounts?.ChildStudioCount ?? s.ChildStudioCount,
         s.ImageBlobId != null ? EntityImageUrls.Studio(ControllerContext.HttpContext, s.Id, s.UpdatedAt) : null,
         s.CustomFields,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
 
-    private List<StudioDto> MapListToDtos(IReadOnlyList<Studio> items)
+    private List<StudioDto> MapListToDtos(IReadOnlyList<Studio> items, IReadOnlyDictionary<int, StudioUsageCounts> usageCountsByStudioId)
     {
-        return items.Count == 0 ? [] : items.Select(studio => MapToDto(studio)).ToList();
+        return items.Count == 0
+            ? []
+            : items.Select(studio => MapToDto(studio, usageCountsByStudioId.GetValueOrDefault(studio.Id))).ToList();
+    }
+
+    private async Task<Dictionary<int, StudioUsageCounts>> LoadStudioUsageCountsAsync(IEnumerable<int> studioIds, CancellationToken ct)
+    {
+        var ids = studioIds
+            .Where(studioId => studioId > 0)
+            .Distinct()
+            .ToArray();
+
+        if (ids.Length == 0)
+            return [];
+
+        var sceneCounts = await db.Scenes
+            .AsNoTracking()
+            .Where(scene => scene.StudioId.HasValue && ids.Contains(scene.StudioId.Value))
+            .GroupBy(scene => scene.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var imageCounts = await db.Images
+            .AsNoTracking()
+            .Where(image => image.StudioId.HasValue && ids.Contains(image.StudioId.Value))
+            .GroupBy(image => image.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var galleryCounts = await db.Galleries
+            .AsNoTracking()
+            .Where(gallery => gallery.StudioId.HasValue && ids.Contains(gallery.StudioId.Value))
+            .GroupBy(gallery => gallery.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var groupCounts = await db.Groups
+            .AsNoTracking()
+            .Where(group => group.StudioId.HasValue && ids.Contains(group.StudioId.Value))
+            .GroupBy(group => group.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var performerCounts = await db.Scenes
+            .AsNoTracking()
+            .Where(scene => scene.StudioId.HasValue && ids.Contains(scene.StudioId.Value))
+            .Join(
+                db.Set<ScenePerformer>().AsNoTracking(),
+                scene => scene.Id,
+                scenePerformer => scenePerformer.SceneId,
+                (scene, scenePerformer) => new { StudioId = scene.StudioId!.Value, scenePerformer.PerformerId })
+            .GroupBy(item => item.StudioId)
+            .Select(group => new { group.Key, Count = group.Select(item => item.PerformerId).Distinct().Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var childStudioCounts = await db.Studios
+            .AsNoTracking()
+            .Where(studio => studio.ParentId.HasValue && ids.Contains(studio.ParentId.Value))
+            .GroupBy(studio => studio.ParentId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+
+        return ids.ToDictionary(
+            id => id,
+            id => new StudioUsageCounts(
+                sceneCounts.GetValueOrDefault(id),
+                imageCounts.GetValueOrDefault(id),
+                galleryCounts.GetValueOrDefault(id),
+                groupCounts.GetValueOrDefault(id),
+                performerCounts.GetValueOrDefault(id),
+                childStudioCounts.GetValueOrDefault(id)));
     }
 
     // ===== Merge =====
