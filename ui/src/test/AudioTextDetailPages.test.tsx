@@ -231,7 +231,7 @@ describe("Audio and text detail pages", () => {
     const view = renderWithQueryClient(<TextDetailPage id={22} onNavigate={vi.fn()} />);
 
     expect(await screen.findByRole("heading", { name: "Project Notes" })).toBeInTheDocument();
-    expect(await screen.findByText("Chapter One")).toBeInTheDocument();
+    expect(await screen.findAllByText("Chapter One")).not.toHaveLength(0);
     expect(screen.getByRole("tab", { name: /edit/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /related/i })).toBeInTheDocument();
 

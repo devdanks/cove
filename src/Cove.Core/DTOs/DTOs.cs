@@ -63,7 +63,7 @@ public record PerformerDto(
     bool Favorite, string? Details, bool IgnoreAutoTag,
     List<string> Urls, List<string> Aliases, List<TagDto> Tags,
     List<PerformerRemoteIdDto> RemoteIds,
-    int SceneCount, int ImageCount, int GalleryCount, int GroupCount,
+    int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount,
     string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
 
 public record PerformerRemoteIdDto(string Endpoint, string RemoteId);
@@ -159,7 +159,7 @@ public record TagDetailDto(
     int Id, string Name, string? SortName, string? Description, bool Favorite, bool IgnoreAutoTag,
     List<string> Aliases, List<TagDto> Parents, List<TagDto> Children,
     int SceneCount, int PerformerCount, int ImageCount, int GalleryCount,
-    int StudioCount, int GroupCount, int SegmentCount,
+    int StudioCount, int GroupCount, int AudioCount, int TextCount, int SegmentCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     bool? ShowAsSegment = null, string? SegmentColorOverride = null, int? SegmentLaneOverride = null,
     string? Color = null, int? TagGroupId = null, string? TagGroupName = null, string? TagGroupColor = null,
@@ -265,7 +265,7 @@ public record TagUpdateDto(
 // ===== STUDIO DTOs =====
 public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
     List<string> Urls, List<string> Aliases, List<TagDto> Tags, List<StudioRemoteIdDto> RemoteIds,
-    int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount,
+    int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount,
     string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
 
 public record StudioRemoteIdDto(string Endpoint, string RemoteId);
@@ -1114,6 +1114,20 @@ public record CustomFieldDefinitionUpdateDto
     public bool? Filterable { get; init; }
     public bool? Sortable { get; init; }
     public bool? IsMultiValue { get; init; }
+    public int? DisplayOrder { get; init; }
+}
+
+public record CustomFieldDefinitionSyncDto
+{
+    public int? Id { get; init; }
+    public string Key { get; init; } = string.Empty;
+    public string Label { get; init; } = string.Empty;
+    public string Type { get; init; } = "text";
+    public List<string> EntityTypes { get; init; } = [];
+    public List<string> Options { get; init; } = [];
+    public bool Filterable { get; init; } = true;
+    public bool Sortable { get; init; }
+    public bool IsMultiValue { get; init; }
     public int? DisplayOrder { get; init; }
 }
 

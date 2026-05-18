@@ -11,7 +11,7 @@
  * - Component-based contributions reference built-in POC components (for built-in extensions)
  *   or would load from JS bundles (for external extensions)
  */
-import { useEffect, useState, createContext, useContext, useCallback, type ReactNode, type FC } from "react";
+import { useEffect, useState, createContext, useContext, useCallback, useMemo, type ReactNode, type FC } from "react";
 import { useRouteRegistry } from "../router/RouteRegistry";
 import { useAppConfig } from "../state/AppConfigContext";
 import { extensions } from "../api/client";
@@ -141,6 +141,29 @@ const LAYOUT_STYLE_STORAGE_KEY = "cove-layout-style";
 const CUSTOM_THEME_STORAGE_KEY = "cove-custom-theme-colors";
 const STYLE_OPTIONS_STORAGE_KEY = "cove-style-options";
 
+const FALLBACK_DEFAULT_THEME: ExtensionThemeDef = {
+  id: "default",
+  name: "Default",
+  description: "A clean, modern dark theme.",
+  colorScheme: "dark",
+  cssVariables: {
+    "--color-background": "#16181d",
+    "--color-nav": "#111317",
+    "--color-card": "#1e2028",
+    "--color-card-hover": "#252830",
+    "--color-surface": "#1a1c23",
+    "--color-border": "#2a2d38",
+    "--color-input": "rgba(0, 0, 0, 0.25)",
+    "--color-accent": "#4f8ff7",
+    "--color-accent-hover": "#6ea4ff",
+    "--color-foreground": "#e8eaf0",
+    "--color-secondary": "#9ea3b0",
+    "--color-muted": "#6b7085",
+    "--color-overlay": "rgba(0, 0, 0, 0.55)",
+    "--color-nav-active": "#4f8ff7",
+  },
+};
+
 function parseStyleSet(raw: string | null): Set<string> {
   if (!raw) return new Set(["default"]);
   const items = raw.split(" ").filter(Boolean);
@@ -184,6 +207,18 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
   );
   const [customThemeColors, setCustomThemeColorsState] = useState<Record<string, string>>(
     () => userThemePreferences?.customThemeColors ?? readStoredThemeColors()
+  );
+  const availableThemes = useMemo(() => {
+    const manifestThemes = manifest?.themes ?? [];
+    return manifestThemes.some((theme) => theme.id === FALLBACK_DEFAULT_THEME.id)
+      ? manifestThemes
+      : [FALLBACK_DEFAULT_THEME, ...manifestThemes];
+  }, [manifest]);
+  const selectedTheme = useMemo(
+    () => activeThemeId && activeThemeId !== "custom"
+      ? availableThemes.find((theme) => theme.id === activeThemeId) ?? (activeThemeId === FALLBACK_DEFAULT_THEME.id ? FALLBACK_DEFAULT_THEME : null)
+      : null,
+    [activeThemeId, availableThemes],
   );
 
   const setActiveTheme = useCallback((id: string | null) => {
@@ -276,6 +311,16 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
     setActiveLayoutStyleState(nextTheme.activeLayoutStyle ?? "default");
     setCustomThemeColorsState(nextTheme.customThemeColors ?? {});
   }, [user, userThemePreferences]);
+
+  useEffect(() => {
+    if (!loaded || !activeThemeId || activeThemeId === "custom" || activeThemeId === FALLBACK_DEFAULT_THEME.id) {
+      return;
+    }
+
+    if (!availableThemes.some((theme) => theme.id === activeThemeId)) {
+      setActiveTheme(FALLBACK_DEFAULT_THEME.id);
+    }
+  }, [activeThemeId, availableThemes, loaded, setActiveTheme]);
 
   // Fetch manifest on mount
   useEffect(() => {
@@ -426,10 +471,15 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
       document.documentElement.removeAttribute("data-color-scheme");
       return;
     }
-    document.documentElement.setAttribute("data-theme", activeThemeId);
+    const theme = selectedTheme;
+    if (!theme) {
+      document.documentElement.removeAttribute("data-theme");
+      document.documentElement.removeAttribute("data-theme-bg-animation");
+      document.documentElement.removeAttribute("data-color-scheme");
+      return;
+    }
 
-    const theme = manifest.themes.find((t) => t.id === activeThemeId);
-    if (!theme) return;
+    document.documentElement.setAttribute("data-theme", theme.id);
 
     // If the theme bundles component styles, auto-apply them (unless user overrode)
     if (theme.componentStyle) {
@@ -478,7 +528,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
       document.documentElement.removeAttribute("data-theme-bg-animation");
       document.documentElement.removeAttribute("data-color-scheme");
     };
-  }, [activeThemeId, manifest, customThemeColors, troubleshootingMode]);
+  }, [activeThemeId, customThemeColors, manifest, selectedTheme, troubleshootingMode]);
 
   // Apply component style data attribute (space-separated for composability)
   useEffect(() => {
@@ -560,7 +610,6 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
     [manifest]
   );
 
-  const availableThemes = manifest?.themes ?? [];
   const availableComponentStyles = manifest?.componentStyles ?? [];
   const availableLayoutStyles = manifest?.layoutStyles ?? [];
   const settingsPanels = manifest?.settingsPanels ?? [];

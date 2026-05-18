@@ -1,5 +1,6 @@
 import { ExternalLink, FolderOpen } from "lucide-react";
 import { EntityCardGrid } from "../../components/EntityCardGrid";
+import { SegmentTile } from "../../components/EntityCards";
 import type { DisplayMode } from "../../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../../components/RouteCardLinkOverlay";
 import {
@@ -37,19 +38,83 @@ export function DerivedSpanResults({
   if (displayMode === "grid") {
     return (
       <EntityCardGrid minCardWidth="var(--card-min-width, 220px)">
-        {items.map((item) => (
-          <DerivedSpanCard
-            key={item.key}
-            item={item}
-            canReadScenes={canReadScenes}
-            onNavigate={onNavigate}
-            onClick={() => (selecting ? onToggle(item.id) : onNavigate({ page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor }))}
-            onViewRawSegments={() => onViewRawSegments(item.span.segmentIds)}
-            selected={selectedIds.has(item.id)}
-            onSelect={() => onToggle(item.id)}
-            selecting={selecting}
-          />
-        ))}
+        {items.map((item) => {
+          const title = buildSpanTitle(item.span, item.sceneTitle);
+          const route = { page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor };
+          const primaryRawSegmentId = item.span.segmentIds[0];
+
+          return (
+            <SegmentTile
+              key={item.key}
+              segment={{
+                id: item.id,
+                hostType: "scene",
+                hostId: item.sceneId,
+                startSec: item.span.startSec,
+                endSec: item.span.endSec,
+                tagName: item.span.tagName,
+                kind: item.span.kind,
+                sourceKey: item.span.sourceKey,
+                title,
+                updatedAt: item.sceneUpdatedAt,
+                hostTitle: item.sceneTitle,
+              }}
+              route={route}
+              label={`Open span ${title}`}
+              eyebrow={formatSegmentRange(item.span.startSec, item.span.endSec)}
+              onClick={() => (selecting ? onToggle(item.id) : onNavigate(route))}
+              selected={selectedIds.has(item.id)}
+              onSelect={() => onToggle(item.id)}
+              selecting={selecting}
+              footer={(
+                <div className="flex items-center justify-between gap-2">
+                  <span>Updated {formatDate(item.sceneUpdatedAt)}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onViewRawSegments(item.span.segmentIds);
+                      }}
+                      className="inline-flex items-center gap-1 text-accent hover:underline"
+                    >
+                      View raw segments ({item.span.segmentIds.length})
+                    </button>
+                    {primaryRawSegmentId != null ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onNavigate({ page: "segment", id: primaryRawSegmentId });
+                        }}
+                        className="inline-flex items-center gap-1 text-accent hover:underline"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Open raw
+                      </button>
+                    ) : null}
+                    {canReadScenes ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onNavigate({ page: "scene", id: item.sceneId, seekTo: item.span.startSec });
+                        }}
+                        className="inline-flex items-center gap-1 text-accent hover:underline"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        Open scene
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            />
+          );
+        })}
       </EntityCardGrid>
     );
   }
@@ -76,115 +141,6 @@ export function DerivedSpanResults({
             selecting={selecting}
           />
         ))}
-      </div>
-    </div>
-  );
-}
-
-function DerivedSpanCard({
-  item,
-  canReadScenes,
-  onNavigate,
-  onClick,
-  onViewRawSegments,
-  selected,
-  onSelect,
-  selecting,
-}: {
-  item: DerivedSpanItem;
-  canReadScenes: boolean;
-  onNavigate: (route: any) => void;
-  onClick: () => void;
-  onViewRawSegments: () => void;
-  selected?: boolean;
-  onSelect?: () => void;
-  selecting?: boolean;
-}) {
-  const title = buildSpanTitle(item.span, item.sceneTitle);
-  const primaryRawSegmentId = item.span.segmentIds[0];
-
-  return (
-    <div
-      onClick={selecting ? onClick : undefined}
-      className={`entity-card group relative overflow-hidden rounded border bg-card transition-all ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}
-    >
-      <RouteCardLinkOverlay
-        route={{ page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor }}
-        onClick={onClick}
-        label={`Open span ${title}`}
-        disabled={selecting}
-        selectionSafeZone={selected !== undefined || selecting}
-      />
-      <div className="relative aspect-video w-full overflow-hidden bg-surface/70">
-        {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
-        <SegmentScenePreview hostId={item.sceneId} updatedAt={item.sceneUpdatedAt} startSec={item.span.startSec} title={title} imgClassName="h-full w-full object-cover" fallbackClassName="flex h-full w-full items-center justify-center bg-surface text-muted" iconClassName="h-12 w-12" />
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-3 text-white">
-          <div className="text-xs font-medium uppercase tracking-wide text-white/75">{formatSegmentRange(item.span.startSec, item.span.endSec)}</div>
-          <div className="mt-1 line-clamp-2 text-sm font-semibold">{title}</div>
-        </div>
-      </div>
-
-      <div className="border-t border-border bg-card p-3">
-        <div className="space-y-1">
-          <div className="flex flex-wrap gap-2">
-            <Pill>{formatSpanItemKindLabel(item)}</Pill>
-          </div>
-          <div className="line-clamp-2 text-sm font-medium text-foreground">{title}</div>
-          <div className="truncate text-xs text-secondary">{item.sceneTitle}</div>
-        </div>
-      </div>
-
-      <div className="relative z-10 flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2 text-[11px]">
-        {item.span.tagName ? <Pill>{item.span.tagName}</Pill> : null}
-        {item.span.kind ? <Pill>{item.span.kind}</Pill> : null}
-        <Pill>{formatSegmentDuration(item.span.startSec, item.span.endSec)}</Pill>
-        {item.span.sourceKey ? <Pill>{item.span.sourceKey}</Pill> : null}
-        <span className="ml-auto text-muted">{item.span.segmentIds.length} raw segment{item.span.segmentIds.length === 1 ? "" : "s"}</span>
-      </div>
-
-      <div className="relative z-10 flex items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs text-secondary">
-        <span>Updated {formatDate(item.sceneUpdatedAt)}</span>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onViewRawSegments();
-            }}
-            className="inline-flex items-center gap-1 text-accent hover:underline"
-          >
-            View raw segments ({item.span.segmentIds.length})
-          </button>
-          {primaryRawSegmentId != null ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onNavigate({ page: "segment", id: primaryRawSegmentId });
-              }}
-              className="inline-flex items-center gap-1 text-accent hover:underline"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open raw
-            </button>
-          ) : null}
-          {canReadScenes ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onNavigate({ page: "scene", id: item.sceneId, seekTo: item.span.startSec });
-              }}
-              className="inline-flex items-center gap-1 text-accent hover:underline"
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-              Open scene
-            </button>
-          ) : null}
-        </div>
       </div>
     </div>
   );
@@ -218,7 +174,7 @@ function DerivedSpanListRow({
           <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onToggle} />
           <div className="flex items-start gap-3">
             <div className="hidden h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-surface sm:block">
-              <SegmentScenePreview hostId={item.sceneId} updatedAt={item.sceneUpdatedAt} startSec={item.span.startSec} title={title} imgClassName="h-full w-full object-cover" fallbackClassName="flex h-full w-full items-center justify-center bg-surface text-muted" iconClassName="h-6 w-6" />
+              <SegmentScenePreview hostId={item.sceneId} updatedAt={item.sceneUpdatedAt} startSec={item.span.startSec} title={title} imgClassName="h-full w-full object-cover" />
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>

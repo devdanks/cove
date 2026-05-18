@@ -104,6 +104,9 @@ vi.mock("../components/EntityCards", () => ({
   ImageTile: ({ image, onClick }: { image: { title: string }; onClick: () => void }) => (
     <button onClick={onClick}>{image.title}</button>
   ),
+  PerformerTile: ({ performer, onClick }: { performer: { name: string }; onClick: () => void }) => (
+    <button onClick={onClick}>{performer.name}</button>
+  ),
 }));
 
 vi.mock("../components/QuickViewDialog", () => ({

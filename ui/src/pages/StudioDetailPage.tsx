@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, groups, images, metadata, performers, scenes, studios, entityImages } from "../api/client";
+import { audios, galleries, groups, images, metadata, performers, scenes, studios, texts, entityImages } from "../api/client";
 import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerStudioMatch, Performer, Scene, Studio } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, ChevronDown, Building2, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link as LinkIcon, Link2, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
+import { Check, ChevronDown, Building2, CloudDownload, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Link as LinkIcon, Link2, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { StudioEditModal } from "./StudioEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailMergeDialog } from "../components/DetailMergeDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
-import { SceneCard, PerformerTile, ImageTile, GalleryTile, StudioTile, GroupTile } from "../components/EntityCards";
+import { AudioTile, SceneCard, PerformerTile, ImageTile, GalleryTile, StudioTile, GroupTile, TextTile } from "../components/EntityCards";
 import { InteractiveRating } from "../components/Rating";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { useAppConfig } from "../state/AppConfigContext";
@@ -54,13 +54,28 @@ const GROUP_SORT = [
   { value: "created_at", label: "Created At" },
   { value: "random", label: "Random" },
 ];
+const AUDIO_SORT = [
+  { value: "updated_at", label: "Updated At" },
+  { value: "created_at", label: "Created At" },
+  { value: "title", label: "Title" },
+  { value: "date", label: "Date" },
+  { value: "duration", label: "Duration" },
+];
+const TEXT_SORT = [
+  { value: "updated_at", label: "Updated At" },
+  { value: "created_at", label: "Created At" },
+  { value: "title", label: "Title" },
+  { value: "date", label: "Date" },
+  { value: "words", label: "Word Count" },
+  { value: "pages", label: "Page Count" },
+];
 
 interface Props {
   id: number;
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "performers" | "galleries" | "images" | "studios" | "groups" | (string & {});
+type TabKey = "scenes" | "performers" | "galleries" | "images" | "audios" | "texts" | "studios" | "groups" | (string & {});
 
 export function StudioDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
@@ -81,12 +96,16 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
     { key: "performers", label: "Performers", count: studio?.performerCount },
     { key: "galleries", label: "Galleries", count: studio?.galleryCount },
     { key: "images", label: "Images", count: studio?.imageCount },
+    { key: "audios", label: "Audios", count: studio?.audioCount },
+    { key: "texts", label: "Texts", count: studio?.textCount },
     { key: "studios", label: "Sub-studios", count: studio?.childStudioCount },
     { key: "groups", label: "Groups", count: studio?.groupCount },
   ], id);
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [galleryFilter, setGalleryFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 30, direction: "desc" });
+  const [audioFilter, setAudioFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
+  const [textFilter, setTextFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
   const [performerFilter, setPerformerFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const [childFilter, setChildFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const [groupFilter, setGroupFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
@@ -103,6 +122,8 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
     performers: "performers.read",
     galleries: "galleries.read",
     images: "images.read",
+    audios: "audios.read",
+    texts: "texts.read",
     studios: "studios.read",
     groups: "groups.read",
   }, hasPermission);
@@ -229,6 +250,8 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
           { key: "performers", label: "Performers", value: studio.performerCount, icon: <UserRound className="h-4 w-4" /> },
           { key: "images", label: "Images", value: studio.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
           { key: "galleries", label: "Galleries", value: studio.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
+          { key: "audios", label: "Audios", value: studio.audioCount, icon: <Headphones className="h-4 w-4" /> },
+          { key: "texts", label: "Texts", value: studio.textCount, icon: <FileText className="h-4 w-4" /> },
           { key: "studios", label: "Sub-studios", value: studio.childStudioCount, icon: <Building2 className="h-4 w-4" /> },
           { key: "groups", label: "Groups", value: studio.groupCount, icon: <Layers className="h-4 w-4" /> },
           ...extensionCounts.map((ec) => ({
@@ -317,6 +340,12 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
           )}
           {activeTab === "images" && (
             <StudioImagesPanel studioId={id} filter={imageFilter} setFilter={setImageFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "audios" && (
+            <StudioAudiosPanel studioId={id} filter={audioFilter} setFilter={setAudioFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "texts" && (
+            <StudioTextsPanel studioId={id} filter={textFilter} setFilter={setTextFilter} onNavigate={onNavigate} />
           )}
           {activeTab === "studios" && (
             <ChildStudiosPanel studioId={id} filter={childFilter} setFilter={setChildFilter} onNavigate={onNavigate} />
@@ -630,6 +659,76 @@ function StudioImagesPanel({ studioId, filter, setFilter, onNavigate }: {
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
+    </>
+  );
+}
+
+function StudioAudiosPanel({ studioId, filter, setFilter, onNavigate }: {
+  studioId: number;
+  filter: FindFilter;
+  setFilter: (filter: FindFilter) => void;
+  onNavigate: (r: any) => void;
+}) {
+  const [zoomLevel, setZoomLevel] = useState(0);
+  const { data, isLoading } = useQuery({
+    queryKey: ["studio-audios", studioId, filter],
+    queryFn: () => audios.findFiltered({
+      findFilter: filter,
+      objectFilter: {
+        studiosCriterion: { value: [studioId], modifier: "INCLUDES" },
+      },
+    }),
+  });
+  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selecting = selectedIds.size > 0;
+
+  if (isLoading) return <LoadingPanel icon={<Headphones className="h-10 w-10" />} message="Loading audios..." />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<Headphones className="h-12 w-12" />} message="No audios from this studio" />;
+
+  return (
+    <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={AUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="audios" selectedIds={selectedIds} onDone={selectNone} audioItems={data.items} downloadItems={data.items} onNavigate={onNavigate} />} />
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`}>
+        {data.items.map((audio) => (
+          <AudioTile key={audio.id} audio={audio} onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })} onNavigate={onNavigate} selected={selectedIds.has(audio.id)} onSelect={() => toggle(audio.id)} selecting={selecting} />
+        ))}
+      </EntityCardGrid>
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+    </>
+  );
+}
+
+function StudioTextsPanel({ studioId, filter, setFilter, onNavigate }: {
+  studioId: number;
+  filter: FindFilter;
+  setFilter: (filter: FindFilter) => void;
+  onNavigate: (r: any) => void;
+}) {
+  const [zoomLevel, setZoomLevel] = useState(0);
+  const { data, isLoading } = useQuery({
+    queryKey: ["studio-texts", studioId, filter],
+    queryFn: () => texts.findFiltered({
+      findFilter: filter,
+      objectFilter: {
+        studiosCriterion: { value: [studioId], modifier: "INCLUDES" },
+      },
+    }),
+  });
+  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selecting = selectedIds.size > 0;
+
+  if (isLoading) return <LoadingPanel icon={<FileText className="h-10 w-10" />} message="Loading texts..." />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<FileText className="h-12 w-12" />} message="No texts from this studio" />;
+
+  return (
+    <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={TEXT_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="texts" selectedIds={selectedIds} onDone={selectNone} textItems={data.items} downloadItems={data.items} />} />
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`}>
+        {data.items.map((text) => (
+          <TextTile key={text.id} text={text} onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })} onNavigate={onNavigate} selected={selectedIds.has(text.id)} onSelect={() => toggle(text.id)} selecting={selecting} />
+        ))}
+      </EntityCardGrid>
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
 }

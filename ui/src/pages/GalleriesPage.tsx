@@ -9,7 +9,7 @@ import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../co
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { FolderOpen, Image, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
-import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent } from "../components/EntityCards";
+import { GalleryTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent } from "../components/EntityCards";
 import { GALLERY_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GALLERY_BULK_FIELDS } from "../components/BulkEditDialog";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
@@ -22,6 +22,7 @@ import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDialog";
 import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
+import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
@@ -197,51 +198,12 @@ export function GalleriesPage({ onNavigate }: Props) {
       onSelectAll={selectAll}
       onSelectNone={selectNone}
       onInvertSelection={invertSelection}
-      selectionActions={
-        <>
-          {canDownloadSelectedGallery && (
-            <button
-              onClick={() => {
-                if (selectedDownloadTargets.length > 1 || !selectedGallery) {
-                  setShowBatchDownloadOptions(true);
-                  return;
-                }
-
-                setDownloadTarget(selectedGallery);
-              }}
-              disabled={batchDownloadMut.isPending}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-60"
-            >
-              {batchDownloadMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-              Download
-            </button>
-          )}
-          {canWriteGallery && (
-            <button
-              onClick={() => setShowBulkEdit(true)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-            >
-              <Edit className="w-3 h-3" />
-              Edit
-            </button>
-          )}
-          {canDeleteGallery && (
-            <button
-              onClick={() => { if (confirm(`Delete ${selectedIds.size} gallery(s)?`)) bulkDeleteMut.mutate(); }}
-              disabled={bulkDeleteMut.isPending}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-            >
-              {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-              Delete
-            </button>
-          )}
-        </>
-      }
+      selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} />}
     >
       {displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {items.map((g) => (
-            <GalleryCard key={g.id} gallery={g} engagement={engagementById.get(g.id)} onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "gallery", id: g.id })} onNavigate={onNavigate} selected={selectedIds.has(g.id)} onSelect={() => toggle(g.id)} selecting={selecting} />
+            <GalleryTile key={g.id} gallery={g} engagement={engagementById.get(g.id)} onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "gallery", id: g.id })} onNavigate={onNavigate} selected={selectedIds.has(g.id)} onSelect={() => toggle(g.id)} selecting={selecting} />
           ))}
         </EntityCardGrid>
       ) : displayMode === "list" ? (
@@ -304,108 +266,6 @@ function GalleryWallCard({ gallery, engagement, onClick, selected, onSelect, sel
         </div>
       )}
     </WallMediaCard>
-  );
-}
-
-function GalleryCard({ gallery, engagement, onClick, onNavigate, selected, onSelect, selecting }: { gallery: Gallery; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  const rating = engagement?.rating;
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, onClick);
-  const cardContent = (
-    <>
-      <div className="aspect-video bg-surface flex items-center justify-center relative overflow-hidden">
-        {gallery.coverPath ? (
-          <img src={gallery.coverPath} alt={gallery.title || ""} className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-        ) : (
-          <FolderOpen className="w-10 h-10 text-muted opacity-30" />
-        )}
-        <RatingBanner rating={rating} />
-        {gallery.studioName && (
-          <div className="absolute top-1 right-1 text-xs bg-black/70 px-1.5 py-0.5 rounded text-white truncate max-w-[80%]">
-            {gallery.studioName}
-          </div>
-        )}
-      </div>
-      <div className="card-body border-t border-border/50 p-2">
-        <h3 className="font-medium text-sm truncate text-foreground">{gallery.title || "Untitled"}</h3>
-        {gallery.date && <div className="text-xs text-secondary">{gallery.date}</div>}
-      </div>
-    </>
-  );
-
-  return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card bg-card rounded overflow-hidden border hover:border-accent/60 transition-all cursor-pointer group relative ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}>
-      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-      {!selecting && (
-        <BookmarkButton
-          hostType="gallery"
-          hostId={gallery.id}
-          compact
-          deferUntilHover
-          className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
-        />
-      )}
-      {selecting ? (
-        cardContent
-      ) : (
-        <a {...linkProps} aria-label={`Open gallery ${gallery.title || "Untitled"}`} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          {cardContent}
-        </a>
-      )}
-      <GalleryCardPopovers gallery={gallery} onNavigate={onNavigate} />
-    </div>
-  );
-}
-
-function GalleryCardPopovers({ gallery, onNavigate }: { gallery: Gallery; onNavigate?: (r: any) => void }) {
-  const hasAny = gallery.imageCount > 0 || gallery.performers.length > 0 || gallery.tags.length > 0 || gallery.sceneCount > 0 || gallery.organized;
-  if (!hasAny) return null;
-
-  return (
-    <div className="relative z-10 flex items-center justify-center gap-1 px-2 pb-2 border-t border-border/50 pt-1.5">
-      {gallery.imageCount > 0 && (
-        <PopoverButton icon={<Image className="w-3 h-3" />} count={gallery.imageCount} title="Images" wide preferBelow>
-          <ImagesPopoverContent filter={{ galleryId: gallery.id }} />
-        </PopoverButton>
-      )}
-      {gallery.tags.length > 0 && (
-        <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={gallery.tags.length} title="Tags" preferBelow>
-          <div className="flex flex-wrap gap-1">
-            {gallery.tags.map((t: any) => {
-              const linkProps = createNestedRouteLinkProps<HTMLAnchorElement>({ page: "tag", id: t.id }, () => onNavigate?.({ page: "tag", id: t.id }));
-
-              return <a key={t.id} {...linkProps}
-                className="text-[11px] text-accent hover:underline cursor-pointer px-1.5 py-0.5 rounded bg-card border border-border hover:border-accent/40 transition-colors whitespace-nowrap">
-                {t.name}
-              </a>;
-            })}
-          </div>
-        </PopoverButton>
-      )}
-      {gallery.performers.length > 0 && (
-        <PopoverButton icon={<Users className="w-3.5 h-3.5" />} count={gallery.performers.length} title="Performers" wide preferBelow>
-          <div className="grid grid-cols-2 gap-2">
-            {gallery.performers.map((p: any) => {
-              const linkProps = createNestedRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: p.id }, () => onNavigate?.({ page: "performer", id: p.id }));
-
-              return <a key={p.id} {...linkProps}
-                className="flex flex-col items-center gap-1 text-center cursor-pointer rounded hover:bg-card-hover p-1.5 transition-colors">
-                <span className="text-xs text-accent hover:underline truncate w-full">{p.name}</span>
-              </a>;
-            })}
-          </div>
-        </PopoverButton>
-      )}
-      {gallery.sceneCount > 0 && (
-        <PopoverButton icon={<Film className="w-3 h-3" />} count={gallery.sceneCount} title="Scenes" wide preferBelow>
-          <ScenesPopoverContent filter={{ galleryId: gallery.id }} />
-        </PopoverButton>
-      )}
-      {gallery.organized && (
-        <span className="text-muted" title="Organized">
-          <Box className="w-3 h-3" />
-        </span>
-      )}
-    </div>
   );
 }
 

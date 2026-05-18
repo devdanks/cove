@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { aiVisual, scenes, tags, performers, galleries } from "../api/client";
+import { aiVisual, entityImages, scenes, tags, performers, galleries } from "../api/client";
 import type { BoolCriterion, EntityEngagement, FindFilter, Group, Scene, SceneCreate, SceneFilterCriteria, SceneListEntry } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
@@ -1419,12 +1419,10 @@ function getSceneDisplayDuration(scene: Scene) {
 }
 
 function getSceneFeedMedia(scene: Scene, feedVideoSource: string) {
-  const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
-  const coverUrl = scene.imagePath ?? screenshotUrl;
+  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
 
   if (feedVideoSource === "video") {
     return {
-      screenshotUrl,
       coverUrl,
       videoSrc: scenes.streamUrl(scene.id),
       videoStatusSrc: undefined,
@@ -1432,7 +1430,6 @@ function getSceneFeedMedia(scene: Scene, feedVideoSource: string) {
   }
 
   return {
-    screenshotUrl,
     coverUrl,
     videoSrc: scenes.previewUrl(scene.id),
     videoStatusSrc: scenes.previewStatusUrl(scene.id),
@@ -1551,8 +1548,7 @@ function SceneListTable({ entries, engagementById, onNavigate, selectedIds, onTo
 
 function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scene: Scene; onClick: () => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
-  const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
-  const coverUrl = scene.imagePath ?? screenshotUrl;
+  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
   const previewUrl = scenes.previewUrl(scene.id);
   const previewStatusUrl = scenes.previewStatusUrl(scene.id);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
@@ -1566,7 +1562,6 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
     <WallMediaCard
       title={title}
       imageSrc={coverUrl}
-      imageFallbackSrc={screenshotUrl}
       videoSrc={previewUrl}
       videoStatusSrc={previewStatusUrl}
       useVideo={wallPreviewType === "video" || wallPreviewType === "webp"}
@@ -1594,7 +1589,7 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
 
 function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
-  const { screenshotUrl, coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
+  const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
   const title = scene.title || file?.basename || `Scene ${scene.id}`;
   const duration = getSceneDisplayDuration(scene);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
@@ -1630,7 +1625,6 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onTog
         <WallMediaCard
           title={title}
           imageSrc={coverUrl}
-          imageFallbackSrc={screenshotUrl}
           videoSrc={videoSrc}
           videoStatusSrc={videoStatusSrc}
           useVideo
@@ -1703,7 +1697,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onTog
 
 function SceneVerticalViewerCard({ scene, feedVideoSource, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, fullscreen, viewerHeight, onNavigate, selected, selecting, onSelect }: { scene: Scene; feedVideoSource: string; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; fullscreen: boolean; viewerHeight: number | null; onNavigate: (sceneId: number) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
-  const { screenshotUrl, coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
+  const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
   const title = scene.title || file?.basename || `Scene ${scene.id}`;
   const duration = getSceneDisplayDuration(scene);
   const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
@@ -1714,7 +1708,6 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, soundEnabled, onToggl
       <WallMediaCard
         title={title}
         imageSrc={coverUrl}
-        imageFallbackSrc={screenshotUrl}
         videoSrc={videoSrc}
         videoStatusSrc={videoStatusSrc}
         useVideo

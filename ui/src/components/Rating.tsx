@@ -47,6 +47,15 @@ function clampDisplayRating(value: number, options?: RatingSystemOptions) {
   return roundToStep(Math.min(maxValue, Math.max(0, value)), step);
 }
 
+function normalizeDisplayRatingInput(rawValue: string, value: number, options?: RatingSystemOptions) {
+  const normalized = normalizeRatingOptions(options);
+  if (normalized.type === "decimal" && !rawValue.includes(".") && !rawValue.includes(",") && value > 10 && value < 100) {
+    return value / 10;
+  }
+
+  return value;
+}
+
 function trimTrailingZeros(value: number) {
   return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
 }
@@ -191,7 +200,7 @@ function RatingNumberInput({
           return;
         }
 
-        onChange(convertFromRatingFormat(clampDisplayRating(parsed, options), options));
+        onChange(convertFromRatingFormat(clampDisplayRating(normalizeDisplayRatingInput(nextValue, parsed, options), options), options));
       }}
       onBlur={(event) => {
         if (!event.target.value) {
@@ -204,7 +213,7 @@ function RatingNumberInput({
           return;
         }
 
-        onChange(convertFromRatingFormat(clampDisplayRating(parsed, options), options));
+        onChange(convertFromRatingFormat(clampDisplayRating(normalizeDisplayRatingInput(event.target.value, parsed, options), options), options));
       }}
       className={inputClassName ?? "w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"}
     />

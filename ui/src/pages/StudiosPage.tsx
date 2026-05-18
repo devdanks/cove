@@ -13,7 +13,7 @@ import { STUDIO_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, STUDIO_BULK_FIELDS } from "../components/BulkEditDialog";
 import { MergeDialog } from "../components/MergeDialog";
 import { StudioTagger } from "../components/StudioTagger";
-import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
+import { StudioTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
@@ -27,6 +27,7 @@ import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDial
 import { CustomFieldsEditor } from "../components/shared";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { BulkSelectionActions } from "../components/BulkSelectionActions";
 
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
@@ -179,15 +180,6 @@ export function StudiosPage({ onNavigate }: Props) {
                 MetadataServer
               </button>
             )}
-            {canWriteStudio && (
-              <button
-                onClick={() => setShowBulkEdit(true)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-              >
-                <Edit className="w-3 h-3" />
-                Edit
-              </button>
-            )}
             {canWriteStudio && selectedIds.size >= 2 && (
               <button
                 onClick={() => setShowMerge(true)}
@@ -197,16 +189,7 @@ export function StudiosPage({ onNavigate }: Props) {
                 Merge
               </button>
             )}
-            {canDeleteStudio && (
-              <button
-                onClick={() => { if (confirm(`Delete ${selectedIds.size} studio(s)?`)) bulkDeleteMut.mutate(); }}
-                disabled={bulkDeleteMut.isPending}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-              >
-                {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                Delete
-              </button>
-            )}
+            <BulkSelectionActions entityType="studios" selectedIds={selectedIds} onDone={selectNone} />
           </>
         }
       >
@@ -234,7 +217,7 @@ export function StudiosPage({ onNavigate }: Props) {
       ) : displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {items.map((s) => (
-            <StudioCard
+            <StudioTile
               key={s.id}
               studio={s}
               engagement={engagementById.get(s.id)}
@@ -243,7 +226,9 @@ export function StudiosPage({ onNavigate }: Props) {
               selected={selectedIds.has(s.id)}
               onSelect={() => toggle(s.id)}
               selecting={selecting}
-            />
+            >
+              <ExtensionSlot slot="studio-card-footer" context={{ studio: s, onNavigate }} />
+            </StudioTile>
           ))}
         </EntityCardGrid>
       ) : (
@@ -286,104 +271,6 @@ function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect,
         {title}
       </div>
     </WallMediaCard>
-  );
-}
-
-function StudioCard({ studio, engagement, onClick, onNavigate, selected, onSelect, selecting }: { studio: Studio; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  const { slots } = useRouteRegistry();
-  const queryClient = useQueryClient();
-  const hasExtensionFooter = slots.some((slot) => slot.slot === "studio-card-footer");
-  const favMut = useMutation({
-    mutationFn: () => studios.update(studio.id, { favorite: !studio.favorite }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["studios"] }),
-  });
-
-  return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card bg-card rounded overflow-hidden border hover:border-accent/60 transition-all cursor-pointer relative group ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}>
-      <RouteCardLinkOverlay route={{ page: "studio", id: studio.id }} onClick={onClick} label={`Open studio ${studio.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="aspect-video bg-surface flex items-center justify-center text-muted relative overflow-hidden">
-        <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-        {/* Favorite heart overlay */}
-        <button
-          onClick={(e) => { e.stopPropagation(); favMut.mutate(); }}
-          className={`absolute top-1 right-1 p-1 z-10 transition-opacity ${studio.favorite ? "opacity-100" : "opacity-0 group-hover:opacity-70"}`}
-          title={studio.favorite ? "Unfavorite" : "Favorite"}
-        >
-          <Heart className={`w-5 h-5 ${studio.favorite ? "fill-red-500 text-red-500" : "text-white drop-shadow-md"}`} />
-        </button>
-        {studio.imagePath ? (
-          <img
-            src={entityImages.studioImageUrl(studio.id, studio.updatedAt)}
-            alt={studio.name}
-            className="w-full h-full object-contain p-4"
-            loading="lazy"
-          />
-        ) : (
-          <Building2 className="w-10 h-10 opacity-30" />
-        )}
-        <RatingBanner rating={engagement?.rating} />
-      </div>
-      <div className="card-body border-t border-border/50 p-2 text-center">
-        <h3 className="font-medium text-sm truncate text-foreground">{studio.name}</h3>
-        {studio.parentName && (
-          <div className="text-xs text-muted truncate">↑ {studio.parentName}</div>
-        )}
-      </div>
-      {(studio.sceneCount > 0 || studio.imageCount > 0 || studio.galleryCount > 0 || studio.groupCount > 0 || studio.performerCount > 0 || studio.tags.length > 0 || studio.childStudioCount > 0 || studio.organized || hasExtensionFooter) && (
-        <div className="relative z-10 flex items-center justify-center gap-1 px-2 pb-2 border-t border-border/50 pt-1.5 flex-wrap">
-          {studio.sceneCount > 0 && (
-            <PopoverButton icon={<Film className="w-3 h-3" />} count={studio.sceneCount} title="Scenes" wide preferBelow>
-              <ScenesPopoverContent filter={{ studioId: studio.id }} />
-            </PopoverButton>
-          )}
-          {studio.groupCount > 0 && (
-            <PopoverButton icon={<Layers className="w-3 h-3" />} count={studio.groupCount} title="Groups" wide preferBelow>
-              <GroupsPopoverContent filter={{ studioId: studio.id }} />
-            </PopoverButton>
-          )}
-          {studio.imageCount > 0 && (
-            <PopoverButton icon={<Image className="w-3 h-3" />} count={studio.imageCount} title="Images" wide preferBelow>
-              <ImagesPopoverContent filter={{ studioId: studio.id }} />
-            </PopoverButton>
-          )}
-          {studio.galleryCount > 0 && (
-            <PopoverButton icon={<LayoutGrid className="w-3 h-3" />} count={studio.galleryCount} title="Galleries" wide preferBelow>
-              <GalleriesPopoverContent filter={{ studioId: studio.id }} />
-            </PopoverButton>
-          )}
-          {studio.performerCount > 0 && (
-            <PopoverButton icon={<Users className="w-3 h-3" />} count={studio.performerCount} title="Performers" wide preferBelow>
-              <PerformersPopoverContent filter={{ studioId: studio.id }} />
-            </PopoverButton>
-          )}
-          {studio.tags.length > 0 && (
-            <PopoverButton icon={<TagIcon className="w-3.5 h-3.5" />} count={studio.tags.length} title="Tags" preferBelow>
-              <div className="flex flex-wrap gap-1">
-                {studio.tags.map((t: any) => {
-                  const linkProps = createNestedRouteLinkProps<HTMLAnchorElement>({ page: "tag", id: t.id }, () => onNavigate?.({ page: "tag", id: t.id }));
-
-                  return <a key={t.id} {...linkProps}
-                    className="text-[11px] text-accent hover:underline cursor-pointer px-1.5 py-0.5 rounded bg-card border border-border hover:border-accent/40 transition-colors whitespace-nowrap">
-                    {t.name}
-                  </a>;
-                })}
-              </div>
-            </PopoverButton>
-          )}
-          {studio.childStudioCount > 0 && (
-            <PopoverButton icon={<Building2 className="w-3 h-3" />} count={studio.childStudioCount} title="Sub-Studios" wide preferBelow>
-              <StudiosPopoverContent filter={{ parentId: studio.id }} />
-            </PopoverButton>
-          )}
-          {studio.organized && (
-            <span className="text-muted" title="Organized">
-              <Check className="w-3 h-3" />
-            </span>
-          )}
-          <ExtensionSlot slot="studio-card-footer" context={{ studio, onNavigate }} />
-        </div>
-      )}
-    </div>
   );
 }
 

@@ -136,7 +136,7 @@ describe("FaceDetailPage", () => {
     expect(await screen.findByText("Similar Jane")).toBeInTheDocument();
     expect(screen.getAllByRole("combobox").length).toBeGreaterThanOrEqual(2);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open face Similar Jane" }));
+    fireEvent.click(screen.getByRole("link", { name: "Open face Similar Jane" }));
     expect(onNavigate).toHaveBeenCalledWith({ page: "face", id: 17 });
   });
 

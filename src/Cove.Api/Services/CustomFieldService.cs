@@ -10,6 +10,17 @@ namespace Cove.Api.Services;
 public sealed class CustomFieldService(CoveContext db)
 {
     private readonly CoveContext _db = db;
+    private sealed record NormalizedDefinitionInput(
+        int? Id,
+        string Key,
+        string Label,
+        string Type,
+        string[] EntityTypes,
+        string[] Options,
+        bool Filterable,
+        bool Sortable,
+        bool IsMultiValue,
+        int DisplayOrder);
 
     public async Task<List<CustomFieldDefinitionDto>> GetDefinitionsAsync(string? entityType = null, CancellationToken ct = default)
     {
@@ -88,6 +99,80 @@ public sealed class CustomFieldService(CoveContext db)
         _db.CustomFieldDefinitions.Remove(definition);
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<List<CustomFieldDefinitionDto>> ReplaceDefinitionsAsync(IReadOnlyCollection<CustomFieldDefinitionSyncDto> definitions, CancellationToken ct = default)
+    {
+        var incomingDefinitions = definitions.ToList();
+        var duplicateId = incomingDefinitions
+            .Where(definition => definition.Id.HasValue)
+            .GroupBy(definition => definition.Id!.Value)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateId != null)
+            throw new ArgumentException("Duplicate custom field definition ids are not allowed.");
+
+        var existingDefinitions = await _db.CustomFieldDefinitions.ToListAsync(ct);
+        var existingDefinitionsById = existingDefinitions.ToDictionary(definition => definition.Id);
+        var normalizedDefinitions = incomingDefinitions
+            .Select((definition, index) =>
+            {
+                if (definition.Id is int id && !existingDefinitionsById.ContainsKey(id))
+                    throw new ArgumentException("A custom field definition no longer exists.");
+
+                var key = NormalizeKey(definition.Key, definition.Label);
+                return new NormalizedDefinitionInput(
+                    definition.Id,
+                    key,
+                    NormalizeLabel(definition.Label, key),
+                    CustomFieldTypes.Normalize(definition.Type),
+                    NormalizeEntityTypes(definition.EntityTypes),
+                    NormalizeOptions(definition.Options),
+                    definition.Filterable,
+                    definition.Sortable,
+                    definition.IsMultiValue,
+                    definition.DisplayOrder ?? (index * 10));
+            })
+            .ToList();
+
+        var duplicateKey = normalizedDefinitions
+            .GroupBy(definition => definition.Key, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateKey != null)
+            throw new ArgumentException("A custom field with that key already exists.");
+
+        var retainedDefinitionIds = normalizedDefinitions
+            .Where(definition => definition.Id.HasValue)
+            .Select(definition => definition.Id!.Value)
+            .ToHashSet();
+        var definitionsToDelete = existingDefinitions
+            .Where(definition => !retainedDefinitionIds.Contains(definition.Id))
+            .ToList();
+        if (definitionsToDelete.Count > 0)
+            _db.CustomFieldDefinitions.RemoveRange(definitionsToDelete);
+
+        foreach (var definitionInput in normalizedDefinitions)
+        {
+            var definition = definitionInput.Id is int id
+                ? existingDefinitionsById[id]
+                : new CustomFieldDefinition();
+
+            if (definitionInput.Id == null)
+                _db.CustomFieldDefinitions.Add(definition);
+
+            definition.Key = definitionInput.Key;
+            definition.Label = definitionInput.Label;
+            definition.Type = definitionInput.Type;
+            definition.EntityTypes = definitionInput.EntityTypes;
+            definition.Options = definitionInput.Options;
+            definition.Filterable = definitionInput.Filterable;
+            definition.Sortable = definitionInput.Sortable;
+            definition.IsMultiValue = definitionInput.IsMultiValue;
+            definition.DisplayOrder = definitionInput.DisplayOrder;
+            definition.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return await GetDefinitionsAsync(null, ct);
     }
 
     public async Task<IReadOnlyDictionary<int, Dictionary<string, object>>> GetValuesAsync(string entityType, IEnumerable<int> entityIds, CancellationToken ct = default)

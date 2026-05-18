@@ -319,6 +319,26 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         }
       >
         <div className="mx-auto max-w-7xl">
+          {(group.synopsis || (canReadTags && group.tags.length > 0)) ? (
+            <section className="mb-4 space-y-4 rounded-2xl border border-border bg-card/70 p-5">
+              {group.synopsis ? (
+                <div>
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Synopsis</h2>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/92">{group.synopsis}</p>
+                </div>
+              ) : null}
+              {canReadTags && group.tags.length > 0 ? (
+                <div>
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</h2>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {group.tags.map((tag) => (
+                      <TagBadge key={tag.id} name={tag.name} tag={tag} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           <EntityDetailTabs tabs={tabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} />
           <div className="py-6">
             {activeContent}

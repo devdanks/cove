@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, groups, images, metadata, performers, scenes, studios, tags, entityImages } from "../api/client";
-import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerTagMatch, Performer, Scene, Studio, TagDetail as TagDetailModel, TagSegmentWall } from "../api/types";
+import { audios, galleries, groups, images, metadata, performers, scenes, segmentLibrary, studios, tags, texts, entityImages } from "../api/client";
+import type { FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerTagMatch, Performer, Scene, SegmentRecord, Studio, TagDetail as TagDetailModel } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Building2, ChevronDown, CloudDownload, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
+import { Building2, ChevronDown, CloudDownload, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { TagEditModal } from "./TagEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailMergeDialog } from "../components/DetailMergeDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
-import { SceneCard, PerformerTile, ImageTile, GalleryTile, StudioTile, GroupTile } from "../components/EntityCards";
+import { AudioTile, SceneCard, PerformerTile, ImageTile, GalleryTile, StudioTile, GroupTile, SegmentTile, TextTile } from "../components/EntityCards";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { useAppConfig } from "../state/AppConfigContext";
 import { DetailListToolbar } from "../components/DetailListToolbar";
@@ -18,7 +18,6 @@ import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
-import { createRouteLinkProps } from "../components/cardNavigation";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
@@ -48,13 +47,36 @@ const GROUP_SORT = [
   { value: "created_at", label: "Created At" },
   { value: "random", label: "Random" },
 ];
+const AUDIO_SORT = [
+  { value: "updated_at", label: "Updated At" },
+  { value: "created_at", label: "Created At" },
+  { value: "title", label: "Title" },
+  { value: "date", label: "Date" },
+  { value: "duration", label: "Duration" },
+];
+const TEXT_SORT = [
+  { value: "updated_at", label: "Updated At" },
+  { value: "created_at", label: "Created At" },
+  { value: "title", label: "Title" },
+  { value: "date", label: "Date" },
+  { value: "words", label: "Word Count" },
+  { value: "pages", label: "Page Count" },
+];
+const SEGMENT_SORT = [
+  { value: "updated_at", label: "Updated At" },
+  { value: "created_at", label: "Created At" },
+  { value: "title", label: "Title" },
+  { value: "start_sec", label: "Start Time" },
+  { value: "duration", label: "Duration" },
+  { value: "confidence", label: "Confidence" },
+];
 
 interface Props {
   id: number;
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "performers" | "images" | "galleries" | "segments" | "studios" | "groups" | (string & {});
+type TabKey = "scenes" | "performers" | "images" | "galleries" | "audios" | "texts" | "segments" | "studios" | "groups" | (string & {});
 
 export function TagDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
@@ -73,6 +95,8 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     { key: "performers", label: "Performers", count: tag?.performerCount },
     { key: "images", label: "Images", count: tag?.imageCount },
     { key: "galleries", label: "Galleries", count: tag?.galleryCount },
+    { key: "audios", label: "Audios", count: tag?.audioCount },
+    { key: "texts", label: "Texts", count: tag?.textCount },
     { key: "segments", label: "Segments", count: tag?.segmentCount },
     { key: "studios", label: "Studios", count: tag?.studioCount },
     { key: "groups", label: "Groups", count: tag?.groupCount },
@@ -81,6 +105,9 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const [performerFilter, setPerformerFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 30, direction: "desc" });
   const [galleryFilter, setGalleryFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
+  const [audioFilter, setAudioFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
+  const [textFilter, setTextFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
+  const [segmentFilter, setSegmentFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc", sort: "updated_at" });
   const [studioFilter, setStudioFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const [groupFilter, setGroupFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const queryClient = useQueryClient();
@@ -94,6 +121,8 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     performers: "performers.read",
     images: "images.read",
     galleries: "galleries.read",
+    audios: "audios.read",
+    texts: "texts.read",
     segments: "scenes.read",
     studios: "studios.read",
     groups: "groups.read",
@@ -177,6 +206,8 @@ export function TagDetailPage({ id, onNavigate }: Props) {
           { key: "performers", label: "Performers", value: tag.performerCount, icon: <UserRound className="h-4 w-4" /> },
           { key: "images", label: "Images", value: tag.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
           { key: "galleries", label: "Galleries", value: tag.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
+          { key: "audios", label: "Audios", value: tag.audioCount, icon: <Headphones className="h-4 w-4" /> },
+          { key: "texts", label: "Texts", value: tag.textCount, icon: <FileText className="h-4 w-4" /> },
           { key: "segments", label: "Segments", value: tag.segmentCount, icon: <Layers className="h-4 w-4" /> },
           { key: "studios", label: "Studios", value: tag.studioCount, icon: <Building2 className="h-4 w-4" /> },
           { key: "groups", label: "Groups", value: tag.groupCount, icon: <Layers className="h-4 w-4" /> },
@@ -228,8 +259,14 @@ export function TagDetailPage({ id, onNavigate }: Props) {
           {activeTab === "galleries" && (
             <TagGalleriesPanel tagId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
           )}
+          {activeTab === "audios" && (
+            <TagAudiosPanel tagId={id} filter={audioFilter} setFilter={setAudioFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "texts" && (
+            <TagTextsPanel tagId={id} filter={textFilter} setFilter={setTextFilter} onNavigate={onNavigate} />
+          )}
           {activeTab === "segments" && (
-            <TagSegmentsPanel tagId={id} onNavigate={onNavigate} />
+            <TagSegmentsPanel tagId={id} filter={segmentFilter} setFilter={setSegmentFilter} onNavigate={onNavigate} />
           )}
           {activeTab === "studios" && (
             <TagStudiosPanel tagId={id} filter={studioFilter} setFilter={setStudioFilter} onNavigate={onNavigate} />
@@ -597,45 +634,102 @@ function TagGalleriesPanel({ tagId, filter, setFilter, onNavigate }: {
   );
 }
 
-function TagSegmentsPanel({ tagId, onNavigate }: { tagId: number; onNavigate: (r: any) => void }) {
+function TagAudiosPanel({ tagId, filter, setFilter, onNavigate }: {
+  tagId: number;
+  filter: FindFilter;
+  setFilter: (filter: FindFilter) => void;
+  onNavigate: (r: any) => void;
+}) {
+  const [zoomLevel, setZoomLevel] = useState(0);
   const { data, isLoading } = useQuery({
-    queryKey: ["tag-segments", tagId],
-    queryFn: () => tags.segments(tagId, 100),
+    queryKey: ["tag-audios", tagId, filter],
+    queryFn: () => audios.findFiltered({
+      findFilter: filter,
+      objectFilter: {
+        tagsCriterion: { value: [tagId], modifier: "INCLUDES" },
+      },
+    }),
+  });
+  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selecting = selectedIds.size > 0;
+
+  if (isLoading) return <LoadingPanel icon={<Headphones className="h-10 w-10" />} message="Loading audios..." />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<Headphones className="h-12 w-12" />} message="No audios with this tag" />;
+
+  return (
+    <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={AUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="audios" selectedIds={selectedIds} onDone={selectNone} audioItems={data.items} downloadItems={data.items} onNavigate={onNavigate} />} />
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`}>
+        {data.items.map((audio) => (
+          <AudioTile key={audio.id} audio={audio} onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })} onNavigate={onNavigate} selected={selectedIds.has(audio.id)} onSelect={() => toggle(audio.id)} selecting={selecting} />
+        ))}
+      </EntityCardGrid>
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+    </>
+  );
+}
+
+function TagTextsPanel({ tagId, filter, setFilter, onNavigate }: {
+  tagId: number;
+  filter: FindFilter;
+  setFilter: (filter: FindFilter) => void;
+  onNavigate: (r: any) => void;
+}) {
+  const [zoomLevel, setZoomLevel] = useState(0);
+  const { data, isLoading } = useQuery({
+    queryKey: ["tag-texts", tagId, filter],
+    queryFn: () => texts.findFiltered({
+      findFilter: filter,
+      objectFilter: {
+        tagsCriterion: { value: [tagId], modifier: "INCLUDES" },
+      },
+    }),
+  });
+  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selecting = selectedIds.size > 0;
+
+  if (isLoading) return <LoadingPanel icon={<FileText className="h-10 w-10" />} message="Loading texts..." />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<FileText className="h-12 w-12" />} message="No texts with this tag" />;
+
+  return (
+    <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={TEXT_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="texts" selectedIds={selectedIds} onDone={selectNone} textItems={data.items} downloadItems={data.items} />} />
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`}>
+        {data.items.map((text) => (
+          <TextTile key={text.id} text={text} onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })} onNavigate={onNavigate} selected={selectedIds.has(text.id)} onSelect={() => toggle(text.id)} selecting={selecting} />
+        ))}
+      </EntityCardGrid>
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+    </>
+  );
+}
+
+function TagSegmentsPanel({ tagId, filter, setFilter, onNavigate }: { tagId: number; filter: FindFilter; setFilter: (filter: FindFilter) => void; onNavigate: (r: any) => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["tag-segments", tagId, filter],
+    queryFn: () => segmentLibrary.list({
+      q: filter.q,
+      tagId,
+      sort: filter.sort,
+      direction: filter.direction as "asc" | "desc" | undefined,
+      page: filter.page,
+      perPage: filter.perPage,
+    }),
   });
 
   if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading segments..." />;
-  if (!data || data.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No segments with this tag" />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No segments with this tag" />;
 
   return (
-    <EntityCardGrid minCardWidth="220px">
-      {data.map((segment: TagSegmentWall) => {
-        const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: segment.sceneId }, () => onNavigate({ page: "scene", id: segment.sceneId }));
-
-        return (
-          <a
-            key={segment.id}
-            {...linkProps}
-            className="group text-left"
-          >
-            <div className="relative aspect-video overflow-hidden rounded-lg border border-border bg-card shadow-md shadow-black/30">
-              <img
-                src={scenes.screenshotUrl(segment.sceneId)}
-                alt={segment.title || segment.kind}
-                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                loading="lazy"
-              />
-              <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[11px] text-white">
-                {formatDuration(segment.startSec)}
-              </span>
-            </div>
-            <div className="pt-2">
-              <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">{segment.title || segment.kind}</p>
-              <p className="mt-0.5 truncate text-xs text-secondary">{segment.sceneTitle || "Untitled Scene"}</p>
-            </div>
-          </a>
-        );
-      })}
-    </EntityCardGrid>
+    <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={SEGMENT_SORT} showSearch />
+      <EntityCardGrid minCardWidth="220px">
+        {data.items.map((segment: SegmentRecord) => (
+          <SegmentTile key={segment.id} segment={segment} onClick={() => onNavigate({ page: "segment", id: segment.id })} />
+        ))}
+      </EntityCardGrid>
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+    </>
   );
 }
 

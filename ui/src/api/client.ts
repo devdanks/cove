@@ -544,6 +544,10 @@ export const performers = {
   findFiltered: (req: FilteredQueryRequest<PerformerFilterCriteria>) =>
     request<PaginatedResponse<Performer>>("/performers/find", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
   get: (id: number) => request<Performer>(`/performers/${id}`),
+  groups: (id: number, filter?: FindFilter) =>
+    request<PaginatedResponse<Group>>(`/performers/${id}/groups${buildQuery(filter)}`),
+  appearsWith: (id: number, filter?: FindFilter) =>
+    request<PaginatedResponse<Performer>>(`/performers/${id}/appears-with${buildQuery(filter)}`),
   create: (data: PerformerCreate) => request<Performer>("/performers", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: PerformerUpdate) => request<Performer>(`/performers/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   scrape: (id: number, data: PerformerScrapeRequest) => request<Performer>(`/performers/${id}/scrape`, { method: "POST", body: JSON.stringify(data) }),
@@ -955,6 +959,7 @@ export const bookmarks = {
 export const customFields = {
   list: (entityType?: string) => request<CustomFieldDefinition[]>(`/custom-fields${buildQuery(undefined, { entityType })}`),
   create: (data: CustomFieldDefinitionCreate) => request<CustomFieldDefinition>("/custom-fields", { method: "POST", body: JSON.stringify(data) }),
+  replaceAll: (data: CustomFieldDefinition[]) => request<CustomFieldDefinition[]>("/custom-fields", { method: "PUT", body: JSON.stringify(data) }),
   update: (id: number, data: CustomFieldDefinitionUpdate) => request<CustomFieldDefinition>(`/custom-fields/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/custom-fields/${id}`, { method: "DELETE" }),
 };

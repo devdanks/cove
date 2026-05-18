@@ -17,6 +17,7 @@ public sealed class TokenService : ITokenService
     public const int DefaultRefreshDays = 30;
     public const string JwtIssuer = "Cove";
     public const string JwtAudience = "Cove";
+    private const string SessionIdClaim = "cove_session_id";
 
     private readonly CoveContext _db;
     private readonly CoveConfiguration _config;
@@ -43,13 +44,14 @@ public sealed class TokenService : ITokenService
         var roleNames = user.Roles.Select(r => r.Role!.Name).ToList();
         var dto = await BuildUserDto(user, ct);
 
-        var (jwt, jwtExpires) = IssueJwt(user.Id, user.Username, roleNames);
         var (refreshPlain, refreshHash) = NewOpaqueToken();
-    var refreshExpires = DateTime.UtcNow.AddDays(GetRefreshTokenDays());
+        var refreshId = Guid.NewGuid();
+        var refreshExpires = DateTime.UtcNow.AddDays(GetRefreshTokenDays());
+        var (jwt, jwtExpires) = IssueJwt(user.Id, user.Username, roleNames, refreshId);
 
         var entity = new RefreshToken
         {
-            Id = Guid.NewGuid(),
+            Id = refreshId,
             UserId = user.Id,
             TokenHash = refreshHash,
             UserAgent = Trunc(userAgent, 500),
@@ -88,10 +90,11 @@ public sealed class TokenService : ITokenService
         existing.LastUsedAt = DateTime.UtcNow;
 
         var (newPlain, newHash) = NewOpaqueToken();
-    var refreshExpires = DateTime.UtcNow.AddDays(GetRefreshTokenDays());
+        var refreshExpires = DateTime.UtcNow.AddDays(GetRefreshTokenDays());
+        var refreshId = Guid.NewGuid();
         var rotated = new RefreshToken
         {
-            Id = Guid.NewGuid(),
+            Id = refreshId,
             UserId = existing.UserId,
             ParentId = existing.Id,
             TokenHash = newHash,
@@ -107,7 +110,7 @@ public sealed class TokenService : ITokenService
             .Where(r => r.UserId == existing.UserId)
             .Select(r => r.Role!.Name)
             .ToListAsync(ct);
-        var (jwt, jwtExpires) = IssueJwt(existing.UserId, existing.User.Username, roleNames);
+        var (jwt, jwtExpires) = IssueJwt(existing.UserId, existing.User.Username, roleNames, refreshId);
 
         await _db.SaveChangesAsync(ct);
 
@@ -192,7 +195,8 @@ public sealed class TokenService : ITokenService
             {
                 ValidateIssuer = true, ValidIssuer = JwtIssuer,
                 ValidateAudience = true, ValidAudience = JwtAudience,
-                ValidateLifetime = false,
+                ValidateLifetime = true,
+                RequireExpirationTime = true,
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
                 ClockSkew = TimeSpan.FromSeconds(30),
@@ -201,6 +205,16 @@ public sealed class TokenService : ITokenService
             var sub = p.FindFirst(ClaimTypes.NameIdentifier)?.Value
                    ?? p.FindFirst("sub")?.Value;
             if (!int.TryParse(sub, out var userId)) return null;
+
+            var sessionClaim = p.FindFirst(SessionIdClaim)?.Value;
+            if (!Guid.TryParse(sessionClaim, out var sessionId)) return null;
+
+            var session = await _db.RefreshTokens.AsNoTracking()
+                .Where(t => t.Id == sessionId && t.UserId == userId)
+                .Select(t => new { t.RevokedAt, t.ExpiresAt })
+                .FirstOrDefaultAsync(ct);
+            if (session is null || session.RevokedAt is not null || session.ExpiresAt < DateTime.UtcNow)
+                return null;
 
             var user = await _db.Users.AsNoTracking()
                 .Include(u => u.Roles).ThenInclude(r => r.Role).ThenInclude(r => r!.Permissions)
@@ -402,22 +416,27 @@ public sealed class TokenService : ITokenService
         }).ToList();
     }
 
-    private (string jwt, DateTime expires) IssueJwt(int userId, string username, IEnumerable<string> roleNames)
+    private (string jwt, DateTime expires) IssueJwt(int userId, string username, IEnumerable<string> roleNames, Guid sessionId)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config.Auth.JwtSecret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var issuedAt = DateTime.UtcNow;
+        var expires = issuedAt.AddMinutes(GetAccessTokenMinutes());
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, userId.ToString()),
             new(ClaimTypes.Name, username),
+            new(SessionIdClaim, sessionId.ToString("N")),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new(JwtRegisteredClaimNames.Iat, EpochTime.GetIntDate(issuedAt).ToString(), ClaimValueTypes.Integer64),
         };
         foreach (var r in roleNames)
             claims.Add(new Claim(ClaimTypes.Role, r));
-        var expires = DateTime.UtcNow.AddYears(20);
-        var token = new JwtSecurityToken(JwtIssuer, JwtAudience, claims, signingCredentials: creds);
+        var token = new JwtSecurityToken(JwtIssuer, JwtAudience, claims, notBefore: issuedAt, expires: expires, signingCredentials: creds);
         return (new JwtSecurityTokenHandler().WriteToken(token), expires);
     }
+
+    private int GetAccessTokenMinutes() => Math.Clamp(_config.Auth.AccessTokenMinutes, 1, 1440);
 
     private int GetRefreshTokenDays() => Math.Clamp(_config.Auth.RefreshTokenDays, 1, 3650);
 

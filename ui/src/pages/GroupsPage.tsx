@@ -22,6 +22,7 @@ import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
 import { DynamicGroupFilterEditor, FILTER_DYNAMIC_SOURCE_KEY, defaultDynamicGroupFilterQueryJson } from "../components/DynamicGroupFilterEditor";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
+import { BulkSelectionActions } from "../components/BulkSelectionActions";
 
 const SORT_OPTIONS = [
   { value: "sort_order", label: "Manual Order" },
@@ -166,29 +167,7 @@ export function GroupsPage({ onNavigate }: Props) {
         onSelectAll={selectAll}
         onSelectNone={selectNone}
         onInvertSelection={invertSelection}
-        selectionActions={
-          <>
-            {canWriteGroup && (
-              <button
-                onClick={() => setShowBulkEdit(true)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-              >
-                <Edit className="w-3 h-3" />
-                Edit
-              </button>
-            )}
-            {canDeleteGroup && (
-              <button
-                onClick={() => { if (confirm(`Delete ${selectedIds.size} group(s)?`)) bulkDeleteMut.mutate(); }}
-                disabled={bulkDeleteMut.isPending}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-              >
-                {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                Delete
-              </button>
-            )}
-          </>
-        }
+        selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} />}
       >
       {displayMode === "tagger" ? (
         <ScraperEntityTagger

@@ -14,7 +14,7 @@ import { BulkEditDialog, PERFORMER_BULK_FIELDS } from "../components/BulkEditDia
 import { Users, Heart, Tag, Film, Image, LayoutGrid, Layers, Trash2, Loader2, Edit, Merge } from "lucide-react";
 import { MergeDialog } from "../components/MergeDialog";
 import { PerformerTagger } from "../components/PerformerTagger";
-import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, GalleriesPopoverContent } from "../components/EntityCards";
+import { PerformerTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent, GalleriesPopoverContent } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
@@ -27,6 +27,7 @@ import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDial
 import { CustomFieldsEditor } from "../components/shared";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { WallMediaCard } from "../components/WallMediaCard";
+import { BulkSelectionActions } from "../components/BulkSelectionActions";
 
 /** Convert 2-letter ISO country code to flag emoji */
 function countryToFlag(code: string): string {
@@ -173,15 +174,6 @@ export function PerformersPage({ onNavigate }: Props) {
                 MetadataServer
               </button>
             )}
-            {canWritePerformer && (
-              <button
-                onClick={() => setShowBulkEdit(true)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-              >
-                <Edit className="w-3 h-3" />
-                Edit
-              </button>
-            )}
             {canWritePerformer && selectedIds.size >= 2 && (
               <button
                 onClick={() => setShowMerge(true)}
@@ -191,16 +183,7 @@ export function PerformersPage({ onNavigate }: Props) {
                 Merge
               </button>
             )}
-            {canDeletePerformer && (
-              <button
-                onClick={() => { if (confirm(`Delete ${selectedIds.size} performer(s)?`)) bulkDeleteMut.mutate(); }}
-                disabled={bulkDeleteMut.isPending}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-              >
-                {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                Delete
-              </button>
-            )}
+            <BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} />
           </>
         }
       >
@@ -228,7 +211,7 @@ export function PerformersPage({ onNavigate }: Props) {
       ) : displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 160px)">
           {items.map((p) => (
-            <PerformerCard
+            <PerformerTile
               key={p.id}
               performer={p}
               engagement={engagementById.get(p.id)}
@@ -282,143 +265,6 @@ function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect,
         {title}
       </div>
     </WallMediaCard>
-  );
-}
-
-function PerformerCard({ performer, engagement, onClick, onNavigate, selected, onSelect, selecting }: { performer: Performer; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  const age = performer.birthdate
-    ? Math.floor((Date.now() - new Date(performer.birthdate).getTime()) / 31557600000)
-    : null;
-  const {
-    favorite,
-    rating,
-    setFavorite,
-    favoritePending,
-  } = useEntityEngagement("performer", performer.id, {
-    enabled: false,
-    fallbackFavorite: engagement?.isFavorite ?? performer.favorite,
-    fallbackRating: engagement?.rating,
-  });
-
-  return (
-    <div
-      onClick={selecting ? onClick : undefined}
-      className={`entity-card bg-card rounded overflow-hidden cursor-pointer border hover:border-accent/60 transition-all text-left w-full group relative ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}
-    >
-      <RouteCardLinkOverlay route={{ page: "performer", id: performer.id }} onClick={onClick} label={`Open performer ${performer.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      {/* Image */}
-      <div className="aspect-[2/3] bg-surface relative overflow-hidden">
-        <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-        <img 
-          src={performer.imagePath || entityImages.performerImageUrl(performer.id, performer.updatedAt)} 
-            alt={performer.name} 
-            className="w-full h-full object-cover" 
-            loading="lazy"
-            onError={(e) => {
-              const el = e.target as HTMLImageElement;
-              el.style.display = "none";
-              if (el.nextElementSibling) (el.nextElementSibling as HTMLElement).style.display = "";
-            }}
-          />
-          <div className="w-full h-full flex items-center justify-center" style={{ display: "none" }}>
-            <svg viewBox="0 0 100 150" className="w-2/3 h-2/3 opacity-20">
-              <ellipse cx="50" cy="35" rx="25" ry="30" fill="currentColor" className="text-muted"/>
-              <ellipse cx="50" cy="120" rx="40" ry="45" fill="currentColor" className="text-muted"/>
-            </svg>
-          </div>
-
-        {/* Favorite star overlay */}
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setFavorite(!favorite);
-          }}
-          disabled={favoritePending}
-          className={`absolute top-1 right-1 p-1 transition-opacity ${
-            favorite ? "opacity-100" : "opacity-0 group-hover:opacity-70"
-          }`}
-          title={favorite ? "Unfavorite" : "Favorite"}
-        >
-          <Heart className={`w-5 h-5 ${favorite ? "fill-red-500 text-red-500" : "text-white drop-shadow-md"}`} />
-        </button>
-
-        {/* Rating banner */}
-        <RatingBanner rating={rating} />
-
-        {/* Country flag overlay - bottom right */}
-        {performer.country && (
-          <div className="absolute bottom-1 right-1 text-lg leading-none drop-shadow-md" title={performer.country}>
-            {countryToFlag(performer.country)}
-          </div>
-        )}
-      </div>
-
-      {/* Title */}
-      <div className="card-body bg-card border-t border-border p-2 text-center">
-        <div className="text-sm text-foreground font-medium truncate">
-          {performer.gender && (
-            <span className="text-muted mr-1" title={performer.gender}>
-              {performer.gender === "FEMALE" ? "♀" : performer.gender === "MALE" ? "♂" : performer.gender === "NON_BINARY" ? "⚧" : "⚧"}
-            </span>
-          )}
-          {performer.name}
-          {performer.disambiguation && (
-            <span className="text-muted font-normal"> ({performer.disambiguation})</span>
-          )}
-        </div>
-        {age !== null && age > 0 && (
-          <div className="text-xs text-secondary">{age} years old</div>
-        )}
-      </div>
-
-      {/* Popovers row */}
-      <PerformerCardPopovers performer={performer} onNavigate={onNavigate} />
-    </div>
-  );
-}
-
-function PerformerCardPopovers({ performer, onNavigate }: { performer: Performer; onNavigate?: (r: any) => void }) {
-  const hasAny = performer.sceneCount > 0 || performer.imageCount > 0 || performer.galleryCount > 0 || performer.groupCount > 0 || performer.tags.length > 0;
-  if (!hasAny) return null;
-
-  return (
-    <div className="relative z-10 flex items-center justify-center gap-1 px-2 pb-2 border-t border-border pt-1.5">
-      {performer.sceneCount > 0 && (
-        <PopoverButton icon={<Film className="w-3 h-3" />} count={performer.sceneCount} title="Scenes" wide preferBelow>
-          <ScenesPopoverContent filter={{ performerIds: String(performer.id) }} />
-        </PopoverButton>
-      )}
-      {performer.imageCount > 0 && (
-        <PopoverButton icon={<Image className="w-3 h-3" />} count={performer.imageCount} title="Images" wide preferBelow>
-          <ImagesPopoverContent filter={{ performerIds: String(performer.id) }} />
-        </PopoverButton>
-      )}
-      {performer.galleryCount > 0 && (
-        <PopoverButton icon={<LayoutGrid className="w-3 h-3" />} count={performer.galleryCount} title="Galleries" wide preferBelow>
-          <GalleriesPopoverContent filter={{ performerIds: String(performer.id) }} />
-        </PopoverButton>
-      )}
-      {performer.groupCount > 0 && (
-        <span className="flex items-center gap-0.5 text-xs text-muted px-1" title="Groups">
-          <Layers className="w-3 h-3" /> {performer.groupCount}
-        </span>
-      )}
-      {performer.tags.length > 0 && (
-        <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={performer.tags.length} title="Tags" preferBelow>
-          <div className="flex flex-wrap gap-1">
-            {performer.tags.map((t: any) => {
-              const linkProps = createNestedRouteLinkProps<HTMLAnchorElement>({ page: "tag", id: t.id }, () => onNavigate?.({ page: "tag", id: t.id }));
-
-              return <a key={t.id} {...linkProps}
-                className="text-[11px] text-accent hover:underline cursor-pointer px-1.5 py-0.5 rounded bg-card border border-border hover:border-accent/40 transition-colors whitespace-nowrap">
-                {t.name}
-              </a>;
-            })}
-          </div>
-        </PopoverButton>
-      )}
-    </div>
   );
 }
 

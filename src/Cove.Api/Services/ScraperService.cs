@@ -4,7 +4,9 @@ using Cove.Core.Interfaces;
 using Cove.Plugins;
 using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -1762,37 +1764,69 @@ public class ScraperService
     private async Task<string> FetchContentAsync(ScraperManifest manifest, string url, CancellationToken ct)
     {
         var requestUrl = NormalizeRequestUrl(url);
-        using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
-
-        foreach (var header in manifest.Driver?.Headers ?? [])
-        {
-            if (!string.IsNullOrWhiteSpace(header.Key) && header.Value != null)
-                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        }
-
         var cookieHeader = BuildCookieHeader(manifest, requestUrl);
-        if (!string.IsNullOrWhiteSpace(cookieHeader))
-            request.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+        const int maxAttempts = 2;
 
-        using var response = await _httpClient.SendAsync(request, ct);
-        var content = await response.Content.ReadAsStringAsync(ct);
-
-        if (!response.IsSuccessStatusCode)
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            if (!string.IsNullOrWhiteSpace(content))
+            try
             {
-                _logger.LogDebug(
-                    "Scrape fetch for {Url} returned {StatusCode}; continuing with response body.",
-                    requestUrl,
-                    (int)response.StatusCode);
+                using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
+
+                foreach (var header in manifest.Driver?.Headers ?? [])
+                {
+                    if (!string.IsNullOrWhiteSpace(header.Key) && header.Value != null)
+                        request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+
+                if (!string.IsNullOrWhiteSpace(cookieHeader))
+                    request.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                var content = await response.Content.ReadAsStringAsync(ct);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        _logger.LogDebug(
+                            "Scrape fetch for {Url} returned {StatusCode}; continuing with response body.",
+                            requestUrl,
+                            (int)response.StatusCode);
+                        return content;
+                    }
+
+                    response.EnsureSuccessStatusCode();
+                }
+
                 return content;
             }
-
-            response.EnsureSuccessStatusCode();
+            catch (Exception ex) when (attempt < maxAttempts && IsTransientScrapeFetchException(ex, ct))
+            {
+                _logger.LogDebug(ex, "Retrying scraper fetch for {Url} after transient transport failure on attempt {Attempt}", requestUrl, attempt);
+            }
         }
 
-        return content;
+        throw new InvalidOperationException($"Failed to fetch scraper content for '{requestUrl}'.");
     }
+
+    private static bool IsTransientScrapeFetchException(Exception exception, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return exception switch
+        {
+            OperationCanceledException => false,
+            HttpRequestException => true,
+            IOException => true,
+            SocketException socketException when socketException.SocketErrorCode is SocketError.ConnectionAborted or SocketError.ConnectionReset or SocketError.NetworkReset or SocketError.TimedOut => true,
+            _ when exception.InnerException is not null => IsTransientScrapeFetchException(exception.InnerException, ct),
+            _ => false,
+        };
+        }
 
     private static string? BuildCookieHeader(ScraperManifest manifest, string requestUrl)
     {

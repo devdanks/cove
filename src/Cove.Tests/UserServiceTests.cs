@@ -175,45 +175,62 @@ public class UserServiceTests
     }
 
     [Fact]
-    public async Task Issued_jwt_has_no_age_expiry_and_refresh_uses_configured_ttl()
+    public async Task Issued_jwt_has_expiry_live_session_and_refresh_uses_configured_ttl()
     {
         await using var db = NewDb("token-age");
-        var now = DateTime.UtcNow;
-        db.Users.Add(new User
-        {
-            Id = 1,
-            Username = "owner",
-            PasswordHash = "hash",
-            PasswordAlgo = "test",
-            IsActive = true,
-            CreatedAt = now,
-            UpdatedAt = now,
-        });
-        db.Roles.Add(new Role
-        {
-            Id = 1,
-            Name = BuiltinRoles.Owner,
-            Description = "Owner",
-            IsBuiltin = true,
-            IsSystem = true,
-            Source = "core",
-            CreatedAt = now,
-            UpdatedAt = now,
-        });
-        db.RolePermissions.Add(new RolePermission { RoleId = 1, PermissionKey = Permissions.All });
-        db.UserRoleAssignments.Add(new UserRoleAssignment { UserId = 1, RoleId = 1, GrantedAt = now });
-        await db.SaveChangesAsync();
+        await SeedOwnerAsync(db);
 
-        var config = new CoveConfiguration { Auth = { JwtSecret = "test-secret-that-is-long-enough-for-hmac", RefreshTokenDays = 30 } };
+        var config = new CoveConfiguration { Auth = { JwtSecret = "test-secret-that-is-long-enough-for-hmac", AccessTokenMinutes = 15, RefreshTokenDays = 30 } };
         var tokens = new TokenService(db, config, new PermissionRegistry(), NullLogger<TokenService>.Instance);
 
         var pair = await tokens.IssueForUserAsync(1, "127.0.0.1", "test");
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(pair.AccessToken);
         var principal = await tokens.ResolveAsync($"Bearer {pair.AccessToken}", "127.0.0.1", "test");
 
-        Assert.DoesNotContain(jwt.Claims, claim => string.Equals(claim.Type, JwtRegisteredClaimNames.Exp, StringComparison.Ordinal));
+        Assert.Contains(jwt.Claims, claim => string.Equals(claim.Type, JwtRegisteredClaimNames.Exp, StringComparison.Ordinal));
         Assert.NotNull(principal);
+        Assert.InRange(pair.AccessExpires - DateTime.UtcNow, TimeSpan.FromMinutes(14), TimeSpan.FromMinutes(16));
         Assert.InRange(pair.RefreshExpires - DateTime.UtcNow, TimeSpan.FromDays(29), TimeSpan.FromDays(31));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_rejects_jwt_after_session_is_revoked()
+    {
+        await using var db = NewDb("token-revoked-session");
+        await SeedOwnerAsync(db);
+
+        var config = new CoveConfiguration { Auth = { JwtSecret = "test-secret-that-is-long-enough-for-hmac", AccessTokenMinutes = 15, RefreshTokenDays = 30 } };
+        var tokens = new TokenService(db, config, new PermissionRegistry(), NullLogger<TokenService>.Instance);
+
+        var pair = await tokens.IssueForUserAsync(1, "127.0.0.1", "test");
+
+        Assert.NotNull(await tokens.ResolveAsync($"Bearer {pair.AccessToken}", "127.0.0.1", "test"));
+
+        var session = await db.RefreshTokens.SingleAsync();
+        session.RevokedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        Assert.Null(await tokens.ResolveAsync($"Bearer {pair.AccessToken}", "127.0.0.1", "test"));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_rejects_jwt_after_auth_database_is_recreated()
+    {
+        await using var db = NewDb("token-db-recreated");
+        await SeedOwnerAsync(db);
+
+        var config = new CoveConfiguration { Auth = { JwtSecret = "test-secret-that-is-long-enough-for-hmac", AccessTokenMinutes = 15, RefreshTokenDays = 30 } };
+        var tokens = new TokenService(db, config, new PermissionRegistry(), NullLogger<TokenService>.Instance);
+
+        var pair = await tokens.IssueForUserAsync(1, "127.0.0.1", "test");
+
+        db.RefreshTokens.RemoveRange(db.RefreshTokens);
+        db.UserRoleAssignments.RemoveRange(db.UserRoleAssignments);
+        db.Users.RemoveRange(db.Users);
+        await db.SaveChangesAsync();
+        await SeedOwnerAsync(db);
+
+        Assert.Null(await tokens.ResolveAsync($"Bearer {pair.AccessToken}", "127.0.0.1", "test"));
     }
 
     [Fact]
@@ -234,6 +251,39 @@ public class UserServiceTests
         {
             base.OnModelCreating(modelBuilder);
         }
+    }
+
+    private static async Task SeedOwnerAsync(CoveContext db)
+    {
+        var now = DateTime.UtcNow;
+        if (!await db.Roles.AnyAsync(r => r.Id == 1))
+        {
+            db.Roles.Add(new Role
+            {
+                Id = 1,
+                Name = BuiltinRoles.Owner,
+                Description = "Owner",
+                IsBuiltin = true,
+                IsSystem = true,
+                Source = "core",
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            db.RolePermissions.Add(new RolePermission { RoleId = 1, PermissionKey = Permissions.All });
+        }
+
+        db.Users.Add(new User
+        {
+            Id = 1,
+            Username = "owner",
+            PasswordHash = "hash",
+            PasswordAlgo = "test",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        db.UserRoleAssignments.Add(new UserRoleAssignment { UserId = 1, RoleId = 1, GrantedAt = now });
+        await db.SaveChangesAsync();
     }
 
     private sealed class NoopAudit : IAuditService

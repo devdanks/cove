@@ -4,7 +4,6 @@ import type { HTMLAttributes, ReactNode } from "react";
 interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   title: string;
   imageSrc?: string | null;
-  imageFallbackSrc?: string | null;
   videoSrc?: string | null;
   videoStatusSrc?: string | null;
   useVideo?: boolean;
@@ -21,7 +20,6 @@ interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
 export function WallMediaCard({
   title,
   imageSrc,
-  imageFallbackSrc,
   videoSrc,
   videoStatusSrc,
   useVideo = false,
@@ -43,15 +41,10 @@ export function WallMediaCard({
   const [videoAvailable, setVideoAvailable] = useState(false);
   const [shouldLoadVideo, setShouldLoadVideo] = useState(false);
   const [shouldPlayVideo, setShouldPlayVideo] = useState(false);
-  const [resolvedImageSrc, setResolvedImageSrc] = useState<string | null>(imageSrc ?? imageFallbackSrc ?? null);
 
   useEffect(() => {
     setVideoFailed(false);
   }, [videoSrc]);
-
-  useEffect(() => {
-    setResolvedImageSrc(imageSrc ?? imageFallbackSrc ?? null);
-  }, [imageFallbackSrc, imageSrc]);
 
   useEffect(() => {
     if (!useVideo || !videoSrc) {
@@ -151,7 +144,7 @@ export function WallMediaCard({
           <video
             ref={videoRef}
             src={videoSrc}
-            poster={resolvedImageSrc ?? undefined}
+            poster={imageSrc ?? undefined}
             className={`absolute inset-0 h-full w-full ${imageClassName}`}
             muted={muted}
             playsInline
@@ -160,20 +153,12 @@ export function WallMediaCard({
             onLoadedMetadata={seekToStartTime}
             onError={() => setVideoFailed(true)}
           />
-        ) : resolvedImageSrc ? (
+        ) : imageSrc ? (
           <img
-            src={resolvedImageSrc}
+            src={imageSrc}
             alt={title}
             className={`absolute inset-0 h-full w-full ${imageClassName}`}
             loading="lazy"
-            onError={() => {
-              if (resolvedImageSrc === imageSrc && imageFallbackSrc && imageFallbackSrc !== imageSrc) {
-                setResolvedImageSrc(imageFallbackSrc);
-                return;
-              }
-
-              setResolvedImageSrc(null);
-            }}
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">

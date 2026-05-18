@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WallMediaCard } from "../components/WallMediaCard";
 
@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe("WallMediaCard", () => {
-  it("uses the image fallback when the preview status request fails", async () => {
+  it("keeps the still image when the preview status request fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
 
     const { container } = render(
@@ -24,29 +24,25 @@ describe("WallMediaCard", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ available: false }) }));
 
     const { container } = render(
-      <WallMediaCard title="Fallback preview" imageSrc="/image.jpg" videoSrc="/preview.mp4" videoStatusSrc="/preview.mp4/status" useVideo />,
+      <WallMediaCard title="Unavailable preview" imageSrc="/image.jpg" videoSrc="/preview.mp4" videoStatusSrc="/preview.mp4/status" useVideo />,
     );
 
-    expect(screen.getByAltText("Fallback preview")).toBeInTheDocument();
+    expect(screen.getByAltText("Unavailable preview")).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/preview.mp4/status", expect.objectContaining({ method: "GET" })));
     expect(container.querySelector("video")).not.toBeInTheDocument();
   });
 
-  it("falls back to the secondary image when the primary image fails", async () => {
+  it("uses the configured image source directly", () => {
     const { rerender } = render(
-      <WallMediaCard title="Fallback image" imageSrc="/cover.jpg" imageFallbackSrc="/screenshot.jpg" />,
+      <WallMediaCard title="Card image" imageSrc="/cover.jpg" />,
     );
 
-    const image = screen.getByAltText("Fallback image");
+    const image = screen.getByAltText("Card image");
     expect(image).toHaveAttribute("src", "/cover.jpg");
 
-    fireEvent.error(image);
+    rerender(<WallMediaCard title="Card image" imageSrc="/next-cover.jpg" />);
 
-    await waitFor(() => expect(screen.getByAltText("Fallback image")).toHaveAttribute("src", "/screenshot.jpg"));
-
-    rerender(<WallMediaCard title="Fallback image" imageSrc="/next-cover.jpg" imageFallbackSrc="/next-screenshot.jpg" />);
-
-    await waitFor(() => expect(screen.getByAltText("Fallback image")).toHaveAttribute("src", "/next-cover.jpg"));
+    expect(screen.getByAltText("Card image")).toHaveAttribute("src", "/next-cover.jpg");
   });
 
   it("mounts the preview video after the preview exists", async () => {

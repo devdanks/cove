@@ -99,6 +99,8 @@ export interface Performer {
   imageCount: number;
   galleryCount: number;
   groupCount: number;
+  audioCount: number;
+  textCount: number;
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -285,6 +287,8 @@ export interface TagDetail extends Tag {
   galleryCount: number;
   studioCount: number;
   groupCount: number;
+  audioCount: number;
+  textCount: number;
   segmentCount: number;
   customFields?: Record<string, unknown>;
   createdAt: string;
@@ -361,6 +365,8 @@ export interface Studio {
   groupCount: number;
   performerCount: number;
   childStudioCount: number;
+  audioCount: number;
+  textCount: number;
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

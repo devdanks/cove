@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, images, scenes, entityImages, fileOps } from "../api/client";
+import { galleries, images, scenes, fileOps } from "../api/client";
 import type { FindFilter } from "../api/types";
 import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Download, Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, UserRound, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
+import { Download, Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GalleryEditModal } from "./GalleryEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -11,7 +11,7 @@ import { ExtensionSlot } from "../router/RouteRegistry";
 import { Lightbox, type LightboxImage } from "../components/Lightbox";
 import { InteractiveRating } from "../components/Rating";
 import { DetailListToolbar } from "../components/DetailListToolbar";
-import { SceneCard, ImageTile } from "../components/EntityCards";
+import { SceneCard, ImageTile, PerformerTile } from "../components/EntityCards";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityCardGrid } from "../components/EntityCardGrid";
@@ -19,7 +19,6 @@ import { QuickViewDialog } from "../components/QuickViewDialog";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
-import { createRouteLinkProps } from "../components/cardNavigation";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
@@ -361,11 +360,11 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         {canReadPerformers && gallery.performers.length > 0 ? (
           <section className="mb-6 rounded-2xl border border-border bg-card/70 p-5">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Performers</h2>
-            <div className="flex flex-wrap justify-center gap-3">
+            <EntityCardGrid minCardWidth="160px" gapClassName="gap-3">
               {gallery.performers.map((performer) => (
-                <GalleryPerformerCard key={performer.id} performer={performer} onClick={() => onNavigate({ page: "performer", id: performer.id })} />
+                <PerformerTile key={performer.id} performer={performer} onClick={() => onNavigate({ page: "performer", id: performer.id })} onNavigate={onNavigate} />
               ))}
-            </div>
+            </EntityCardGrid>
           </section>
         ) : null}
 
@@ -395,38 +394,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         onClose={() => setLightboxOpen(false)}
       />
     </div>
-  );
-}
-
-function GalleryPerformerCard({ performer, onClick }: { performer: { id: number; name: string; disambiguation?: string; imagePath?: string }; onClick: () => void }) {
-  const imageUrl = performer.imagePath || entityImages.performerImageUrl(performer.id);
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, onClick);
-
-  return (
-    <a
-      {...linkProps}
-      className="w-[180px] overflow-hidden rounded-lg border border-border bg-surface text-left transition-colors hover:border-accent/60"
-    >
-      <div className="aspect-[2/3] overflow-hidden bg-card">
-        <img
-          src={imageUrl}
-          alt={performer.name}
-          className="h-full w-full object-cover"
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = "none";
-            const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
-            if (fallback) fallback.style.display = "flex";
-          }}
-        />
-        <div className="hidden h-full w-full items-center justify-center bg-gradient-to-b from-card to-surface">
-          <UserRound className="h-12 w-12 text-muted/50" />
-        </div>
-      </div>
-      <div className="p-2 text-center">
-        <p className="truncate text-sm font-medium text-foreground">{performer.name}</p>
-        {performer.disambiguation && <p className="truncate text-xs text-muted">{performer.disambiguation}</p>}
-      </div>
-    </a>
   );
 }
 
@@ -500,6 +467,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
   canWriteGallery: boolean;
 }) {
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(galleryImages?.items ?? []);
   const selecting = selectedIds.size > 0;
 
@@ -532,7 +500,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
           <>
             <BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={galleryImages.items} />
             {canWriteGallery ? <button
-              onClick={() => { if (confirm(`Remove ${selectedIds.size} image(s) from gallery?`)) removeImagesMut.mutate([...selectedIds]); }}
+              onClick={() => setConfirmRemove(true)}
               disabled={removeImagesMut.isPending}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-orange-400 hover:text-orange-300 hover:bg-orange-900/20"
             >
@@ -561,6 +529,15 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
           />
         ))}
       </EntityCardGrid>
+      <ConfirmDialog
+        open={confirmRemove}
+        title="Remove from Gallery"
+        message={`Remove ${selectedIds.size} selected image${selectedIds.size === 1 ? "" : "s"} from this gallery?`}
+        confirmLabel={removeImagesMut.isPending ? "Removing..." : "Remove"}
+        onConfirm={() => removeImagesMut.mutate([...selectedIds], { onSuccess: () => { setConfirmRemove(false); selectNone(); } })}
+        onCancel={() => setConfirmRemove(false)}
+        isPending={removeImagesMut.isPending}
+      />
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}

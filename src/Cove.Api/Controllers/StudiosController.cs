@@ -17,7 +17,7 @@ namespace Cove.Api.Controllers;
 [RequiresPermission(Permissions.StudiosRead)]
 public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
 {
-    private sealed record StudioUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount);
+    private sealed record StudioUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount);
 
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -208,6 +208,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         usageCounts?.GroupCount ?? s.GroupCount,
         usageCounts?.PerformerCount ?? s.PerformerCount,
         usageCounts?.ChildStudioCount ?? s.ChildStudioCount,
+        usageCounts?.AudioCount ?? 0,
+        usageCounts?.TextCount ?? 0,
         s.ImageBlobId != null ? EntityImageUrls.Studio(ControllerContext.HttpContext, s.Id, s.UpdatedAt) : null,
         s.CustomFields,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
@@ -271,6 +273,18 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             .GroupBy(studio => studio.ParentId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var audioCounts = await db.Audios
+            .AsNoTracking()
+            .Where(audio => audio.StudioId.HasValue && ids.Contains(audio.StudioId.Value))
+            .GroupBy(audio => audio.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var textCounts = await db.TextDocuments
+            .AsNoTracking()
+            .Where(text => text.StudioId.HasValue && ids.Contains(text.StudioId.Value))
+            .GroupBy(text => text.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
 
         return ids.ToDictionary(
             id => id,
@@ -280,7 +294,9 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
                 galleryCounts.GetValueOrDefault(id),
                 groupCounts.GetValueOrDefault(id),
                 performerCounts.GetValueOrDefault(id),
-                childStudioCounts.GetValueOrDefault(id)));
+                childStudioCounts.GetValueOrDefault(id),
+                audioCounts.GetValueOrDefault(id),
+                textCounts.GetValueOrDefault(id)));
     }
 
     // ===== Merge =====

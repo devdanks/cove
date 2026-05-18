@@ -253,6 +253,7 @@ try
                 ValidateIssuer = true,
                 ValidateAudience = true,
                 ValidateLifetime = true,
+                RequireExpirationTime = true,
                 ValidateIssuerSigningKey = true,
                 ValidIssuer = "Cove",
                 ValidAudience = "Cove",
@@ -522,6 +523,10 @@ try
             {
                 await db.Database.EnsureCreatedAsync();
             }
+
+            await scope.ServiceProvider
+                .GetRequiredService<DynamicGroupResolver>()
+                .EnsureBuiltInGroupsAsync(CancellationToken.None);
 
             if (schemaCurrent)
             {

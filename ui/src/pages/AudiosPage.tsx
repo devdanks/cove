@@ -10,7 +10,7 @@ import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../co
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { CustomFieldsEditor, formatDuration } from "../components/shared";
-import { EntityReferencePopovers } from "../components/EntityCards";
+import { AudioTile, EntityReferencePopovers } from "../components/EntityCards";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteEntity } from "../auth/visibility";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
@@ -155,7 +155,7 @@ export function AudiosPage({ onNavigate }: Props) {
         ) : (
         <EntityCardGrid minCardWidth="280px">
           {items.map((audio) => (
-            <AudioCard
+            <AudioTile
               key={audio.id}
               audio={audio}
               engagement={engagementById.get(audio.id)}
@@ -399,123 +399,6 @@ function AudioListTable({ audios: items, engagementById, selectedIds, selecting,
         </tbody>
       </table>
     </div>
-  );
-}
-
-function AudioCard({
-  audio,
-  engagement,
-  selected,
-  onSelect,
-  selecting,
-  onClick,
-  onNavigate,
-}: {
-  audio: Audio;
-  engagement?: EntityEngagement;
-  selected?: boolean;
-  onSelect?: () => void;
-  selecting?: boolean;
-  onClick: () => void;
-  onNavigate: (route: any) => void;
-}) {
-  const title = getAudioDisplayTitle(audio);
-  const duration = audio.maxDuration > 0 ? formatDuration(audio.maxDuration) : null;
-  const route = { page: "audio", id: audio.id };
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const hoverTimerRef = useRef<number | null>(null);
-  const canPreview = !selecting && !selected;
-
-  const playPreview = () => {
-    const element = audioRef.current;
-    if (!element) return;
-    element.currentTime = 0;
-    element.volume = 0.35;
-    element.play().catch(() => {});
-  };
-
-  const stopPreview = () => {
-    if (hoverTimerRef.current !== null) {
-      window.clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = null;
-    }
-    const element = audioRef.current;
-    if (!element) return;
-    element.pause();
-    element.currentTime = 0;
-  };
-
-  const schedulePreview = (event: MouseEvent<HTMLElement>) => {
-    if (!canPreview || (event.target as HTMLElement).closest("[data-audio-preview-ignore]")) return;
-    if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
-    hoverTimerRef.current = window.setTimeout(() => {
-      hoverTimerRef.current = null;
-      playPreview();
-    }, 1000);
-  };
-
-  useEffect(() => {
-    if (!canPreview) stopPreview();
-    return () => {
-      if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
-    };
-  }, [canPreview]);
-
-  return (
-    <article onClick={selecting ? onClick : undefined} onMouseEnter={schedulePreview} onMouseLeave={stopPreview} className={`entity-card group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
-      <RouteCardLinkOverlay route={route} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
-        {audio.imagePath ? (
-          <img src={audio.imagePath} alt={title} className="h-full w-full object-cover" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />
-        ) : (
-          <Headphones className="h-12 w-12 text-muted opacity-50" />
-        )}
-        <audio ref={audioRef} src={audios.streamUrl(audio.id)} preload="none" />
-        {(selected !== undefined || selecting) ? <div data-audio-preview-ignore onMouseEnter={stopPreview}><CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /></div> : null}
-        {!selecting ? (
-          <BookmarkButton hostType="audio" hostId={audio.id} compact deferUntilHover className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100" />
-        ) : null}
-        {audio.hasVideoFiles ? (
-          <span className="absolute right-1 top-1 z-[5] inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
-            <MonitorPlay className="h-3 w-3" />
-            Video
-          </span>
-        ) : null}
-        {duration ? <span className="absolute bottom-1 right-1 z-[5] rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">{duration}</span> : null}
-      </div>
-
-      <div className="card-body flex flex-1 flex-col gap-2 border-t border-border/50 p-2.5">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <h2 className="card-title line-clamp-2 font-semibold text-foreground transition-colors group-hover:text-accent">{title}</h2>
-          {audio.details ? <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted">{audio.details}</p> : null}
-          <div data-audio-preview-ignore className="mt-auto pt-2">
-            <EntityReferencePopovers
-              studio={{ id: audio.studioId, name: audio.studioName }}
-              performers={audio.performers}
-              tags={audio.tags}
-              groups={audio.groups}
-              onNavigate={onNavigate}
-              className="w-full justify-center"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 text-[11px] text-muted">
-          {engagement?.playCount ? (
-            <span className="inline-flex items-center gap-1 rounded border border-border/80 px-1.5 py-0.5">
-              <PlayCircle className="h-3 w-3" />
-              {engagement.playCount} play{engagement.playCount === 1 ? "" : "s"}
-            </span>
-          ) : null}
-          {audio.tracks.length > 0 ? (
-            <span className="inline-flex items-center gap-1 rounded border border-border/80 px-1.5 py-0.5">
-              <Mic2 className="h-3 w-3" />
-              {audio.tracks.length} track{audio.tracks.length === 1 ? "" : "s"}
-            </span>
-          ) : null}
-        </div>
-      </div>
-    </article>
   );
 }
 

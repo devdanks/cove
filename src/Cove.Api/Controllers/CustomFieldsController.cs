@@ -38,6 +38,20 @@ public sealed class CustomFieldsController(CustomFieldService customFields) : Co
         }
     }
 
+    [HttpPut]
+    [RequiresPermission(Permissions.SystemSettingsWrite)]
+    public async Task<ActionResult<List<CustomFieldDefinitionDto>>> ReplaceDefinitions([FromBody] List<CustomFieldDefinitionSyncDto> definitions, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await customFields.ReplaceDefinitionsAsync(definitions, ct));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
     [HttpPut("{id:int}")]
     [RequiresPermission(Permissions.SystemSettingsWrite)]
     public async Task<ActionResult<CustomFieldDefinitionDto>> UpdateDefinition(int id, [FromBody] CustomFieldDefinitionUpdateDto dto, CancellationToken ct)

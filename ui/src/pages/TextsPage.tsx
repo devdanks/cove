@@ -9,7 +9,7 @@ import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../co
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { CustomFieldsEditor } from "../components/shared";
-import { EntityReferencePopovers } from "../components/EntityCards";
+import { EntityReferencePopovers, TextTile } from "../components/EntityCards";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteEntity } from "../auth/visibility";
 import { useListUrlState } from "../hooks/useListUrlState";
@@ -154,7 +154,7 @@ export function TextsPage({ onNavigate }: Props) {
         ) : (
         <EntityCardGrid minCardWidth="300px">
           {items.map((text) => (
-            <TextCard
+            <TextTile
               key={text.id}
               text={text}
               selected={selectedIds.has(text.id)}
@@ -402,67 +402,3 @@ function TextListTable({ texts: items, selectedIds, selecting, onToggle, onNavig
   );
 }
 
-function TextCard({
-  text,
-  selected,
-  onSelect,
-  selecting,
-  onClick,
-  onNavigate,
-}: {
-  text: TextDocument;
-  selected?: boolean;
-  onSelect?: () => void;
-  selecting?: boolean;
-  onClick: () => void;
-  onNavigate: (route: any) => void;
-}) {
-  const title = getTextDisplayTitle(text);
-  const primaryFile = pickPrimaryTextFile(text);
-  const preview = primaryFile?.excerptText?.trim() || text.details?.trim() || "Open the document to read the extracted content and file details.";
-  const route = { page: "text", id: text.id };
-
-  return (
-    <article onClick={selecting ? onClick : undefined} className={`entity-card group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
-      <RouteCardLinkOverlay route={route} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
-        {text.imagePath ? (
-          <img src={text.imagePath} alt={title} className="h-full w-full object-cover" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />
-        ) : (
-          <FileText className="h-12 w-12 text-muted opacity-50" />
-        )}
-        {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
-        {!selecting ? (
-          <BookmarkButton hostType="text" hostId={text.id} compact deferUntilHover className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100" />
-        ) : null}
-        {text.maxWordCount ? <span className="absolute bottom-1 right-1 z-[5] rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">{Intl.NumberFormat().format(text.maxWordCount)} words</span> : null}
-      </div>
-
-      <div className="card-body flex flex-1 flex-col gap-2 border-t border-border/50 p-2.5">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <h2 className="card-title line-clamp-2 font-semibold text-foreground transition-colors group-hover:text-accent">{title}</h2>
-          <p className="mt-1 line-clamp-3 text-xs leading-snug text-muted">{preview}</p>
-          <div className="mt-auto pt-2">
-            <EntityReferencePopovers
-              studio={{ id: text.studioId, name: text.studioName }}
-              performers={text.performers}
-              tags={text.tags}
-              groups={text.groups}
-              onNavigate={onNavigate}
-              className="w-full justify-center"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 text-[11px] text-muted">
-          {text.maxPageCount ? (
-            <span className="inline-flex items-center gap-1 rounded border border-border/80 px-1.5 py-0.5">
-              <BookOpenText className="h-3 w-3" />
-              {text.maxPageCount} page{text.maxPageCount === 1 ? "" : "s"}
-            </span>
-          ) : null}
-        </div>
-      </div>
-    </article>
-  );
-}

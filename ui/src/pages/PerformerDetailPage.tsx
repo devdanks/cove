@@ -1,15 +1,15 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { faces, galleries, images, metadata, performers, scenes, entityImages } from "../api/client";
+import { audios, faces, galleries, images, metadata, performers, scenes, texts, entityImages } from "../api/client";
 import type { Face, FaceSimilar, FindFilter, Gallery, Image, Performer as PerformerModel, Scene, MetadataServer, MetadataServerPerformerMatch } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Calendar, ChevronDown, CloudDownload, ExternalLink, Film, FolderOpen, GitMerge, Heart, ImageIcon, Layers, Link2, Loader2, MapPin, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
+import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Link2, Loader2, MapPin, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PerformerEditModal } from "./PerformerEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailMergeDialog } from "../components/DetailMergeDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
-import { SceneCard, GalleryTile, ImageTile } from "../components/EntityCards";
+import { AudioTile, SceneCard, GalleryTile, ImageTile, GroupTile, PerformerTile, TextTile } from "../components/EntityCards";
 import { InteractiveRating } from "../components/Rating";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { useAppConfig } from "../state/AppConfigContext";
@@ -20,7 +20,6 @@ import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
-import { createRouteLinkProps } from "../components/cardNavigation";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
@@ -34,7 +33,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "galleries" | "images" | "groups" | "appearsWith" | (string & {});
+type TabKey = "scenes" | "galleries" | "images" | "audios" | "texts" | "groups" | "appearsWith" | (string & {});
 
 const IMAGE_SORT = [
   { value: "updated_at", label: "Updated At" },
@@ -49,6 +48,21 @@ const GROUP_SORT = [
   { value: "updated_at", label: "Updated At" },
   { value: "created_at", label: "Created At" },
   { value: "random", label: "Random" },
+];
+const AUDIO_SORT = [
+  { value: "updated_at", label: "Updated At" },
+  { value: "created_at", label: "Created At" },
+  { value: "title", label: "Title" },
+  { value: "date", label: "Date" },
+  { value: "duration", label: "Duration" },
+];
+const TEXT_SORT = [
+  { value: "updated_at", label: "Updated At" },
+  { value: "created_at", label: "Created At" },
+  { value: "title", label: "Title" },
+  { value: "date", label: "Date" },
+  { value: "words", label: "Word Count" },
+  { value: "pages", label: "Page Count" },
 ];
 
 export function PerformerDetailPage({ id, onNavigate }: Props) {
@@ -67,12 +81,16 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [galleryFilter, setGalleryFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 30, direction: "desc" });
+  const [audioFilter, setAudioFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
+  const [textFilter, setTextFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
   const [groupFilter, setGroupFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const [appearsWithFilter, setAppearsWithFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const { allTabs: performerTabs, renderExtensionTab, extensionCounts } = useExtensionTabs("performer", [
     { key: "scenes", label: "Scenes", count: performer?.sceneCount },
     { key: "galleries", label: "Galleries", count: performer?.galleryCount },
     { key: "images", label: "Images", count: performer?.imageCount },
+    { key: "audios", label: "Audios", count: performer?.audioCount },
+    { key: "texts", label: "Texts", count: performer?.textCount },
     { key: "groups", label: "Groups", count: performer?.groupCount },
     { key: "appearsWith", label: "Appears With" },
   ], id);
@@ -87,6 +105,8 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const canReadPerformerScenes = canReadEntity("scene", hasPermission);
   const canReadPerformerGalleries = canReadEntity("gallery", hasPermission);
   const canReadPerformerImages = canReadEntity("image", hasPermission);
+  const canReadPerformerAudios = canReadEntity("audio", hasPermission);
+  const canReadPerformerTexts = canReadEntity("text", hasPermission);
   const canReadPerformerGroups = canReadEntity("group", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
   const canAutoTagPerformer = hasPermission("library.autotag") && canWritePerformer;
@@ -96,6 +116,8 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     scenes: "scenes.read",
     galleries: "galleries.read",
     images: "images.read",
+    audios: "audios.read",
+    texts: "texts.read",
     groups: "groups.read",
     appearsWith: "performers.read",
   }, hasPermission);
@@ -197,6 +219,8 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
           { key: "scenes", label: "Scenes", value: performer.sceneCount, icon: <Film className="h-4 w-4" /> },
           { key: "galleries", label: "Galleries", value: performer.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
           { key: "images", label: "Images", value: performer.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
+          { key: "audios", label: "Audios", value: performer.audioCount, icon: <Headphones className="h-4 w-4" /> },
+          { key: "texts", label: "Texts", value: performer.textCount, icon: <FileText className="h-4 w-4" /> },
           { key: "groups", label: "Groups", value: performer.groupCount, icon: <Layers className="h-4 w-4" /> },
           ...extensionCounts.map((ec) => ({
             key: ec.key,
@@ -293,6 +317,12 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
           )}
           {activeTab === "images" && (
             <PerformerImagesPanel performerId={id} filter={imageFilter} setFilter={setImageFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "audios" && (
+            <PerformerAudiosPanel performerId={id} filter={audioFilter} setFilter={setAudioFilter} onNavigate={onNavigate} />
+          )}
+          {activeTab === "texts" && (
+            <PerformerTextsPanel performerId={id} filter={textFilter} setFilter={setTextFilter} onNavigate={onNavigate} />
           )}
           {activeTab === "groups" && (
             <PerformerGroupsPanel performerId={id} filter={groupFilter} setFilter={setGroupFilter} onNavigate={onNavigate} />
@@ -815,61 +845,101 @@ function PerformerImagesPanel({ performerId, filter, setFilter, onNavigate }: {
   );
 }
 
+function PerformerAudiosPanel({ performerId, filter, setFilter, onNavigate }: {
+  performerId: number;
+  filter: FindFilter;
+  setFilter: (filter: FindFilter) => void;
+  onNavigate: (r: any) => void;
+}) {
+  const [zoomLevel, setZoomLevel] = useState(0);
+  const { data, isLoading } = useQuery({
+    queryKey: ["performer-audios", performerId, filter],
+    queryFn: () => audios.findFiltered({
+      findFilter: filter,
+      objectFilter: {
+        performersCriterion: { value: [performerId], modifier: "INCLUDES" },
+      },
+    }),
+  });
+  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selecting = selectedIds.size > 0;
+
+  if (isLoading) return <LoadingPanel icon={<Headphones className="h-10 w-10" />} message="Loading audios..." />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<Headphones className="h-12 w-12" />} message="No audios found for this performer" />;
+
+  return (
+    <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={AUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="audios" selectedIds={selectedIds} onDone={selectNone} audioItems={data.items} downloadItems={data.items} onNavigate={onNavigate} />} />
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
+        {data.items.map((audio) => (
+          <AudioTile key={audio.id} audio={audio} onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })} onNavigate={onNavigate} selected={selectedIds.has(audio.id)} onSelect={() => toggle(audio.id)} selecting={selecting} />
+        ))}
+      </EntityCardGrid>
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+    </>
+  );
+}
+
+function PerformerTextsPanel({ performerId, filter, setFilter, onNavigate }: {
+  performerId: number;
+  filter: FindFilter;
+  setFilter: (filter: FindFilter) => void;
+  onNavigate: (r: any) => void;
+}) {
+  const [zoomLevel, setZoomLevel] = useState(0);
+  const { data, isLoading } = useQuery({
+    queryKey: ["performer-texts", performerId, filter],
+    queryFn: () => texts.findFiltered({
+      findFilter: filter,
+      objectFilter: {
+        performersCriterion: { value: [performerId], modifier: "INCLUDES" },
+      },
+    }),
+  });
+  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selecting = selectedIds.size > 0;
+
+  if (isLoading) return <LoadingPanel icon={<FileText className="h-10 w-10" />} message="Loading texts..." />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<FileText className="h-12 w-12" />} message="No texts found for this performer" />;
+
+  return (
+    <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={TEXT_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="texts" selectedIds={selectedIds} onDone={selectNone} textItems={data.items} downloadItems={data.items} />} />
+      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
+        {data.items.map((text) => (
+          <TextTile key={text.id} text={text} onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })} onNavigate={onNavigate} selected={selectedIds.has(text.id)} onSelect={() => toggle(text.id)} selecting={selecting} />
+        ))}
+      </EntityCardGrid>
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+    </>
+  );
+}
+
 function PerformerGroupsPanel({ performerId, filter, setFilter, onNavigate }: {
   performerId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
 }) {
-  // Fetch all scenes for this performer and extract unique groups
-  const { data: scenesData, isLoading } = useQuery({
-    queryKey: ["performer-scenes-for-groups", performerId],
-    queryFn: () => scenes.find({ page: 1, perPage: 200, direction: "desc" }, { performerIds: String(performerId) }),
+  const { data, isLoading } = useQuery({
+    queryKey: ["performer-groups", performerId, filter],
+    queryFn: () => performers.groups(performerId, filter),
   });
-
-  const uniqueGroups = useMemo(() => {
-    if (!scenesData) return [];
-    const seen = new Map<number, { id: number; name: string; sceneCount: number }>();
-    for (const scene of scenesData.items) {
-      for (const g of scene.groups ?? []) {
-        const existing = seen.get(g.id);
-        if (existing) {
-          existing.sceneCount++;
-        } else {
-          seen.set(g.id, { id: g.id, name: g.name, sceneCount: 1 });
-        }
-      }
-    }
-    return [...seen.values()].sort((a, b) => b.sceneCount - a.sceneCount);
-  }, [scenesData]);
-
-  const page = filter.page ?? 1;
-  const perPage = filter.perPage ?? 18;
-  const paginated = uniqueGroups.slice((page - 1) * perPage, page * perPage);
+  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selecting = selectedIds.size > 0;
 
   if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading groups..." />;
-  if (uniqueGroups.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No groups for this performer" />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No groups for this performer" />;
 
   return (
     <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GROUP_SORT} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} />} />
       <EntityCardGrid minCardWidth="200px" gapClassName="gap-4">
-        {paginated.map((group) => {
-          const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
-
-          return (
-            <a key={group.id} {...linkProps} className="group overflow-hidden rounded-xl border border-border bg-card text-left transition-colors hover:border-accent/60">
-              <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card">
-                <Layers className="h-10 w-10 text-muted" />
-              </div>
-              <div className="p-3">
-                <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">{group.name}</p>
-                <p className="mt-1 text-xs text-secondary">{group.sceneCount} scene{group.sceneCount !== 1 ? "s" : ""}</p>
-              </div>
-            </a>
-          );
-        })}
+        {data.items.map((group) => (
+          <GroupTile key={group.id} group={group} onClick={() => selecting ? toggle(group.id) : onNavigate({ page: "group", id: group.id })} selected={selectedIds.has(group.id)} onSelect={() => toggle(group.id)} selecting={selecting} />
+        ))}
       </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={uniqueGroups.length} />
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
 }
@@ -880,63 +950,25 @@ function PerformerAppearsWithPanel({ performerId, filter, setFilter, onNavigate 
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
 }) {
-  // Find all scenes this performer is in, collect co-performers
-  const { data: scenesData, isLoading } = useQuery({
-    queryKey: ["performer-scenes-for-costars", performerId],
-    queryFn: () => scenes.find({ page: 1, perPage: 200, direction: "desc" }, { performerIds: String(performerId) }),
+  const { data, isLoading } = useQuery({
+    queryKey: ["performer-appears-with", performerId, filter],
+    queryFn: () => performers.appearsWith(performerId, filter),
   });
-
-  const coStars = useMemo(() => {
-    if (!scenesData) return [];
-    const counts = new Map<number, { performer: { id: number; name: string; imagePath?: string }; count: number }>();
-    for (const scene of scenesData.items) {
-      for (const p of scene.performers ?? []) {
-        if (p.id === performerId) continue;
-        const existing = counts.get(p.id);
-        if (existing) {
-          existing.count++;
-        } else {
-          counts.set(p.id, { performer: { id: p.id, name: p.name, imagePath: p.imagePath }, count: 1 });
-        }
-      }
-    }
-    return [...counts.values()].sort((a, b) => b.count - a.count);
-  }, [scenesData, performerId]);
-
-  // Paginate client-side
-  const page = filter.page ?? 1;
-  const perPage = filter.perPage ?? 18;
-  const paginated = coStars.slice((page - 1) * perPage, page * perPage);
+  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selecting = selectedIds.size > 0;
 
   if (isLoading) return <LoadingPanel icon={<Users className="h-10 w-10" />} message="Loading co-stars..." />;
-  if (coStars.length === 0) return <EmptyPanel icon={<Users className="h-12 w-12" />} message="No co-stars found" />;
+  if (!data || data.items.length === 0) return <EmptyPanel icon={<Users className="h-12 w-12" />} message="No co-stars found" />;
 
   return (
     <>
+      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={[{ value: "co_scene_count", label: "Shared Scenes" }, { value: "name", label: "Name" }]} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} />} />
       <EntityCardGrid minCardWidth="180px" gapClassName="gap-4">
-        {paginated.map(({ performer: p, count }) => {
-          const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: p.id }, () => onNavigate({ page: "performer", id: p.id }));
-
-          return (
-            <a key={p.id} {...linkProps} className="group overflow-hidden rounded-xl border border-border bg-card text-left transition-colors hover:border-accent/60">
-              <div className="aspect-[2/3] bg-gradient-to-b from-card to-surface overflow-hidden">
-                <img
-                  src={p.imagePath || entityImages.performerImageUrl(p.id)}
-                  alt={p.name}
-                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  loading="lazy"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                />
-              </div>
-              <div className="p-3">
-                <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">{p.name}</p>
-                <p className="mt-1 text-xs text-secondary">{count} scene{count !== 1 ? "s" : ""} together</p>
-              </div>
-            </a>
-          );
-        })}
+        {data.items.map((performer) => (
+          <PerformerTile key={performer.id} performer={performer} onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })} selected={selectedIds.has(performer.id)} onSelect={() => toggle(performer.id)} selecting={selecting} />
+        ))}
       </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={coStars.length} />
+      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
     </>
   );
 }

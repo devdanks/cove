@@ -78,6 +78,7 @@ public class AuthConfig
     public string? HashedPassword { get; set; } // bcrypt hash
     public string? ApiKey { get; set; }
     public string JwtSecret { get; set; } = Guid.NewGuid().ToString();
+    public int AccessTokenMinutes { get; set; } = 15;
     public int RefreshTokenDays { get; set; } = 30;
     public bool AllowAnonymousShareLinks { get; set; } = true;
     public List<string> KnownProxies { get; set; } = [];

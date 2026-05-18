@@ -23,7 +23,7 @@ import { TextEditPanel } from "./TextEditPanel";
 const MediaScrapeDialog = lazy(() => import("../components/MediaScrapeDialog").then((module) => ({ default: module.MediaScrapeDialog })));
 const MediaDownloadDialog = lazy(() => import("../components/MediaDownloadDialog").then((module) => ({ default: module.MediaDownloadDialog })));
 
-type TextTab = "details" | "read" | "related" | "file-info" | "history" | "edit";
+type TextTab = "details" | "read" | "file-info" | "history" | "edit";
 
 interface Props {
   id: number;
@@ -56,7 +56,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canReadGroups = canReadEntity("group", hasPermission);
   const canReadStudio = canReadEntity("studio", hasPermission);
-  const canReadFiles = hasPermission("stream.read");
+  const canReadFiles = hasPermission("files.read");
   const trackingEnabled = user?.uiPreferences?.tracking?.enabled ?? true;
   const canEngageText = canReadText && (user?.kind === "user" || user?.kind === "system");
   const trackTextActivity = canEngageText && trackingEnabled;
@@ -165,11 +165,6 @@ export function TextDetailPage({ id, onNavigate }: Props) {
   ) : undefined;
   const tabs = useMemo(() => {
     const nextTabs: MediaDetailTab[] = [{ key: "read", label: "Read" }, { key: "details", label: "Details" }];
-    const relatedCount = (canReadPerformers ? text?.performers.length ?? 0 : 0)
-      + (canReadTags ? text?.tags.length ?? 0 : 0)
-      + (canReadGroups ? text?.groups.length ?? 0 : 0)
-      + (canReadStudio && text?.studioId ? 1 : 0);
-    nextTabs.push({ key: "related", label: "Related", count: relatedCount });
     if (canReadFiles && (text?.files.length ?? 0) > 0) {
       nextTabs.push({ key: "file-info", label: "File Info", count: text?.files.length ?? 0 });
     }
@@ -324,8 +319,14 @@ export function TextDetailPage({ id, onNavigate }: Props) {
       />
       <MediaDetailLayout.Content>
         {activeTab === "read" ? (
-          <section className="rounded-3xl border border-border bg-card/75 p-5 text-sm text-muted">
-            {contentLoading ? "Loading extracted text content..." : content?.content ? `Rendering ${content.renderMode === "markdown" ? "markdown" : content.renderMode === "html" ? "HTML" : "plain text"} content.` : "No extracted text content is available yet."}
+          <section className="overflow-hidden rounded-3xl border border-border bg-card/75">
+            {contentLoading ? (
+              <div className="p-5 text-sm text-muted">Loading extracted text content...</div>
+            ) : content?.content ? (
+              <TextViewer content={content.content} renderMode={content.renderMode} />
+            ) : (
+              <div className="p-5 text-sm text-muted">No extracted text content is available yet.</div>
+            )}
           </section>
         ) : null}
 
@@ -361,17 +362,6 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                 </div>
               </section>
             ) : null}
-            {text.customFields && Object.keys(text.customFields).length > 0 ? (
-              <MediaDetailLayout.Metadata>
-                <CustomFieldsDisplay customFields={text.customFields} entityType="text" />
-              </MediaDetailLayout.Metadata>
-            ) : null}
-            <AspectRatingsPanel hostType="text" hostId={text.id} canRate={canEngageText} />
-          </div>
-        ) : null}
-
-        {activeTab === "related" ? (
-          <div className="space-y-4">
             {(canReadPerformers && text.performers.length > 0) || (canReadTags && text.tags.length > 0) || (canReadGroups && text.groups.length > 0) || (canReadStudio && text.studioId && text.studioName) ? (
               <RelatedSection icon={<Rows3 className="h-4 w-4" />} title="Related Entities">
                 <EntityReferencePopovers
@@ -383,11 +373,12 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                 />
               </RelatedSection>
             ) : null}
-            {(!canReadPerformers || text.performers.length === 0) && (!canReadTags || text.tags.length === 0) && (!canReadGroups || text.groups.length === 0) && !(canReadStudio && text.studioId && text.studioName) ? (
-              <section className="rounded-3xl border border-dashed border-border bg-card/70 px-5 py-8 text-sm text-muted">
-                No related performers, tags, studio, or groups are linked to this text yet.
-              </section>
+            {text.customFields && Object.keys(text.customFields).length > 0 ? (
+              <MediaDetailLayout.Metadata>
+                <CustomFieldsDisplay customFields={text.customFields} entityType="text" />
+              </MediaDetailLayout.Metadata>
             ) : null}
+            <AspectRatingsPanel hostType="text" hostId={text.id} canRate={canEngageText} />
           </div>
         ) : null}
 

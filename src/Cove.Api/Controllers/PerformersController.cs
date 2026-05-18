@@ -17,7 +17,7 @@ namespace Cove.Api.Controllers;
 [RequiresPermission(Permissions.PerformersRead)]
 public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
 {
-    private sealed record PerformerUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount);
+    private sealed record PerformerUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount);
 
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -62,6 +62,133 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         var performer = await performerRepo.GetByIdWithRelationsAsync(id, ct);
         if (performer == null) return NotFound();
         return Ok(await MapToDetailDtoAsync(performer, ct));
+    }
+
+    [HttpGet("{id:int}/groups")]
+    [OutputCache(PolicyName = "ShortCache")]
+    public async Task<ActionResult<PaginatedResponse<GroupDto>>> GetGroups(
+        int id,
+        [FromQuery] string? q,
+        [FromQuery] int page = 1,
+        [FromQuery] int perPage = 18,
+        [FromQuery] string? sort = null,
+        [FromQuery] string? direction = null,
+        CancellationToken ct = default)
+    {
+        var performerExists = await db.Performers.AsNoTracking().AnyAsync(performer => performer.Id == id, ct);
+        if (!performerExists)
+            return NotFound();
+
+        page = Math.Max(1, page);
+        perPage = Math.Clamp(perPage, 1, 250);
+
+        var directGroupIds = await db.GroupItems
+            .AsNoTracking()
+            .Where(item => (item.HostType == "performer" || item.Kind == GroupItemKind.Performer) && item.HostId == id)
+            .Select(item => item.GroupId)
+            .ToListAsync(ct);
+        var sceneGroupIds = await (
+            from scenePerformer in db.Set<ScenePerformer>().AsNoTracking()
+            join groupItem in db.GroupItems.AsNoTracking().Where(item => item.SceneId.HasValue)
+                on scenePerformer.SceneId equals groupItem.SceneId!.Value
+            where scenePerformer.PerformerId == id
+            select groupItem.GroupId
+        ).ToListAsync(ct);
+        var groupIds = directGroupIds.Concat(sceneGroupIds).Distinct().ToArray();
+        if (groupIds.Length == 0)
+            return Ok(new PaginatedResponse<GroupDto>([], 0, page, perPage));
+
+        var query = db.Groups
+            .AsNoTracking()
+            .Include(group => group.Studio)
+            .Include(group => group.Urls)
+            .Include(group => group.GroupTags).ThenInclude(groupTag => groupTag.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Include(group => group.GroupItems)
+            .Include(group => group.SubGroupRelations)
+            .Include(group => group.ContainingGroupRelations)
+            .AsSplitQuery()
+            .Where(group => groupIds.Contains(group.Id));
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var normalizedQuery = q.Trim().ToLowerInvariant();
+            query = query.Where(group => group.Name.ToLower().Contains(normalizedQuery) || (group.Aliases != null && group.Aliases.ToLower().Contains(normalizedQuery)));
+        }
+
+        query = ApplyGroupSort(query, sort, direction == "desc");
+        var totalCount = await query.CountAsync(ct);
+        var groups = await query.Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+        return Ok(new PaginatedResponse<GroupDto>(groups.Select(MapGroupToDto).ToList(), totalCount, page, perPage));
+    }
+
+    [HttpGet("{id:int}/appears-with")]
+    [OutputCache(PolicyName = "ShortCache")]
+    public async Task<ActionResult<PaginatedResponse<PerformerDto>>> GetAppearsWith(
+        int id,
+        [FromQuery] string? q,
+        [FromQuery] int page = 1,
+        [FromQuery] int perPage = 18,
+        [FromQuery] string? sort = null,
+        [FromQuery] string? direction = null,
+        CancellationToken ct = default)
+    {
+        var performerExists = await db.Performers.AsNoTracking().AnyAsync(performer => performer.Id == id, ct);
+        if (!performerExists)
+            return NotFound();
+
+        page = Math.Max(1, page);
+        perPage = Math.Clamp(perPage, 1, 250);
+
+        var coPerformerCounts =
+            from scenePerformer in db.Set<ScenePerformer>().AsNoTracking()
+            join coPerformer in db.Set<ScenePerformer>().AsNoTracking()
+                on scenePerformer.SceneId equals coPerformer.SceneId
+            where scenePerformer.PerformerId == id && coPerformer.PerformerId != id
+            group coPerformer by coPerformer.PerformerId into grouped
+            select new
+            {
+                PerformerId = grouped.Key,
+                SceneCount = grouped.Select(item => item.SceneId).Distinct().Count(),
+            };
+
+        var query =
+            from relation in coPerformerCounts
+            join performer in db.Performers.AsNoTracking() on relation.PerformerId equals performer.Id
+            select new { relation.PerformerId, relation.SceneCount, performer.Name };
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var normalizedQuery = q.Trim().ToLowerInvariant();
+            query = query.Where(item => item.Name.ToLower().Contains(normalizedQuery));
+        }
+
+        var desc = direction == "desc";
+        query = sort switch
+        {
+            "name" => desc ? query.OrderByDescending(item => item.Name) : query.OrderBy(item => item.Name),
+            _ => query.OrderByDescending(item => item.SceneCount).ThenBy(item => item.Name),
+        };
+
+        var totalCount = await query.CountAsync(ct);
+        var pageRows = await query.Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+        var pageIds = pageRows.Select(item => item.PerformerId).ToArray();
+        var performers = await db.Performers
+            .AsNoTracking()
+            .Include(performer => performer.Urls)
+            .Include(performer => performer.Aliases)
+            .Include(performer => performer.PerformerTags).ThenInclude(performerTag => performerTag.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Include(performer => performer.RemoteIds)
+            .AsSplitQuery()
+            .Where(performer => pageIds.Contains(performer.Id))
+            .ToListAsync(ct);
+        var performersById = performers.ToDictionary(performer => performer.Id);
+        var usageCountsByPerformerId = await LoadPerformerUsageCountsAsync(pageIds, ct);
+        var dtos = pageRows
+            .Where(row => performersById.ContainsKey(row.PerformerId))
+            .Select(row => MapToDto(performersById[row.PerformerId], usageCountsByPerformerId.GetValueOrDefault(row.PerformerId)))
+            .ToList();
+
+        return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, page, perPage));
     }
 
     [HttpPost]
@@ -375,6 +502,46 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         return MapToDto(performer, usageCounts);
     }
 
+    private static IQueryable<Group> ApplyGroupSort(IQueryable<Group> query, string? sort, bool desc) => sort switch
+    {
+        "date" => desc ? query.OrderByDescending(group => group.Date) : query.OrderBy(group => group.Date),
+        "created_at" => desc ? query.OrderByDescending(group => group.CreatedAt) : query.OrderBy(group => group.CreatedAt),
+        "updated_at" => desc ? query.OrderByDescending(group => group.UpdatedAt) : query.OrderBy(group => group.UpdatedAt),
+        "item_count" => desc ? query.OrderByDescending(group => group.GroupItems.Count) : query.OrderBy(group => group.GroupItems.Count),
+        _ => desc ? query.OrderByDescending(group => group.Name) : query.OrderBy(group => group.Name),
+    };
+
+    private GroupDto MapGroupToDto(Group group) => new(
+        group.Id,
+        group.Name,
+        group.Aliases,
+        group.Duration,
+        group.Date?.ToString("yyyy-MM-dd"),
+        group.StudioId,
+        group.Studio?.Name,
+        group.Director,
+        group.Synopsis,
+        group.Urls.Select(url => url.Url).ToList(),
+        group.GroupTags.Where(groupTag => groupTag.Tag != null).Select(groupTag => TagDtoMapping.MapTagDto(groupTag.Tag!)).ToList(),
+        group.GroupItems.Select(item => item.SceneId).Where(sceneId => sceneId.HasValue).Distinct().Count(),
+        group.GroupItems.Count,
+        group.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange),
+        group.SubGroupRelations?.Count ?? 0,
+        group.ContainingGroupRelations?.Count ?? 0,
+        group.CustomFields,
+        group.CreatedAt.ToString("o"),
+        group.UpdatedAt.ToString("o"),
+        group.FrontImageBlobId != null ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt) : null,
+        group.BackImageBlobId != null ? EntityImageUrls.GroupBack(ControllerContext.HttpContext, group.Id, group.UpdatedAt) : null,
+        group.Kind,
+        group.QuerySourceKey,
+        group.QueryJson,
+        group.LastResolvedAt?.ToString("o"),
+        group.CachedItemCount,
+        group.CacheTtlSec,
+        group.ShowInSceneLists,
+        group.AllowedHostTypes);
+
     private PerformerDto MapToDto(Performer p, PerformerUsageCounts? usageCounts = null) => new(
         p.Id, p.Name, p.Disambiguation, p.Gender?.ToString(),
         p.Birthdate?.ToString("yyyy-MM-dd"), p.DeathDate?.ToString("yyyy-MM-dd"),
@@ -390,6 +557,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         usageCounts?.ImageCount ?? p.ImageCount,
         usageCounts?.GalleryCount ?? p.GalleryCount,
         usageCounts?.GroupCount ?? 0,
+        usageCounts?.AudioCount ?? 0,
+        usageCounts?.TextCount ?? 0,
         p.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, p.Id, p.UpdatedAt) : null,
         p.CustomFields,
         p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o")
@@ -423,6 +592,18 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             .GroupBy(galleryPerformer => galleryPerformer.PerformerId)
             .Select(group => new { group.Key, Count = group.Select(galleryPerformer => galleryPerformer.GalleryId).Distinct().Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var audioCounts = await db.Set<AudioPerformer>()
+            .AsNoTracking()
+            .Where(audioPerformer => ids.Contains(audioPerformer.PerformerId))
+            .GroupBy(audioPerformer => audioPerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Select(audioPerformer => audioPerformer.AudioId).Distinct().Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var textCounts = await db.Set<TextPerformer>()
+            .AsNoTracking()
+            .Where(textPerformer => ids.Contains(textPerformer.PerformerId))
+            .GroupBy(textPerformer => textPerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Select(textPerformer => textPerformer.TextDocumentId).Distinct().Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
 
         var directGroupRows = await db.GroupItems
             .AsNoTracking()
@@ -447,7 +628,9 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
                 sceneCounts.GetValueOrDefault(id),
                 imageCounts.GetValueOrDefault(id),
                 galleryCounts.GetValueOrDefault(id),
-                groupCounts.GetValueOrDefault(id)));
+                groupCounts.GetValueOrDefault(id),
+                audioCounts.GetValueOrDefault(id),
+                textCounts.GetValueOrDefault(id)));
     }
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;

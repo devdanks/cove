@@ -28,6 +28,7 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { PerformerTile } from "../components/EntityCards";
 import { trackInteraction } from "../utils/interactionTracking";
 import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector, type SelectableTag } from "../components/TagSelector";
@@ -66,7 +67,7 @@ function usePersistedFlag(key: string, defaultValue: boolean): [boolean, (next: 
   return [value, set];
 }
 
-type TabKey = "details" | "groups" | "galleries" | "segments" | "filters" | "file-info" | "edit" | "history" | string;
+type TabKey = "details" | "segments" | "filters" | "file-info" | "edit" | "history" | string;
 
 export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const { data: scene, isLoading } = useQuery({
@@ -313,16 +314,12 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     { key: "details", label: "Details" },
     { key: "segments", label: `Segments${segments.length ? ` (${segments.length})` : ""}` },
     { key: "similar", label: "Similar" },
-    ...(scene?.groups.length ? [{ key: "groups" as TabKey, label: "Groups" }] : []),
-    ...(scene?.galleries.length ? [{ key: "galleries" as TabKey, label: "Galleries" }] : []),
     { key: "filters", label: "Filters" },
     { key: "file-info", label: `File Info${scene?.files.length && scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },
     { key: "history", label: "History" },
     ...getTabsForPage("scene").map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label })),
     { key: "edit", label: "Edit" },
   ], {
-    groups: "groups.read",
-    galleries: "galleries.read",
     segments: "segments.read",
     "file-info": "files.read",
     edit: "scenes.write",
@@ -490,10 +487,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
 
   const activeTabContent = activeTab === "details" ? (
     <DetailsTab scene={scene} onNavigate={onNavigate} sceneFaces={sceneFaces} />
-  ) : activeTab === "groups" ? (
-    <GroupsTab scene={scene} onNavigate={onNavigate} />
-  ) : activeTab === "galleries" ? (
-    <GalleriesTab scene={scene} onNavigate={onNavigate} />
   ) : activeTab === "segments" ? (
     <div className="space-y-4">
       <ResolvedSpansPanel
@@ -833,17 +826,83 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       {scene.performers.length > 0 && (
         <div>
           <h6 className="text-sm text-muted mb-2">Performer{scene.performers.length > 1 ? "s" : ""}</h6>
-          <div className={scene.performers.length > 1 ? "grid grid-cols-2 gap-3" : "flex flex-wrap gap-3"}>
-            {scene.performers.map((performer: any) => (
-              <PerformerCard 
-                key={performer.id} 
-                performer={performer}
-                sceneDate={scene.date}
-                fullWidth={scene.performers.length > 1}
-                contextTags={(scene.contextTagApplications ?? []).filter((application) => application.contextType === "performer" && application.contextId === performer.id)}
-                onClick={() => onNavigate({ page: "performer", id: performer.id })}
-              />
-            ))}
+          <div className={scene.performers.length > 1 ? "grid grid-cols-2 gap-3" : "grid max-w-[220px] gap-3"}>
+            {scene.performers.map((performer: any) => {
+              const contextTags = (scene.contextTagApplications ?? []).filter((application) => application.contextType === "performer" && application.contextId === performer.id);
+              const ageAtScene = getAgeAtDate(scene.date, performer.birthdate);
+              const footer = ageAtScene || contextTags.length > 0
+                ? <ScenePerformerTileFooter ageAtScene={ageAtScene} contextTags={contextTags} />
+                : null;
+
+              return (
+                <PerformerTile
+                  key={performer.id}
+                  performer={performer}
+                  onClick={() => onNavigate({ page: "performer", id: performer.id })}
+                  onNavigate={onNavigate}
+                >
+                  {footer}
+                </PerformerTile>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {scene.groups.length > 0 && (
+        <div>
+          <h6 className="mb-2 text-sm text-muted">Groups</h6>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {scene.groups.map((group) => {
+              const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
+
+              return (
+                <a
+                  key={group.id}
+                  {...linkProps}
+                  className="rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-accent/60"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-foreground">{group.name}</div>
+                      <div className="mt-1 text-xs text-secondary">Scene #{group.sceneIndex}</div>
+                    </div>
+                    <Layers className="h-5 w-5 text-muted" />
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {scene.galleries.length > 0 && (
+        <div>
+          <h6 className="mb-2 text-sm text-muted">Galleries</h6>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {scene.galleries.map((gallery) => {
+              const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, () => onNavigate({ page: "gallery", id: gallery.id }));
+
+              return (
+                <a
+                  key={gallery.id}
+                  {...linkProps}
+                  className="group overflow-hidden rounded-xl border border-border bg-card text-left transition-colors hover:border-accent/60"
+                >
+                  <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card">
+                    <FolderOpen className="h-10 w-10 text-muted" />
+                  </div>
+                  <div className="p-3">
+                    <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">
+                      {gallery.title || "Untitled"}
+                    </p>
+                    {gallery.date && (
+                      <p className="mt-1 text-xs text-secondary">{formatDate(gallery.date)}</p>
+                    )}
+                  </div>
+                </a>
+              );
+            })}
           </div>
         </div>
       )}
@@ -923,139 +982,22 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
   );
 }
 
-function GroupsTab({ scene, onNavigate }: { scene: Scene; onNavigate: (r: any) => void }) {
-  if (scene.groups.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-border bg-card/40 px-4 py-10 text-center text-sm text-secondary">
-        <Layers className="mx-auto mb-3 h-8 w-8 text-muted" />
-        No groups linked to this scene.
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {scene.groups.map((group) => {
-        const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
-
-        return (
-          <a
-            key={group.id}
-            {...linkProps}
-            className="rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-accent/60"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-foreground">{group.name}</div>
-                <div className="mt-1 text-xs text-secondary">Scene #{group.sceneIndex}</div>
-              </div>
-              <Layers className="h-5 w-5 text-muted" />
-            </div>
-          </a>
-        );
-      })}
-    </div>
-  );
+function ScenePerformerTileFooter({ ageAtScene, contextTags = [] }: { ageAtScene: number | null; contextTags?: TagApplication[] }) {
+  return <div className="space-y-2 text-xs text-secondary">
+    {ageAtScene ? <div className="text-center">{ageAtScene} yrs old</div> : null}
+    <PerformerContextTagList contextTags={contextTags} />
+  </div>;
 }
 
-function GalleriesTab({ scene, onNavigate }: { scene: Scene; onNavigate: (r: any) => void }) {
-  if (scene.galleries.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-border bg-card/40 px-4 py-10 text-center text-sm text-secondary">
-        <FolderOpen className="mx-auto mb-3 h-8 w-8 text-muted" />
-        No galleries linked to this scene.
-      </div>
-    );
-  }
+function getAgeAtDate(sceneDate?: string, birthdate?: string) {
+  if (!sceneDate || !birthdate) return null;
 
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {scene.galleries.map((gallery) => {
-        const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, () => onNavigate({ page: "gallery", id: gallery.id }));
-
-        return (
-          <a
-            key={gallery.id}
-            {...linkProps}
-            className="group overflow-hidden rounded-xl border border-border bg-card text-left transition-colors hover:border-accent/60"
-          >
-            <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card">
-              <FolderOpen className="h-10 w-10 text-muted" />
-            </div>
-            <div className="p-3">
-              <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">
-                {gallery.title || "Untitled"}
-              </p>
-              {gallery.date && (
-                <p className="mt-1 text-xs text-secondary">{formatDate(gallery.date)}</p>
-              )}
-            </div>
-          </a>
-        );
-      })}
-    </div>
-  );
-}
-
-function PerformerCard({
-  performer,
-  sceneDate,
-  fullWidth = false,
-  contextTags = [],
-  onClick,
-}: {
-  performer: any;
-  sceneDate?: string;
-  fullWidth?: boolean;
-  contextTags?: TagApplication[];
-  onClick: () => void;
-}) {
-  const imageUrl = performer.imagePath;
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, onClick);
-  // Calculate age at scene date
-  const ageAtScene = (() => {
-    if (!sceneDate || !performer.birthdate) return null;
-    const scene = new Date(sceneDate);
-    const birth = new Date(performer.birthdate);
-    let age = scene.getFullYear() - birth.getFullYear();
-    const m = scene.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && scene.getDate() < birth.getDate())) age--;
-    return age > 0 ? age : null;
-  })();
-
-  return (
-    <div className={`bg-card border border-border rounded overflow-hidden transition-colors text-left ${fullWidth ? "w-full" : ""}`} style={fullWidth ? undefined : { width: "200px" }}>
-      <a {...linkProps} className={`block hover:bg-surface/40 ${fullWidth ? "w-full" : ""}`}>
-        <div className="aspect-[2/3] bg-surface flex items-center justify-center relative">
-          {imageUrl ? (
-            <img src={imageUrl} alt={performer.name} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-card to-surface">
-              <svg viewBox="0 0 100 150" className="w-2/3 h-2/3 opacity-30">
-                <ellipse cx="50" cy="35" rx="25" ry="30" fill="currentColor" className="text-muted"/>
-                <ellipse cx="50" cy="120" rx="40" ry="45" fill="currentColor" className="text-muted"/>
-              </svg>
-            </div>
-          )}
-        </div>
-        <div className="p-2 text-center">
-          <div className="text-sm text-foreground font-medium truncate">{performer.name}</div>
-          <div className="text-xs text-muted flex items-center justify-center gap-1 mt-0.5">
-            {ageAtScene && <span>{ageAtScene} yrs old</span>}
-            {ageAtScene && performer.sceneCount !== undefined && <span>·</span>}
-            {performer.sceneCount !== undefined && (
-              <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" /> {performer.sceneCount}</span>
-            )}
-          </div>
-        </div>
-      </a>
-      {contextTags.length > 0 ? (
-        <div className="border-t border-border/60 p-2">
-          <PerformerContextTagList contextTags={contextTags} />
-        </div>
-      ) : null}
-    </div>
-  );
+  const scene = new Date(sceneDate);
+  const birth = new Date(birthdate);
+  let age = scene.getFullYear() - birth.getFullYear();
+  const monthDelta = scene.getMonth() - birth.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && scene.getDate() < birth.getDate())) age--;
+  return age > 0 ? age : null;
 }
 
 function PerformerContextTagList({ contextTags }: { contextTags: TagApplication[] }) {

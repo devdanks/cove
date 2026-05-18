@@ -11,6 +11,7 @@ import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EntityCardGrid } from "../components/EntityCardGrid";
+import { FaceTile } from "../components/EntityCards";
 import { formatDate } from "../components/shared";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
@@ -382,17 +383,27 @@ export function FacesPage({ onNavigate }: Props) {
         {displayMode === "grid" ? (
           <EntityCardGrid gapClassName="gap-4">
             {items.map((face) => (
-              <FaceCard
+              <FaceTile
                 key={face.id}
                 face={face}
-                onNavigate={onNavigate}
-                canReadPerformers={canReadPerformers}
-                canWriteFaces={canWriteFaces}
-                onOpenCompare={(suggestion) => setComparison({ face, suggestion })}
+                onClick={() => onNavigate({ page: "face", id: face.id })}
                 selected={selectedIds.has(face.id)}
                 onSelect={() => toggle(face.id)}
                 selecting={selecting}
-              />
+              >
+                {face.performerId ? (
+                  <LinkedPerformerSummary face={face} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
+                ) : (
+                  <TopSuggestionFooter
+                    face={face}
+                    suggestion={face.topSuggestion}
+                    onNavigate={onNavigate}
+                    canReadPerformers={canReadPerformers}
+                    canWriteFaces={canWriteFaces}
+                    onOpenCompare={(suggestion) => setComparison({ face, suggestion })}
+                  />
+                )}
+              </FaceTile>
             ))}
           </EntityCardGrid>
         ) : (
@@ -466,89 +477,6 @@ function describeBatchResult(result: FaceBatchOperationResult) {
 
   const firstIssue = result.failed[0]?.error ?? result.skipped[0]?.reason;
   return firstIssue ? `${parts.join(", ")}. ${firstIssue}` : `${parts.join(", ")}.`;
-}
-
-function FaceCard({
-  face,
-  onNavigate,
-  canReadPerformers,
-  canWriteFaces,
-  onOpenCompare,
-  selected,
-  onSelect,
-  selecting,
-}: {
-  face: Face;
-  onNavigate: (r: any) => void;
-  canReadPerformers: boolean;
-  canWriteFaces: boolean;
-  onOpenCompare: (suggestion: FaceTopSuggestion) => void;
-  selected: boolean;
-  onSelect: () => void;
-  selecting: boolean;
-}) {
-  const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
-  const openFace = () => onNavigate({ page: "face", id: face.id });
-
-  return (
-    <article className={`entity-card group relative overflow-hidden rounded-2xl border bg-card/80 shadow-sm transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/50"}`}>
-      <RouteCardLinkOverlay
-        route={{ page: "face", id: face.id }}
-        onClick={openFace}
-        label={`Open face ${title}`}
-        disabled={selecting}
-        selectionSafeZone
-      />
-      <div
-        onClick={selecting ? onSelect : openFace}
-        className="relative block aspect-square max-h-[22rem] w-full bg-surface/70 text-left"
-      >
-        <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-        {face.coverImageUrl ? (
-          <img src={face.coverImageUrl} alt={title} className="h-full w-full bg-surface/85 object-contain p-2" loading="lazy" />
-        ) : (
-          <div className="flex h-full items-center justify-center bg-surface text-muted">
-            <Fingerprint className="h-12 w-12" />
-          </div>
-        )}
-        <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-1 bg-gradient-to-t from-black/80 via-black/35 to-transparent p-3">
-          {face.mergedIntoFaceId && <Badge icon={<Merge className="h-3 w-3" />} label={`Merged into #${face.mergedIntoFaceId}`} />}
-          {face.performerId && <Badge icon={<Link2 className="h-3 w-3" />} label="Linked" />}
-        </div>
-      </div>
-      <div className="relative z-10 space-y-3 p-4">
-        <div>
-          <button type="button" onClick={openFace} className="relative z-10 text-left text-sm font-semibold text-foreground hover:text-accent">
-            {title}
-          </button>
-          <div className="mt-1 text-xs text-secondary">Updated {formatDate(face.updatedAt)}</div>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-center text-xs">
-          <Metric label="Detections" value={face.detectionCount} />
-          <Metric label="Scenes" value={face.sceneCount} />
-          <Metric label="Images" value={face.imageCount} />
-        </div>
-        <div className="relative z-20 rounded-xl border border-border bg-surface/50 p-3">
-          {face.performerId ? (
-            <LinkedPerformerSummary face={face} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
-          ) : (
-            <TopSuggestionFooter
-              face={face}
-              suggestion={face.topSuggestion}
-              onNavigate={onNavigate}
-              canReadPerformers={canReadPerformers}
-              canWriteFaces={canWriteFaces}
-              onOpenCompare={onOpenCompare}
-            />
-          )}
-        </div>
-        <div className="flex items-center justify-between gap-2 text-xs text-secondary">
-          <span>Source: {face.primarySourceKey || "unknown"}</span>
-          <span>{face.frameSampleCount ?? 0} samples</span>
-        </div>
-      </div>
-    </article>
-  );
 }
 
 function FaceListTable({

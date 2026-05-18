@@ -84,6 +84,8 @@ describe("PerformerEditModal", () => {
       imageCount: 0,
       galleryCount: 0,
       groupCount: 0,
+      audioCount: 0,
+      textCount: 0,
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-02T00:00:00Z",
     };
@@ -115,6 +117,8 @@ describe("PerformerEditModal", () => {
       imageCount: 0,
       galleryCount: 0,
       groupCount: 0,
+      audioCount: 0,
+      textCount: 0,
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-02T00:00:00Z",
     };

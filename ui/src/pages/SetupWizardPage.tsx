@@ -414,21 +414,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
     : activeMode === "backup"
     ? ["welcome", "source", "backup-restore", "theme", "done"]
     : ["welcome", "source", "paths", "confirm", "theme", "done"];
-  const themeOptions = useMemo(() => {
-    const defaultTheme = {
-      id: "default",
-      name: "Classic Cove",
-      description: "Use Cove's built-in layout, spacing, and accents.",
-      cssVariables: {
-        "--background": "#0b1220",
-        "--card": "#152033",
-        "--accent": "#2f80ed",
-        "--foreground": "#f8fafc",
-      },
-    };
-
-    return [defaultTheme, ...availableThemes.filter((theme) => theme.id !== "default")];
-  }, [availableThemes]);
+  const themeOptions = useMemo(() => availableThemes, [availableThemes]);
 
   const stashPreviewMut = useMutation({
     mutationFn: () => stashMigration.preview(stashDbPath),

@@ -24,7 +24,7 @@ import { AudioEditPanel } from "./AudioEditPanel";
 const MediaScrapeDialog = lazy(() => import("../components/MediaScrapeDialog").then((module) => ({ default: module.MediaScrapeDialog })));
 const MediaDownloadDialog = lazy(() => import("../components/MediaDownloadDialog").then((module) => ({ default: module.MediaDownloadDialog })));
 
-type AudioTab = "details" | "related" | "tracks" | "file-info" | "history" | "edit";
+type AudioTab = "details" | "tracks" | "file-info" | "history" | "edit";
 
 function getMutationErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : error ? String(error) : null;
@@ -56,7 +56,8 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canReadGroups = canReadEntity("group", hasPermission);
   const canReadStudio = canReadEntity("studio", hasPermission);
-  const canReadFiles = hasPermission("stream.read");
+  const canStreamAudio = hasPermission("stream.read");
+  const canReadFiles = hasPermission("files.read");
   const trackingEnabled = user?.uiPreferences?.tracking?.enabled ?? true;
   const canEngageAudio = canReadAudio && (user?.kind === "user" || user?.kind === "system");
   const trackAudioActivity = canEngageAudio && trackingEnabled;
@@ -135,11 +136,6 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   ) : undefined;
   const tabs = useMemo(() => {
     const nextTabs: MediaDetailTab[] = [{ key: "details", label: "Details" }];
-    const relatedCount = (canReadPerformers ? audio?.performers.length ?? 0 : 0)
-      + (canReadTags ? audio?.tags.length ?? 0 : 0)
-      + (canReadGroups ? audio?.groups.length ?? 0 : 0)
-      + (canReadStudio && audio?.studioId ? 1 : 0);
-    nextTabs.push({ key: "related", label: "Related", count: relatedCount });
     if ((audio?.tracks.length ?? 0) > 0) {
       nextTabs.push({ key: "tracks", label: "Tracks", count: audio?.tracks.length ?? 0 });
     }
@@ -185,7 +181,11 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   const audioPlayDuration = audioEngagement?.playDuration ?? 0;
   const audioPageVisitCount = audioEngagement?.pageVisitCount ?? 0;
 
-  const audioMedia = primaryFile ? (
+  const audioMedia = !canStreamAudio ? (
+    <div className="flex h-full min-h-[20rem] items-center justify-center rounded-[2rem] border border-dashed border-border bg-card/70 text-sm text-muted">
+      Playback is unavailable with your current permissions.
+    </div>
+  ) : primaryFile ? (
     primaryFile.hasVideoTrack ? (
       <div className="flex h-full min-h-0 w-full items-center justify-center bg-black">
         <VideoPlayer
@@ -275,7 +275,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
               <Check className="h-4 w-4" />
             </span>
           ) : null}
-          {canReadFiles ? (
+          {canStreamAudio ? (
             <a
               href={audios.streamUrl(audio.id)}
               target="_blank"
@@ -386,17 +386,6 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
                 </div>
               </section>
             ) : null}
-            {audio.customFields && Object.keys(audio.customFields).length > 0 ? (
-              <MediaDetailLayout.Metadata>
-                <CustomFieldsDisplay customFields={audio.customFields} entityType="audio" />
-              </MediaDetailLayout.Metadata>
-            ) : null}
-            <AspectRatingsPanel hostType="audio" hostId={audio.id} canRate={canEngageAudio} />
-          </div>
-        ) : null}
-
-        {activeTab === "related" ? (
-          <div className="space-y-4">
             {(canReadPerformers && audio.performers.length > 0) || (canReadTags && audio.tags.length > 0) || (canReadGroups && audio.groups.length > 0) || (canReadStudio && audio.studioId && audio.studioName) ? (
               <RelatedSection icon={<Rows3 className="h-4 w-4" />} title="Related Entities">
                 <EntityReferencePopovers
@@ -408,11 +397,12 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
                 />
               </RelatedSection>
             ) : null}
-            {(!canReadPerformers || audio.performers.length === 0) && (!canReadTags || audio.tags.length === 0) && (!canReadGroups || audio.groups.length === 0) && !(canReadStudio && audio.studioId && audio.studioName) ? (
-              <section className="rounded-3xl border border-dashed border-border bg-card/70 px-5 py-8 text-sm text-muted">
-                No related performers, tags, studio, or groups are linked to this audio yet.
-              </section>
+            {audio.customFields && Object.keys(audio.customFields).length > 0 ? (
+              <MediaDetailLayout.Metadata>
+                <CustomFieldsDisplay customFields={audio.customFields} entityType="audio" />
+              </MediaDetailLayout.Metadata>
             ) : null}
+            <AspectRatingsPanel hostType="audio" hostId={audio.id} canRate={canEngageAudio} />
           </div>
         ) : null}
 

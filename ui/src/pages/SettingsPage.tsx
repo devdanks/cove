@@ -34,7 +34,7 @@ import {
   UserCog,
   X,
 } from "lucide-react";
-import { system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi } from "../api/client";
+import { customFields, system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi } from "../api/client";
 import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, StashAiImportResult, UserRow } from "../api/client";
 import type {
   JobInfo,
@@ -80,6 +80,7 @@ import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } fro
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
 import { KEYBINDING_GROUPS, keybindingDefault } from "../keyboard/keybindings";
 import { openTutorialStoryboard } from "../components/TutorialStoryboardDialog";
+import { customFieldDefinitionsQueryKey } from "../hooks/useCustomFieldDefinitions";
 
 type SettingsTab = "tasks" | "library" | "interface" | "user-settings" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
@@ -378,6 +379,8 @@ const METADATA_BATCH_EXCLUDE_OPTIONS = [
 
 const customFieldEntityOptions: { value: CustomFieldEntityType; label: string }[] = [
   { value: "scene", label: "Scenes" },
+  { value: "audio", label: "Audios" },
+  { value: "text", label: "Texts" },
   { value: "performer", label: "Performers" },
   { value: "tag", label: "Tags" },
   { value: "studio", label: "Studios" },
@@ -406,6 +409,56 @@ function linesToList(value: string) {
 
 function listToLines(values: string[]) {
   return values.join("\n");
+}
+
+function cloneCustomFieldDefinitions(definitions: CustomFieldDefinition[]) {
+  return definitions.map((definition) => ({
+    ...definition,
+    entityTypes: [...definition.entityTypes],
+    options: [...definition.options],
+  }));
+}
+
+function canSyncCustomFieldDefinition(definition: CustomFieldDefinition) {
+  return (definition.key.trim() !== "" || definition.label.trim() !== "") && definition.entityTypes.length > 0;
+}
+
+function normalizeCustomFieldDefinitionForSync(definition: CustomFieldDefinition, index: number): CustomFieldDefinition {
+  return {
+    id: definition.id,
+    key: definition.key.trim(),
+    label: definition.label.trim(),
+    type: definition.type,
+    entityTypes: [...definition.entityTypes],
+    options: definition.options.map((option) => option.trim()).filter(Boolean),
+    filterable: definition.filterable,
+    sortable: definition.sortable,
+    isMultiValue: definition.isMultiValue ?? false,
+    displayOrder: definition.displayOrder ?? (index * 10),
+  };
+}
+
+function mergeSavedCustomFieldDefinitions(savedDefinitions: CustomFieldDefinition[], draftSnapshot: CustomFieldDefinition[]) {
+  const normalizedSavedDefinitions = cloneCustomFieldDefinitions(savedDefinitions);
+  let savedIndex = 0;
+
+  return draftSnapshot.flatMap((definition) => {
+    if (definition.id == null && !canSyncCustomFieldDefinition(definition)) {
+      return [{
+        ...definition,
+        entityTypes: [...definition.entityTypes],
+        options: [...definition.options],
+      }];
+    }
+
+    const savedDefinition = normalizedSavedDefinitions[savedIndex];
+    if (!savedDefinition) {
+      return [];
+    }
+
+    savedIndex += 1;
+    return [savedDefinition];
+  });
 }
 
 function normalizeConfig(config: CoveConfig): CoveConfig {
@@ -520,11 +573,18 @@ export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => readSettingsTabFromUrl());
   const [authGroupOpen, setAuthGroupOpen] = useState(() => authTabKeys.has(readSettingsTabFromUrl()));
   const [draftState, setDraft] = useState<CoveConfig | null>(null);
+  const [customFieldDraftState, setCustomFieldDraft] = useState<CustomFieldDefinition[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const [metadataServerValidation, setMetadataServerValidation] = useState<Record<string, MetadataServerValidationResult>>({});
+
+  const { data: loadedCustomFieldDefinitions = [], isLoading: customFieldDefinitionsLoading } = useQuery({
+    queryKey: customFieldDefinitionsQueryKey(),
+    queryFn: () => customFields.list(),
+    enabled: canWriteSystemSettings,
+  });
 
   const securityUsersQ = useQuery<UserRow[]>({
     queryKey: ["admin", "users", "security"],
@@ -625,6 +685,14 @@ export function SettingsPage() {
   }, [config]);
 
   useEffect(() => {
+    if (!canWriteSystemSettings || customFieldDefinitionsLoading) {
+      return;
+    }
+
+    setCustomFieldDraft((current) => current ?? cloneCustomFieldDefinitions(loadedCustomFieldDefinitions));
+  }, [canWriteSystemSettings, customFieldDefinitionsLoading, loadedCustomFieldDefinitions]);
+
+  useEffect(() => {
     const handleLocationChange = () => setActiveTab(readSettingsTabFromUrl());
     window.addEventListener("popstate", handleLocationChange);
     window.addEventListener(LOCATION_CHANGE_EVENT, handleLocationChange);
@@ -650,6 +718,17 @@ export function SettingsPage() {
       queryClient.setQueriesData({ queryKey: ["system-config"] }, savedConfig);
       queryClient.invalidateQueries({ queryKey: ["system-config"] });
       queryClient.invalidateQueries({ queryKey: ["system-scrapers"] });
+      setError(null);
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const syncCustomFieldsMutation = useMutation({
+    mutationFn: ({ definitions }: { definitions: CustomFieldDefinition[]; draftSnapshot: CustomFieldDefinition[] }) => customFields.replaceAll(definitions),
+    onSuccess: (savedDefinitions, variables) => {
+      setCustomFieldDraft(mergeSavedCustomFieldDefinitions(savedDefinitions, variables.draftSnapshot));
+      queryClient.setQueryData(customFieldDefinitionsQueryKey(), savedDefinitions);
+      queryClient.invalidateQueries({ queryKey: ["custom-fields"] });
       setError(null);
     },
     onError: (err: Error) => setError(err.message),
@@ -786,40 +865,70 @@ export function SettingsPage() {
     });
   };
 
-  const updateCustomFieldDefinition = (index: number, updater: (definition: CustomFieldDefinition) => CustomFieldDefinition) => {
-    updateDraft((current) => {
-      const definitions = [...(current.customFieldDefinitions ?? [])];
-      const existing = definitions[index];
-      if (!existing) return current;
-      definitions[index] = updater(existing);
-      return { ...current, customFieldDefinitions: definitions };
+  const commitCustomFieldDraft = (definitions: CustomFieldDefinition[] | null = customFieldDraftState) => {
+    if (!definitions || !canWriteSystemSettings) {
+      return;
+    }
+
+    if (definitions.some((definition) => definition.id != null && !canSyncCustomFieldDefinition(definition))) {
+      return;
+    }
+
+    const nextDefinitions = definitions
+      .filter((definition) => definition.id != null || canSyncCustomFieldDefinition(definition))
+      .map((definition, index) => normalizeCustomFieldDefinitionForSync(definition, index));
+
+    syncCustomFieldsMutation.mutate({
+      definitions: nextDefinitions,
+      draftSnapshot: cloneCustomFieldDefinitions(definitions),
     });
   };
 
+  const updateCustomFieldDefinition = (
+    index: number,
+    updater: (definition: CustomFieldDefinition) => CustomFieldDefinition,
+    options?: { commit?: boolean },
+  ) => {
+    let nextDefinitions: CustomFieldDefinition[] | null = null;
+    setCustomFieldDraft((current) => {
+      if (!current) return current;
+      const definitions = [...current];
+      const existing = definitions[index];
+      if (!existing) return current;
+      definitions[index] = updater(existing);
+      nextDefinitions = definitions;
+      return definitions;
+    });
+
+    if (options?.commit && nextDefinitions) {
+      commitCustomFieldDraft(nextDefinitions);
+    }
+  };
+
   const addCustomFieldDefinition = () => {
-    updateDraft((current) => ({
-      ...current,
-      customFieldDefinitions: [
-        ...(current.customFieldDefinitions ?? []),
-        {
-          key: "",
-          label: "",
-          type: "text",
-          entityTypes: ["scene"],
-          options: [],
-          filterable: true,
-          sortable: false,
-          isMultiValue: false,
-        },
-      ],
-    }));
+    setCustomFieldDraft((current) => ([
+      ...(current ?? []),
+      {
+        key: "",
+        label: "",
+        type: "text",
+        entityTypes: ["scene"],
+        options: [],
+        filterable: true,
+        sortable: false,
+        isMultiValue: false,
+      },
+    ]));
   };
 
   const removeCustomFieldDefinition = (index: number) => {
-    updateDraft((current) => ({
-      ...current,
-      customFieldDefinitions: (current.customFieldDefinitions ?? []).filter((_, candidateIndex) => candidateIndex !== index),
-    }));
+    let nextDefinitions: CustomFieldDefinition[] | null = null;
+    setCustomFieldDraft((current) => {
+      nextDefinitions = current?.filter((_, candidateIndex) => candidateIndex !== index) ?? null;
+      return nextDefinitions;
+    });
+
+    commitCustomFieldDraft(nextDefinitions);
   };
 
   const toggleCustomFieldEntity = (index: number, entityType: CustomFieldEntityType) => {
@@ -829,10 +938,12 @@ export function SettingsPage() {
         ? currentTypes.filter((candidate) => candidate !== entityType)
         : [...currentTypes, entityType];
       return { ...definition, entityTypes: nextTypes };
-    });
+    }, { commit: true });
   };
 
   const draft = draftState as CoveConfig;
+  const customFieldDraft = customFieldDraftState ?? [];
+  const hasInvalidPersistedCustomFields = customFieldDraft.some((definition) => definition.id != null && !canSyncCustomFieldDefinition(definition));
   const resolvedActiveTab = resolveVisibleSettingsTab(activeTab, visibleTabs, canWriteSystemSettings ? "library" : "about");
   const activeTabMeta = visibleTabs.find((tab) => tab.key === resolvedActiveTab) ?? tabs.find((tab) => tab.key === resolvedActiveTab);
   const activeTabDescription = resolvedActiveTab === "interface" && !canWriteSystemSettings
@@ -1313,8 +1424,25 @@ export function SettingsPage() {
 
             <SectionCard title="Custom Fields" description="Define typed metadata fields for entities that need extra structured values.">
               <div className="space-y-4">
-                {(draft.customFieldDefinitions ?? []).map((definition, index) => (
-                  <div key={`${definition.key || "new"}-${index}`} className="rounded-lg border border-border bg-card p-4">
+                {syncCustomFieldsMutation.isPending ? (
+                  <div className="inline-flex items-center gap-2 text-sm text-secondary">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving custom fields...
+                  </div>
+                ) : null}
+                {hasInvalidPersistedCustomFields ? (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                    Existing custom fields need a key or label and at least one entity selected before they can be saved.
+                  </div>
+                ) : null}
+                {customFieldDefinitionsLoading && customFieldDraftState == null ? (
+                  <div className="inline-flex items-center gap-2 text-sm text-secondary">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading custom fields...
+                  </div>
+                ) : null}
+                {customFieldDraft.map((definition, index) => (
+                  <div key={`custom-field-${index}`} className="rounded-lg border border-border bg-card p-4">
                     <div className="mb-4 flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-foreground">{definition.label || definition.key || "New custom field"}</div>
@@ -1334,18 +1462,21 @@ export function SettingsPage() {
                         label="Key"
                         value={definition.key}
                         onChange={(value) => updateCustomFieldDefinition(index, (current) => ({ ...current, key: value }))}
+                        onBlur={() => commitCustomFieldDraft()}
                         placeholder="source_id"
                       />
                       <TextField
                         label="Label"
                         value={definition.label}
                         onChange={(value) => updateCustomFieldDefinition(index, (current) => ({ ...current, label: value }))}
+                        onBlur={() => commitCustomFieldDraft()}
                         placeholder="Source ID"
                       />
                       <SelectField
                         label="Type"
                         value={definition.type}
                         onChange={(value) => updateCustomFieldDefinition(index, (current) => ({ ...current, type: value as CustomFieldType }))}
+                        onBlur={() => commitCustomFieldDraft()}
                         options={customFieldTypeOptions}
                       />
                       <div className="space-y-2">
@@ -1354,12 +1485,12 @@ export function SettingsPage() {
                           <CheckboxLabel
                             label="Filterable"
                             checked={definition.filterable}
-                            onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, filterable: checked }))}
+                            onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, filterable: checked }), { commit: true })}
                           />
                           <CheckboxLabel
                             label="Sortable"
                             checked={definition.sortable}
-                            onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, sortable: checked }))}
+                            onChange={(checked) => updateCustomFieldDefinition(index, (current) => ({ ...current, sortable: checked }), { commit: true })}
                           />
                         </div>
                       </div>
@@ -1383,6 +1514,7 @@ export function SettingsPage() {
                           label="Options"
                           value={listToLines(definition.options ?? [])}
                           onChange={(value) => updateCustomFieldDefinition(index, (current) => ({ ...current, options: linesToList(value) }))}
+                          onBlur={() => commitCustomFieldDraft()}
                           rows={3}
                           placeholder="One option per line"
                         />
@@ -4606,12 +4738,14 @@ function TextField({
   label,
   value,
   onChange,
+  onBlur,
   placeholder,
   type = "text",
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   type?: string;
 }) {
@@ -4622,6 +4756,7 @@ function TextField({
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
       />
@@ -4661,12 +4796,14 @@ function TextAreaField({
   label,
   value,
   onChange,
+  onBlur,
   rows,
   placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   rows: number;
   placeholder?: string;
 }) {
@@ -4676,6 +4813,7 @@ function TextAreaField({
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
         rows={rows}
         placeholder={placeholder}
         className="w-full rounded-xl border border-border bg-card px-3 py-2 font-mono text-sm text-foreground focus:border-accent focus:outline-none"
@@ -4688,11 +4826,13 @@ function SelectField({
   label,
   value,
   onChange,
+  onBlur,
   options,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   options: { value: string; label: string }[];
 }) {
   return (
@@ -4701,6 +4841,7 @@ function SelectField({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
         className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
       >
         {options.map((option) => (

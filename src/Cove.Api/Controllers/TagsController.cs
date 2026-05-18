@@ -23,9 +23,11 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         int GalleryCount,
         int GroupCount,
         int PerformerCount,
-        int StudioCount)
+        int StudioCount,
+        int AudioCount,
+        int TextCount)
     {
-        public int TotalUsageCount => SceneCount + SegmentCount + ImageCount + GalleryCount + GroupCount + PerformerCount + StudioCount;
+        public int TotalUsageCount => SceneCount + SegmentCount + ImageCount + GalleryCount + GroupCount + PerformerCount + StudioCount + AudioCount + TextCount;
     }
 
     private sealed record GraphRelation(int ParentId, int ChildId);
@@ -104,7 +106,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var graphItems = items
             .Select(tag =>
             {
-                var usageCounts = usageCountsByTagId.GetValueOrDefault(tag.Id) ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0);
+                var usageCounts = usageCountsByTagId.GetValueOrDefault(tag.Id) ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0, 0, 0);
 
                 return new TagGraphNodeDto(
                     tag.Id,
@@ -453,7 +455,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     private async Task<TagDetailDto> MapToDetailDtoAsync(Tag t, CancellationToken ct)
     {
         var usageCounts = (await LoadTagUsageCountsAsync([t.Id], ct)).GetValueOrDefault(t.Id)
-            ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0);
+            ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0, 0, 0);
 
         return new TagDetailDto(
             t.Id,
@@ -471,6 +473,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             usageCounts.GalleryCount,
             usageCounts.StudioCount,
             usageCounts.GroupCount,
+            usageCounts.AudioCount,
+            usageCounts.TextCount,
             usageCounts.SegmentCount,
             await customFields.GetValuesAsync(CustomFieldEntityTypes.Tag, t.Id, ct),
             t.CreatedAt.ToString("o"),
@@ -492,7 +496,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
         return items.Select(t =>
         {
-            var usageCounts = usageCountsByTagId.GetValueOrDefault(t.Id) ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0);
+            var usageCounts = usageCountsByTagId.GetValueOrDefault(t.Id) ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0, 0, 0);
 
             return new TagListDto(
                 t.Id,
@@ -568,6 +572,18 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             .GroupBy(studioTag => studioTag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var audioCounts = await db.Set<AudioTag>()
+            .AsNoTracking()
+            .Where(audioTag => ids.Contains(audioTag.TagId))
+            .GroupBy(audioTag => audioTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
+        var textCounts = await db.Set<TextTag>()
+            .AsNoTracking()
+            .Where(textTag => ids.Contains(textTag.TagId))
+            .GroupBy(textTag => textTag.TagId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
 
         return ids.ToDictionary(
             id => id,
@@ -578,7 +594,9 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 galleryCounts.GetValueOrDefault(id),
                 groupCounts.GetValueOrDefault(id),
                 performerCounts.GetValueOrDefault(id),
-                studioCounts.GetValueOrDefault(id)));
+                studioCounts.GetValueOrDefault(id),
+                audioCounts.GetValueOrDefault(id),
+                textCounts.GetValueOrDefault(id)));
     }
 
     private static TagDto MapTagDto(Tag tag, List<TagProvenanceDto>? provenance = null)

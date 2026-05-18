@@ -4,15 +4,14 @@ import { aiVisual, images } from "../api/client";
 import type { DeleteEntityOptions, EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
-import { RatingBanner } from "../components/Rating";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { ImageIcon, Users, Tag, Trash2, Loader2, Edit, Box, Heart, FolderOpen, Search } from "lucide-react";
+import { ImageIcon, Trash2, Loader2, Edit, Heart, FolderOpen, Search } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
-import { GalleriesPopoverContent, LikeCounter, PerformerPreviewGrid, PopoverButton } from "../components/EntityCards";
+import { ImageTile } from "../components/EntityCards";
 import type { LightboxImage } from "../components/Lightbox";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
@@ -403,10 +402,14 @@ export function ImagesPage({ onNavigate }: Props) {
       ) : displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 140px)">
           {items.map((img, idx) => (
-            <ImageCard
+            <ImageTile
               key={img.id}
               image={img}
               engagement={engagementById.get(img.id)}
+              onClick={() => {
+                if (selecting) { toggle(img.id); return; }
+                onNavigate({ page: "image", id: img.id });
+              }}
               onPreview={() => {
                 if (selecting) { toggle(img.id); return; }
                 setLightboxIndex(idx);
@@ -495,93 +498,6 @@ export function ImagesPage({ onNavigate }: Props) {
       ) : null}
     </Suspense>
     </>
-  );
-}
-
-function ImageCard({ image, engagement, onPreview, onDetails, onNavigate, selected, onSelect, selecting, onQuickView }: { image: Image; engagement?: EntityEngagement; onPreview: () => void; onDetails: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onQuickView?: () => void }) {
-  const thumbnailUrl = images.thumbnailUrl(image.id);
-  const displayTitle = getImageDisplayTitle(image);
-  const rating = engagement?.rating;
-  const likeCount = engagement?.likeCount ?? 0;
-
-  return (
-    <div
-      className={`entity-card bg-card rounded overflow-hidden cursor-pointer border hover:border-accent/60 transition-colors group relative ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}
-    >
-      <div className="aspect-square bg-surface relative overflow-hidden" onClick={onPreview}>
-        <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-        <img
-          src={thumbnailUrl}
-          alt={displayTitle}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          loading="lazy"
-          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-        />
-        <RatingBanner rating={rating} />
-        {!selecting && (
-          <BookmarkButton
-            hostType="image"
-            hostId={image.id}
-            compact
-            deferUntilHover
-            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
-          />
-        )}
-        {onQuickView && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onQuickView(); }}
-            className="absolute bottom-1 left-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-black/60 text-white hover:bg-black/80"
-            title="Quick View"
-          >
-            <ImageIcon className="w-3.5 h-3.5" />
-          </button>
-        )}
-        {image.studioName && (
-          <div className="absolute top-1 right-1 text-xs bg-black/70 px-1 py-0.5 rounded text-white truncate max-w-[80%]">
-            {image.studioName}
-          </div>
-        )}
-      </div>
-      <div className="card-body border-t border-border/50 p-1.5" onClick={onDetails}>
-        <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">
-          {displayTitle}
-        </p>
-      </div>
-      {(image.performers.length > 0 || image.tags.length > 0 || likeCount > 0 || image.galleryCount > 0 || image.organized) && (
-        <div className="flex items-center justify-center gap-1 px-1.5 pb-1.5 border-t border-border/50 pt-1">
-          {image.tags.length > 0 && (
-            <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={image.tags.length} title="Tags" preferBelow>
-              <div className="flex flex-wrap gap-1">
-                {image.tags.map((t: any) => (
-                  <button key={t.id} onClick={(e) => { e.stopPropagation(); onNavigate?.({ page: "tag", id: t.id }); }}
-                    className="text-[11px] text-accent hover:underline cursor-pointer px-1.5 py-0.5 rounded bg-card border border-border hover:border-accent/40 transition-colors whitespace-nowrap">
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-            </PopoverButton>
-          )}
-          {image.performers.length > 0 && (
-            <PopoverButton icon={<Users className="w-3.5 h-3.5" />} count={image.performers.length} title="Performers" wide preferBelow>
-              <PerformerPreviewGrid performers={image.performers} onNavigate={onNavigate} />
-            </PopoverButton>
-          )}
-          {image.galleries.length > 0 && (
-            <PopoverButton icon={<FolderOpen className="w-3.5 h-3.5" />} count={image.galleries.length} title="Galleries" wide preferBelow>
-              <GalleriesPopoverContent filter={{ imageId: image.id }} />
-            </PopoverButton>
-          )}
-          {likeCount > 0 && (
-            <LikeCounter count={likeCount} />
-          )}
-          {image.organized && (
-            <span className="text-muted" title="Organized">
-              <Box className="w-2.5 h-2.5" />
-            </span>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 

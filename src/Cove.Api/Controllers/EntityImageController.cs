@@ -11,7 +11,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-public class EntityImageController(CoveContext db, IBlobService blobService, IThumbnailService thumbnailService) : ControllerBase
+public class EntityImageController(CoveContext db, IBlobService blobService, IThumbnailService thumbnailService, IStreamService streamService) : ControllerBase
 {
     // ── Scenes ──────────────────────────────────────────────────
 
@@ -40,7 +40,20 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     public async Task<IActionResult> GetSceneImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
         var entity = await db.Scenes.FirstOrDefaultAsync(scene => scene.Id == id, ct);
-        if (entity?.ImageBlobId == null) return NotFound();
+        if (entity == null) return NotFound();
+
+        if (entity.ImageBlobId == null)
+        {
+            var screenshot = await streamService.GetSceneScreenshot(id, null, ct);
+            if (screenshot == null) return NotFound();
+
+            Response.Headers.CacheControl = !string.IsNullOrWhiteSpace(v)
+                ? "public, max-age=31536000, immutable"
+                : screenshot.Value.useLongCache
+                    ? "public, max-age=86400"
+                    : "no-store, no-cache, max-age=0, must-revalidate";
+            return File(screenshot.Value.stream, screenshot.Value.contentType);
+        }
 
         return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }

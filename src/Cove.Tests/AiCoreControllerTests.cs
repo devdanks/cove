@@ -300,7 +300,8 @@ public class AiCoreControllerTests
             {
                 ["blob-1"] = (bytes, "image/jpeg"),
             }),
-            new StubThumbnailService())
+            new StubThumbnailService(),
+            new StubStreamService())
         {
             ControllerContext = new ControllerContext
             {
@@ -313,10 +314,40 @@ public class AiCoreControllerTests
 
         Assert.Equal("image/jpeg", file.ContentType);
         Assert.Equal("public, max-age=3600", controller.Response.Headers.CacheControl.ToString());
-
         await using var output = new MemoryStream();
         await file.FileStream.CopyToAsync(output);
         Assert.Equal(bytes, output.ToArray());
+    }
+
+
+    [Fact]
+    public async Task EntityImageController_GetSceneImage_ReturnsStreamScreenshotWhenNoStoredBlob()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+        var bytes = new byte[] { 9, 8, 7, 6 };
+
+        var scene = new Scene { Title = "Scene without custom cover" };
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        var controller = new EntityImageController(
+            context,
+            new StubBlobService(new Dictionary<string, (byte[] Bytes, string ContentType)>()),
+            new StubThumbnailService(),
+            new StubStreamService(bytes, "image/webp", useLongCache: true))
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext(),
+            },
+        };
+
+        var result = await controller.GetSceneImage(scene.Id, null, null, CancellationToken.None);
+        var file = Assert.IsType<FileStreamResult>(result);
+
+        Assert.Equal("image/webp", file.ContentType);
+        Assert.Equal("public, max-age=86400", controller.Response.Headers.CacheControl.ToString());
     }
 
     [Fact]
@@ -573,6 +604,24 @@ public class AiCoreControllerTests
             => throw new NotSupportedException();
 
         public string StartGenerateAllThumbnails()
+            => throw new NotSupportedException();
+    }
+
+    private sealed class StubStreamService(byte[]? screenshotBytes = null, string screenshotContentType = "image/jpeg", bool useLongCache = false) : IStreamService
+    {
+        public Task<(Stream stream, string contentType, long? fileSize)?> GetSceneStream(int sceneId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<(Stream stream, string contentType, bool useLongCache)?> GetSceneScreenshot(int sceneId, double? seconds, CancellationToken ct = default)
+        {
+            if (screenshotBytes == null)
+                throw new NotSupportedException();
+
+            return Task.FromResult<(Stream, string, bool)?>(
+                (new MemoryStream(screenshotBytes, writable: false), screenshotContentType, useLongCache));
+        }
+
+        public Task<(Stream stream, string contentType, bool useLongCache)?> GetSegmentAnimatedPreview(int sceneId, double seconds, CancellationToken ct = default)
             => throw new NotSupportedException();
     }
 }

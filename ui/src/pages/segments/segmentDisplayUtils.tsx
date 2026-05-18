@@ -1,5 +1,4 @@
-import { Film } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode } from "react";
 import { scenes } from "../../api/client";
 import type { ResolvedSpan } from "../../api/types";
 import { formatDate } from "../../components/shared";
@@ -20,49 +19,19 @@ export function SegmentScenePreview({
   startSec,
   title,
   imgClassName,
-  fallbackClassName,
-  iconClassName,
 }: {
   hostId: number;
   updatedAt?: string;
   startSec?: number;
   title: string;
   imgClassName: string;
-  fallbackClassName: string;
-  iconClassName: string;
 }) {
-  const [hovered, setHovered] = useState(false);
-  const [animatedFailed, setAnimatedFailed] = useState(false);
-  const [staticFailed, setStaticFailed] = useState(false);
-
-  if (staticFailed) {
-    return (
-      <div className={fallbackClassName}>
-        <Film className={iconClassName} />
-      </div>
-    );
-  }
-
-  const useAnimated = hovered && startSec != null && !animatedFailed;
-
   return (
     <img
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      src={useAnimated
-        ? scenes.segmentPreviewUrl(hostId, startSec, updatedAt)
-        : scenes.screenshotUrl(hostId, updatedAt, startSec)}
+      src={scenes.screenshotUrl(hostId, updatedAt, startSec)}
       alt={title}
       className={imgClassName}
       loading="lazy"
-      onError={() => {
-        if (useAnimated) {
-          setAnimatedFailed(true);
-          setHovered(false);
-        } else {
-          setStaticFailed(true);
-        }
-      }}
     />
   );
 }

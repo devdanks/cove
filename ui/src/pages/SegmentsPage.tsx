@@ -6,6 +6,7 @@ import type { FindFilter, SegmentDisplayProfile } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { AddToGroupDialog, type AddToGroupEntry } from "../components/AddToGroupDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
@@ -120,6 +121,7 @@ export function SegmentsPage({ onNavigate }: Props) {
   const canWriteGroups = canWriteEntity("group", hasPermission);
   const canDeleteSegments = canDeleteEntity("segment", hasPermission);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
+  const [confirmRawDelete, setConfirmRawDelete] = useState(false);
   const [activeProfileId, setActiveProfileId] = useState<number>();
   const [contentView, setContentView] = useState<SegmentsPageContentView>(() => readSegmentsPageContentView());
   const [rawSegmentIds, setRawSegmentIds] = useState<number[]>(() => readRawSegmentIdsFromUrl());
@@ -458,6 +460,7 @@ export function SegmentsPage({ onNavigate }: Props) {
         await queryClient.invalidateQueries({ queryKey: ["scene", segment.hostId, "segments"] });
         await queryClient.invalidateQueries({ queryKey: ["scene", segment.hostId] });
       }
+      setConfirmRawDelete(false);
       handleSelectNone();
     },
   });
@@ -573,11 +576,7 @@ export function SegmentsPage({ onNavigate }: Props) {
             {isRawView && canDeleteSegments && selectedRawSegments.length > 0 ? (
               <button
                 type="button"
-                onClick={() => {
-                  if (window.confirm(`Delete ${selectedRawSegments.length} raw segment(s)?`)) {
-                    rawDeleteMutation.mutate(selectedRawSegments);
-                  }
-                }}
+                onClick={() => setConfirmRawDelete(true)}
                 disabled={rawDeleteMutation.isPending}
                 className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-red-400 hover:bg-red-900/20 hover:text-red-300 disabled:opacity-60"
               >
@@ -619,6 +618,15 @@ export function SegmentsPage({ onNavigate }: Props) {
           selecting={selecting}
         />
       </ListPage>
+      <ConfirmDialog
+        open={confirmRawDelete}
+        title="Delete Raw Segments"
+        message={`Delete ${selectedRawSegments.length} selected raw segment${selectedRawSegments.length === 1 ? "" : "s"}? This cannot be undone.`}
+        confirmLabel={rawDeleteMutation.isPending ? "Deleting..." : "Delete"}
+        onConfirm={() => rawDeleteMutation.mutate(selectedRawSegments)}
+        onCancel={() => setConfirmRawDelete(false)}
+        isPending={rawDeleteMutation.isPending}
+      />
     </>
   );
 }

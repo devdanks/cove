@@ -189,8 +189,8 @@ describe("DetailsTab performers", () => {
     expect(performerGrid.className).toContain("grid");
     expect(performerGrid.className).toContain("grid-cols-2");
 
-    expect(screen.getByRole("link", { name: /Alice Example/i }).className).toContain("w-full");
-    expect(screen.getByRole("link", { name: /Beth Example/i }).className).toContain("w-full");
+    expect(screen.getByRole("link", { name: /Alice Example/i }).className).toContain("absolute inset-0");
+    expect(screen.getByRole("link", { name: /Beth Example/i }).className).toContain("absolute inset-0");
   });
 
 });

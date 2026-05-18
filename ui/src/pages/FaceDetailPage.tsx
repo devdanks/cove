@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Fingerprint, Image as ImageIcon, Link2, Merge, Pencil, Save, Search, Trash2, UserPlus, Video } from "lucide-react";
+import { ChevronLeft, ChevronRight, Fingerprint, Link2, Merge, Pencil, Save, Search, Trash2, UserPlus } from "lucide-react";
 import { faces, performers } from "../api/client";
 import type { Face, FaceAppearance, FaceDeleteImpact, FaceSimilar, FaceSuggestion, FindFilter, PaginatedResponse, Performer } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -16,6 +16,7 @@ import { EditModal } from "../components/EditModal";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
+import { FaceAppearanceTile, FaceTile } from "../components/EntityCards";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { formatDate } from "../components/shared";
 
@@ -588,7 +589,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
           />
           <EntityCardGrid minCardWidth={`${280 + similarZoomLevel * 50}px`} gapClassName="gap-4">
             {similarFacesPage.items.map((candidate) => (
-              <SimilarFaceCard key={candidate.id} face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
+              <SimilarFaceTile key={candidate.id} face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
             ))}
           </EntityCardGrid>
           <FaceTabPager filter={similarFilter} setFilter={setSimilarFilter} totalCount={similarFacesPage.totalCount} />
@@ -678,7 +679,6 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         imageAlt={title}
         imageFallback={<Fingerprint className="h-14 w-14" />}
         title={title}
-        aliases={`Face cluster #${face.id} · Primary source ${face.primarySourceKey || "Unknown"}`}
         counts={[
           { key: "appearances", label: "Appearances", value: face.appearanceCount || faceAppearancesPage.totalCount },
           { key: "scenes", label: "Scenes", value: face.sceneCount },
@@ -686,6 +686,8 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         ]}
         metaRow={(
           <>
+            <span>Face cluster #{face.id}</span>
+            <span>Primary source {face.primarySourceKey || "Unknown"}</span>
             <span>Created {formatDate(face.createdAt)}</span>
             <span>Updated {formatDate(face.updatedAt)}</span>
           </>
@@ -907,68 +909,11 @@ function FaceCandidateRow({ face, onSelect, disabled }: { face: Face; onSelect: 
 function FaceAppearancesGrid({ appearances, onNavigate, zoomLevel }: { appearances: FaceAppearance[]; onNavigate: (r: any) => void; zoomLevel: number }) {
   return (
     <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-      {appearances.map((appearance) => {
-        const hostLabel = appearance.title || `${appearance.hostType === "image" ? "Image" : "Scene"} #${appearance.hostId}`;
-        const open = () => onNavigate({ page: appearance.hostType, id: appearance.hostId });
-        const Icon = appearance.hostType === "image" ? ImageIcon : Video;
-
-        return (
-          <article key={appearance.appearanceId} className="entity-card group overflow-hidden rounded-2xl border border-border bg-card/80 shadow-sm transition-colors hover:border-accent/50">
-            <button
-              type="button"
-              onClick={open}
-              className={`block w-full bg-surface/80 text-left ${appearance.hostType === "image" ? "aspect-square" : "aspect-video"}`}
-              aria-label={`Open ${hostLabel}`}
-            >
-              <img
-                src={appearance.thumbnailUrl}
-                alt={hostLabel}
-                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-                loading="lazy"
-                onError={(event) => { (event.target as HTMLImageElement).style.visibility = "hidden"; }}
-              />
-            </button>
-            <div className="space-y-3 p-4">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted">
-                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/70 px-2 py-0.5">
-                  <Icon className="h-3 w-3" />
-                  {appearance.hostType}
-                </span>
-                <span>{appearance.frameSampleCount} frames</span>
-                {appearance.topConfidence != null ? <span>{Math.round(appearance.topConfidence * 100)}% confidence</span> : null}
-              </div>
-              <button type="button" onClick={open} className="block text-left text-sm font-semibold text-foreground hover:text-accent">
-                {hostLabel}
-              </button>
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <FaceMetric label="Frames" value={appearance.frameSampleCount} />
-                <FaceMetric label="Samples" value={appearance.retainedSpatialSampleCount} />
-                <FaceMetric label="Segments" value={appearance.segmentCount} />
-              </div>
-              <div className="text-xs text-secondary">
-                {appearance.hostType === "scene" ? formatAppearanceTimeRange(appearance) : "Image appearance"}
-              </div>
-            </div>
-          </article>
-        );
-      })}
+      {appearances.map((appearance) => (
+        <FaceAppearanceTile key={appearance.appearanceId} appearance={appearance} onClick={() => onNavigate({ page: appearance.hostType, id: appearance.hostId })} />
+      ))}
     </EntityCardGrid>
   );
-}
-
-function formatAppearanceTimeRange(appearance: FaceAppearance) {
-  const start = appearance.firstSeenAtSec == null ? null : formatDetectionTime(appearance.firstSeenAtSec);
-  const end = appearance.lastSeenAtSec == null ? null : formatDetectionTime(appearance.lastSeenAtSec);
-  return start && end && start !== end ? `${start} - ${end}` : start ?? end ?? "Scene appearance";
-}
-
-function formatDetectionTime(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-  return hours > 0
-    ? `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
-    : `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function describeFaceDeleteImpact(deleteImpact: FaceDeleteImpact) {
@@ -1018,42 +963,10 @@ function FaceTabPager({ filter, setFilter, totalCount }: { filter: FindFilter; s
   );
 }
 
-function SimilarFaceCard({ face, onNavigate, canReadPerformers }: { face: FaceSimilar; onNavigate: (r: any) => void; canReadPerformers: boolean }) {
-  const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
-
+function SimilarFaceTile({ face, onNavigate, canReadPerformers }: { face: FaceSimilar; onNavigate: (r: any) => void; canReadPerformers: boolean }) {
   return (
-    <article className="entity-card group relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-sm transition-colors hover:border-accent/50">
-      <button
-        type="button"
-        onClick={() => onNavigate({ page: "face", id: face.id })}
-        className="block aspect-square w-full bg-surface/80 text-left"
-        aria-label={`Open face ${title}`}
-      >
-        {face.coverImageUrl ? (
-          <img src={face.coverImageUrl} alt={title} className="h-full w-full bg-surface/85 object-contain p-2 transition-transform duration-300 group-hover:scale-[1.02]" loading="lazy" />
-        ) : (
-          <div className="flex h-full items-center justify-center bg-surface text-muted">
-            <Fingerprint className="h-12 w-12" />
-          </div>
-        )}
-        <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-1 bg-gradient-to-t from-black/80 via-black/35 to-transparent p-3">
-          {face.mergedIntoFaceId ? <FaceBadge icon={<Merge className="h-3 w-3" />} label={`Merged into #${face.mergedIntoFaceId}`} /> : null}
-          {face.performerId ? <FaceBadge icon={<Link2 className="h-3 w-3" />} label="Linked" /> : null}
-        </div>
-      </button>
-      <div className="space-y-3 p-4">
-        <div>
-          <button type="button" onClick={() => onNavigate({ page: "face", id: face.id })} className="text-left text-sm font-semibold text-foreground hover:text-accent">
-            {title}
-          </button>
-          <div className="mt-1 text-xs text-secondary">Updated {formatDate(face.updatedAt)}</div>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-center text-xs">
-          <FaceMetric label="Detections" value={face.detectionCount} />
-          <FaceMetric label="Scenes" value={face.sceneCount} />
-          <FaceMetric label="Images" value={face.imageCount} />
-        </div>
-        <div className="rounded-xl border border-border bg-surface/50 p-3">
+    <FaceTile face={face} onClick={() => onNavigate({ page: "face", id: face.id })}>
+      <div className="rounded-xl border border-border bg-surface/50 p-3">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Closest match</div>
           <div className="mt-1 text-sm font-medium text-foreground">Distance {face.distance.toFixed(3)}</div>
           {face.performerId ? (
@@ -1065,30 +978,7 @@ function SimilarFaceCard({ face, onNavigate, canReadPerformers }: { face: FaceSi
               {face.performerName || `Performer #${face.performerId}`}
             </button>
           ) : null}
-        </div>
-        <div className="flex items-center justify-between gap-2 text-xs text-secondary">
-          <span>Source: {face.primarySourceKey || "unknown"}</span>
-          <span>{face.frameSampleCount ?? 0} samples</span>
-        </div>
       </div>
-    </article>
-  );
-}
-
-function FaceBadge({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/35 px-2 py-0.5 text-[10px] font-medium text-white">
-      {icon}
-      {label}
-    </span>
-  );
-}
-
-function FaceMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-border bg-surface/50 px-2 py-2">
-      <div className="text-sm font-semibold text-foreground">{value}</div>
-      <div className="mt-1 text-[10px] uppercase tracking-wide text-muted">{label}</div>
-    </div>
+    </FaceTile>
   );
 }

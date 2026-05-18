@@ -10,7 +10,7 @@ import { useMultiSelect } from "../hooks/useMultiSelect";
 import { CreateModalActions, EditModal, Field, NumberInput, SelectInput, TextInput, TextArea } from "../components/EditModal";
 import { Tag as TagIcon, Film, Trash2, Loader2, Edit, Merge, Heart, Image, LayoutGrid, Layers, Users, Building2 } from "lucide-react";
 import { MergeDialog } from "../components/MergeDialog";
-import { PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
+import { TagTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { TAG_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, TAG_BULK_FIELDS } from "../components/BulkEditDialog";
@@ -29,6 +29,8 @@ import { TagTagger } from "../components/TagTagger";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { CustomFieldsEditor } from "../components/shared";
+import { BulkSelectionActions } from "../components/BulkSelectionActions";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const GRAPH_VIEW_LIMIT = 5000;
 
@@ -75,6 +77,7 @@ export function TagsPage({ onNavigate }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showMetadataBatch, setShowMetadataBatch] = useState(false);
+  const [graphDeleteTarget, setGraphDeleteTarget] = useState<{ id: number; name: string } | null>(null);
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
@@ -217,15 +220,6 @@ export function TagsPage({ onNavigate }: Props) {
               MetadataServer
             </button>
           )}
-          {canWriteTag && (
-            <button
-              onClick={() => setShowBulkEdit(true)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
-            >
-              <Edit className="w-3 h-3" />
-              Edit
-            </button>
-          )}
           {canWriteTag && selectedIds.size >= 2 && (
             <button
               onClick={() => setShowMerge(true)}
@@ -235,16 +229,7 @@ export function TagsPage({ onNavigate }: Props) {
               Merge
             </button>
           )}
-          {canDeleteTag && (
-            <button
-              onClick={() => { if (confirm(`Delete ${selectedIds.size} tag(s)?`)) bulkDeleteMut.mutate(); }}
-              disabled={bulkDeleteMut.isPending}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20"
-            >
-              {bulkDeleteMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-              Delete
-            </button>
-          )}
+          <BulkSelectionActions entityType="tags" selectedIds={selectedIds} onDone={selectNone} />
         </>
       )}
     >
@@ -261,11 +246,7 @@ export function TagsPage({ onNavigate }: Props) {
           onToggleSelect={toggle}
           onDeleteNode={canDeleteTag ? (id) => {
             const tagName = selectionItems.find((item) => item.id === id)?.name ?? `#${id}`;
-            if (!confirm(`Delete tag \"${tagName}\"?`)) {
-              return;
-            }
-
-            deleteTagMut.mutate(id);
+            setGraphDeleteTarget({ id, name: tagName });
           } : undefined}
         />
       ) : displayMode === "wall" ? (
@@ -290,7 +271,7 @@ export function TagsPage({ onNavigate }: Props) {
       ) : displayMode === "grid" ? (
         <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
           {items.map((tag) => (
-            <TagCard
+            <TagTile
               key={tag.id}
               tag={tag}
               engagement={engagementById.get(tag.id)}
@@ -299,7 +280,9 @@ export function TagsPage({ onNavigate }: Props) {
               selected={selectedIds.has(tag.id)}
               onSelect={() => toggle(tag.id)}
               selecting={selecting}
-            />
+            >
+              <ExtensionSlot slot="tag-card-footer" context={{ tag, onNavigate }} />
+            </TagTile>
           ))}
         </EntityCardGrid>
       ) : (
@@ -320,6 +303,19 @@ export function TagsPage({ onNavigate }: Props) {
         fields={TAG_BULK_FIELDS}
         onApply={(values) => bulkEditMut.mutate(values)}
         isPending={bulkEditMut.isPending}
+      />
+      <ConfirmDialog
+        open={graphDeleteTarget != null}
+        title="Delete Tag"
+        message={graphDeleteTarget ? `Delete tag "${graphDeleteTarget.name}"? This cannot be undone.` : "Delete this tag?"}
+        confirmLabel={deleteTagMut.isPending ? "Deleting..." : "Delete"}
+        onConfirm={() => {
+          if (graphDeleteTarget) {
+            deleteTagMut.mutate(graphDeleteTarget.id, { onSuccess: () => setGraphDeleteTarget(null) });
+          }
+        }}
+        onCancel={() => setGraphDeleteTarget(null)}
+        isPending={deleteTagMut.isPending}
       />
       <MergeDialog
         open={showMerge}
@@ -435,98 +431,6 @@ function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect,
         {title}
       </div>
     </WallMediaCard>
-  );
-}
-
-function TagCard({ tag, engagement, onClick, onNavigate, selected, onSelect, selecting }: { tag: Tag; engagement?: EntityEngagement; onClick: () => void; onNavigate: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  const { slots } = useRouteRegistry();
-  const hasExtensionFooter = slots.some((slot) => slot.slot === "tag-card-footer");
-  const {
-    favorite,
-    setFavorite,
-    favoritePending,
-  } = useEntityEngagement("tag", tag.id, {
-    enabled: false,
-    fallbackFavorite: engagement?.isFavorite ?? tag.favorite,
-  });
-
-  return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card bg-card rounded overflow-hidden border hover:border-accent/60 transition-all cursor-pointer group relative ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}>
-      <RouteCardLinkOverlay route={{ page: "tag", id: tag.id }} onClick={onClick} label={`Open tag ${tag.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="aspect-video bg-surface flex items-center justify-center relative overflow-hidden">
-        <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-        {/* Favorite heart overlay */}
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setFavorite(!favorite);
-          }}
-          disabled={favoritePending}
-          className={`absolute top-1 right-1 p-1 z-10 transition-opacity ${favorite ? "opacity-100" : "opacity-0 group-hover:opacity-70"}`}
-          title={favorite ? "Unfavorite" : "Favorite"}
-        >
-          <Heart className={`w-5 h-5 ${favorite ? "fill-red-500 text-red-500" : "text-white drop-shadow-md"}`} />
-        </button>
-        {tag.imagePath ? (
-          <img src={tag.imagePath} alt={tag.name} className="w-full h-full object-cover" loading="lazy" />
-        ) : (
-          <TagIcon className="w-10 h-10 text-muted opacity-30" />
-        )}
-      </div>
-      <div className="card-body border-t border-border/50 p-2 text-center">
-        <h3 className="font-medium text-sm text-foreground truncate">{tag.name}</h3>
-        {tag.tagGroupName ? (
-          <div className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] text-secondary">
-            <span className="h-2 w-2 rounded-full border border-border" style={{ backgroundColor: tag.tagGroupColor ?? "transparent" }} />
-            <span className="truncate">{tag.tagGroupName}</span>
-          </div>
-        ) : null}
-        {tag.description && (
-          <p className="text-xs text-secondary mt-0.5 line-clamp-1">{tag.description}</p>
-        )}
-      </div>
-      {(tag.sceneCount || tag.segmentCount || tag.imageCount || tag.galleryCount || tag.groupCount || tag.performerCount || tag.studioCount || hasExtensionFooter) ? (
-        <div className="relative z-10 flex items-center justify-center gap-2 px-2 pb-2 border-t border-border/50 pt-1.5 flex-wrap">
-          {tag.sceneCount != null && tag.sceneCount > 0 && (
-            <PopoverButton icon={<Film className="w-3 h-3" />} count={tag.sceneCount} title="Scenes" wide preferBelow>
-              <ScenesPopoverContent filter={{ tagIds: String(tag.id) }} />
-            </PopoverButton>
-          )}
-          {tag.imageCount != null && tag.imageCount > 0 && (
-            <PopoverButton icon={<Image className="w-3 h-3" />} count={tag.imageCount} title="Images" wide preferBelow>
-              <ImagesPopoverContent filter={{ tagIds: String(tag.id) }} />
-            </PopoverButton>
-          )}
-          {tag.galleryCount != null && tag.galleryCount > 0 && (
-            <PopoverButton icon={<LayoutGrid className="w-3 h-3" />} count={tag.galleryCount} title="Galleries" wide preferBelow>
-              <GalleriesPopoverContent filter={{ tagIds: String(tag.id) }} />
-            </PopoverButton>
-          )}
-          {tag.groupCount != null && tag.groupCount > 0 && (
-            <PopoverButton icon={<Layers className="w-3 h-3" />} count={tag.groupCount} title="Groups" wide preferBelow>
-              <GroupsPopoverContent filter={{ tagIds: String(tag.id) }} />
-            </PopoverButton>
-          )}
-          {tag.segmentCount != null && tag.segmentCount > 0 && (
-            <span className="flex items-center gap-0.5 text-xs text-muted" title="Segments">
-              <Layers className="w-3 h-3" /> {tag.segmentCount}
-            </span>
-          )}
-          {tag.performerCount != null && tag.performerCount > 0 && (
-            <PopoverButton icon={<Users className="w-3 h-3" />} count={tag.performerCount} title="Performers" wide preferBelow>
-              <PerformersPopoverContent filter={{ tagIds: String(tag.id) }} />
-            </PopoverButton>
-          )}
-          {tag.studioCount != null && tag.studioCount > 0 && (
-            <PopoverButton icon={<Building2 className="w-3 h-3" />} count={tag.studioCount} title="Studios" wide preferBelow>
-              <StudiosPopoverContent filter={{ tagIds: String(tag.id) }} />
-            </PopoverButton>
-          )}
-          <ExtensionSlot slot="tag-card-footer" context={{ tag, onNavigate }} />
-        </div>
-      ) : null}
-    </div>
   );
 }
 

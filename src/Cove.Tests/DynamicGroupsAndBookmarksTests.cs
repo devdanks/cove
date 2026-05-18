@@ -128,6 +128,29 @@ public class DynamicGroupsAndBookmarksTests
     }
 
     [Fact]
+    public async Task EnsureBuiltInGroupsAsync_CreatesMissingBuiltInGroups()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var resolver = CreateResolver(context, scope.PrincipalAccessor);
+
+        await resolver.EnsureBuiltInGroupsAsync(CancellationToken.None);
+
+        var groups = await context.Groups
+            .OrderBy(group => group.Name)
+            .Select(group => new { group.Name, group.QuerySourceKey, group.Kind })
+            .ToListAsync();
+
+        Assert.Equal(
+            [
+                ("Continue Watching", DynamicGroupResolver.ContinueWatchingSourceKey, GroupKind.Dynamic),
+                ("Save for Later", DynamicGroupResolver.SaveForLaterSourceKey, GroupKind.Dynamic),
+                ("Watch History", DynamicGroupResolver.WatchHistorySourceKey, GroupKind.Dynamic),
+            ],
+            groups.Select(group => (group.Name, group.QuerySourceKey, group.Kind)).ToArray());
+    }
+
+    [Fact]
     public async Task FilterDynamicGroupSource_UsesSavedSceneFilter()
     {
         await using var scope = CreateContext();

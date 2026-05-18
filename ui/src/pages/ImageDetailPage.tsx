@@ -29,7 +29,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type ImageTab = "details" | "file-info" | "similar" | "detections" | "related" | "edit";
+type ImageTab = "details" | "file-info" | "similar" | "detections" | "edit";
 
 export function ImageDetailPage({ id, onNavigate }: Props) {
   const { data: image, isLoading } = useQuery({
@@ -56,6 +56,8 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const canReadStudios = canReadEntity("studio", hasPermission);
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
+  const canReadGalleries = canReadEntity("gallery", hasPermission);
+  const canReadGroups = canReadEntity("group", hasPermission);
   const trackingEnabled = user?.uiPreferences?.tracking?.enabled ?? true;
   const trackImageActivity = canEngageImage && trackingEnabled;
   const {
@@ -96,16 +98,11 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       { key: "details", label: "Details" },
       ...(canReadFiles ? [{ key: "file-info", label: "File Info", count: image?.files.length ?? 0 }] : []),
       { key: "similar", label: "Similar" },
-      { key: "detections", label: "Faces", count: imageFaces.length },
-      {
-        key: "related",
-        label: "Related",
-        count: (image?.performers.length ?? 0) + (image?.tags.length ?? 0) + (image?.studioId ? 1 : 0),
-      },
+      ...(imageFaces.length > 0 ? [{ key: "detections", label: "Faces", count: imageFaces.length }] : []),
       ...(canWriteImage ? [{ key: "edit", label: "Edit" }] : []),
     ];
     return nextTabs;
-  }, [canReadFiles, canWriteImage, image?.files.length, image?.performers.length, image?.studioId, image?.tags.length, imageFaces.length]);
+  }, [canReadFiles, canWriteImage, image?.files.length, imageFaces.length]);
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
@@ -239,11 +236,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       handler: () => setActiveTab("detections"),
     },
     {
-      key: "r",
-      description: "Open related tab",
-      handler: () => setActiveTab("related"),
-    },
-    {
       key: "Escape",
       description: "Close lightbox",
       handler: () => closeLightbox(),
@@ -259,6 +251,94 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   }
 
   if (!image) return <div className="text-center text-secondary py-16">Image not found</div>;
+
+  const currentImage = image;
+
+  function renderRelatedContent() {
+    return (
+      <div className="space-y-5">
+        {(canReadStudios && currentImage.studioName && currentImage.studioId) || (canReadPerformers && currentImage.performers.length > 0) ? (
+          <section>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">People and Studio</h2>
+            {canReadStudios && currentImage.studioName && currentImage.studioId ? (
+              <div className="mt-3">
+                <button onClick={() => onNavigate({ page: "studio", id: currentImage.studioId })} className="text-sm text-accent hover:underline">
+                  {currentImage.studioName}
+                </button>
+              </div>
+            ) : null}
+            {canReadPerformers && currentImage.performers.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {currentImage.performers.map((performer) => {
+                  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, () => onNavigate({ page: "performer", id: performer.id }));
+
+                  return (
+                    <a
+                      key={performer.id}
+                      {...linkProps}
+                      className="flex items-center gap-2 rounded-lg border border-border bg-surface/40 px-3 py-2 transition-colors hover:border-accent"
+                    >
+                      <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-surface text-xs text-muted">
+                        {performer.imagePath ? <img src={performer.imagePath} alt="" className="h-full w-full object-cover" /> : performer.name[0]}
+                      </div>
+                      <span className="text-sm text-foreground">{performer.name}</span>
+                    </a>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {canReadTags && currentImage.tags.length > 0 ? (
+          <section>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</h2>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {currentImage.tags.map((tag) => (
+                <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {canReadGalleries && currentImage.galleries.length > 0 ? (
+          <section>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Galleries</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {currentImage.galleries.map((gallery) => {
+                const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, () => onNavigate({ page: "gallery", id: gallery.id }));
+                return (
+                  <a key={gallery.id} {...linkProps} className="rounded-lg border border-border bg-surface/40 px-3 py-2 text-sm text-foreground transition-colors hover:border-accent hover:text-accent">
+                    {gallery.title || `Gallery ${gallery.id}`}
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        {canReadGroups && (currentImage.groups?.length ?? 0) > 0 ? (
+          <section>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Groups</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(currentImage.groups ?? []).map((group) => {
+                const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
+                return (
+                  <a key={group.id} {...linkProps} className="rounded-lg border border-border bg-surface/40 px-3 py-2 text-sm text-foreground transition-colors hover:border-accent hover:text-accent">
+                    {group.name}
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        {(!canReadPerformers || currentImage.performers.length === 0) && (!canReadTags || currentImage.tags.length === 0) && (!canReadGalleries || currentImage.galleries.length === 0) && (!canReadGroups || (currentImage.groups?.length ?? 0) === 0) && !(canReadStudios && currentImage.studioName && currentImage.studioId) ? (
+          <EmptyPanel icon={<UserRound className="h-10 w-10" />} message="No related performers, studio, tags, galleries, or groups are linked to this image yet." />
+        ) : null}
+      </div>
+    );
+  }
 
   const detailsContent = (
     <div className="space-y-5">
@@ -294,6 +374,8 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
           </div>
         </section>
       ) : null}
+
+      {renderRelatedContent()}
 
       <CustomFieldsDisplay customFields={image.customFields} entityType="image" />
       <ExtensionSlot slot="image-detail-sidebar-bottom" context={{ image, onNavigate }} />
@@ -383,67 +465,13 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     </section>
   );
 
-  const relatedContent = (
-    <div className="space-y-5">
-      {(canReadStudios && image.studioName && image.studioId) || (canReadPerformers && image.performers.length > 0) ? (
-        <section>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">People and Studio</h2>
-          {canReadStudios && image.studioName && image.studioId ? (
-            <div className="mt-3">
-              <button onClick={() => onNavigate({ page: "studio", id: image.studioId })} className="text-sm text-accent hover:underline">
-                {image.studioName}
-              </button>
-            </div>
-          ) : null}
-          {canReadPerformers && image.performers.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {image.performers.map((performer) => {
-                const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, () => onNavigate({ page: "performer", id: performer.id }));
-
-                return (
-                  <a
-                    key={performer.id}
-                    {...linkProps}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-surface/40 px-3 py-2 transition-colors hover:border-accent"
-                  >
-                    <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-surface text-xs text-muted">
-                      {performer.imagePath ? <img src={performer.imagePath} alt="" className="h-full w-full object-cover" /> : performer.name[0]}
-                    </div>
-                    <span className="text-sm text-foreground">{performer.name}</span>
-                  </a>
-                );
-              })}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {canReadTags && image.tags.length > 0 ? (
-        <section>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</h2>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {image.tags.map((tag) => (
-              <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {(!canReadPerformers || image.performers.length === 0) && (!canReadTags || image.tags.length === 0) && !(canReadStudios && image.studioName && image.studioId) ? (
-        <EmptyPanel icon={<UserRound className="h-10 w-10" />} message="No related performers, studio, or tags are linked to this image yet." />
-      ) : null}
-    </div>
-  );
-
   const activeContent = activeTab === "file-info"
     ? fileInfoContent
     : activeTab === "similar"
       ? <ImageVisualSimilarityPanel imageId={image.id} onNavigate={onNavigate} />
     : activeTab === "detections"
       ? detectionsContent
-      : activeTab === "related"
-        ? relatedContent
-        : activeTab === "edit"
+      : activeTab === "edit"
           ? <ImageEditPanel image={image} onSaved={() => setActiveTab("details")} />
           : detailsContent;
 
