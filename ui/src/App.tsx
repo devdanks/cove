@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Database, Loader2 } from "lucide-react";
 import { Navbar } from "./components/Navbar";
-import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { TutorialStoryboardDialog, TUTORIAL_STORYBOARD_EVENT, hasCompletedTutorialStoryboard, type TutorialOpenRequest } from "./components/TutorialStoryboardDialog";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteRegistryProvider, useRouteRegistry } from "./router/RouteRegistry";
@@ -167,17 +166,14 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const [showShortcuts, setShowShortcuts] = useState(false);
-
   return (
     <RouteRegistryProvider>
       <AppConfigProvider>
         <AuthGate>
           <ExtensionLoaderProvider>
             <SceneQueueProvider>
-              <AppKeyboardShortcuts navigate={navigate} onShowShortcuts={() => setShowShortcuts(true)} />
+              <AppKeyboardShortcuts navigate={navigate} />
               <AppShell route={route} navigate={navigate} />
-              <KeyboardShortcutsDialog open={showShortcuts} onClose={() => setShowShortcuts(false)} />
             </SceneQueueProvider>
           </ExtensionLoaderProvider>
         </AuthGate>
@@ -186,7 +182,7 @@ export default function App() {
   );
 }
 
-function AppKeyboardShortcuts({ navigate, onShowShortcuts }: { navigate: (route: Route) => void; onShowShortcuts: () => void }) {
+function AppKeyboardShortcuts({ navigate }: { navigate: (route: Route) => void }) {
   const overrides = useResolvedKeybindingOverrides();
 
   const globalBindings = useMemo(() => [
@@ -204,8 +200,7 @@ function AppKeyboardShortcuts({ navigate, onShowShortcuts }: { navigate: (route:
     { keys: resolveKeybinding(overrides, "global.tags", "g t"), action: () => navigate({ page: "tags" }) },
     { keys: resolveKeybinding(overrides, "global.settings", "g z"), action: () => navigate({ page: "settings" }) },
     { keys: resolveKeybinding(overrides, "global.stats", "g d"), action: () => navigate({ page: "stats" }) },
-    { keys: resolveKeybinding(overrides, "global.shortcuts", "?"), action: onShowShortcuts },
-  ], [navigate, onShowShortcuts, overrides]);
+  ], [navigate, overrides]);
 
   useKeySequence(globalBindings);
   return null;

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, images, scenes, fileOps } from "../api/client";
-import type { FindFilter } from "../api/types";
+import type { FindFilter, Image, ImageFilterCriteria, Scene, SceneFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
 import { Download, Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,12 +11,12 @@ import { ExtensionSlot } from "../router/RouteRegistry";
 import { Lightbox, type LightboxImage } from "../components/Lightbox";
 import { InteractiveRating } from "../components/Rating";
 import { DetailListToolbar } from "../components/DetailListToolbar";
+import { IMAGE_CRITERIA, SCENE_CRITERIA } from "../components/FilterDialog";
 import { SceneCard, ImageTile, PerformerTile } from "../components/EntityCards";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { QuickViewDialog } from "../components/QuickViewDialog";
-import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
@@ -25,6 +25,10 @@ import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
+import { useDetailListQuery } from "../hooks/useDetailListQuery";
+import { useDetailListSelection } from "../hooks/useDetailListSelection";
+import { withRequiredMultiId } from "../utils/detailRelationFilters";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 interface Props {
   id: number;
@@ -36,13 +40,21 @@ type TabKey = "images" | "scenes" | "fileinfo" | (string & {});
 export function GalleryDetailPage({ id, onNavigate }: Props) {
   const { hasPermission, user } = useAuth();
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 60, direction: "desc" });
+  const [imageObjectFilter, setImageObjectFilter] = useState<Record<string, unknown>>({});
+  const hasImageObjectFilter = Object.keys(imageObjectFilter).length > 0;
   const { data: gallery, isLoading } = useQuery({
     queryKey: ["gallery", id],
     queryFn: () => galleries.get(id),
   });
-  const { data: galleryImages } = useQuery({
-    queryKey: ["gallery-images", id, imageFilter],
-    queryFn: () => images.find(imageFilter, { galleryId: id }),
+  const { data: galleryImages, infinitePageSize: imageInfinitePageSize, infiniteQuery: imageInfiniteQuery, infiniteFilterKey: imageInfiniteFilterKey, fetchAllIds: fetchAllImageIds, loadMore: loadMoreImages } = useDetailListQuery<Image>({
+    queryKey: ["gallery-images", id, imageObjectFilter],
+    filter: imageFilter,
+    queryFn: (nextFilter) => hasImageObjectFilter
+      ? images.findFiltered({
+          findFilter: nextFilter,
+          objectFilter: withRequiredMultiId(imageObjectFilter as ImageFilterCriteria, "galleriesCriterion", id),
+        })
+      : images.find(nextFilter, { galleryId: id }),
     enabled: !!gallery,
   });
   const effectiveImageCount = galleryImages?.totalCount ?? gallery?.imageCount ?? 0;
@@ -217,8 +229,15 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
             galleryId={id}
             filter={imageFilter}
             setFilter={setImageFilter}
+              objectFilter={imageObjectFilter}
+              setObjectFilter={setImageObjectFilter}
             onNavigate={onNavigate}
             galleryImages={galleryImages}
+              infinitePageSize={imageInfinitePageSize}
+              infiniteQuery={imageInfiniteQuery}
+              infiniteFilterKey={imageInfiniteFilterKey}
+              fetchAllIds={fetchAllImageIds}
+              loadMore={loadMoreImages}
             onShowAddImages={() => setShowAddImages(true)}
             onLightbox={(idx) => { setLightboxIndex(idx); setLightboxOpen(true); }}
             removeImagesMut={removeImagesMut}
@@ -257,6 +276,8 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         imageAlt={gallery.title || "Gallery cover"}
         imageFallback={<ImageIcon className="h-14 w-14" />}
         title={gallery.title || "Untitled Gallery"}
+        favorite={galleryFavorite}
+        onFavoriteToggle={canEngageGallery && !galleryFavoritePending ? () => setGalleryFavorite(!galleryFavorite) : undefined}
         aliases={
           <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             {gallery.date ? <span>{formatDate(gallery.date)}</span> : null}
@@ -288,8 +309,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
             <InteractiveRating value={galleryRating} onChange={(value) => setGalleryRating(value)} readOnly={!canEngageGallery} />
           </>
         }
-        favorite={canEngageGallery ? galleryFavorite : undefined}
-        onFavoriteToggle={canEngageGallery && !galleryFavoritePending ? () => setGalleryFavorite(!galleryFavorite) : undefined}
         actions={
           <>
             <ExtensionSlot slot="gallery-detail-actions" context={{ gallery, onNavigate }} />
@@ -324,7 +343,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
               </button>
               {showOpsMenu ? (
                 <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded border border-border bg-card py-1 shadow-lg">
-                  {canWriteGallery ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
                   {gallery.files.length === 0 && canDownloadGallery ? <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Download className="h-3.5 w-3.5" /> Download Media...</button> : null}
                   <button onClick={() => { setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button>
                   {canDeleteGallery ? <div className="my-1 border-t border-border" /> : null}
@@ -405,41 +423,71 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
-  const { data, isLoading } = useQuery({
-    queryKey: ["gallery-scenes", galleryId, filter],
-    queryFn: () => scenes.find(filter, { galleryId: String(galleryId) }),
+  const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
+  const hasObjectFilter = Object.keys(objectFilter).length > 0;
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Scene>({
+    queryKey: ["gallery-scenes", galleryId, objectFilter],
+    filter,
+    queryFn: (nextFilter) => hasObjectFilter
+      ? scenes.findFiltered({
+          findFilter: nextFilter,
+          objectFilter: withRequiredMultiId(objectFilter as SceneFilterCriteria, "galleriesCriterion", galleryId),
+        })
+      : scenes.find(nextFilter, { galleryId: String(galleryId) }),
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const items = data?.items ?? [];
+  const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
+  const toolbar = (
+    <DetailListToolbar
+      filter={filter}
+      onFilterChange={setFilter}
+      totalCount={data?.totalCount ?? 0}
+      sortOptions={[
+        { value: "title", label: "Title" },
+        { value: "date", label: "Date" },
+        { value: "rating", label: "Rating" },
+        { value: "created_at", label: "Created At" },
+      ]}
+      zoomLevel={zoomLevel}
+      onZoomChange={setZoomLevel}
+      showSearch
+      selectedCount={selectedIds.size}
+      onSelectAll={selectAll}
+      selectAllPending={selectAllPending}
+      onSelectAllMatching={selectShown}
+      selectAllMatchingLabel="Select shown"
+      onSelectNone={selectNone}
+      selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} />}
+      criteriaDefinitions={SCENE_CRITERIA}
+      objectFilter={objectFilter}
+      onObjectFilterChange={setObjectFilter}
+      allowInfinitePageSize
+    />
+  );
 
   if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!data || data.items.length === 0) return <EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes for this gallery" />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes for this gallery" /></>;
 
   return (
     <>
-      <DetailListToolbar
-        filter={filter}
-        onFilterChange={setFilter}
-        totalCount={data.totalCount}
-        sortOptions={[
-          { value: "title", label: "Title" },
-          { value: "date", label: "Date" },
-          { value: "rating", label: "Rating" },
-          { value: "created_at", label: "Created At" },
-        ]}
-        zoomLevel={zoomLevel}
-        onZoomChange={setZoomLevel}
-        showSearch
-        selectedCount={selectedIds.size}
-        onSelectAll={selectAll}
-        onSelectNone={selectNone}
-        selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={data.items} onNavigate={onNavigate} />}
+      {toolbar}
+      <VirtualizedEntityGrid
+        items={items}
+        getItemKey={(scene) => scene.id}
+        minCardWidth={`${220 + zoomLevel * 50}px`}
+        virtualMinColumnWidth={220 + zoomLevel * 50}
+        estimateRowHeight={320}
+        gap={16}
+        gapClassName="gap-4"
+        infinitePageSize={infinitePageSize}
+        hasNextPage={infiniteQuery.hasNextPage}
+        isFetchingNextPage={infiniteQuery.isFetchingNextPage}
+        loadMore={loadMore}
+        renderItem={(scene) => (
+          <SceneCard scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
+        )}
       />
-      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-        {data.items.map((scene) => (
-          <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -453,12 +501,19 @@ const IMAGE_SORT = [
   { label: "Created At", value: "created_at" },
 ];
 
-function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryImages, onShowAddImages, onLightbox, removeImagesMut, imageZoom, setImageZoom, canWriteGallery }: {
+function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObjectFilter, onNavigate, galleryImages, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore, onShowAddImages, onLightbox, removeImagesMut, imageZoom, setImageZoom, canWriteGallery }: {
   galleryId: number;
   filter: FindFilter;
   setFilter: (f: FindFilter) => void;
+  objectFilter: Record<string, unknown>;
+  setObjectFilter: (filter: Record<string, unknown>) => void;
   onNavigate: (r: any) => void;
   galleryImages: { items: any[]; totalCount: number } | undefined;
+  infinitePageSize: boolean;
+  infiniteQuery: ReturnType<typeof useDetailListQuery<Image>>["infiniteQuery"];
+  infiniteFilterKey: unknown;
+  fetchAllIds: () => Promise<Array<Image["id"]>>;
+  loadMore: () => void;
   onShowAddImages: () => void;
   onLightbox: (idx: number) => void;
   removeImagesMut: any;
@@ -468,12 +523,47 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
 }) {
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(galleryImages?.items ?? []);
+  const items = galleryImages?.items ?? [];
+  const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
+  const toolbar = (
+    <DetailListToolbar
+      filter={filter}
+      onFilterChange={setFilter}
+      totalCount={galleryImages?.totalCount ?? 0}
+      sortOptions={IMAGE_SORT}
+      zoomLevel={imageZoom}
+      onZoomChange={setImageZoom}
+      showSearch
+      selectedCount={selectedIds.size}
+      onSelectAll={selectAll}
+      selectAllPending={selectAllPending}
+      onSelectAllMatching={selectShown}
+      selectAllMatchingLabel="Select shown"
+      onSelectNone={selectNone}
+      criteriaDefinitions={IMAGE_CRITERIA}
+      objectFilter={objectFilter}
+      onObjectFilterChange={setObjectFilter}
+      allowInfinitePageSize
+      selectionActions={
+        <>
+          <BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} />
+          {canWriteGallery ? <button
+            onClick={() => setConfirmRemove(true)}
+            disabled={removeImagesMut.isPending}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-orange-400 hover:text-orange-300 hover:bg-orange-900/20"
+          >
+            {removeImagesMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+            Remove from Gallery
+          </button> : null}
+        </>
+      }
+    />
+  );
 
-  if (!galleryImages) return <EmptyPanel icon={<ImageIcon className="h-12 w-12" />} message="No images in this gallery" />;
-  if (galleryImages.items.length === 0) return (
+  if (!galleryImages || items.length === 0) return (
     <>
+      {toolbar}
       {canWriteGallery ? <div className="flex justify-end mb-3">
         <button onClick={onShowAddImages} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10 border border-border">
           <Plus className="w-3 h-3" /> Add Images
@@ -485,40 +575,24 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
 
   return (
     <>
-      <DetailListToolbar
-        filter={filter}
-        onFilterChange={setFilter}
-        totalCount={galleryImages.totalCount}
-        sortOptions={IMAGE_SORT}
-        zoomLevel={imageZoom}
-        onZoomChange={setImageZoom}
-        showSearch
-        selectedCount={selectedIds.size}
-        onSelectAll={selectAll}
-        onSelectNone={selectNone}
-        selectionActions={
-          <>
-            <BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={galleryImages.items} />
-            {canWriteGallery ? <button
-              onClick={() => setConfirmRemove(true)}
-              disabled={removeImagesMut.isPending}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-orange-400 hover:text-orange-300 hover:bg-orange-900/20"
-            >
-              {removeImagesMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-              Remove from Gallery
-            </button> : null}
-          </>
-        }
-      />
+      {toolbar}
       {canWriteGallery ? <div className="flex justify-end mb-2">
         <button onClick={onShowAddImages} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10 border border-border">
           <Plus className="w-3 h-3" /> Add Images
         </button>
       </div> : null}
-      <EntityCardGrid minCardWidth={`${160 + imageZoom * 50}px`}>
-        {galleryImages.items.map((image, idx) => (
+      <VirtualizedEntityGrid
+        items={items}
+        getItemKey={(image) => image.id}
+        minCardWidth={`${160 + imageZoom * 50}px`}
+        virtualMinColumnWidth={160 + imageZoom * 50}
+        estimateRowHeight={260}
+        infinitePageSize={infinitePageSize}
+        hasNextPage={infiniteQuery.hasNextPage}
+        isFetchingNextPage={infiniteQuery.isFetchingNextPage}
+        loadMore={loadMore}
+        renderItem={(image, idx) => (
           <ImageTile
-            key={image.id}
             image={image}
             onClick={() => selecting ? toggle(image.id) : onLightbox(idx)}
             onNavigate={onNavigate}
@@ -527,8 +601,8 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, onNavigate, galleryI
             onSelect={() => toggle(image.id)}
             selecting={selecting}
           />
-        ))}
-      </EntityCardGrid>
+        )}
+      />
       <ConfirmDialog
         open={confirmRemove}
         title="Remove from Gallery"

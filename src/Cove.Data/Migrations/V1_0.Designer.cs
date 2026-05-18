@@ -2874,6 +2874,11 @@ namespace Cove.Data.Migrations
                     b.Property<bool>("Organized")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsVr")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<int?>("ParentSceneId")
                         .HasColumnType("integer");
 
@@ -2941,6 +2946,8 @@ namespace Cove.Data.Migrations
                     b.HasIndex("MinPath");
 
                     b.HasIndex("Organized");
+
+                    b.HasIndex("IsVr");
 
                     b.HasIndex("ParentSceneId");
 

@@ -5,7 +5,6 @@ import { audios, system } from "../api/client";
 import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundError, type UrlDownloadMode } from "../utils/createFromUrlDownload";
 import type { Audio, AudioCreate, AudioFilterCriteria, DownloaderMatch, EntityEngagement } from "../api/types";
 import { BookmarkButton } from "../components/BookmarkButton";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
@@ -27,6 +26,7 @@ import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { SourceDownloadDialog } from "../components/SourceDownloadDialog";
 import { AUDIO_CRITERIA } from "../components/FilterDialog";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 const SORT_OPTIONS = [
   { value: "updatedAt", label: "Updated At" },
@@ -45,7 +45,7 @@ export function AudiosPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("audios");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "updatedAt", direction: "desc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -107,27 +107,16 @@ export function AudiosPage({ onNavigate }: Props) {
       availableDisplayModes={["grid", "list", "tagger"]}
       allowInfinitePageSize
       showPagingControls={!listData.infinitePageSize}
-      selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
-      onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
-      selectAllMatchingLabel={`Select all ${totalCount} matching`}
-      selectAllMatchingPending={selectAllMatchingPending}
-      infiniteScroll={listData.infinitePageSize ? {
-        hasNextPage: listData.infiniteQuery.hasNextPage,
-        hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
-        isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
-        isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
-        onLoadMore: listData.loadMore,
-        onLoadPrevious: listData.loadPrevious,
-        loadedCount: listData.infiniteQuery.loadedThroughCount,
-        previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
-        totalCount,
-      } : undefined}
+      selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
+      onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
+      selectAllMatchingLabel="Select shown"
+      infiniteScroll={listData.infiniteScroll}
       onNew={canWriteAudio ? () => setShowCreate(true) : undefined}
       criteriaDefinitions={AUDIO_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       selectedIds={selectedIds}
-      onSelectAll={selectAll}
+      onSelectAll={listData.infinitePageSize ? handleSelectAllMatching : selectAll}
       onSelectNone={selectNone}
       onInvertSelection={invertSelection}
       selectionActions={<BulkSelectionActions entityType="audios" selectedIds={selectedIds} onDone={selectNone} audioItems={items} downloadItems={items} onNavigate={onNavigate} />}
@@ -153,10 +142,17 @@ export function AudiosPage({ onNavigate }: Props) {
         ) : displayMode === "list" ? (
           <AudioListTable audios={items} engagementById={engagementById} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} />
         ) : (
-        <EntityCardGrid minCardWidth="280px">
-          {items.map((audio) => (
+        <VirtualizedEntityGrid
+          items={items}
+          getItemKey={(audio) => audio.id}
+          minCardWidth="var(--card-min-width, 280px)"
+          estimateRowHeight={220}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          renderItem={(audio) => (
             <AudioTile
-              key={audio.id}
               audio={audio}
               engagement={engagementById.get(audio.id)}
               selected={selectedIds.has(audio.id)}
@@ -165,8 +161,8 @@ export function AudiosPage({ onNavigate }: Props) {
               onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })}
               onNavigate={onNavigate}
             />
-          ))}
-        </EntityCardGrid>
+          )}
+        />
         )
       )}
     </ListPage>

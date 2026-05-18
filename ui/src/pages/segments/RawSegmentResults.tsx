@@ -1,5 +1,5 @@
 import { FolderOpen } from "lucide-react";
-import { EntityCardGrid } from "../../components/EntityCardGrid";
+import { VirtualizedEntityGrid } from "../../components/VirtualizedEntityLayouts";
 import { SegmentTile } from "../../components/EntityCards";
 import type { DisplayMode } from "../../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../../components/RouteCardLinkOverlay";
@@ -20,6 +20,10 @@ interface Props {
   selectedIds: Set<string | number>;
   onToggle: (id: string | number) => void;
   selecting: boolean;
+  infinitePageSize: boolean;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  loadMore: () => void;
 }
 
 export function RawSegmentResults({
@@ -30,13 +34,24 @@ export function RawSegmentResults({
   selectedIds,
   onToggle,
   selecting,
+  infinitePageSize,
+  hasNextPage,
+  isFetchingNextPage,
+  loadMore,
 }: Props) {
   if (displayMode === "grid") {
     return (
-      <EntityCardGrid minCardWidth="var(--card-min-width, 220px)">
-        {items.map((item) => (
+      <VirtualizedEntityGrid
+        items={items}
+        getItemKey={(item) => item.key}
+        minCardWidth="var(--card-min-width, 220px)"
+        estimateRowHeight={300}
+        infinitePageSize={infinitePageSize}
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        loadMore={loadMore}
+        renderItem={(item) => (
           <SegmentTile
-            key={item.key}
             segment={item}
             label={`Open raw segment ${buildRawSegmentTitle(item)}`}
             onClick={() => (selecting ? onToggle(item.id) : onNavigate({ page: "segment", id: item.id }))}
@@ -63,8 +78,8 @@ export function RawSegmentResults({
               </div>
             )}
           />
-        ))}
-      </EntityCardGrid>
+        )}
+      />
     );
   }
 

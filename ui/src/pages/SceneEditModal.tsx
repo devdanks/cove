@@ -6,6 +6,7 @@ import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StudioSelector } from "../components/StudioSelector";
+import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector, type SelectableTag } from "../components/TagSelector";
 
 interface Props {
@@ -22,6 +23,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   const [details, setDetails] = useState(scene.details || "");
   const [director, setDirector] = useState(scene.director || "");
   const [date, setDate] = useState(scene.date || "");
+  const [isVr, setIsVr] = useState(scene.isVr ?? false);
   const [rating, setRating] = useState<number | undefined>(undefined);
   const [urls, setUrls] = useState<string[]>(scene.urls.length > 0 ? scene.urls : [""]);
   const addUrl = () => setUrls([...urls, ""]);
@@ -37,6 +39,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(scene));
   const [contextTagSearchByPerformer, setContextTagSearchByPerformer] = useState<Record<number, string>>({});
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(scene.customFields ?? {}) });
+  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(scene.remoteIds.map((remoteId) => ({ ...remoteId })));
 
   // Tag search
   const [tagSearch, setTagSearch] = useState("");
@@ -72,6 +75,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     setDetails(scene.details || "");
     setDirector(scene.director || "");
     setDate(scene.date || "");
+    setIsVr(scene.isVr ?? false);
     setRating(undefined);
     setUrls(scene.urls.length > 0 ? scene.urls : [""]);
     setStudioId(scene.studioId ?? undefined);
@@ -82,6 +86,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     setContextTagIdsByPerformer(buildPerformerContextTagIds(scene));
     setContextTagSearchByPerformer({});
     setCustomFields({ ...(scene.customFields ?? {}) });
+    setRemoteIds(scene.remoteIds.map((remoteId) => ({ ...remoteId })));
   }, [scene]);
 
   const mutation = useMutation({
@@ -106,6 +111,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       details: details || undefined,
       director: director || undefined,
       date: date || undefined,
+      isVr,
       rating,
       studioId,
       urls: urlList,
@@ -114,6 +120,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       galleryIds: selectedGalleryIds,
       groups: selectedGroups,
       customFields,
+      remoteIds: normalizeRemoteIds(remoteIds),
     });
   };
 
@@ -177,10 +184,17 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <RatingField value={rating} onChange={setRating} />
-        <Field label="Studio">
-          <StudioSelector value={studioId} onChange={setStudioId} />
+        <Field label="VR">
+          <label className="inline-flex items-center gap-2 rounded border border-border bg-card px-3 py-2 text-sm text-foreground">
+            <input type="checkbox" checked={isVr} onChange={(event) => setIsVr(event.target.checked)} className="accent-accent" />
+            <span>VR</span>
+          </label>
         </Field>
       </div>
+
+      <Field label="Studio">
+        <StudioSelector value={studioId} onChange={setStudioId} />
+      </Field>
 
       <Field label="URLs">
         <div className="space-y-1.5">
@@ -386,6 +400,10 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
             ))}
           </div>
         )}
+      </Field>
+
+      <Field label="Remote IDs">
+        <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
       </Field>
 
       <Field label="Custom Fields">

@@ -7,6 +7,7 @@ import { ImageInput } from "../components/ImageInput";
 import { InteractiveRatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
+import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
 
 interface Props {
@@ -30,6 +31,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
   // Tag search
   const [tagSearch, setTagSearch] = useState("");
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(studio.customFields ?? {}) });
+  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(studio.remoteIds.map((remoteId) => ({ ...remoteId })));
   const { data: allTags } = useQuery({
     queryKey: ["tags-all"],
     queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
@@ -51,6 +53,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
     setParentId(studio.parentId ?? undefined);
     setSelectedTagIds(studio.tags.map((t) => t.id));
     setCustomFields({ ...(studio.customFields ?? {}) });
+    setRemoteIds(studio.remoteIds.map((remoteId) => ({ ...remoteId })));
   }, [studio]);
 
   const mutation = useMutation({
@@ -75,6 +78,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
       aliases: aliasList,
       tagIds: selectedTagIds,
       customFields,
+      remoteIds: normalizeRemoteIds(remoteIds),
     });
   };
 
@@ -151,6 +155,10 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
         {tagSearch && filteredTags.length > 0 && (
           <GroupedTagOptionList tags={filteredTags} maxItems={20} onSelect={(tag) => { setSelectedTagIds([...selectedTagIds, tag.id]); setTagSearch(""); }} />
         )}
+      </Field>
+
+      <Field label="Remote IDs">
+        <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
       </Field>
 
       <Field label="Custom Fields">

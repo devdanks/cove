@@ -17,7 +17,7 @@ public class FilteredQueryRequest<TFilter> where TFilter : class, new()
 // ===== SCENE DTOs =====
 public record SceneDto(
     int Id, string? Title, string? Code, string? Details, string? Director,
-    string? Date, bool Organized, int? StudioId, string? StudioName,
+    string? Date, bool Organized, bool IsVr, int? StudioId, string? StudioName,
     string? Captions, int? InteractiveSpeed,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     List<VideoFileDto> Files,
@@ -42,16 +42,16 @@ public record SceneCreateDto(
     string? Date, int? Rating, bool Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields = null,
-    int? ParentSceneId = null, double? ClipStartSec = null, double? ClipEndSec = null);
+    List<SceneGroupInputDto>? Groups, List<SceneRemoteIdDto>? RemoteIds = null, Dictionary<string, object>? CustomFields = null,
+    int? ParentSceneId = null, double? ClipStartSec = null, double? ClipEndSec = null, bool IsVr = false);
 
 public record SceneUpdateDto(
     string? Title, string? Code, string? Details, string? Director,
     string? Date, int? Rating, bool? Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups, Dictionary<string, object>? CustomFields,
-    double? ClipStartSec = null, double? ClipEndSec = null);
+    List<SceneGroupInputDto>? Groups, List<SceneRemoteIdDto>? RemoteIds, Dictionary<string, object>? CustomFields,
+    double? ClipStartSec = null, double? ClipEndSec = null, bool? IsVr = null);
 
 // ===== PERFORMER DTOs =====
 public record PerformerDto(
@@ -79,7 +79,7 @@ public record PerformerCreateDto(
     string? Measurements, string? FakeTits, double? PenisLength, string? Circumcised,
     string? CareerStart, string? CareerEnd, string? Tattoos, string? Piercings,
     bool Favorite, int? Rating, string? Details, bool IgnoreAutoTag,
-    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, Dictionary<string, object>? CustomFields = null);
+    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, List<PerformerRemoteIdDto>? RemoteIds = null, Dictionary<string, object>? CustomFields = null);
 
 public record PerformerUpdateDto(
     string? Name, string? Disambiguation, string? Gender,
@@ -88,7 +88,7 @@ public record PerformerUpdateDto(
     string? Measurements, string? FakeTits, double? PenisLength, string? Circumcised,
     string? CareerStart, string? CareerEnd, string? Tattoos, string? Piercings,
     bool? Favorite, int? Rating, string? Details, bool? IgnoreAutoTag,
-    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, Dictionary<string, object>? CustomFields);
+    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, List<PerformerRemoteIdDto>? RemoteIds, Dictionary<string, object>? CustomFields);
 
 // ===== TAG DTOs =====
 public record TagProvenanceDto(
@@ -163,7 +163,9 @@ public record TagDetailDto(
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     bool? ShowAsSegment = null, string? SegmentColorOverride = null, int? SegmentLaneOverride = null,
     string? Color = null, int? TagGroupId = null, string? TagGroupName = null, string? TagGroupColor = null,
-    double? MinOccurrenceSec = null, double? MinOccurrencePercent = null);
+    double? MinOccurrenceSec = null, double? MinOccurrencePercent = null, List<TagRemoteIdDto>? RemoteIds = null);
+
+public record TagRemoteIdDto(string Endpoint, string RemoteId);
 
 public record TagSegmentWallDto(
     int Id,
@@ -243,7 +245,8 @@ public record TagCreateDto(
     int? TagGroupId = null,
     double? MinOccurrenceSec = null,
     double? MinOccurrencePercent = null,
-    Dictionary<string, object>? CustomFields = null);
+    Dictionary<string, object>? CustomFields = null,
+    List<TagRemoteIdDto>? RemoteIds = null);
 public record TagUpdateDto(
     string? Name,
     string? SortName,
@@ -260,7 +263,8 @@ public record TagUpdateDto(
     string? Color = null,
     int? TagGroupId = null,
     double? MinOccurrenceSec = null,
-    double? MinOccurrencePercent = null);
+    double? MinOccurrencePercent = null,
+    List<TagRemoteIdDto>? RemoteIds = null);
 
 // ===== STUDIO DTOs =====
 public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
@@ -271,10 +275,10 @@ public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, 
 public record StudioRemoteIdDto(string Endpoint, string RemoteId);
 
 public record StudioCreateDto(string Name, int? ParentId, int? Rating, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
-    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, Dictionary<string, object>? CustomFields = null);
+    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, List<StudioRemoteIdDto>? RemoteIds = null, Dictionary<string, object>? CustomFields = null);
 
 public record StudioUpdateDto(string? Name, int? ParentId, int? Rating, bool? Favorite, string? Details, bool? IgnoreAutoTag, bool? Organized,
-    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, Dictionary<string, object>? CustomFields);
+    List<string>? Urls, List<string>? Aliases, List<int>? TagIds, List<StudioRemoteIdDto>? RemoteIds, Dictionary<string, object>? CustomFields);
 
 // ===== GALLERY DTOs =====
 public record GalleryDto(int Id, string? Title, string? Code, string? Date, string? Details, string? Photographer,
@@ -1684,6 +1688,7 @@ public record BulkSceneUpdateDto
     public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Organized { get; init; }
+    public bool? IsVr { get; init; }
     public int? StudioId { get; init; }
     public string? Date { get; init; }
     public string? Code { get; init; }

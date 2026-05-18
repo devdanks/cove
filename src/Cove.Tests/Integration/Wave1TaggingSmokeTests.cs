@@ -57,6 +57,114 @@ public sealed class Wave1TaggingSmokeTests
         Assert.Contains(items, item => item.GetProperty("title").GetString() == "Searchable Squirt Scene");
     }
 
+    [Theory]
+    [InlineData("Performer Match Scene", "maria")]
+    [InlineData("Performer Alias Scene", "stage-name")]
+    [InlineData("Tag Match Scene", "tagged")]
+    [InlineData("Tag Alias Scene", "alias-tag")]
+    public async Task SceneSearch_WithRelatedEntityQuery_ReturnsMatchingItems(string expectedTitle, string query)
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            var performer = new Performer
+            {
+                Name = "Melena Maria Rya",
+                Aliases = { new PerformerAlias { Alias = "Stage-Name Search" } },
+            };
+            var tag = new Tag
+            {
+                Name = "Tagged Relation",
+                Aliases = { new TagAlias { Alias = "Alias-Tag Search" } },
+            };
+
+            db.Scenes.AddRange(
+                new Scene { Title = "Performer Match Scene", ScenePerformers = { new ScenePerformer { Performer = performer } } },
+                new Scene { Title = "Performer Alias Scene", ScenePerformers = { new ScenePerformer { Performer = performer } } },
+                new Scene { Title = "Tag Match Scene", SceneTags = { new SceneTag { Tag = tag } } },
+                new Scene { Title = "Tag Alias Scene", SceneTags = { new SceneTag { Tag = tag } } },
+                new Scene { Title = "Unrelated Scene" });
+            await db.SaveChangesAsync();
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/scenes?q={Uri.EscapeDataString(query)}&perPage=10&sort=title&direction=asc");
+        response.EnsureSuccessStatusCode();
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = payload.RootElement.GetProperty("items").EnumerateArray().ToArray();
+
+        Assert.Contains(items, item => item.GetProperty("title").GetString() == expectedTitle);
+    }
+
+    [Theory]
+    [InlineData("/api/scenes", "title", "Melena Maria Rya Scene", "melen")]
+    [InlineData("/api/performers", "name", "Melena Maria Rya", "melen")]
+    [InlineData("/api/studios", "name", "The Penguin Studio", "peng")]
+    [InlineData("/api/tags", "name", "Melena Maria Rya Tag", "melen")]
+    [InlineData("/api/groups", "name", "The Penguin Group", "peng")]
+    [InlineData("/api/galleries", "title", "The Penguin Gallery", "peng")]
+    [InlineData("/api/images", "title", "Melena Maria Rya Image", "melen")]
+    [InlineData("/api/audios", "title", "The Penguin Audio", "peng")]
+    [InlineData("/api/texts", "title", "Melena Maria Rya Text", "melen")]
+    public async Task EntitySearch_WithPartialWordQuery_ReturnsMatchingItems(string endpoint, string propertyName, string expectedValue, string query)
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.Scenes.Add(new Scene { Title = "Melena Maria Rya Scene" });
+            db.Performers.Add(new Performer { Name = "Melena Maria Rya" });
+            db.Studios.Add(new Studio { Name = "The Penguin Studio" });
+            db.Tags.Add(new Tag { Name = "Melena Maria Rya Tag" });
+            db.Groups.Add(new Group { Name = "The Penguin Group" });
+            db.Galleries.Add(new Gallery { Title = "The Penguin Gallery" });
+            db.Images.Add(new Image { Title = "Melena Maria Rya Image" });
+            db.Audios.Add(new Audio { Title = "The Penguin Audio" });
+            db.TextDocuments.Add(new TextDocument { Title = "Melena Maria Rya Text" });
+            await db.SaveChangesAsync();
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"{endpoint}?q={Uri.EscapeDataString(query)}&perPage=10");
+        response.EnsureSuccessStatusCode();
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = payload.RootElement.GetProperty("items").EnumerateArray().ToArray();
+
+        Assert.Contains(items, item => item.GetProperty(propertyName).GetString() == expectedValue);
+    }
+
+    [Theory]
+    [InlineData("/api/performers", "name", "Alias Performer", "alias-perf")]
+    [InlineData("/api/tags", "name", "Alias Tag", "alias-tag")]
+    [InlineData("/api/studios", "name", "Alias Studio", "alias-studio")]
+    public async Task EntitySearch_WithAliasQuery_ReturnsMatchingItems(string endpoint, string propertyName, string expectedValue, string query)
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+
+        await factory.WithDbContextAsync(async db =>
+        {
+            db.Performers.Add(new Performer { Name = "Alias Performer", Aliases = { new PerformerAlias { Alias = "Alias-Perf Search" } } });
+            db.Tags.Add(new Tag { Name = "Alias Tag", Aliases = { new TagAlias { Alias = "Alias-Tag Search" } } });
+            db.Studios.Add(new Studio { Name = "Alias Studio", Aliases = { new StudioAlias { Alias = "Alias-Studio Search" } } });
+            await db.SaveChangesAsync();
+        });
+
+        using var client = factory.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"{endpoint}?q={Uri.EscapeDataString(query)}&perPage=10&sort=name&direction=asc");
+        response.EnsureSuccessStatusCode();
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = payload.RootElement.GetProperty("items").EnumerateArray().ToArray();
+
+        Assert.Contains(items, item => item.GetProperty(propertyName).GetString() == expectedValue);
+    }
+
     [Fact]
     public async Task TagCreate_WithCustomFields_RoundTripsThroughApi()
     {
@@ -110,6 +218,58 @@ public sealed class Wave1TaggingSmokeTests
         Assert.NotNull(detail!.CustomFields);
         Assert.Equal("cf-ui", Assert.IsType<JsonElement>(detail.CustomFields!["source_id"]).GetString());
         Assert.Equal("2026-05-09", Assert.IsType<JsonElement>(detail.CustomFields!["reviewed_on"]).GetString());
+    }
+
+    [Theory]
+    [InlineData(CustomFieldEntityTypes.Scene, "/api/scenes")]
+    [InlineData(CustomFieldEntityTypes.Image, "/api/images")]
+    public async Task EntityCustomFields_UpdateAndReload_RoundTripsThroughApi(string entityType, string endpoint)
+    {
+        using var factory = new CoveWebApplicationFactory();
+        await factory.ResetDatabaseAsync();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var fieldKey = $"audit_marker_{entityType}";
+        var fieldResponse = await client.PostAsJsonAsync("/api/custom-fields", new
+        {
+            key = fieldKey,
+            label = "Audit Marker",
+            type = "text",
+            entityTypes = new[] { entityType },
+            filterable = true,
+            sortable = true,
+        }, IntegrationHttpJson.Options);
+        fieldResponse.EnsureSuccessStatusCode();
+
+        var createResponse = await client.PostAsJsonAsync(endpoint, CreateCustomFieldPayload(entityType, fieldKey, "initial"), IntegrationHttpJson.Options);
+        createResponse.EnsureSuccessStatusCode();
+        using var createdPayload = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var id = createdPayload.RootElement.GetProperty("id").GetInt32();
+        Assert.Equal("initial", ReadCustomField(createdPayload.RootElement, fieldKey));
+
+        var updateResponse = await client.PutAsJsonAsync($"{endpoint}/{id}", new
+        {
+            customFields = new Dictionary<string, object?> { [fieldKey] = "updated" },
+        }, IntegrationHttpJson.Options);
+        updateResponse.EnsureSuccessStatusCode();
+        using var updatedPayload = JsonDocument.Parse(await updateResponse.Content.ReadAsStringAsync());
+        Assert.Equal("updated", ReadCustomField(updatedPayload.RootElement, fieldKey));
+
+        var detailResponse = await client.GetAsync($"{endpoint}/{id}");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailPayload = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        Assert.Equal("updated", ReadCustomField(detailPayload.RootElement, fieldKey));
+
+        var clearResponse = await client.PutAsJsonAsync($"{endpoint}/{id}", new
+        {
+            customFields = new Dictionary<string, object?>(),
+        }, IntegrationHttpJson.Options);
+        clearResponse.EnsureSuccessStatusCode();
+
+        var clearedDetailResponse = await client.GetAsync($"{endpoint}/{id}?cacheBust=clear");
+        clearedDetailResponse.EnsureSuccessStatusCode();
+        using var clearedPayload = JsonDocument.Parse(await clearedDetailResponse.Content.ReadAsStringAsync());
+        Assert.Null(ReadCustomField(clearedPayload.RootElement, fieldKey));
     }
 
     [Fact]
@@ -173,6 +333,27 @@ public sealed class Wave1TaggingSmokeTests
         Assert.Null(cleared.TagGroupId);
         Assert.Null(cleared.MinOccurrenceSec);
         Assert.Null(cleared.MinOccurrencePercent);
+    }
+
+    private static object CreateCustomFieldPayload(string entityType, string fieldKey, string value)
+    {
+        var customFields = new Dictionary<string, object?> { [fieldKey] = value };
+        return entityType switch
+        {
+            CustomFieldEntityTypes.Scene => new { title = "Custom Field Scene", organized = false, customFields },
+            CustomFieldEntityTypes.Image => new { title = "Custom Field Image", organized = false, customFields },
+            _ => throw new ArgumentOutOfRangeException(nameof(entityType), entityType, null),
+        };
+    }
+
+    private static string? ReadCustomField(JsonElement root, string key)
+    {
+        if (!root.TryGetProperty("customFields", out var customFields)
+            || customFields.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+            || !customFields.TryGetProperty(key, out var value))
+            return null;
+
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
     }
 
     [Fact]

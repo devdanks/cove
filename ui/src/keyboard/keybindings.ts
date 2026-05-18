@@ -20,7 +20,6 @@ export const KEYBINDING_DEFAULTS: KeybindingDefinition[] = [
   { id: "global.tags", group: "Global Navigation", label: "Tags", keys: "g t" },
   { id: "global.settings", group: "Global Navigation", label: "Settings", keys: "g z" },
   { id: "global.stats", group: "Global Navigation", label: "Stats", keys: "g d" },
-  { id: "global.shortcuts", group: "Global Navigation", label: "Show shortcuts", keys: "?" },
   { id: "list.search", group: "List Pages", label: "Focus search", keys: "/" },
   { id: "list.view.grid", group: "List Pages", label: "Grid view", keys: "v g" },
   { id: "list.view.list", group: "List Pages", label: "List view", keys: "v l" },

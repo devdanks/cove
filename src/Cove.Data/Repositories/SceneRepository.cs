@@ -81,12 +81,7 @@ public class SceneRepository : ISceneRepository
         // Apply all filters to the lightweight query
         filterQuery = ApplyFilters(filterQuery, filter, expandedTags?.ValueGroups);
 
-        filterQuery = FullTextSearchHelpers.Apply(_db, filterQuery, findFilter?.Q,
-            s => s.Title,
-            s => s.Details,
-            s => s.Code,
-            s => s.FileSearchText,
-            s => s.SearchText);
+        filterQuery = ApplySceneSearch(filterQuery, findFilter?.Q);
 
         // COUNT runs on the lightweight query â€” no JOINs from Includes
         var perPage = findFilter?.PerPage ?? 25;
@@ -147,6 +142,8 @@ public class SceneRepository : ISceneRepository
                 query = EngagementQueryHelpers.ApplyRatingMinimum(_db, query, currentUserId, RatingHostType.Scene, filter.Rating.Value);
             if (filter.Organized.HasValue)
                 query = query.Where(s => s.Organized == filter.Organized.Value);
+            if (filter.IsVr.HasValue)
+                query = query.Where(s => s.IsVr == filter.IsVr.Value);
             if (filter.StudioId.HasValue)
                 query = query.Where(s => s.StudioId == filter.StudioId.Value);
             if (filter.GroupId.HasValue)
@@ -203,6 +200,9 @@ public class SceneRepository : ISceneRepository
 
             if (filter.OrganizedCriterion != null)
                 query = query.Where(s => s.Organized == filter.OrganizedCriterion.Value);
+
+            if (filter.IsVrCriterion != null)
+                query = query.Where(s => s.IsVr == filter.IsVrCriterion.Value);
 
             if (filter.InteractiveCriterion != null)
                 query = filter.InteractiveCriterion.Value
@@ -337,6 +337,33 @@ public class SceneRepository : ISceneRepository
             }
 
         return query;
+    }
+
+    private IQueryable<Scene> ApplySceneSearch(IQueryable<Scene> query, string? search)
+    {
+        var textQuery = FullTextSearchHelpers.Apply(_db, query, search,
+            s => s.Title,
+            s => s.Details,
+            s => s.Code,
+            s => s.FileSearchText,
+            s => s.SearchText);
+
+        var normalized = search?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized)) return textQuery;
+        var normalizedLower = normalized.ToLowerInvariant();
+
+        var relationalQuery = query.Where(s =>
+            (s.Studio != null && s.Studio.Name.ToLower().Contains(normalizedLower)) ||
+            s.ScenePerformers.Any(sp => sp.Performer != null && (
+                sp.Performer.Name.ToLower().Contains(normalizedLower) ||
+                sp.Performer.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower)))) ||
+            s.SceneTags.Any(st => st.Tag != null && (
+                st.Tag.Name.ToLower().Contains(normalizedLower) ||
+                st.Tag.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower)))) ||
+            s.SceneGalleries.Any(sg => sg.Gallery != null && sg.Gallery.Title != null && sg.Gallery.Title.ToLower().Contains(normalizedLower)) ||
+            s.GroupItems.Any(item => item.Group != null && item.Group.Name.ToLower().Contains(normalizedLower)));
+
+        return textQuery.Concat(relationalQuery).Distinct();
     }
 
     private IQueryable<Scene> ApplySorting(IQueryable<Scene> query, string sort, bool desc, int? seed = null)

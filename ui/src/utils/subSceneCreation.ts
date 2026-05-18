@@ -29,6 +29,7 @@ export function buildSubSceneCreate(scene: Scene, range: SubSceneRange, override
     director: scene.director,
     date: scene.date,
     organized: scene.organized,
+    isVr: scene.isVr ?? false,
     studioId: scene.studioId,
     urls: urls.length > 0 ? [...urls] : undefined,
     tagIds: mergedTagIds.length > 0 ? mergedTagIds : undefined,

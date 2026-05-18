@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups, scenes } from "../api/client";
-import type { FindFilter, Group, GroupItem, Scene, SegmentDerivedQueryDescriptor, SegmentSpanDerivedQuery } from "../api/types";
+import type { FindFilter, Group, GroupItem, Scene, SceneFilterCriteria, SegmentDerivedQueryDescriptor, SegmentSpanDerivedQuery } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
 import { Clapperboard, ExternalLink, Film, GripVertical, Layers, Link as LinkIcon, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -12,16 +12,20 @@ import { CompilationPlayer } from "../components/CompilationPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { DetailListToolbar } from "../components/DetailListToolbar";
-import { EntityCardGrid } from "../components/EntityCardGrid";
+import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
-import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 import { SortableList } from "../components/SortableList";
+import { useEntityEngagement } from "../hooks/useEntityEngagement";
+import { useDetailListQuery } from "../hooks/useDetailListQuery";
+import { useDetailListSelection } from "../hooks/useDetailListSelection";
+import { withRequiredMultiId } from "../utils/detailRelationFilters";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 interface Props {
   id: number;
@@ -35,7 +39,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     queryKey: ["group", id],
     queryFn: () => groups.get(id),
   });
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("items");
@@ -54,10 +58,14 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const canDeleteGroup = canDeleteEntity("group", hasPermission);
   const canReadStudios = canReadEntity("studio", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
+  const canEngageGroup = canReadGroups && (user?.kind === "user" || user?.kind === "system");
   const { data: groupItems = [], isLoading: groupItemsLoading } = useQuery({
     queryKey: ["group-items", id],
     queryFn: () => groups.items.list(id),
     enabled: canReadGroups,
+  });
+  const { favorite: groupFavorite, setFavorite: setGroupFavorite, favoritePending: groupFavoritePending } = useEntityEngagement("group", id, {
+    enabled: !!group,
   });
   const { data: playbackManifest, isLoading: playbackManifestLoading } = useQuery({
     queryKey: ["group", id, "playback-manifest"],
@@ -257,6 +265,8 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
 
       <EntityHeroLayout
         title={group.name}
+        favorite={groupFavorite}
+        onFavoriteToggle={canEngageGroup && !groupFavoritePending ? () => setGroupFavorite(!groupFavorite) : undefined}
         aliases={group.aliases || undefined}
         metaRow={
           <div className="flex flex-wrap items-center gap-3 text-sm text-secondary">
@@ -276,6 +286,8 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         }
         backLabel={backLabel}
         onGoBack={goBack}
+        imageUrl={group.frontImagePath}
+        imageAlt={group.name}
         imageFallback={<Layers className="h-14 w-14" />}
         counts={[
           { key: "scenes", label: "Scenes", value: group.sceneCount, icon: <Film className="h-4 w-4" /> },
@@ -373,9 +385,17 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
   const queryClient = useQueryClient();
   const [zoomLevel, setZoomLevel] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
-  const { data: groupScenes, isLoading } = useQuery({
-    queryKey: ["group-scenes", groupId, filter],
-    queryFn: () => scenes.find(filter, { groupId: String(groupId) }),
+  const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
+  const hasObjectFilter = Object.keys(objectFilter).length > 0;
+  const { data: groupScenes, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Scene>({
+    queryKey: ["group-scenes", groupId, objectFilter],
+    filter,
+    queryFn: (nextFilter) => hasObjectFilter
+      ? scenes.findFiltered({
+          findFilter: nextFilter,
+          objectFilter: withRequiredMultiId(objectFilter as SceneFilterCriteria, "groupsCriterion", groupId),
+        })
+      : scenes.find(nextFilter, { groupId: String(groupId) }),
   });
   const deleteItemMutation = useMutation({
     mutationFn: (itemId: number) => groups.items.delete(groupId, itemId),
@@ -410,8 +430,36 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
       queryClient.invalidateQueries({ queryKey: ["group-items", groupId] });
     },
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(groupScenes?.items ?? []);
+  const items = groupScenes?.items ?? [];
+  const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
+  const toolbar = (
+    <DetailListToolbar
+      filter={filter}
+      onFilterChange={setFilter}
+      totalCount={groupScenes?.totalCount ?? 0}
+      sortOptions={[
+        { value: "title", label: "Title" },
+        { value: "date", label: "Date" },
+        { value: "rating", label: "Rating" },
+        { value: "created_at", label: "Created At" },
+      ]}
+      zoomLevel={zoomLevel}
+      onZoomChange={setZoomLevel}
+      showSearch
+      selectedCount={selectedIds.size}
+      onSelectAll={selectAll}
+      selectAllPending={selectAllPending}
+      onSelectAllMatching={selectShown}
+      selectAllMatchingLabel="Select shown"
+      onSelectNone={selectNone}
+      selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} />}
+      criteriaDefinitions={SCENE_CRITERIA}
+      objectFilter={objectFilter}
+      onObjectFilterChange={setObjectFilter}
+      allowInfinitePageSize
+    />
+  );
 
   if (groupItemsLoading) {
     return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading group items..." />;
@@ -503,33 +551,27 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
   }
 
   if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!groupScenes || groupScenes.items.length === 0) return <EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes in this group" />;
+  if (!groupScenes || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes in this group" /></>;
 
   return (
     <>
-      <DetailListToolbar
-        filter={filter}
-        onFilterChange={setFilter}
-        totalCount={groupScenes.totalCount}
-        sortOptions={[
-          { value: "title", label: "Title" },
-          { value: "date", label: "Date" },
-          { value: "rating", label: "Rating" },
-          { value: "created_at", label: "Created At" },
-        ]}
-        zoomLevel={zoomLevel}
-        onZoomChange={setZoomLevel}
-        showSearch
-        selectedCount={selectedIds.size}
-        onSelectAll={selectAll}
-        onSelectNone={selectNone}
-        selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={groupScenes.items} onNavigate={onNavigate} />}
+      {toolbar}
+      <VirtualizedEntityGrid
+        items={items}
+        getItemKey={(scene) => scene.id}
+        minCardWidth={`${220 + zoomLevel * 50}px`}
+        virtualMinColumnWidth={220 + zoomLevel * 50}
+        estimateRowHeight={320}
+        gap={16}
+        gapClassName="gap-4"
+        infinitePageSize={infinitePageSize}
+        hasNextPage={infiniteQuery.hasNextPage}
+        isFetchingNextPage={infiniteQuery.isFetchingNextPage}
+        loadMore={loadMore}
+        renderItem={(scene) => (
+          <SceneCard scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
+        )}
       />
-      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-        {groupScenes.items.map((scene) => (
-          <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -715,38 +757,6 @@ function GroupContainingGroupsPanel({ groupId, onNavigate }: { groupId: number; 
       {containingGroups.map((g) => (
         <GroupTile key={g.id} group={g} onClick={() => onNavigate({ page: "group", id: g.id })} />
       ))}
-    </div>
-  );
-}
-
-function Pager({ filter, setFilter, totalCount }: {
-  filter: FindFilter;
-  setFilter: (filter: FindFilter) => void;
-  totalCount: number;
-}) {
-  const perPage = filter.perPage ?? 1;
-  const page = filter.page ?? 1;
-  const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
-
-  if (totalPages <= 1) return null;
-
-  return (
-    <div className="mx-auto max-w-7xl mt-6 flex items-center justify-center gap-4">
-      <button
-        disabled={page <= 1}
-        onClick={() => setFilter({ ...filter, page: page - 1 })}
-        className="rounded border border-border bg-card px-4 py-2 text-sm text-secondary hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Previous
-      </button>
-      <span className="text-sm text-secondary">Page {page} of {totalPages}</span>
-      <button
-        disabled={page >= totalPages}
-        onClick={() => setFilter({ ...filter, page: page + 1 })}
-        className="rounded border border-border bg-card px-4 py-2 text-sm text-secondary hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Next
-      </button>
     </div>
   );
 }

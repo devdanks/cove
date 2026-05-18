@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, Plus, X, Rows3, MonitorPlay, Play, Pause } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowDown, ArrowUp, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, Plus, X, Rows3, MonitorPlay, Play, Pause, Shuffle } from "lucide-react";
 import type { CriterionModifier, CustomFieldCriterion, CustomFieldDefinition, CustomFieldEntityType, CustomFieldType, FindFilter } from "../api/types";
 import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, tagGroups as tagGroupsApi } from "../api/client";
 import { ExtensionSlot } from "../router/RouteRegistry";
@@ -13,8 +13,11 @@ import { useKeySequence } from "../hooks/useKeySequence";
 import { resolveKeybinding } from "../keyboard/keybindings";
 import { useAppConfig } from "../state/AppConfigContext";
 import { useCustomFieldDefinitions } from "../hooks/useCustomFieldDefinitions";
-import { withSeededRandomSort } from "../utils/seededRandomSort";
+import { clampCardSizeLevel, useEntityCardSize } from "../hooks/useEntityCardSize";
+import { reshuffleRandomSort, withSeededRandomSort } from "../utils/seededRandomSort";
 import { trackInteraction } from "../utils/interactionTracking";
+import { LIST_PER_PAGE_OPTIONS, toolbarIconButtonClass, toolbarSegmentClass, toolbarSelectClass } from "./listToolbarStyles";
+import { ListPageCardSizeContext } from "./ListPageCardSizeContext";
 
 export type DisplayMode = "grid" | "list" | "wall" | "tagger" | "graph" | "byGroup" | "feed" | "vertical";
 
@@ -39,6 +42,7 @@ interface ListPageProps {
   onInvertSelection?: () => void;
   selectionActions?: ReactNode;
   selectAllLabel?: string;
+  selectAllPending?: boolean;
   selectAllMatchingLabel?: string;
   selectAllMatchingPending?: boolean;
   metadataByline?: ReactNode;
@@ -58,13 +62,9 @@ interface ListPageProps {
   autoScrollContainerRef?: RefObject<HTMLElement | null>;
   infiniteScroll?: {
     hasNextPage?: boolean;
-    hasPreviousPage?: boolean;
     isFetchingNextPage?: boolean;
-    isFetchingPreviousPage?: boolean;
     onLoadMore: () => void;
-    onLoadPrevious?: () => void | Promise<unknown>;
     loadedCount: number;
-    previousLoadedCount?: number;
     totalCount: number;
   };
   showAutoScrollControls?: boolean;
@@ -73,10 +73,8 @@ interface ListPageProps {
   showClearAllObjectFilters?: boolean;
 }
 
-const PER_PAGE_OPTIONS = [20, 40, 60, 120, 250, 500, 1000];
+const PER_PAGE_OPTIONS = LIST_PER_PAGE_OPTIONS;
 const DEFAULT_ZOOM_LEVEL = 1;
-const MIN_ZOOM_LEVEL = 0;
-const MAX_ZOOM_LEVEL = 5;
 const LIST_SEARCH_DEBOUNCE_MS = 350;
 
 const CUSTOM_FIELD_ENTITY_BY_FILTER_MODE: Record<string, CustomFieldEntityType> = {
@@ -115,10 +113,6 @@ const REFERENCE_CUSTOM_FIELD_MODIFIERS: CriterionModifier[] = ["INCLUDES", "EXCL
 
 function getDefaultCustomFieldModifier(type: CustomFieldType): CriterionModifier {
   return isEntityReferenceType(type) ? "INCLUDES" : "EQUALS";
-}
-
-function clampZoomLevel(value: number) {
-  return Math.min(MAX_ZOOM_LEVEL, Math.max(MIN_ZOOM_LEVEL, value));
 }
 
 function normalizeCustomFieldCriteria(value: unknown): CustomFieldCriterion[] {
@@ -603,6 +597,7 @@ export function ListPage({
   onInvertSelection,
   selectionActions,
   selectAllLabel = "Select all",
+  selectAllPending = false,
   selectAllMatchingLabel = "Select all matching",
   selectAllMatchingPending = false,
   metadataByline,
@@ -628,7 +623,9 @@ export function ListPage({
   const [searchText, setSearchText] = useState(filter.q ?? "");
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [filterDialogPreselect, setFilterDialogPreselect] = useState<string | undefined>();
-  const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM_LEVEL); // 0-5 range: 0=smallest (240px), 5=largest (540px)
+  const cardSizeEntityType = filterMode ?? pageKey;
+  const [zoomLevel, setZoomLevel] = useEntityCardSize(cardSizeEntityType, pageKey, DEFAULT_ZOOM_LEVEL); // 0-5 range: 0=smallest (240px), 5=largest (540px)
+  const cardMinWidthPx = Math.round(240 + zoomLevel * 60);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(false);
   const [autoScrollSpeed, setAutoScrollSpeed] = useState(120);
   const [autoScrollControlsAwake, setAutoScrollControlsAwake] = useState(true);
@@ -734,27 +731,8 @@ export function ListPage({
   const selecting = selectedIds && selectedIds.size > 0;
   const showSelectionBar = Boolean(selectedIds && selecting);
   const showInfiniteAutoScrollControls = infinitePageSize && showAutoScrollControls;
+  const contentOwnsInfiniteLoading = infinitePageSize && (displayMode === "grid" || displayMode === "wall" || displayMode === "feed" || displayMode === "vertical");
   const wakeAutoScrollControls = useCallback(() => setAutoScrollControlsAwake(true), []);
-  const toolbarSegmentClass = "flex items-center gap-1 rounded-lg border border-border bg-card/70 px-1.5 py-1 shadow-sm";
-  const toolbarSelectClass = "min-h-[30px] rounded-md border border-border/60 bg-input px-2 py-1 text-xs text-foreground shadow-inner focus:outline-none focus:border-accent";
-  const toolbarIconButtonClass = "rounded-md border border-transparent p-1.5 text-secondary hover:bg-card/80 hover:text-foreground focus:outline-none focus:border-accent";
-
-  const loadPreviousInfinitePage = useCallback(() => {
-    if (!infiniteScroll?.onLoadPrevious) {
-      return;
-    }
-
-    const scrollingElement = document.scrollingElement ?? document.documentElement;
-    const previousHeight = scrollingElement.scrollHeight;
-    const previousTop = window.scrollY;
-    const result = infiniteScroll.onLoadPrevious();
-    void Promise.resolve(result).then(() => {
-      window.requestAnimationFrame(() => {
-        const nextHeight = scrollingElement.scrollHeight;
-        window.scrollTo({ top: previousTop + (nextHeight - previousHeight), behavior: "auto" });
-      });
-    });
-  }, [infiniteScroll]);
 
   useEffect(() => {
     if ((!infinitePageSize || !showAutoScrollControls) && autoScrollEnabled) {
@@ -838,10 +816,7 @@ export function ListPage({
         return;
       }
 
-      const parsed = JSON.parse(raw) as { perPage?: number; zoomLevel?: number; wallColumnCount?: number };
-      if (typeof parsed.zoomLevel === "number") {
-        setZoomLevel(clampZoomLevel(parsed.zoomLevel));
-      }
+      const parsed = JSON.parse(raw) as { perPage?: number; wallColumnCount?: number };
 
       if (typeof parsed.wallColumnCount === "number" && onWallColumnCountChange) {
         onWallColumnCountChange(Math.min(12, Math.max(2, parsed.wallColumnCount)));
@@ -864,9 +839,9 @@ export function ListPage({
 
     localStorage.setItem(
       `cove-list-prefs-${pageKey}`,
-      JSON.stringify({ perPage, zoomLevel: clampZoomLevel(zoomLevel), wallColumnCount })
+      JSON.stringify({ perPage, wallColumnCount })
     );
-  }, [pageKey, perPage, wallColumnCount, zoomLevel]);
+  }, [pageKey, perPage, wallColumnCount]);
 
   useEffect(() => {
     setSearchText(filter.q ?? "");
@@ -945,8 +920,8 @@ export function ListPage({
     // Filter dialog
     ...(criteriaDefinitions && onObjectFilterChange ? [{ keys: resolveKeybinding(keybindingOverrides, "list.filters", "f"), action: () => setFilterDialogOpen(true) }] : []),
     // Zoom
-    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.in", "+"), action: () => setZoomLevel((v) => Math.min(5, v + 0.25)) },
-    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.out", "-"), action: () => setZoomLevel((v) => Math.max(0, v - 0.25)) },
+    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.in", "+"), action: () => setZoomLevel((v) => clampCardSizeLevel(v + 0.25)) },
+    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.out", "-"), action: () => setZoomLevel((v) => clampCardSizeLevel(v - 0.25)) },
   ], [showPagingControls, onDisplayModeChange, availableDisplayModes, onSelectAll, onSelectNone, onInvertSelection, goTo, page, totalPages, criteriaDefinitions, onObjectFilterChange, keybindingOverrides]);
 
   useKeySequence(listBindings);
@@ -1031,13 +1006,26 @@ export function ListPage({
               ))}
             </select>
 
+            {filter.sort === "random" && (
+              <button
+                type="button"
+                onClick={() => onFilterChange(reshuffleRandomSort(filter))}
+                className={toolbarIconButtonClass}
+                title="Shuffle"
+                aria-label="Shuffle"
+              >
+                <Shuffle className="w-3.5 h-3.5" />
+              </button>
+            )}
+
             {/* Direction toggle */}
             <button
+              type="button"
               onClick={() => onFilterChange(withSeededRandomSort(filter, { ...filter, direction: filter.direction === "desc" ? "asc" : "desc" }))}
               className={toolbarIconButtonClass}
               title={filter.direction === "desc" ? "Sort descending" : "Sort ascending"}
             >
-              <ArrowUpDown className="w-3.5 h-3.5" />
+              {filter.direction === "desc" ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />}
             </button>
           </div>
         )}
@@ -1169,7 +1157,7 @@ export function ListPage({
                 max={5}
                 step={0.25}
                 value={zoomLevel}
-                onChange={(e) => setZoomLevel(clampZoomLevel(Number(e.target.value)))}
+                onChange={(e) => setZoomLevel(clampCardSizeLevel(Number(e.target.value)))}
                 className="w-16 sm:w-20 h-1 accent-accent cursor-pointer"
                 title={`Card size: ${Math.round(240 + zoomLevel * 60)}px`}
               />
@@ -1321,7 +1309,7 @@ export function ListPage({
           <span className="text-xs text-secondary">
             {selectedIds!.size} selected
           </span>
-          {onSelectAll && <button onClick={onSelectAll} className="text-xs text-accent hover:underline">{selectAllLabel}</button>}
+          {onSelectAll && <button onClick={onSelectAll} disabled={selectAllPending} className="text-xs text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-60">{selectAllPending ? "Selecting..." : selectAllLabel}</button>}
           {onSelectAllMatching && (
             <button onClick={onSelectAllMatching} disabled={selectAllMatchingPending} className="text-xs text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-60">
               {selectAllMatchingPending ? "Selecting..." : selectAllMatchingLabel}
@@ -1346,29 +1334,20 @@ export function ListPage({
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" />
         </div>
       ) : (
-        <div className="pt-3" style={{ "--card-min-width": `${Math.round(240 + zoomLevel * 60)}px` } as React.CSSProperties}>
-          {infinitePageSize && infiniteScroll?.onLoadPrevious && (infiniteScroll.hasPreviousPage || infiniteScroll.isFetchingPreviousPage) && (
-            <InfiniteScrollSentinel
-              direction="previous"
-              hasMore={Boolean(infiniteScroll.hasPreviousPage)}
-              isLoading={Boolean(infiniteScroll.isFetchingPreviousPage)}
-              onLoadMore={loadPreviousInfinitePage}
-              loadedCount={infiniteScroll.previousLoadedCount ?? 0}
-              totalCount={infiniteScroll.totalCount}
-              className="pt-2"
-            />
-          )}
-          {children}
-          {infinitePageSize && infiniteScroll && (
-            <InfiniteScrollSentinel
-              hasMore={Boolean(infiniteScroll.hasNextPage)}
-              isLoading={Boolean(infiniteScroll.isFetchingNextPage)}
-              onLoadMore={infiniteScroll.onLoadMore}
-              loadedCount={infiniteScroll.loadedCount}
-              totalCount={infiniteScroll.totalCount}
-            />
-          )}
-        </div>
+        <ListPageCardSizeContext.Provider value={{ cardMinWidthPx, zoomLevel }}>
+          <div className="pt-3" style={{ "--card-min-width": `${cardMinWidthPx}px` } as React.CSSProperties}>
+            {children}
+            {infinitePageSize && infiniteScroll && !contentOwnsInfiniteLoading && (
+              <InfiniteScrollSentinel
+                hasMore={Boolean(infiniteScroll.hasNextPage)}
+                isLoading={Boolean(infiniteScroll.isFetchingNextPage)}
+                onLoadMore={infiniteScroll.onLoadMore}
+                loadedCount={infiniteScroll.loadedCount}
+                totalCount={infiniteScroll.totalCount}
+              />
+            )}
+          </div>
+        </ListPageCardSizeContext.Provider>
       )}
 
       {/* Pagination bottom */}

@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { Heart, Star } from "lucide-react";
 import type { EngagementBarProps } from "./MediaDetailLayout/types";
 
@@ -12,7 +13,30 @@ export function EngagementBar({
   additionalMetrics = [],
   className,
 }: EngagementBarProps) {
-  const favoriteTitle = favorite ? "Remove from favorites" : "Add to favorites";
+  const favoriteTitle = favorite ? "Remove favorite" : "Favorite";
+  const favoriteAction = typeof favorite === "boolean" ? (
+    onFavoriteChange ? (
+      <button
+        type="button"
+        aria-pressed={favorite}
+        aria-label={favoriteTitle}
+        title={favoriteTitle}
+        disabled={favoritePending}
+        onClick={() => onFavoriteChange(!favorite)}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 ${favorite ? "border-accent/60 bg-accent/10 text-foreground" : "border-border text-secondary"}`}
+      >
+        <Heart className={["h-3.5 w-3.5", favorite ? "fill-current text-red-300" : "text-muted"].join(" ")} />
+      </button>
+    ) : (
+      <span
+        aria-label={favorite ? "Favorite" : "Not favorite"}
+        title={favorite ? "Favorite" : "Not favorite"}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${favorite ? "border-accent/60 bg-accent/10 text-foreground" : "border-border text-secondary"}`}
+      >
+        <Heart className={["h-3.5 w-3.5", favorite ? "fill-current text-red-300" : "text-muted"].join(" ")} />
+      </span>
+    )
+  ) : null;
 
   return (
     <div
@@ -22,30 +46,6 @@ export function EngagementBar({
       ].filter(Boolean).join(" ")}
     >
       {primaryContent ? <div className="shrink-0">{primaryContent}</div> : null}
-
-      {typeof favorite === "boolean" ? (
-        onFavoriteChange ? (
-          <button
-            type="button"
-            aria-pressed={favorite}
-            aria-label={favoriteTitle}
-            title={favoriteTitle}
-            disabled={favoritePending}
-            onClick={() => onFavoriteChange(!favorite)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-foreground transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Heart className={["h-3.5 w-3.5", favorite ? "fill-current text-red-300" : "text-muted"].join(" ")} />
-          </button>
-        ) : (
-          <span
-            aria-label={favorite ? "Favorite" : "Not favorite"}
-            title={favorite ? "Favorite" : "Not favorite"}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-foreground"
-          >
-            <Heart className={["h-3.5 w-3.5", favorite ? "fill-current text-red-300" : "text-muted"].join(" ")} />
-          </span>
-        )
-      ) : null}
 
       {!primaryContent && typeof rating === "number" ? (
         <span className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-foreground">
@@ -81,7 +81,7 @@ export function EngagementBar({
             <span className="text-foreground">{metric.value}</span>
           </>
         );
-        return metric.onClick ? (
+        const metricNode = metric.onClick ? (
           <button
             key={metric.label}
             type="button"
@@ -97,7 +97,14 @@ export function EngagementBar({
             {content}
           </span>
         );
+        return (
+          <Fragment key={metric.label}>
+            {metricNode}
+            {metric.label === "Likes" ? favoriteAction : null}
+          </Fragment>
+        );
       })}
+      {favoriteAction && !additionalMetrics.some((metric) => metric.label === "Likes") ? favoriteAction : null}
     </div>
   );
 }

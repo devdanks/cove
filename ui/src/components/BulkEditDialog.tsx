@@ -386,6 +386,7 @@ function serializeBulkFieldValue(field: BulkEditField, value: unknown) {
 export const SCENE_BULK_FIELDS: BulkEditField[] = [
   { key: "rating", label: "Rating", type: "rating" },
   { key: "organized", label: "Organized", type: "bool" },
+  { key: "isVr", label: "VR", type: "bool" },
   { key: "studioId", label: "Studio", type: "select", entityType: "studios", nullable: true },
   { key: "date", label: "Date", type: "date" },
   { key: "code", label: "Studio Code", type: "string" },

@@ -90,7 +90,8 @@ public sealed record UserTrackingPreferencesDto(
     int? SessionIdleTimeoutSec);
 
 public sealed record UserScenesPreferencesDto(
-    bool? IncludeCompilationGroups);
+    bool? IncludeCompilationGroups,
+    bool? ExcludeVr = null);
 
 public sealed record UserPlaybackPreferencesDto(
     int? SkipSeconds);

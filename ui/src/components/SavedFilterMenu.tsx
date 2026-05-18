@@ -4,12 +4,36 @@ import { savedFilters } from "../api/client";
 import type { FindFilter } from "../api/types";
 import { Bookmark, ChevronDown, Save, Trash2, Loader2, Star } from "lucide-react";
 
+const DEFAULT_SORT_BY_MODE: Record<string, string> = {
+  scenes: "date",
+  images: "date",
+  galleries: "date",
+  groups: "date",
+  audios: "date",
+  texts: "date",
+  performers: "latest_scene_date",
+  studios: "latest_scene_date",
+  tags: "latest_scene_date",
+};
+
+function normalizeSavedFindFilter(mode: string, findFilter: FindFilter | undefined): FindFilter | undefined {
+  if (!findFilter) return findFilter;
+  const defaultSort = DEFAULT_SORT_BY_MODE[mode];
+  if (!defaultSort) return findFilter;
+  return {
+    ...findFilter,
+    sort: findFilter.sort ?? defaultSort,
+    direction: findFilter.direction ?? "desc",
+  };
+}
+
 /** Get the default filter for a mode from localStorage */
 export function getDefaultFilter(mode: string): { findFilter?: FindFilter; objectFilter?: Record<string, unknown>; uiOptions?: Record<string, unknown> } | null {
   try {
     const raw = localStorage.getItem(`cove-default-filter-${mode}`);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw) as { findFilter?: FindFilter; objectFilter?: Record<string, unknown>; uiOptions?: Record<string, unknown> };
+    return { ...parsed, findFilter: normalizeSavedFindFilter(mode, parsed.findFilter) };
   } catch { return null; }
 }
 
@@ -79,7 +103,8 @@ export function SavedFilterMenu({
   const applyFilter = (findFilterJson: string | undefined, objectFilterJson?: string, uiOptionsJson?: string) => {
     if (!findFilterJson) return;
     try {
-      const parsed = JSON.parse(findFilterJson) as FindFilter;
+      const parsed = normalizeSavedFindFilter(mode, JSON.parse(findFilterJson) as FindFilter);
+      if (!parsed) return;
       onApplyFilter(parsed);
     } catch {
       // ignore invalid JSON

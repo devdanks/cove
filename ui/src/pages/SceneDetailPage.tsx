@@ -1,8 +1,8 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, scenes, segmentDisplayProfiles, tags, tagApplications, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata, fileOps } from "../api/client";
-import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay } from "../components/shared";
+import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay, CustomFieldsEditor } from "../components/shared";
 import { 
-  Pencil, Plus, Trash2, Search, Eye, EyeOff, Heart, ArrowLeft, ThumbsUp,
+  Pencil, Plus, Trash2, Search, Eye, EyeOff, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
   Gauge, Clapperboard, Monitor, FolderOpen, Layers,
   RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download, X,
@@ -21,6 +21,7 @@ import { createRouteLinkProps } from "../components/cardNavigation";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionEntityActions } from "../components/ExtensionEntityActions";
+import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission, hasAnyPermission } from "../auth/visibility";
@@ -457,7 +458,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         </button>
         {showOpsMenu && (
           <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] rounded-2xl border border-border bg-card py-1 shadow-lg">
-            {canWriteScene ? <button onClick={() => { setActiveTab("edit"); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
             {!file && canDownloadScene ? (
               <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Download className="h-3.5 w-3.5" /> Download Media…</button>
             ) : null}
@@ -518,11 +518,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       scene={scene}
       playCount={scenePlayCount}
       playDuration={scenePlayDuration}
-      favorite={sceneFavorite}
-      favoritePending={sceneFavoritePending}
-      setFavorite={setSceneFavorite}
-      likeCount={sceneLikeCount}
-      canEngageScene={canEngageScene}
     />
   ) : activeTab === "edit" ? (
     <SceneEditPanel scene={scene} onSaved={() => setActiveTab("details")} />
@@ -660,26 +655,17 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         onTabChange={(key) => setActiveTab(key as TabKey)}
         engagement={{
           primaryContent: <InteractiveRating value={sceneRating} onChange={(value) => setSceneRating(value)} readOnly={!canEngageScene} />,
+          favorite: sceneFavorite,
+          favoritePending: sceneFavoritePending,
+          onFavoriteChange: canEngageScene ? setSceneFavorite : undefined,
           additionalMetrics: [
-            {
-              label: "Plays",
-              value: scenePlayCount,
-              icon: <Eye className="h-4 w-4" />,
-            },
             {
               label: "Likes",
               value: sceneLikeCount,
               icon: <ThumbsUp className={["h-4 w-4", sceneLikeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />,
-              title: "Add like",
+              title: "Likes",
               onClick: canEngageScene ? () => incrementLikeMut.mutate() : undefined,
               active: sceneLikeCount > 0,
-            },
-            {
-              label: "Derived Likes",
-              value: sceneDerivedLikeCount,
-              icon: <ThumbsUp className={["h-4 w-4", sceneDerivedLikeCount > 0 ? "text-accent" : ""].join(" ")} />,
-              title: "Derived likes",
-              active: sceneDerivedLikeCount > 0,
             },
             {
               label: "Page Visits",
@@ -963,20 +949,6 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
         </div>
       )}
 
-      {/* Remote IDs */}
-      {scene.remoteIds && scene.remoteIds.length > 0 && (
-        <div>
-          <h6 className="text-sm text-muted mb-2">Remote IDs</h6>
-          <dl className="grid gap-y-1 text-sm" style={{ gridTemplateColumns: "auto 1fr" }}>
-            {scene.remoteIds.map((sid, i) => (
-              <Fragment key={i}>
-                <dt className="text-muted pr-3 truncate">{sid.endpoint}</dt>
-                <dd className="text-foreground font-mono text-xs break-all">{sid.remoteId}</dd>
-              </Fragment>
-            ))}
-          </dl>
-        </div>
-      )}
       <CustomFieldsDisplay customFields={scene.customFields} entityType="scene" />
     </div>
   );
@@ -1119,20 +1091,10 @@ function HistoryTab({
   scene,
   playCount,
   playDuration,
-  favorite,
-  favoritePending,
-  setFavorite,
-  likeCount,
-  canEngageScene,
 }: {
   scene: Scene;
   playCount: number;
   playDuration: number;
-  favorite: boolean;
-  favoritePending: boolean;
-  setFavorite: (isFavorite: boolean) => void;
-  likeCount: number;
-  canEngageScene: boolean;
 }) {
   const queryClient = useQueryClient();
   const { data: history } = useQuery({
@@ -1157,20 +1119,7 @@ function HistoryTab({
   });
 
   const btnCls = "rounded border border-border bg-card px-2 py-0.5 text-xs text-secondary hover:text-foreground hover:bg-card-hover";
-  const interactionLabel = (kind: string) => {
-    switch (kind) {
-      case "pause": return "Paused";
-      case "seek": return "Seeked";
-      case "likeCount": return "Liked";
-      case "pageVisit": return "Page visit";
-      case "derivedLike": return "Derived like";
-      case "hide": return "Backgrounded";
-      case "share": return "Shared";
-      default: return kind;
-    }
-  };
-  const timelineEvents = history?.events ?? [];
-  const totalNonDistinctWatchedSec = (history as { totalNonDistinctWatchedSec?: number } | undefined)?.totalNonDistinctWatchedSec;
+  const recentSessions = history?.sessions?.slice(0, 10) ?? [];
 
   return (
     <div className="space-y-6 text-sm">
@@ -1196,96 +1145,14 @@ function HistoryTab({
         )}
       </section>
 
-      {/* Favorite (boolean state) */}
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">Favorite</h3>
-          {canEngageScene ? (
-            <button
-              onClick={() => setFavorite(!favorite)}
-              disabled={favoritePending}
-              className="flex items-center gap-1.5 rounded border border-border bg-card px-2.5 py-1 text-xs text-secondary hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
-              title={favorite ? "Remove from favorites" : "Add to favorites"}
-            >
-              <Heart className={`w-3.5 h-3.5 ${favorite ? "fill-accent text-accent" : ""}`} />
-              <span>{favorite ? "Favorited" : "Favorite"}</span>
-            </button>
-          ) : (
-            <span className="flex items-center gap-1.5 rounded border border-border bg-card px-2.5 py-1 text-xs text-secondary">
-              <Heart className={`w-3.5 h-3.5 ${favorite ? "fill-accent text-accent" : ""}`} />
-              <span>{favorite ? "Favorited" : "Favorite"}</span>
-            </span>
-          )}
-        </div>
-        <div className="mb-2">
-          <span className="text-muted">Current state:</span> <span className="text-foreground">{favorite ? "Favorited" : "Not favorited"}</span>
-        </div>
-      </section>
-
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-muted uppercase tracking-wide">Likes</h3>
-          <div className="flex items-center gap-1.5 rounded border border-border bg-card px-2.5 py-1 text-xs text-secondary">
-            <ThumbsUp className={`w-3.5 h-3.5 ${likeCount > 0 ? "fill-accent text-accent" : ""}`} />
-            <span>{likeCount}</span>
-          </div>
-        </div>
-        <div className="mb-2">
-          <span className="text-muted">Count:</span> <span className="text-foreground">{likeCount}</span>
-        </div>
-        {history?.likeHistory && history.likeHistory.length > 0 && (
-          <div className="max-h-40 overflow-y-auto space-y-0.5 border-t border-border pt-2">
-            {history.likeHistory.map((date, i) => (
-              <div key={i} className="text-xs text-secondary">{new Date(date).toLocaleString()}</div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Watched Sections</h3>
-          <span className="text-xs text-secondary">{history?.allTimeWatchedIntervals?.length ?? 0} intervals</span>
-        </div>
-        {history?.allTimeWatchedIntervals && history.allTimeWatchedIntervals.length > 0 ? (
-          <>
-            {totalNonDistinctWatchedSec != null && (
-              <div className="mb-2 text-xs text-secondary">Total watched: {formatDuration(totalNonDistinctWatchedSec)}</div>
-            )}
-            {history.totalDistinctWatchedSec != null && (
-              <div className="mb-2 text-xs text-secondary">Total distinct: {formatDuration(history.totalDistinctWatchedSec)}</div>
-            )}
-          <div className="space-y-2 border-t border-border pt-3">
-            {history.allTimeWatchedIntervals.map((range, index) => (
-              <div key={`${range.startSec}-${range.endSec}-${index}`} className="rounded-lg border border-border/70 bg-surface/35 px-3 py-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium uppercase tracking-wide text-foreground">
-                      {formatDuration(range.startSec)} to {formatDuration(range.endSec)}
-                    </div>
-                    <div className="mt-1 text-xs text-secondary">
-                      Span {formatDuration(Math.max(0, range.endSec - range.startSec))}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-xs text-secondary">{new Date(range.recordedAt).toLocaleString()}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-          </>
-        ) : (
-          <div className="border-t border-border pt-3 text-xs text-secondary">No watched intervals recorded yet.</div>
-        )}
-      </section>
-
-      {history?.sessions && history.sessions.length > 0 && (
+      {recentSessions.length > 0 && (
         <section>
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Playback Sessions</h3>
-            <span className="text-xs text-secondary">{history.sessions.length} sessions</span>
+            <span className="text-xs text-secondary">{recentSessions.length}{(history?.sessions?.length ?? 0) > recentSessions.length ? ` of ${history?.sessions?.length ?? 0}` : ""} sessions</span>
           </div>
           <div className="space-y-3 border-t border-border pt-3">
-            {history.sessions.map((session) => (
+            {recentSessions.map((session) => (
               <div key={session.sessionId} className="rounded-lg border border-border/70 bg-surface/35 px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -1309,27 +1176,6 @@ function HistoryTab({
                     ))}
                   </div>
                 ) : null}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {timelineEvents.length > 0 && (
-        <section>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Interaction Timeline</h3>
-            <span className="text-xs text-secondary">{timelineEvents.length} events</span>
-          </div>
-          <div className="max-h-72 space-y-2 overflow-y-auto border-t border-border pt-3">
-            {timelineEvents.map((event, index) => (
-              <div key={`${event.at}-${event.kind}-${index}`} className="rounded-lg border border-border/70 bg-surface/35 px-3 py-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium uppercase tracking-wide text-foreground">{interactionLabel(event.kind)}</div>
-                  </div>
-                  <div className="shrink-0 text-xs text-secondary">{new Date(event.at).toLocaleString()}</div>
-                </div>
               </div>
             ))}
           </div>
@@ -2149,13 +1995,17 @@ function DetectionsPanel({
 // ===== Inline Scene Edit Panel =====
 function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void }) {
   const queryClient = useQueryClient();
+  const { config } = useAppConfig();
   const [title, setTitle] = useState(scene.title || "");
   const [code, setCode] = useState(scene.code || "");
   const [details, setDetails] = useState(scene.details || "");
   const [director, setDirector] = useState(scene.director || "");
   const [date, setDate] = useState(scene.date || "");
+  const [isVr, setIsVr] = useState(scene.isVr ?? false);
   const [rating, setRating] = useState<number | undefined>(undefined);
   const [urls, setUrls] = useState(scene.urls.length > 0 ? scene.urls : [""]);
+  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(scene.remoteIds?.length ? scene.remoteIds : []);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(scene.customFields ?? {}) });
   const [studioId, setStudioId] = useState<number | undefined>(scene.studioId ?? undefined);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(scene.tags.map((t) => t.id));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(scene.performers.map((p) => p.id));
@@ -2177,8 +2027,10 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
 
   useEffect(() => {
     setTitle(scene.title || ""); setCode(scene.code || ""); setDetails(scene.details || "");
-    setDirector(scene.director || ""); setDate(scene.date || ""); setRating(undefined);
+    setDirector(scene.director || ""); setDate(scene.date || ""); setIsVr(scene.isVr ?? false); setRating(undefined);
     setUrls(scene.urls.length > 0 ? scene.urls : [""]); setStudioId(scene.studioId ?? undefined);
+    setRemoteIds(scene.remoteIds?.length ? scene.remoteIds : []);
+    setCustomFields({ ...(scene.customFields ?? {}) });
     setSelectedTagIds(scene.tags.map((t) => t.id)); setSelectedPerformerIds(scene.performers.map((p) => p.id));
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
@@ -2198,8 +2050,9 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   const handleSave = () => {
     const urlList = urls.map((url) => url.trim()).filter(Boolean);
     mutation.mutate({ title: title || undefined, code: code || undefined, details: details || undefined,
-      director: director || undefined, date: date || undefined, rating, studioId,
-      urls: urlList, tagIds: selectedTagIds, performerIds: selectedPerformerIds, galleryIds: selectedGalleryIds, groups: selectedGroups });
+      director: director || undefined, date: date || undefined, isVr, rating, studioId,
+      urls: urlList, remoteIds: normalizeRemoteIds(remoteIds), customFields,
+      tagIds: selectedTagIds, performerIds: selectedPerformerIds, galleryIds: selectedGalleryIds, groups: selectedGroups });
   };
 
   const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, selectedTagIds);
@@ -2236,12 +2089,15 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
         <label className="space-y-1"><span className="text-xs text-secondary">Director</span><input value={director} onChange={(e) => setDirector(e.target.value)} className={inputCls} /></label>
       </div>
       <label className="block space-y-1"><span className="text-xs text-secondary">Details</span><textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={3} className={inputCls} /></label>
+      <label className="inline-flex items-center gap-2 text-sm text-secondary">
+        <input type="checkbox" checked={isVr} onChange={(e) => setIsVr(e.target.checked)} className="rounded border-border bg-card" />
+        VR
+      </label>
       <div className="space-y-1">
         <span className="text-xs text-secondary">Studio</span>
         <StudioSelector value={studioId} onChange={setStudioId} placeholder="Search studios..." />
       </div>
       <div className="space-y-1"><span className="text-xs text-secondary">URLs</span><StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" /></div>
-
       {/* Tags */}
       <div className="space-y-1">
         <span className="text-xs text-secondary">Tags</span>
@@ -2341,6 +2197,9 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
         <input value={groupSearch} onChange={(e) => setGroupSearch(e.target.value)} placeholder="Search groups…" className={inputCls} />
         {groupSearch && filteredGroupsList.length > 0 && <div className="max-h-24 overflow-y-auto bg-surface rounded border border-border">{filteredGroupsList.slice(0, 10).map((g) => <button key={g.id} onClick={() => { setSelectedGroups([...selectedGroups, { groupId: g.id, sceneIndex: 0 }]); setGroupSearch(""); }} className="block w-full text-left px-3 py-1 text-sm text-foreground hover:bg-card">{g.name}</button>)}</div>}
       </div>
+
+      <div className="space-y-1"><span className="text-xs text-secondary">Remote IDs</span><RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} metadataServers={config?.scraping?.metadataServers} /></div>
+      <div className="space-y-1"><span className="text-xs text-secondary">Custom Fields</span><CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" /></div>
 
       {mutation.error && <div className="bg-red-900/50 border border-red-700 text-red-300 rounded p-2 text-sm">{(mutation.error as Error).message}</div>}
 

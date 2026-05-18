@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries } from "../api/client";
 import type { EntityEngagement, FindFilter, Gallery, GalleryCreate, GalleryFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { InteractiveRatingField, RatingBanner } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -27,6 +26,7 @@ import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
 import { BookmarkButton } from "../components/BookmarkButton";
+import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -45,7 +45,7 @@ export function GalleriesPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("galleries");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, direction: "desc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -172,21 +172,10 @@ export function GalleriesPage({ onNavigate }: Props) {
       availableDisplayModes={["grid", "list", "wall"]}
       allowInfinitePageSize
       showPagingControls={!listData.infinitePageSize}
-      selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
-      onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
-      selectAllMatchingLabel={`Select all ${totalCount} matching`}
-      selectAllMatchingPending={selectAllMatchingPending}
-      infiniteScroll={listData.infinitePageSize ? {
-        hasNextPage: listData.infiniteQuery.hasNextPage,
-        hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
-        isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
-        isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
-        onLoadMore: listData.loadMore,
-        onLoadPrevious: listData.loadPrevious,
-        loadedCount: listData.infiniteQuery.loadedThroughCount,
-        previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
-        totalCount,
-      } : undefined}
+      selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
+      onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
+      selectAllMatchingLabel="Select shown"
+      infiniteScroll={listData.infiniteScroll}
       criteriaDefinitions={GALLERY_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
@@ -195,26 +184,39 @@ export function GalleriesPage({ onNavigate }: Props) {
       onWallColumnCountChange={setWallColumnCount}
 
       selectedIds={selectedIds}
-      onSelectAll={selectAll}
+      onSelectAll={listData.infinitePageSize ? handleSelectAllMatching : selectAll}
       onSelectNone={selectNone}
       onInvertSelection={invertSelection}
       selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} />}
     >
       {displayMode === "grid" ? (
-        <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
-          {items.map((g) => (
-            <GalleryTile key={g.id} gallery={g} engagement={engagementById.get(g.id)} onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "gallery", id: g.id })} onNavigate={onNavigate} selected={selectedIds.has(g.id)} onSelect={() => toggle(g.id)} selecting={selecting} />
-          ))}
-        </EntityCardGrid>
+        <VirtualizedEntityGrid
+          items={items}
+          getItemKey={(gallery) => gallery.id}
+          minCardWidth="var(--card-min-width, 200px)"
+          estimateRowHeight={260}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          renderItem={(g) => (
+            <GalleryTile gallery={g} engagement={engagementById.get(g.id)} onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "gallery", id: g.id })} onNavigate={onNavigate} selected={selectedIds.has(g.id)} onSelect={() => toggle(g.id)} selecting={selecting} />
+          )}
+        />
       ) : displayMode === "list" ? (
         <GalleryListTable galleries={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       ) : (
-        <div className="flex gap-2 px-2">
-          {wallColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="flex min-w-0 flex-1 flex-col gap-2">
-              {column.map((gallery) => (
+        <VirtualizedWallColumns
+          columns={wallColumns}
+          getItemKey={(gallery) => gallery.id}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          estimateItemHeight={220}
+          gap={8}
+          renderItem={(gallery) => (
                 <GalleryWallCard
-                  key={gallery.id}
                   gallery={gallery}
                   engagement={engagementById.get(gallery.id)}
                   onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })}
@@ -222,10 +224,8 @@ export function GalleriesPage({ onNavigate }: Props) {
                   onSelect={() => toggle(gallery.id)}
                   selecting={selecting}
                 />
-              ))}
-            </div>
-          ))}
-        </div>
+          )}
+        />
       )}
       {items.length === 0 && (
         <div className="text-center text-secondary py-16">

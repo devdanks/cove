@@ -359,7 +359,6 @@ export function SegmentsPage({ onNavigate }: Props) {
     queryFn: queryDerivedSpansPage,
     enabled: derivedQueryEnabled && infinitePageSize,
     chunkSize: defaultPerPage,
-    maxPages: Number.MAX_SAFE_INTEGER,
   });
 
   const rawInfiniteQuery = usePaginatedInfiniteQuery<RawSegmentItem>({
@@ -367,8 +366,20 @@ export function SegmentsPage({ onNavigate }: Props) {
     queryFn: queryRawSegmentsPage,
     enabled: rawQueryEnabled && infinitePageSize,
     chunkSize: defaultPerPage,
-    maxPages: Number.MAX_SAFE_INTEGER,
   });
+
+  const loadMoreSegments = useCallback(() => {
+    if (isRawView) {
+      if (rawInfiniteQuery.hasNextPage && !rawInfiniteQuery.isFetchingNextPage) {
+        void rawInfiniteQuery.fetchNextPage();
+      }
+      return;
+    }
+
+    if (derivedInfiniteQuery.hasNextPage && !derivedInfiniteQuery.isFetchingNextPage) {
+      void derivedInfiniteQuery.fetchNextPage();
+    }
+  }, [derivedInfiniteQuery.fetchNextPage, derivedInfiniteQuery.hasNextPage, derivedInfiniteQuery.isFetchingNextPage, isRawView, rawInfiniteQuery.fetchNextPage, rawInfiniteQuery.hasNextPage, rawInfiniteQuery.isFetchingNextPage]);
 
   const spanItems = infinitePageSize ? derivedInfiniteQuery.items : segmentsWindowQuery.data?.items ?? [];
   const rawItems = infinitePageSize ? rawInfiniteQuery.items : rawSegmentsQuery.data?.items ?? [];
@@ -497,25 +508,14 @@ export function SegmentsPage({ onNavigate }: Props) {
         availableDisplayModes={["grid", "list"]}
         allowInfinitePageSize
         showPagingControls={!infinitePageSize}
-        selectAllLabel={infinitePageSize ? "Select loaded" : undefined}
-        onSelectAllMatching={infinitePageSize ? handleSelectAllMatching : undefined}
-        selectAllMatchingLabel={`Select all ${totalCount} matching`}
-        selectAllMatchingPending={selectAllMatchingPending}
+        selectAllPending={infinitePageSize ? selectAllMatchingPending : false}
+        onSelectAllMatching={infinitePageSize ? selectAll : undefined}
+        selectAllMatchingLabel="Select shown"
         infiniteScroll={infinitePageSize ? {
           hasNextPage: isRawView ? rawInfiniteQuery.hasNextPage : derivedInfiniteQuery.hasNextPage,
-          hasPreviousPage: isRawView ? rawInfiniteQuery.hasPreviousPage : derivedInfiniteQuery.hasPreviousPage,
           isFetchingNextPage: isRawView ? rawInfiniteQuery.isFetchingNextPage : derivedInfiniteQuery.isFetchingNextPage,
-          isFetchingPreviousPage: isRawView ? rawInfiniteQuery.isFetchingPreviousPage : derivedInfiniteQuery.isFetchingPreviousPage,
-          onLoadMore: () => {
-            if (isRawView) void rawInfiniteQuery.fetchNextPage();
-            else void derivedInfiniteQuery.fetchNextPage();
-          },
-          onLoadPrevious: () => {
-            if (isRawView) return rawInfiniteQuery.fetchPreviousPage();
-            return derivedInfiniteQuery.fetchPreviousPage();
-          },
+          onLoadMore: loadMoreSegments,
           loadedCount: isRawView ? rawInfiniteQuery.loadedThroughCount : derivedInfiniteQuery.loadedThroughCount,
-          previousLoadedCount: isRawView ? rawInfiniteQuery.firstLoadedIndex : derivedInfiniteQuery.firstLoadedIndex,
           totalCount,
         } : undefined}
         criteriaDefinitions={SEGMENT_CRITERIA}
@@ -568,7 +568,7 @@ export function SegmentsPage({ onNavigate }: Props) {
           </div>
         )}
         selectedIds={selectedIds}
-        onSelectAll={selectAll}
+        onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll}
         onSelectNone={handleSelectNone}
         onInvertSelection={invertSelection}
         selectionActions={
@@ -616,6 +616,10 @@ export function SegmentsPage({ onNavigate }: Props) {
           selectedIds={selectedIds}
           onToggle={toggle}
           selecting={selecting}
+          infinitePageSize={infinitePageSize}
+          hasNextPage={isRawView ? rawInfiniteQuery.hasNextPage : derivedInfiniteQuery.hasNextPage}
+          isFetchingNextPage={isRawView ? rawInfiniteQuery.isFetchingNextPage : derivedInfiniteQuery.isFetchingNextPage}
+          loadMore={loadMoreSegments}
         />
       </ListPage>
       <ConfirmDialog

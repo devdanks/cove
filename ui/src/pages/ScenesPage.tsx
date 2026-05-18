@@ -14,9 +14,9 @@ import { CustomFieldsEditor, formatDuration, formatFileSize, getResolutionLabel,
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
-import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX } from "lucide-react";
+import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX, ThumbsUp } from "lucide-react";
 import { useSceneQueue } from "../state/SceneQueueContext";
-import { SceneCard } from "../components/EntityCards";
+import { CardFavoriteButton, SceneCard } from "../components/EntityCards";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity, hasAnyPermission } from "../auth/visibility";
@@ -34,7 +34,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FileBackedCreateSource, type CreateSourceMode } from "../components/FileBackedCreateSource";
 import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundError, type UrlDownloadMode } from "../utils/createFromUrlDownload";
 import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
-import { InfiniteScrollSentinel } from "../components/InfiniteScrollSentinel";
+import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
+import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -63,23 +64,8 @@ const SEARCH_MODE_OPTIONS = [
 
 const VISUAL_MATCH_SORT_OPTION = { value: "visual_match", label: "Visual Match" };
 const INCLUDE_COMPILATIONS_FILTER_KEY = "includeCompilationGroups";
+const IS_VR_FILTER_KEY = "isVrCriterion";
 const VERTICAL_PORTRAIT_FILTER_KEY = "orientationCriterion";
-const VISIBILITY_THRESHOLDS = [0, 0.1, 0.25, 0.5, 0.7, 0.85, 1];
-
-function getVisibleAreaRatio(element: HTMLElement, root?: HTMLElement | null) {
-  const rect = element.getBoundingClientRect();
-  const rootRect = root?.getBoundingClientRect() ?? { top: 0, left: 0, right: window.innerWidth, bottom: window.innerHeight };
-  const width = Math.max(0, Math.min(rect.right, rootRect.right) - Math.max(rect.left, rootRect.left));
-  const height = Math.max(0, Math.min(rect.bottom, rootRect.bottom) - Math.max(rect.top, rootRect.top));
-  return (width * height) / Math.max(1, rect.width * rect.height);
-}
-
-function getSceneIdFromData(element: HTMLElement, key: "feedSceneId" | "verticalSceneId") {
-  const raw = element.dataset[key];
-  if (!raw) return null;
-  const id = Number(raw);
-  return Number.isFinite(id) ? id : null;
-}
 
 function isIncludeCompilationGroupsEnabled(value: unknown) {
   if (typeof value === "boolean") {
@@ -97,7 +83,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("scenes");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, direction: "desc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -133,10 +119,11 @@ export function ScenesPage({ onNavigate }: Props) {
   const [verticalAutoScrollSeconds, setVerticalAutoScrollSeconds] = useState(8);
   const [verticalAutoScrollAwake, setVerticalAutoScrollAwake] = useState(true);
   const [feedAudioSceneId, setFeedAudioSceneId] = useState<number | null>(null);
+  const [activeFeedSceneId, setActiveFeedSceneId] = useState<number | null>(null);
   const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
   const queryClient = useQueryClient();
   const { setQueue } = useSceneQueue();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const { config } = useAppConfig();
   const canWriteScene = canWriteEntity("scene", hasPermission);
   const canDeleteScene = canDeleteEntity("scene", hasPermission);
@@ -148,6 +135,9 @@ export function ScenesPage({ onNavigate }: Props) {
   const feedVideoStartPercent = config?.ui.feedVideoStartPercent ?? 0;
   const feedVideoStartMinDuration = config?.ui.feedVideoStartMinDuration ?? 0;
   const infiniteOnlyDisplayMode = displayMode === "feed" || displayMode === "vertical";
+  const verticalItemHeight = verticalFullscreen
+    ? (typeof window !== "undefined" ? window.innerHeight : 720)
+    : (verticalViewerHeight ?? (typeof window !== "undefined" ? window.innerHeight : 720));
 
   useEffect(() => {
     if (displayMode !== "vertical") {
@@ -248,13 +238,22 @@ export function ScenesPage({ onNavigate }: Props) {
     return { ...objectFilter, [INCLUDE_COMPILATIONS_FILTER_KEY]: { value: includeValue } satisfies BoolCriterion };
   }, [objectFilter]);
 
+  const effectiveObjectFilter = useMemo(() => {
+    if (user?.uiPreferences?.scenes?.excludeVr !== true || normalizedObjectFilter[IS_VR_FILTER_KEY]) {
+      return normalizedObjectFilter;
+    }
+
+    return { ...normalizedObjectFilter, [IS_VR_FILTER_KEY]: { value: false } satisfies BoolCriterion };
+  }, [normalizedObjectFilter, user?.uiPreferences?.scenes?.excludeVr]);
+
   const backendObjectFilter = useMemo(() => Object.fromEntries(
-    Object.entries(normalizedObjectFilter).filter(([key]) => key !== INCLUDE_COMPILATIONS_FILTER_KEY),
-  ), [normalizedObjectFilter]);
+    Object.entries(effectiveObjectFilter).filter(([key]) => key !== INCLUDE_COMPILATIONS_FILTER_KEY),
+  ), [effectiveObjectFilter]);
   const hasObjectFilter = Object.keys(backendObjectFilter).length > 0;
   const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
   const infinitePageSize = filter.perPage === 0 || infiniteOnlyDisplayMode;
-  const infiniteChunkSize = defaultState.filter.perPage ?? 40;
+  const defaultInfiniteChunkSize = defaultState.filter.perPage && defaultState.filter.perPage > 0 ? defaultState.filter.perPage : 40;
+  const infiniteChunkSize = displayMode === "vertical" ? 6 : displayMode === "feed" ? 10 : defaultInfiniteChunkSize;
   const infiniteFilterKey = useMemo(
     () => ({ ...filter, page: 1, perPage: infiniteChunkSize }),
     [filter, infiniteChunkSize],
@@ -354,7 +353,6 @@ export function ScenesPage({ onNavigate }: Props) {
     : (data?.items ?? []).map((scene) => ({ kind: "scene" as const, id: scene.id, scene }));
   const defaultItems = defaultListEntries.flatMap((entry) => entry.kind === "scene" && entry.scene ? [entry.scene] : []);
   const items = infinitePageSize ? infiniteScenesQuery.items : defaultItems;
-  const itemIdsKey = useMemo(() => items.map((scene) => scene.id).join(","), [items]);
   const listEntries = infinitePageSize
     ? items.map((scene) => ({ kind: "scene" as const, id: scene.id, scene }))
     : defaultListEntries;
@@ -369,127 +367,21 @@ export function ScenesPage({ onNavigate }: Props) {
       void infiniteScenesQuery.fetchNextPage();
     }
   }, [infiniteScenesQuery.fetchNextPage, infiniteScenesQuery.hasNextPage, infiniteScenesQuery.isFetchingNextPage]);
-  const loadPreviousScenes = useCallback((container?: HTMLElement | null) => {
-    if (!infiniteScenesQuery.hasPreviousPage || infiniteScenesQuery.isFetchingPreviousPage) {
-      return;
-    }
-
-    const beforeHeight = container?.scrollHeight ?? document.documentElement.scrollHeight;
-    const beforeTop = container?.scrollTop ?? window.scrollY;
-    void infiniteScenesQuery.fetchPreviousPage().then(() => {
-      window.requestAnimationFrame(() => {
-        const afterHeight = container?.scrollHeight ?? document.documentElement.scrollHeight;
-        const nextTop = beforeTop + (afterHeight - beforeHeight);
-        if (container) {
-          container.scrollTop = nextTop;
-        } else {
-          window.scrollTo({ top: nextTop });
-        }
-      });
-    });
-  }, [infiniteScenesQuery.fetchPreviousPage, infiniteScenesQuery.hasPreviousPage, infiniteScenesQuery.isFetchingPreviousPage]);
 
   useEffect(() => {
-    if (displayMode !== "feed" || !feedVideoSound) {
+    if (displayMode !== "feed") {
+      setActiveFeedSceneId(null);
       setFeedAudioSceneId(null);
       return;
     }
-
-    const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-feed-scene-id]"));
-    if (elements.length === 0) {
-      setFeedAudioSceneId(null);
-      return;
-    }
-
-    const ratios = new Map<number, number>();
-    const selectBestVisible = () => {
-      let bestId: number | null = null;
-      let bestRatio = 0;
-      for (const [id, ratio] of ratios) {
-        if (ratio > bestRatio) {
-          bestId = id;
-          bestRatio = ratio;
-        }
-      }
-      setFeedAudioSceneId((current) => current === bestId ? current : bestId);
-    };
-
-    const seedRatios = () => {
-      for (const element of elements) {
-        const id = getSceneIdFromData(element, "feedSceneId");
-        if (id != null) ratios.set(id, getVisibleAreaRatio(element));
-      }
-      selectBestVisible();
-    };
-
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const id = getSceneIdFromData(entry.target as HTMLElement, "feedSceneId");
-        if (id != null) ratios.set(id, entry.isIntersecting ? entry.intersectionRatio : 0);
-      }
-      selectBestVisible();
-    }, { root: null, rootMargin: "-10% 0px -25% 0px", threshold: VISIBILITY_THRESHOLDS });
-
-    for (const element of elements) observer.observe(element);
-    const frameId = window.requestAnimationFrame(seedRatios);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      observer.disconnect();
-    };
-  }, [displayMode, feedVideoSound, itemIdsKey]);
+    if (!feedVideoSound) setFeedAudioSceneId(null);
+  }, [displayMode, feedVideoSound]);
 
   useEffect(() => {
     if (displayMode !== "vertical") {
       setActiveVerticalSceneId(null);
-      return;
     }
-
-    const root = verticalViewerRef.current;
-    if (!root) return;
-    const elements = Array.from(root.querySelectorAll<HTMLElement>("[data-vertical-scene-id]"));
-    if (elements.length === 0) {
-      setActiveVerticalSceneId(null);
-      return;
-    }
-
-    const ratios = new Map<number, number>();
-    const selectBestVisible = () => {
-      let bestId: number | null = null;
-      let bestRatio = 0;
-      for (const [id, ratio] of ratios) {
-        if (ratio > bestRatio) {
-          bestId = id;
-          bestRatio = ratio;
-        }
-      }
-      setActiveVerticalSceneId((current) => current === bestId ? current : bestId);
-    };
-
-    const seedRatios = () => {
-      for (const element of elements) {
-        const id = getSceneIdFromData(element, "verticalSceneId");
-        if (id != null) ratios.set(id, getVisibleAreaRatio(element, root));
-      }
-      selectBestVisible();
-    };
-
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const id = getSceneIdFromData(entry.target as HTMLElement, "verticalSceneId");
-        if (id != null) ratios.set(id, entry.isIntersecting ? entry.intersectionRatio : 0);
-      }
-      selectBestVisible();
-    }, { root, threshold: VISIBILITY_THRESHOLDS });
-
-    for (const element of elements) observer.observe(element);
-    const frameId = window.requestAnimationFrame(seedRatios);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      observer.disconnect();
-    };
-  }, [displayMode, itemIdsKey, verticalFullscreen]);
+  }, [displayMode]);
 
   useEffect(() => {
     if (displayMode !== "vertical" || !verticalAutoScrollEnabled || activeVerticalSceneId == null) {
@@ -499,18 +391,17 @@ export function ScenesPage({ onNavigate }: Props) {
     const timeoutId = window.setTimeout(() => {
       const root = verticalViewerRef.current;
       if (!root) return;
-      const elements = Array.from(root.querySelectorAll<HTMLElement>("[data-vertical-scene-id]"));
-      const currentIndex = elements.findIndex((element) => getSceneIdFromData(element, "verticalSceneId") === activeVerticalSceneId);
-      const nextElement = currentIndex >= 0 ? elements[currentIndex + 1] : elements[0];
-      if (!nextElement) {
+      const currentIndex = items.findIndex((scene) => scene.id === activeVerticalSceneId);
+      const nextIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+      if (nextIndex >= items.length) {
         setVerticalAutoScrollEnabled(false);
         return;
       }
-      root.scrollTo({ top: nextElement.offsetTop, behavior: "smooth" });
+      root.scrollTo({ top: nextIndex * verticalItemHeight, behavior: "smooth" });
     }, verticalAutoScrollSeconds * 1000);
 
     return () => window.clearTimeout(timeoutId);
-  }, [activeVerticalSceneId, displayMode, itemIdsKey, verticalAutoScrollEnabled, verticalAutoScrollSeconds]);
+  }, [activeVerticalSceneId, displayMode, items, verticalAutoScrollEnabled, verticalAutoScrollSeconds, verticalItemHeight]);
   const { engagementById } = useEntityEngagementBatch("scene", items.map((item) => item.id));
   const wallColumns = useWallColumns(items, wallColumnCount, (scene) => {
     const file = scene.files[0];
@@ -613,6 +504,7 @@ export function ScenesPage({ onNavigate }: Props) {
   }, [items]);
   const verticalOverlayTop = verticalFullscreen ? 12 : Math.max(12, verticalViewerTop + 12);
   const verticalViewerStyle = verticalFullscreen ? undefined : { height: verticalViewerHeight != null ? `${verticalViewerHeight}px` : "calc(100dvh - 10rem)" };
+  const verticalActiveIndex = useMemo(() => items.findIndex((scene) => scene.id === activeVerticalSceneId), [items, activeVerticalSceneId]);
 
   return (
     <>
@@ -674,16 +566,22 @@ export function ScenesPage({ onNavigate }: Props) {
       onObjectFilterChange={setObjectFilter}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
+      infiniteScroll={infinitePageSize ? {
+        hasNextPage: Boolean(infiniteScenesQuery.hasNextPage),
+        isFetchingNextPage: infiniteScenesQuery.isFetchingNextPage,
+        onLoadMore: loadMoreScenes,
+        loadedCount: infiniteScenesQuery.loadedThroughCount,
+        totalCount: infiniteScenesQuery.totalCount,
+      } : undefined}
       autoScrollContainerRef={displayMode === "vertical" ? verticalViewerRef : undefined}
       showAutoScrollControls={displayMode !== "vertical"}
       showPagingControls={!infinitePageSize}
-      selectAllLabel={infinitePageSize ? "Select loaded" : undefined}
-      onSelectAllMatching={infinitePageSize ? handleSelectAllMatching : undefined}
-      selectAllMatchingLabel={`Select all ${totalCount ?? 0} matching`}
-      selectAllMatchingPending={selectAllMatchingPending}
+      onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll}
+      selectAllPending={infinitePageSize ? selectAllMatchingPending : false}
+      onSelectAllMatching={infinitePageSize ? selectAll : undefined}
+      selectAllMatchingLabel="Select shown"
       onNew={canWriteScene ? () => setShowCreate(true) : undefined}
       selectedIds={selectedIds}
-      onSelectAll={selectAll}
       onSelectNone={selectNone}
       onInvertSelection={invertSelection}
       selectionActions={
@@ -840,149 +738,147 @@ export function ScenesPage({ onNavigate }: Props) {
               ? "fixed inset-0 z-[80] h-[100dvh] snap-y snap-mandatory overflow-y-auto bg-black px-0 py-0"
               : "relative -mx-3 -mb-5 snap-y snap-mandatory overflow-y-auto bg-black px-0 py-0 sm:-mx-4 md:-mx-6"}
           >
-            {infinitePageSize && items.length > 0 && (infiniteScenesQuery.hasPreviousPage || infiniteScenesQuery.isFetchingPreviousPage) && (
-              <InfiniteScrollSentinel
-                direction="previous"
-                hasMore={Boolean(infiniteScenesQuery.hasPreviousPage)}
-                isLoading={infiniteScenesQuery.isFetchingPreviousPage}
-                onLoadMore={() => loadPreviousScenes(verticalViewerRef.current)}
-                loadedCount={infiniteScenesQuery.firstLoadedIndex}
-                totalCount={infiniteScenesQuery.totalCount}
-                className="snap-start pt-2 text-white/70"
-              />
-            )}
-            {items.map((scene) => (
-              <SceneVerticalViewerCard
-                key={scene.id}
-                scene={scene}
-                feedVideoSource={feedVideoSource}
-                soundEnabled={verticalSoundEnabled}
-                onToggleSound={() => setVerticalSoundEnabled((current) => !current)}
-                feedVideoStartPercent={feedVideoStartPercent}
-                feedVideoStartMinDuration={feedVideoStartMinDuration}
-                fullscreen={verticalFullscreen}
-                viewerHeight={verticalViewerHeight}
-                selected={selectedIds.has(scene.id)}
-                selecting={selecting}
-                onSelect={() => toggle(scene.id)}
-                onNavigate={navigateToScene}
-              />
-            ))}
-            {infinitePageSize && items.length > 0 && (infiniteScenesQuery.hasNextPage || infiniteScenesQuery.isFetchingNextPage) && (
-              <InfiniteScrollSentinel
-                hasMore={Boolean(infiniteScenesQuery.hasNextPage)}
-                isLoading={infiniteScenesQuery.isFetchingNextPage}
-                onLoadMore={loadMoreScenes}
-                loadedCount={infiniteScenesQuery.loadedThroughCount}
-                totalCount={infiniteScenesQuery.totalCount}
-                className="snap-start pb-2 text-white/70"
-              />
-            )}
+            <VirtualizedInfiniteList
+              items={items}
+              getItemKey={(scene) => scene.id}
+              estimateSize={verticalItemHeight}
+              overscan={2}
+              hasNextPage={Boolean(infiniteScenesQuery.hasNextPage)}
+              isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
+              loadMore={loadMoreScenes}
+              scrollElementRef={verticalViewerRef}
+              onActiveIndexChange={(idx) => setActiveVerticalSceneId(idx == null ? null : items[idx]?.id ?? null)}
+              itemClassName="snap-start"
+              renderItem={({ item: scene, index }) => (
+                <SceneVerticalViewerCard
+                  scene={scene}
+                  useVideo={verticalActiveIndex < 0 ? index === 0 : Math.abs(index - verticalActiveIndex) <= 1}
+                  feedVideoSource={feedVideoSource}
+                  soundEnabled={verticalSoundEnabled && scene.id === activeVerticalSceneId}
+                  onToggleSound={() => setVerticalSoundEnabled((current) => !current)}
+                  feedVideoStartPercent={feedVideoStartPercent}
+                  feedVideoStartMinDuration={feedVideoStartMinDuration}
+                  fullscreen={verticalFullscreen}
+                  viewerHeight={verticalViewerHeight}
+                  selected={selectedIds.has(scene.id)}
+                  selecting={selecting}
+                  onSelect={() => toggle(scene.id)}
+                  onNavigate={navigateToScene}
+                />
+              )}
+            />
           </div>
         </>
       )}
       {displayMode === "feed" && (
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 px-2">
-          {infinitePageSize && items.length > 0 && (
-            <InfiniteScrollSentinel
-              direction="previous"
-              hasMore={Boolean(infiniteScenesQuery.hasPreviousPage)}
-              isLoading={infiniteScenesQuery.isFetchingPreviousPage}
-              onLoadMore={() => loadPreviousScenes()}
-              loadedCount={infiniteScenesQuery.firstLoadedIndex}
-              totalCount={infiniteScenesQuery.totalCount}
-            />
-          )}
-          {items.map((scene) => (
-            <SceneFeedCard
-              key={scene.id}
-              scene={scene}
-              engagement={engagementById.get(scene.id)}
-              feedVideoSource={feedVideoSource}
-              feedVideoStartPercent={feedVideoStartPercent}
-              feedVideoStartMinDuration={feedVideoStartMinDuration}
-              soundEnabled={feedAudioSceneId === scene.id}
-              onToggleSound={() => setFeedAudioSceneId((current) => current === scene.id ? null : scene.id)}
-              onNavigate={onNavigate}
-              selected={selectedIds.has(scene.id)}
-              selecting={selecting}
-              onSelect={() => toggle(scene.id)}
-            />
-          ))}
-          {infinitePageSize && items.length > 0 && (
-            <InfiniteScrollSentinel
-              hasMore={Boolean(infiniteScenesQuery.hasNextPage)}
-              isLoading={infiniteScenesQuery.isFetchingNextPage}
-              onLoadMore={loadMoreScenes}
-              loadedCount={infiniteScenesQuery.loadedThroughCount}
-              totalCount={infiniteScenesQuery.totalCount}
-            />
-          )}
+        <div className="mx-auto max-w-5xl px-2">
+          <VirtualizedInfiniteList
+            items={items}
+            getItemKey={(scene) => scene.id}
+            estimateSize={760}
+            overscan={2}
+            hasNextPage={Boolean(infiniteScenesQuery.hasNextPage)}
+            isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
+            loadMore={loadMoreScenes}
+            onActiveIndexChange={(idx) => {
+              const id = idx == null ? null : items[idx]?.id ?? null;
+              setActiveFeedSceneId(id);
+              if (feedVideoSound) setFeedAudioSceneId(id);
+            }}
+            itemClassName="pb-4"
+            renderItem={({ item: scene }) => (
+              <SceneFeedCard
+                scene={scene}
+                useVideo={true}
+                engagement={engagementById.get(scene.id)}
+                feedVideoSource={feedVideoSource}
+                feedVideoStartPercent={feedVideoStartPercent}
+                feedVideoStartMinDuration={feedVideoStartMinDuration}
+                soundEnabled={feedAudioSceneId === scene.id}
+                onToggleSound={() => setFeedAudioSceneId((current) => current === scene.id ? null : scene.id)}
+                onNavigate={onNavigate}
+                selected={selectedIds.has(scene.id)}
+                selecting={selecting}
+                onSelect={() => toggle(scene.id)}
+              />
+            )}
+          />
         </div>
       )}
-      {infinitePageSize && displayMode !== "feed" && displayMode !== "vertical" && items.length > 0 && (infiniteScenesQuery.hasPreviousPage || infiniteScenesQuery.isFetchingPreviousPage) && (
-        <InfiniteScrollSentinel
-          direction="previous"
-          hasMore={Boolean(infiniteScenesQuery.hasPreviousPage)}
-          isLoading={infiniteScenesQuery.isFetchingPreviousPage}
-          onLoadMore={() => loadPreviousScenes()}
-          loadedCount={infiniteScenesQuery.firstLoadedIndex}
-          totalCount={infiniteScenesQuery.totalCount}
-          className="pt-2"
-        />
-      )}
       {displayMode === "grid" && (
-        <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
-          {listEntries.map((entry) => entry.kind === "compilation" && entry.group ? (
-            <CompilationGroupCard key={`compilation-${entry.group.id}`} group={entry.group} onNavigate={onNavigate} />
-          ) : entry.scene ? (
-            <SceneCard
-              key={`scene-${entry.scene.id}`}
-              scene={entry.scene}
-              engagement={engagementById.get(entry.scene.id)}
-              onClick={() => selecting ? toggle(entry.scene!.id) : navigateToScene(entry.scene!.id)}
-              onNavigate={onNavigate}
-              selected={selectedIds.has(entry.scene.id)}
-              onSelect={() => toggle(entry.scene!.id)}
-              selecting={selecting}
-              onQuickView={() => setQuickViewId(entry.scene!.id)}
-            />
-          ) : null)}
-        </EntityCardGrid>
+        infinitePageSize ? (
+          <VirtualizedEntityGrid
+            items={items}
+            getItemKey={(s) => s.id}
+            minCardWidth="var(--card-min-width, 200px)"
+            gap={12}
+            estimateRowHeight={320}
+            overscan={3}
+            infinitePageSize={infinitePageSize}
+            hasNextPage={infiniteScenesQuery.hasNextPage}
+            isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
+            loadMore={loadMoreScenes}
+            renderItem={(scene) => (
+              <SceneCard
+                scene={scene}
+                engagement={engagementById.get(scene.id)}
+                onClick={() => selecting ? toggle(scene.id) : navigateToScene(scene.id)}
+                onNavigate={onNavigate}
+                selected={selectedIds.has(scene.id)}
+                onSelect={() => toggle(scene.id)}
+                selecting={selecting}
+                onQuickView={() => setQuickViewId(scene.id)}
+              />
+            )}
+          />
+        ) : (
+          <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
+            {listEntries.map((entry) => entry.kind === "compilation" && entry.group ? (
+              <CompilationGroupCard key={`compilation-${entry.group.id}`} group={entry.group} onNavigate={onNavigate} />
+            ) : entry.scene ? (
+              <SceneCard
+                key={`scene-${entry.scene.id}`}
+                scene={entry.scene}
+                engagement={engagementById.get(entry.scene.id)}
+                onClick={() => selecting ? toggle(entry.scene!.id) : navigateToScene(entry.scene!.id)}
+                onNavigate={onNavigate}
+                selected={selectedIds.has(entry.scene.id)}
+                onSelect={() => toggle(entry.scene!.id)}
+                selecting={selecting}
+                onQuickView={() => setQuickViewId(entry.scene!.id)}
+              />
+            ) : null)}
+          </EntityCardGrid>
+        )
       )}
       {displayMode === "list" && (
         <SceneListTable entries={listEntries} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}
       {displayMode === "wall" && (
-        <div className="flex gap-1 px-2">
-          {wallColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="flex-1 flex flex-col gap-1 min-w-0">
-              {column.map((scene) => (
+        <VirtualizedWallColumns
+          columns={wallColumns}
+          getItemKey={(scene) => scene.id}
+          infinitePageSize={infinitePageSize}
+          hasNextPage={infiniteScenesQuery.hasNextPage}
+          isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
+          loadMore={loadMoreScenes}
+          estimateItemHeight={260}
+          gap={4}
+          className="flex gap-1 px-2"
+          columnClassName="flex-1 flex flex-col gap-1 min-w-0"
+          renderItem={(scene) => (
                 <SceneWallCard
-                  key={scene.id}
                   scene={scene}
                   onClick={() => selecting ? toggle(scene.id) : navigateToScene(scene.id)}
                   selected={selectedIds.has(scene.id)}
                   selecting={selecting}
                   onSelect={() => toggle(scene.id)}
                 />
-              ))}
-            </div>
-          ))}
-        </div>
+          )}
+        />
       )}
       {displayMode === "tagger" && (
         <SceneTagger scenes={items} onNavigate={navigateToScene} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
-      )}
-      {infinitePageSize && displayMode !== "feed" && displayMode !== "vertical" && items.length > 0 && (
-        <InfiniteScrollSentinel
-          hasMore={Boolean(infiniteScenesQuery.hasNextPage)}
-          isLoading={infiniteScenesQuery.isFetchingNextPage}
-          onLoadMore={loadMoreScenes}
-          loadedCount={infiniteScenesQuery.loadedThroughCount}
-          totalCount={infiniteScenesQuery.totalCount}
-          className="pb-2"
-        />
       )}
       {listEntries.length === 0 && !loading && (
         <div className="text-center py-20">
@@ -1050,6 +946,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   const [director, setDirector] = useState("");
   const [rating, setRating] = useState<number | undefined>(undefined);
   const [organized, setOrganized] = useState(false);
+  const [isVr, setIsVr] = useState(false);
   const [urls, setUrls] = useState<string[]>([""]);
   const [studioId, setStudioId] = useState<number | undefined>(undefined);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
@@ -1093,6 +990,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     setDirector("");
     setRating(undefined);
     setOrganized(false);
+    setIsVr(false);
     setUrls([""]);
     setStudioId(undefined);
     setCustomFields({});
@@ -1157,6 +1055,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     director: director || undefined,
     rating,
     organized,
+    isVr,
     studioId,
     urls: mergeUrlLists(urls, extraUrls),
     tagIds: selectedTags.map((t) => t.id),
@@ -1259,15 +1158,26 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         <StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" />
       </Field>
 
-      <label className="flex items-center gap-2 text-sm mb-2">
-        <input
-          type="checkbox"
-          checked={organized}
-          onChange={(e) => setOrganized(e.target.checked)}
-          className="rounded bg-card border-border"
-        />
-        Organized
-      </label>
+      <div className="mb-2 flex flex-wrap items-center gap-4 text-sm">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={organized}
+            onChange={(e) => setOrganized(e.target.checked)}
+            className="rounded bg-card border-border"
+          />
+          Organized
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={isVr}
+            onChange={(e) => setIsVr(e.target.checked)}
+            className="rounded bg-card border-border"
+          />
+          VR
+        </label>
+      </div>
 
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
@@ -1587,7 +1497,7 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
   );
 }
 
-function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
   const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
   const title = scene.title || file?.basename || `Scene ${scene.id}`;
@@ -1597,6 +1507,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onTog
   const mediaIsPortrait = Boolean(mediaStyle);
   const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
   const visitCount = engagement?.pageVisitCount ?? 0;
+  const likeCount = engagement?.likeCount ?? 0;
 
   return (
     <FeedCardFrame
@@ -1616,6 +1527,13 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onTog
             {engagement?.rating != null ? <RatingBadge rating={engagement.rating} /> : "Unrated"}
           </span>
           <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+            <ThumbsUp className={["h-3.5 w-3.5", likeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />
+            {likeCount}
+          </span>
+          {typeof engagement?.isFavorite === "boolean" ? (
+            <CardFavoriteButton hostType="scene" hostId={scene.id} favorite={engagement.isFavorite} />
+          ) : null}
+          <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
             <Eye className="h-3.5 w-3.5" />
             {visitCount}
           </span>
@@ -1627,7 +1545,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onTog
           imageSrc={coverUrl}
           videoSrc={videoSrc}
           videoStatusSrc={videoStatusSrc}
-          useVideo
+          useVideo={useVideo}
           muted={!soundEnabled}
           videoStartTimeSec={videoStartTimeSec}
           videoPlayThreshold={0.65}
@@ -1695,7 +1613,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, soundEnabled, onTog
   );
 }
 
-function SceneVerticalViewerCard({ scene, feedVideoSource, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, fullscreen, viewerHeight, onNavigate, selected, selecting, onSelect }: { scene: Scene; feedVideoSource: string; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; fullscreen: boolean; viewerHeight: number | null; onNavigate: (sceneId: number) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, fullscreen, viewerHeight, onNavigate, selected, selecting, onSelect }: { scene: Scene; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; fullscreen: boolean; viewerHeight: number | null; onNavigate: (sceneId: number) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
   const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
   const title = scene.title || file?.basename || `Scene ${scene.id}`;
@@ -1710,7 +1628,7 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, soundEnabled, onToggl
         imageSrc={coverUrl}
         videoSrc={videoSrc}
         videoStatusSrc={videoStatusSrc}
-        useVideo
+        useVideo={useVideo}
         muted={!soundEnabled}
         videoStartTimeSec={videoStartTimeSec}
         videoPlayThreshold={0.72}

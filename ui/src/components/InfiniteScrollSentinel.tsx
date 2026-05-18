@@ -9,6 +9,7 @@ interface InfiniteScrollSentinelProps {
   totalCount?: number;
   direction?: "next" | "previous";
   className?: string;
+  rootMargin?: string;
 }
 
 export function InfiniteScrollSentinel({
@@ -19,6 +20,7 @@ export function InfiniteScrollSentinel({
   totalCount,
   direction = "next",
   className,
+  rootMargin,
 }: InfiniteScrollSentinelProps) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -32,11 +34,11 @@ export function InfiniteScrollSentinel({
       if (entries.some((entry) => entry.isIntersecting)) {
         onLoadMore();
       }
-    }, { rootMargin: "800px 0px" });
+    }, { rootMargin: rootMargin ?? (direction === "previous" ? "120px 0px 0px 0px" : "800px 0px") });
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [hasMore, isLoading, onLoadMore]);
+  }, [direction, hasMore, isLoading, onLoadMore, rootMargin]);
 
   return (
     <div ref={ref} className={`flex items-center justify-center px-4 py-6 text-sm text-muted ${className ?? ""}`.trim()}>

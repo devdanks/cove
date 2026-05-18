@@ -1,20 +1,31 @@
 import { useInfiniteQuery, type QueryKey } from "@tanstack/react-query";
 import type { PaginatedResponse } from "../api/types";
 
-interface UsePaginatedInfiniteQueryOptions<TItem> {
+interface UsePaginatedInfiniteQueryOptions<TItem extends { id: string | number }> {
   queryKey: QueryKey;
   queryFn: (page: number, perPage: number) => Promise<PaginatedResponse<TItem>>;
   enabled?: boolean;
   chunkSize?: number;
-  maxPages?: number;
 }
 
-export function usePaginatedInfiniteQuery<TItem>({
+function uniqueItemsById<TItem extends { id: string | number }>(items: TItem[]) {
+  const seen = new Set<string>();
+  const uniqueItems: TItem[] = [];
+  for (const item of items) {
+    const key = String(item.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueItems.push(item);
+  }
+
+  return uniqueItems;
+}
+
+export function usePaginatedInfiniteQuery<TItem extends { id: string | number }>({
   queryKey,
   queryFn,
   enabled = true,
   chunkSize = 24,
-  maxPages = 5,
 }: UsePaginatedInfiniteQueryOptions<TItem>) {
   const query = useInfiniteQuery({
     queryKey,
@@ -30,7 +41,6 @@ export function usePaginatedInfiniteQuery<TItem>({
       return lastPage.page + 1;
     },
     getPreviousPageParam: (firstPage) => firstPage.page > 1 ? firstPage.page - 1 : undefined,
-    maxPages,
   });
 
   const pages = query.data?.pages ?? [];
@@ -42,7 +52,7 @@ export function usePaginatedInfiniteQuery<TItem>({
 
   return {
     ...query,
-    items: pages.flatMap((page) => page.items),
+    items: uniqueItemsById(pages.flatMap((page) => page.items)),
     firstLoadedIndex: pages[0] ? (pages[0].page - 1) * pages[0].perPage : 0,
     loadedThroughCount,
     totalCount,

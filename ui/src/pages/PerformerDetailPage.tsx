@@ -1,8 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { audios, faces, galleries, images, metadata, performers, scenes, texts, entityImages } from "../api/client";
-import type { Face, FaceSimilar, FindFilter, Gallery, Image, Performer as PerformerModel, Scene, MetadataServer, MetadataServerPerformerMatch } from "../api/types";
+import { audios, faces, galleries, groups, images, metadata, performers, scenes, texts, entityImages } from "../api/client";
+import type { Audio, AudioFilterCriteria, Face, FaceSimilar, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, Performer as PerformerModel, Scene, SceneFilterCriteria, MetadataServer, MetadataServerPerformerMatch, TextDocument, TextFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Link2, Loader2, MapPin, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
+import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MapPin, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PerformerEditModal } from "./PerformerEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -18,15 +18,19 @@ import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
+import { AUDIO_CRITERIA, GALLERY_CRITERIA, GROUP_CRITERIA, IMAGE_CRITERIA, SCENE_CRITERIA, TEXT_CRITERIA } from "../components/FilterDialog";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PerformerScrapeDialog } from "../components/PerformerScrapeDialog";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
+import { useDetailListQuery } from "../hooks/useDetailListQuery";
+import { useDetailListSelection } from "../hooks/useDetailListSelection";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission, hasAnyPermission } from "../auth/visibility";
+import { withRequiredMultiId } from "../utils/detailRelationFilters";
 
 interface Props {
   id: number;
@@ -207,7 +211,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
         backgroundImageUrl={entityImages.performerImageUrl(performer.id, performer.updatedAt, 1600)}
         imageUrl={performer.imagePath || entityImages.performerImageUrl(performer.id, performer.updatedAt, 1200)}
         imageAlt={performer.name}
-        imageContainerClassName="aspect-[2/3] w-48 flex-shrink-0 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/40 md:w-64"
+        imageContainerClassName="relative flex h-96 w-72 max-w-full flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/35 md:h-[34rem] md:w-[25rem]"
         imageFallbackClassName="flex h-full w-full items-center justify-center bg-gradient-to-b from-card to-surface"
         imageFallback={<UserRound className="h-20 w-20 text-muted/50" />}
         title={performer.name}
@@ -285,6 +289,16 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
         actions={(
           <>
             <ExtensionSlot slot="performer-detail-actions" context={{ performer, onNavigate }} />
+            {canWritePerformer ? (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
+                title="Edit"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </button>
+            ) : null}
             {showPerformerOpsMenu ? (
               <div className="relative" ref={opsMenuRef}>
                 <button onClick={() => setShowOpsMenu(!showOpsMenu)} className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground" title="Actions">
@@ -292,7 +306,6 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                 </button>
                 {showOpsMenu ? (
                   <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
-                    {canWritePerformer ? <button onClick={() => { setEditing(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
                     {canAutoTagPerformer ? <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">{autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag</button> : null}
                     {canScrapePerformer ? <button onClick={() => { setScrapeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Scrape...</button> : null}
                     {canWritePerformer ? <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><GitMerge className="h-3.5 w-3.5" /> Merge...</button> : null}
@@ -304,7 +317,6 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
             ) : null}
           </>
         )}
-        heroRowClassName="flex flex-col gap-6 md:flex-row md:items-start"
       >
         <EntityDetailTabs tabs={visiblePerformerTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl mt-0" />
 
@@ -572,8 +584,6 @@ function PerformerMetadataServerPanel({ performer, metadataServers, onNavigate }
   });
 
   const draftEndpoint = selectedEndpoint || metadataServers[0]?.endpoint;
-  const linkedNames = new Map(metadataServers.map((box) => [box.endpoint, box.name || box.endpoint]));
-
   return (
     <div className="mt-6 rounded-xl border border-border bg-card p-4">
       <button
@@ -582,16 +592,6 @@ function PerformerMetadataServerPanel({ performer, metadataServers, onNavigate }
       >
         <div className="flex items-center gap-3">
           <h2 className="text-base font-semibold text-foreground">MetadataServer</h2>
-          {performer.remoteIds.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {performer.remoteIds.map((remoteId) => (
-                <span key={`${remoteId.endpoint}:${remoteId.remoteId}`} className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-secondary">
-                  <Link2 className="h-3.5 w-3.5 text-accent" />
-                  {linkedNames.get(remoteId.endpoint) ?? remoteId.endpoint}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
         <ChevronDown className={`h-4 w-4 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>
@@ -755,25 +755,44 @@ function PerformerScenesPanel({ performerId, filter, setFilter, onNavigate }: {
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
-  const { data, isLoading } = useQuery({
-    queryKey: ["performer-scenes", performerId, filter],
-    queryFn: () => scenes.find(filter, { performerIds: String(performerId) }),
+  const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const hasObjectFilter = Object.keys(objectFilter).length > 0;
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Scene>({
+    queryKey: ["performer-scenes", performerId, objectFilter],
+    filter,
+    queryFn: (nextFilter) => hasObjectFilter
+      ? scenes.findFiltered({
+          findFilter: nextFilter,
+          objectFilter: withRequiredMultiId(objectFilter as SceneFilterCriteria, "performersCriterion", performerId),
+        })
+      : scenes.find(nextFilter, { performerIds: String(performerId) }),
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter }), [infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone } = useMultiSelect(data?.items ?? [], { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const items = data?.items ?? [];
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
+  const toolbar = (
+    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll} selectAllPending={infinitePageSize ? selectAllMatchingPending : false} onSelectAllMatching={infinitePageSize ? selectAll : undefined} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} />} criteriaDefinitions={SCENE_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize />
+  );
 
   if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!data || data.items.length === 0) return <EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes found for this performer" />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes found for this performer" /></>;
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={data.items} onNavigate={onNavigate} />} />
-      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-        {data.items.map((scene) => (
-          <SceneCard key={scene.id} scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+      {toolbar}
+      <VirtualizedEntityGrid items={items} getItemKey={(scene) => scene.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={320} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(scene) => (
+        <SceneCard scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
+      )} />
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -788,25 +807,44 @@ function PerformerGalleriesPanel({ performerId, filter, setFilter, onNavigate }:
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
-  const { data, isLoading } = useQuery({
-    queryKey: ["performer-galleries", performerId, filter],
-    queryFn: () => galleries.find(filter, { performerIds: String(performerId) }),
+  const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const hasObjectFilter = Object.keys(objectFilter).length > 0;
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Gallery>({
+    queryKey: ["performer-galleries", performerId, objectFilter],
+    filter,
+    queryFn: (nextFilter) => hasObjectFilter
+      ? galleries.findFiltered({
+          findFilter: nextFilter,
+          objectFilter: withRequiredMultiId(objectFilter as GalleryFilterCriteria, "performersCriterion", performerId),
+        })
+      : galleries.find(nextFilter, { performerIds: String(performerId) }),
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter }), [infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone } = useMultiSelect(data?.items ?? [], { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const items = data?.items ?? [];
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
+  const toolbar = (
+    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll} selectAllPending={infinitePageSize ? selectAllMatchingPending : false} onSelectAllMatching={infinitePageSize ? selectAll : undefined} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} />} criteriaDefinitions={GALLERY_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize />
+  );
 
   if (isLoading) return <LoadingPanel icon={<FolderOpen className="h-10 w-10" />} message="Loading galleries..." />;
-  if (!data || data.items.length === 0) return <EmptyPanel icon={<FolderOpen className="h-12 w-12" />} message="No galleries found for this performer" />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<FolderOpen className="h-12 w-12" />} message="No galleries found for this performer" /></>;
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
-      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-        {data.items.map((gallery) => (
-          <GalleryTile key={gallery.id} gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+      {toolbar}
+      <VirtualizedEntityGrid items={items} getItemKey={(gallery) => gallery.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={280} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(gallery) => (
+        <GalleryTile gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
+      )} />
     </>
   );
 }
@@ -819,25 +857,44 @@ function PerformerImagesPanel({ performerId, filter, setFilter, onNavigate }: {
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
-  const { data, isLoading } = useQuery({
-    queryKey: ["performer-images", performerId, filter],
-    queryFn: () => images.find(filter, { performerIds: String(performerId) }),
+  const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const hasObjectFilter = Object.keys(objectFilter).length > 0;
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Image>({
+    queryKey: ["performer-images", performerId, objectFilter],
+    filter,
+    queryFn: (nextFilter) => hasObjectFilter
+      ? images.findFiltered({
+          findFilter: nextFilter,
+          objectFilter: withRequiredMultiId(objectFilter as ImageFilterCriteria, "performersCriterion", performerId),
+        })
+      : images.find(nextFilter, { performerIds: String(performerId) }),
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter }), [infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone } = useMultiSelect(data?.items ?? [], { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const items = data?.items ?? [];
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
+  const toolbar = (
+    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll} selectAllPending={infinitePageSize ? selectAllMatchingPending : false} onSelectAllMatching={infinitePageSize ? selectAll : undefined} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} />} criteriaDefinitions={IMAGE_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize />
+  );
 
   if (isLoading) return <LoadingPanel icon={<ImageIcon className="h-10 w-10" />} message="Loading images..." />;
-  if (!data || data.items.length === 0) return <EmptyPanel icon={<ImageIcon className="h-12 w-12" />} message="No images found for this performer" />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<ImageIcon className="h-12 w-12" />} message="No images found for this performer" /></>;
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={data.items} />} />
-      <EntityCardGrid minCardWidth={`${160 + zoomLevel * 50}px`}>
-        {data.items.map((image) => (
-          <ImageTile key={image.id} image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+      {toolbar}
+      <VirtualizedEntityGrid items={items} getItemKey={(image) => image.id} minCardWidth={`${160 + zoomLevel * 50}px`} virtualMinColumnWidth={160 + zoomLevel * 50} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(image) => (
+        <ImageTile image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
+      )} />
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -852,30 +909,41 @@ function PerformerAudiosPanel({ performerId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
-  const { data, isLoading } = useQuery({
-    queryKey: ["performer-audios", performerId, filter],
-    queryFn: () => audios.findFiltered({
-      findFilter: filter,
-      objectFilter: {
-        performersCriterion: { value: [performerId], modifier: "INCLUDES" },
-      },
+  const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Audio>({
+    queryKey: ["performer-audios", performerId, objectFilter],
+    filter,
+    queryFn: (nextFilter) => audios.findFiltered({
+      findFilter: nextFilter,
+      objectFilter: withRequiredMultiId(objectFilter as AudioFilterCriteria, "performersCriterion", performerId),
     }),
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter }), [infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone } = useMultiSelect(data?.items ?? [], { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const items = data?.items ?? [];
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
+  const toolbar = (
+    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={AUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll} selectAllPending={infinitePageSize ? selectAllMatchingPending : false} onSelectAllMatching={infinitePageSize ? selectAll : undefined} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="audios" selectedIds={selectedIds} onDone={selectNone} audioItems={items} downloadItems={items} onNavigate={onNavigate} />} criteriaDefinitions={AUDIO_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize />
+  );
 
   if (isLoading) return <LoadingPanel icon={<Headphones className="h-10 w-10" />} message="Loading audios..." />;
-  if (!data || data.items.length === 0) return <EmptyPanel icon={<Headphones className="h-12 w-12" />} message="No audios found for this performer" />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Headphones className="h-12 w-12" />} message="No audios found for this performer" /></>;
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={AUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="audios" selectedIds={selectedIds} onDone={selectNone} audioItems={data.items} downloadItems={data.items} onNavigate={onNavigate} />} />
-      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-        {data.items.map((audio) => (
-          <AudioTile key={audio.id} audio={audio} onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })} onNavigate={onNavigate} selected={selectedIds.has(audio.id)} onSelect={() => toggle(audio.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+      {toolbar}
+      <VirtualizedEntityGrid items={items} getItemKey={(audio) => audio.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={220} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(audio) => (
+        <AudioTile audio={audio} onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })} onNavigate={onNavigate} selected={selectedIds.has(audio.id)} onSelect={() => toggle(audio.id)} selecting={selecting} />
+      )} />
     </>
   );
 }
@@ -887,30 +955,41 @@ function PerformerTextsPanel({ performerId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
-  const { data, isLoading } = useQuery({
-    queryKey: ["performer-texts", performerId, filter],
-    queryFn: () => texts.findFiltered({
-      findFilter: filter,
-      objectFilter: {
-        performersCriterion: { value: [performerId], modifier: "INCLUDES" },
-      },
+  const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<TextDocument>({
+    queryKey: ["performer-texts", performerId, objectFilter],
+    filter,
+    queryFn: (nextFilter) => texts.findFiltered({
+      findFilter: nextFilter,
+      objectFilter: withRequiredMultiId(objectFilter as TextFilterCriteria, "performersCriterion", performerId),
     }),
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter }), [infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone } = useMultiSelect(data?.items ?? [], { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const items = data?.items ?? [];
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
+  const toolbar = (
+    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={TEXT_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll} selectAllPending={infinitePageSize ? selectAllMatchingPending : false} onSelectAllMatching={infinitePageSize ? selectAll : undefined} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="texts" selectedIds={selectedIds} onDone={selectNone} textItems={items} downloadItems={items} />} criteriaDefinitions={TEXT_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize />
+  );
 
   if (isLoading) return <LoadingPanel icon={<FileText className="h-10 w-10" />} message="Loading texts..." />;
-  if (!data || data.items.length === 0) return <EmptyPanel icon={<FileText className="h-12 w-12" />} message="No texts found for this performer" />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<FileText className="h-12 w-12" />} message="No texts found for this performer" /></>;
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={TEXT_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="texts" selectedIds={selectedIds} onDone={selectNone} textItems={data.items} downloadItems={data.items} />} />
-      <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-        {data.items.map((text) => (
-          <TextTile key={text.id} text={text} onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })} onNavigate={onNavigate} selected={selectedIds.has(text.id)} onSelect={() => toggle(text.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+      {toolbar}
+      <VirtualizedEntityGrid items={items} getItemKey={(text) => text.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={220} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(text) => (
+        <TextTile text={text} onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })} onNavigate={onNavigate} selected={selectedIds.has(text.id)} onSelect={() => toggle(text.id)} selecting={selecting} />
+      )} />
     </>
   );
 }
@@ -921,25 +1000,41 @@ function PerformerGroupsPanel({ performerId, filter, setFilter, onNavigate }: {
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
 }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ["performer-groups", performerId, filter],
-    queryFn: () => performers.groups(performerId, filter),
+  const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
+  const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Group>({
+    queryKey: ["performer-groups", performerId, objectFilter],
+    filter,
+    queryFn: (nextFilter) => groups.findFiltered({
+      findFilter: nextFilter,
+      objectFilter: withRequiredMultiId(objectFilter as GroupFilterCriteria, "performersCriterion", performerId),
+    }),
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter }), [infiniteFilterKey, objectFilter]);
+  const { selectedIds, toggle, selectAll, selectIds, selectNone } = useMultiSelect(data?.items ?? [], { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
+  const items = data?.items ?? [];
+  const handleSelectAllMatching = async () => {
+    setSelectAllMatchingPending(true);
+    try {
+      selectIds(await fetchAllIds());
+    } finally {
+      setSelectAllMatchingPending(false);
+    }
+  };
+  const toolbar = (
+    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={GROUP_SORT} showSearch selectedCount={selectedIds.size} onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll} selectAllPending={infinitePageSize ? selectAllMatchingPending : false} onSelectAllMatching={infinitePageSize ? selectAll : undefined} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} />} criteriaDefinitions={GROUP_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize />
+  );
 
   if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading groups..." />;
-  if (!data || data.items.length === 0) return <EmptyPanel icon={<Layers className="h-12 w-12" />} message="No groups for this performer" />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Layers className="h-12 w-12" />} message="No groups for this performer" /></>;
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={GROUP_SORT} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} />} />
-      <EntityCardGrid minCardWidth="200px" gapClassName="gap-4">
-        {data.items.map((group) => (
-          <GroupTile key={group.id} group={group} onClick={() => selecting ? toggle(group.id) : onNavigate({ page: "group", id: group.id })} selected={selectedIds.has(group.id)} onSelect={() => toggle(group.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+      {toolbar}
+      <VirtualizedEntityGrid items={items} getItemKey={(group) => group.id} minCardWidth="200px" virtualMinColumnWidth={200} estimateRowHeight={280} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(group) => (
+        <GroupTile group={group} onClick={() => selecting ? toggle(group.id) : onNavigate({ page: "group", id: group.id })} selected={selectedIds.has(group.id)} onSelect={() => toggle(group.id)} selecting={selecting} />
+      )} />
     </>
   );
 }
@@ -950,58 +1045,26 @@ function PerformerAppearsWithPanel({ performerId, filter, setFilter, onNavigate 
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
 }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<PerformerModel>({
     queryKey: ["performer-appears-with", performerId, filter],
-    queryFn: () => performers.appearsWith(performerId, filter),
+    filter,
+    queryFn: (nextFilter) => performers.appearsWith(performerId, nextFilter),
   });
-  const { selectedIds, toggle, selectAll, selectNone } = useMultiSelect(data?.items ?? []);
+  const items = data?.items ?? [];
+  const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={[{ value: "co_scene_count", label: "Shared Scenes" }, { value: "name", label: "Name" }]} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} />} allowInfinitePageSize />;
 
   if (isLoading) return <LoadingPanel icon={<Users className="h-10 w-10" />} message="Loading co-stars..." />;
-  if (!data || data.items.length === 0) return <EmptyPanel icon={<Users className="h-12 w-12" />} message="No co-stars found" />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Users className="h-12 w-12" />} message="No co-stars found" /></>;
 
   return (
     <>
-      <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data.totalCount} sortOptions={[{ value: "co_scene_count", label: "Shared Scenes" }, { value: "name", label: "Name" }]} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} />} />
-      <EntityCardGrid minCardWidth="180px" gapClassName="gap-4">
-        {data.items.map((performer) => (
-          <PerformerTile key={performer.id} performer={performer} onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })} selected={selectedIds.has(performer.id)} onSelect={() => toggle(performer.id)} selecting={selecting} />
-        ))}
-      </EntityCardGrid>
-      <Pager filter={filter} setFilter={setFilter} totalCount={data.totalCount} />
+      {toolbar}
+      <VirtualizedEntityGrid items={items} getItemKey={(performer) => performer.id} minCardWidth="180px" virtualMinColumnWidth={180} estimateRowHeight={260} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(performer) => (
+        <PerformerTile performer={performer} onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })} selected={selectedIds.has(performer.id)} onSelect={() => toggle(performer.id)} selecting={selecting} />
+      )} />
     </>
-  );
-}
-
-function Pager({ filter, setFilter, totalCount }: {
-  filter: FindFilter;
-  setFilter: (filter: FindFilter) => void;
-  totalCount: number;
-}) {
-  const perPage = filter.perPage ?? 1;
-  const page = filter.page ?? 1;
-  const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
-
-  if (totalPages <= 1) return null;
-
-  return (
-    <div className="mx-auto max-w-7xl mt-6 flex items-center justify-center gap-4">
-      <button
-        disabled={page <= 1}
-        onClick={() => setFilter({ ...filter, page: page - 1 })}
-        className="rounded border border-border bg-card px-4 py-2 text-sm text-secondary hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Previous
-      </button>
-      <span className="text-sm text-secondary">Page {page} of {totalPages}</span>
-      <button
-        disabled={page >= totalPages}
-        onClick={() => setFilter({ ...filter, page: page + 1 })}
-        className="rounded border border-border bg-card px-4 py-2 text-sm text-secondary hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Next
-      </button>
-    </div>
   );
 }
 

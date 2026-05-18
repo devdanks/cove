@@ -12,6 +12,23 @@ public class PerformerRepository : IPerformerRepository
     private readonly CoveContext _db;
     public PerformerRepository(CoveContext db) => _db = db;
 
+    private IQueryable<Performer> ApplyPerformerSearch(IQueryable<Performer> query, string? search)
+    {
+        var textQuery = FullTextSearchHelpers.Apply(_db, query, search,
+            p => p.Name,
+            p => p.Disambiguation,
+            p => p.Details,
+            p => p.SearchText);
+
+        var normalized = search?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized)) return textQuery;
+        var normalizedLower = normalized.ToLowerInvariant();
+
+        return textQuery
+            .Concat(query.Where(p => p.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower))))
+            .Distinct();
+    }
+
     private static IQueryable<Performer> ApplyCareerLengthCriterion(IQueryable<Performer> query, IntCriterion? criterion)
     {
         if (criterion == null)
@@ -535,11 +552,7 @@ public class PerformerRepository : IPerformerRepository
             query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Performer, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
 
-        query = FullTextSearchHelpers.Apply(_db, query, findFilter?.Q,
-            p => p.Name,
-            p => p.Disambiguation,
-            p => p.Details,
-            p => p.SearchText);
+        query = ApplyPerformerSearch(query, findFilter?.Q);
 
         var totalCount = await query.AsNoTracking().CountAsync(ct);
 
@@ -674,6 +687,23 @@ public class TagRepository : ITagRepository
     private readonly CoveContext _db;
     public TagRepository(CoveContext db) => _db = db;
 
+    private IQueryable<Tag> ApplyTagSearch(IQueryable<Tag> query, string? search)
+    {
+        var textQuery = FullTextSearchHelpers.Apply(_db, query, search,
+            t => t.Name,
+            t => t.SortName,
+            t => t.Description,
+            t => t.SearchText);
+
+        var normalized = search?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized)) return textQuery;
+        var normalizedLower = normalized.ToLowerInvariant();
+
+        return textQuery
+            .Concat(query.Where(t => t.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower))))
+            .Distinct();
+    }
+
     public async Task<Tag?> GetByIdAsync(int id, CancellationToken ct = default)
         => await _db.Tags.FindAsync([id], ct);
 
@@ -681,6 +711,7 @@ public class TagRepository : ITagRepository
         => await _db.Tags
             .Include(t => t.Aliases)
             .Include(t => t.TagGroup)
+            .Include(t => t.RemoteIds)
             .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent).ThenInclude(parent => parent!.TagGroup)
             .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child).ThenInclude(child => child!.TagGroup)
             .AsSplitQuery()
@@ -808,11 +839,7 @@ public class TagRepository : ITagRepository
             query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Tag, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
 
-        query = FullTextSearchHelpers.Apply(_db, query, findFilter?.Q,
-            t => t.Name,
-            t => t.SortName,
-            t => t.Description,
-            t => t.SearchText);
+        query = ApplyTagSearch(query, findFilter?.Q);
 
         if (filter != null)
         {
@@ -1153,6 +1180,22 @@ public class StudioRepository : IStudioRepository
     private readonly CoveContext _db;
     public StudioRepository(CoveContext db) => _db = db;
 
+    private IQueryable<Studio> ApplyStudioSearch(IQueryable<Studio> query, string? search)
+    {
+        var textQuery = FullTextSearchHelpers.Apply(_db, query, search,
+            s => s.Name,
+            s => s.Details,
+            s => s.SearchText);
+
+        var normalized = search?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized)) return textQuery;
+        var normalizedLower = normalized.ToLowerInvariant();
+
+        return textQuery
+            .Concat(query.Where(s => s.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower))))
+            .Distinct();
+    }
+
     private IQueryable<Studio> ApplyStudioRatingSort(IQueryable<Studio> query, bool desc)
         => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Studio, desc);
 
@@ -1289,10 +1332,7 @@ public class StudioRepository : IStudioRepository
 
             query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Studio, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
-        query = FullTextSearchHelpers.Apply(_db, query, findFilter?.Q,
-            s => s.Name,
-            s => s.Details,
-            s => s.SearchText);
+        query = ApplyStudioSearch(query, findFilter?.Q);
 
         if (filter == null || !filter.ParentId.HasValue)
             query = query.Where(s => s.ParentId == null);
@@ -2290,11 +2330,7 @@ public class GroupRepository : IGroupRepository
 
     public async Task<(IReadOnlyList<Group> Items, int TotalCount)> FindAsync(GroupFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
     {
-        var query = _db.Groups
-            .Include(g => g.GroupTags).ThenInclude(gt => gt.Tag).ThenInclude(tag => tag!.TagGroup)
-            .Include(g => g.GroupItems)
-            .AsSplitQuery()
-            .AsQueryable();
+        var query = _db.Groups.AsQueryable();
         if (filter != null)
         {
             if (!string.IsNullOrEmpty(filter.Name)) query = query.Where(g => EF.Functions.ILike(g.Name, $"%{filter.Name}%"));
@@ -2384,7 +2420,36 @@ public class GroupRepository : IGroupRepository
         query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
         var page = findFilter?.Page ?? 1;
         var perPage = findFilter?.PerPage ?? 25;
-        var items = await query.Skip((page - 1) * perPage).Take(perPage).AsNoTracking().ToListAsync(ct);
+        if (perPage <= 0)
+        {
+            return (Array.Empty<Group>(), totalCount);
+        }
+
+        var pagedIds = await query
+            .Skip((page - 1) * perPage)
+            .Take(perPage)
+            .Select(g => g.Id)
+            .ToListAsync(ct);
+
+        if (pagedIds.Count == 0)
+        {
+            return (Array.Empty<Group>(), totalCount);
+        }
+
+        var items = await _db.Groups
+            .Include(g => g.Studio)
+            .Include(g => g.Urls)
+            .Include(g => g.GroupTags).ThenInclude(gt => gt.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Include(g => g.GroupItems)
+            .Include(g => g.SubGroupRelations)
+            .Include(g => g.ContainingGroupRelations)
+            .AsSplitQuery()
+            .Where(g => pagedIds.Contains(g.Id))
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var orderMap = pagedIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
+        items = items.OrderBy(group => orderMap.GetValueOrDefault(group.Id, int.MaxValue)).ToList();
         return (items, totalCount);
     }
 }

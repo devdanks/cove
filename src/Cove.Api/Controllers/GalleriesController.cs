@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using Cove.Api.Services;
 using Cove.Core.Auth;
 using Cove.Core.Common;
 using Cove.Core.DTOs;
@@ -13,8 +14,10 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.GalleriesRead)]
-public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null) : ControllerBase
+public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null, CustomFieldService? customFields = null) : ControllerBase
 {
+    private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
+
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<PaginatedResponse<GalleryDto>>> Find(
@@ -96,8 +99,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         {
             Title = dto.Title, Code = dto.Code, Date = ParseDate(dto.Date),
             Details = dto.Details, Photographer = dto.Photographer,
-            Organized = dto.Organized, StudioId = dto.StudioId,
-            CustomFields = dto.CustomFields
+            Organized = dto.Organized, StudioId = dto.StudioId
         };
         if (dto.Urls?.Count > 0) gallery.Urls = dto.Urls.Select(u => new GalleryUrl { Url = u }).ToList();
         if (dto.TagIds?.Count > 0) gallery.GalleryTags = dto.TagIds.Select(id => new GalleryTag { TagId = id }).ToList();
@@ -105,6 +107,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         if (dto.SceneIds?.Count > 0) gallery.SceneGalleries = dto.SceneIds.Select(id => new SceneGallery { SceneId = id }).ToList();
 
         gallery = await galleryRepo.AddAsync(gallery, ct);
+        if (dto.CustomFields != null)
+            await _customFields.SaveValuesAsync(CustomFieldEntityTypes.Gallery, gallery.Id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Gallery, gallery.Id, dto.Rating, cancellationToken: ct);
         if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
@@ -153,8 +157,6 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             gallery.SceneGalleries.Clear();
             gallery.SceneGalleries = dto.SceneIds.Select(sid => new SceneGallery { SceneId = sid, GalleryId = id }).ToList();
         }
-        if (dto.CustomFields != null) gallery.CustomFields = dto.CustomFields;
-
         if (dto.TagIds != null && tagProvenanceService != null)
         {
             await tagProvenanceService.SyncTagSetAsync(
@@ -166,6 +168,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         }
 
         await galleryRepo.UpdateAsync(gallery, ct);
+        if (dto.CustomFields != null)
+            await _customFields.SaveValuesAsync(CustomFieldEntityTypes.Gallery, id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Gallery, id, dto.Rating, cancellationToken: ct);
         var updated = await galleryRepo.GetByIdWithRelationsAsync(id, ct);
@@ -181,6 +185,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         if (g == null) return NotFound();
         if (tagProvenanceService != null)
             await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Gallery, id, ct);
+        await _customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Gallery, id, ct);
         await galleryRepo.DeleteAsync(id, ct);
         return NoContent();
     }
@@ -196,10 +201,11 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             ? null
             : await tagProvenanceService.GetLookupAsync(AffinityHostType.Gallery, gallery.Id, tagIds, cancellationToken);
 
-        return MapToDto(gallery, null, null, provenanceLookup);
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Gallery, gallery.Id, cancellationToken);
+        return MapToDto(gallery, customFieldValues, null, null, provenanceLookup);
     }
 
-    private GalleryDto MapToDto(Gallery g, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
+    private GalleryDto MapToDto(Gallery g, Dictionary<string, object>? customFieldValues = null, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
         g.Id, g.Title, g.Code, g.Date?.ToString("yyyy-MM-dd"), g.Details, g.Photographer,
         g.Organized, g.StudioId, g.Studio?.Name,
         g.Urls.Select(u => u.Url).ToList(),
@@ -211,7 +217,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         g.Folder?.Path,
         g.Files?.Select(f => new GalleryFileInfoDto(f.Id, f.Path, f.Size, f.ModTime.ToString("o"),
             f.Fingerprints?.Select(fp => new FingerprintDto(fp.Type, fp.Value)).ToList() ?? [])).ToList() ?? [],
-        g.CustomFields,
+        customFieldValues,
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
         ResolveCoverPath(g, imageCount),
         g.CoverImageId
@@ -236,8 +242,12 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     private async Task<List<GalleryDto>> MapListToDtos(IReadOnlyList<Gallery> items, CancellationToken ct)
     {
         if (items.Count == 0) return [];
-        return items.Select(g => MapToDto(g)).ToList();
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Gallery, items.Select(item => item.Id), ct);
+        return items.Select(g => MapToDto(g, GetCustomFields(customFieldValues, g.Id))).ToList();
     }
+
+    private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
+        => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;
 
     private static List<TagProvenanceDto> GetTagProvenance(IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup, int tagId)
         => provenanceLookup != null && provenanceLookup.TryGetValue(tagId, out var provenance) ? provenance : [];

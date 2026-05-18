@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using Cove.Api.Services;
 using Cove.Core.Auth;
 using Cove.Core.Common;
 using Cove.Core.DTOs;
@@ -13,8 +14,10 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.GroupsRead)]
-public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, IUserEngagementService engagementService) : ControllerBase
+public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, IUserEngagementService engagementService, CustomFieldService? customFields = null) : ControllerBase
 {
+    private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
+
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<PaginatedResponse<GroupDto>>> Find(
@@ -34,7 +37,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         };
 
         var (items, totalCount) = await groupRepo.FindAsync(filter, findFilter, ct);
-        var dtos = items.Select(MapToDto).ToList();
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, items.Select(item => item.Id), ct);
+        var dtos = items.Select(group => MapToDto(group, GetCustomFields(customFieldValues, group.Id))).ToList();
         return Ok(new PaginatedResponse<GroupDto>(dtos, totalCount, page, perPage));
     }
 
@@ -44,7 +48,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new GroupFilter();
         var (items, totalCount) = await groupRepo.FindAsync(filter, findFilter, ct);
-        var dtos = items.Select(MapToDto).ToList();
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, items.Select(item => item.Id), ct);
+        var dtos = items.Select(group => MapToDto(group, GetCustomFields(customFieldValues, group.Id))).ToList();
         return Ok(new PaginatedResponse<GroupDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -54,7 +59,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
     {
         var group = await groupRepo.GetByIdWithRelationsAsync(id, ct);
         if (group == null) return NotFound();
-        return Ok(MapToDto(group));
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, id, ct);
+        return Ok(MapToDto(group, customFieldValues));
     }
 
     [HttpPost]
@@ -65,17 +71,19 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         {
             Name = dto.Name, Aliases = dto.Aliases, Duration = dto.Duration,
             Date = ParseDate(dto.Date), StudioId = dto.StudioId,
-            Director = dto.Director, Synopsis = dto.Synopsis,
-            CustomFields = dto.CustomFields
+            Director = dto.Director, Synopsis = dto.Synopsis
         };
         if (dto.Urls?.Count > 0) group.Urls = dto.Urls.Select(u => new GroupUrl { Url = u }).ToList();
         if (dto.TagIds?.Count > 0) group.GroupTags = dto.TagIds.Select(id => new GroupTag { TagId = id }).ToList();
 
         group = await groupRepo.AddAsync(group, ct);
+        if (dto.CustomFields != null)
+            await _customFields.SaveValuesAsync(CustomFieldEntityTypes.Group, group.Id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Group, group.Id, dto.Rating, cancellationToken: ct);
         var result = await groupRepo.GetByIdWithRelationsAsync(group.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = group.Id }, MapToDto(result!));
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, group.Id, ct);
+        return CreatedAtAction(nameof(GetById), new { id = group.Id }, MapToDto(result!, customFieldValues));
     }
 
     [HttpPut("{id:int}")]
@@ -104,13 +112,14 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             group.GroupTags.Clear();
             group.GroupTags = dto.TagIds.Select(tid => new GroupTag { TagId = tid, GroupId = id }).ToList();
         }
-        if (dto.CustomFields != null) group.CustomFields = dto.CustomFields;
-
         await groupRepo.UpdateAsync(group, ct);
+        if (dto.CustomFields != null)
+            await _customFields.SaveValuesAsync(CustomFieldEntityTypes.Group, id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Group, id, dto.Rating, cancellationToken: ct);
         var updated = await groupRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, id, ct);
+        return Ok(MapToDto(updated!, customFieldValues));
     }
 
     [HttpDelete("{id:int}")]
@@ -120,6 +129,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
     {
         var g = await groupRepo.GetByIdAsync(id, ct);
         if (g == null) return NotFound();
+        await _customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Group, id, ct);
         await groupRepo.DeleteAsync(id, ct);
         return NoContent();
     }
@@ -180,7 +190,9 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             .Include(r => r.SubGroup!).ThenInclude(g => g.GroupTags).ThenInclude(gt => gt.Tag)
             .Include(r => r.SubGroup!).ThenInclude(g => g.GroupItems)
             .ToListAsync(ct);
-        return Ok(relations.Where(r => r.SubGroup != null).Select(r => MapToDto(r.SubGroup!)).ToList());
+        var groups = relations.Where(r => r.SubGroup != null).Select(r => r.SubGroup!).ToList();
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, groups.Select(group => group.Id), ct);
+        return Ok(groups.Select(group => MapToDto(group, GetCustomFields(customFieldValues, group.Id))).ToList());
     }
 
     [HttpGet("{id:int}/containinggroups")]
@@ -194,7 +206,9 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             .Include(r => r.ContainingGroup!).ThenInclude(g => g.GroupTags).ThenInclude(gt => gt.Tag)
             .Include(r => r.ContainingGroup!).ThenInclude(g => g.GroupItems)
             .ToListAsync(ct);
-        return Ok(relations.Where(r => r.ContainingGroup != null).Select(r => MapToDto(r.ContainingGroup!)).ToList());
+        var groups = relations.Where(r => r.ContainingGroup != null).Select(r => r.ContainingGroup!).ToList();
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, groups.Select(group => group.Id), ct);
+        return Ok(groups.Select(group => MapToDto(group, GetCustomFields(customFieldValues, group.Id))).ToList());
     }
 
     [HttpPost("{id:int}/subgroups")]
@@ -258,7 +272,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         return Ok();
     }
 
-    private GroupDto MapToDto(Group g) => new(
+    private GroupDto MapToDto(Group g, Dictionary<string, object>? customFieldValues = null) => new(
         g.Id, g.Name, g.Aliases, g.Duration, g.Date?.ToString("yyyy-MM-dd"),
         g.StudioId, g.Studio?.Name, g.Director, g.Synopsis,
         g.Urls.Select(u => u.Url).ToList(),
@@ -268,11 +282,14 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         g.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange),
         g.SubGroupRelations?.Count ?? 0,
         g.ContainingGroupRelations?.Count ?? 0,
-        g.CustomFields,
+        customFieldValues,
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
         g.FrontImageBlobId != null ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, g.Id, g.UpdatedAt) : null,
         g.BackImageBlobId != null ? EntityImageUrls.GroupBack(ControllerContext.HttpContext, g.Id, g.UpdatedAt) : null
     );
+
+    private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
+        => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;
 
     private static DateOnly? ParseDate(string? date) => DateOnly.TryParse(date, out var d) ? d : null;
 }

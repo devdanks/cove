@@ -36,6 +36,31 @@ type SearchDefinition = {
   mapItems: (items: unknown[]) => SearchGroup["items"];
 };
 
+async function mergeSearches<TItem extends { id: number }>(limit: number, searches: Promise<{ items: TItem[] }>[]) {
+  const settled = await Promise.allSettled(searches);
+  const resultSets = settled
+    .filter((result): result is PromiseFulfilledResult<{ items: TItem[] }> => result.status === "fulfilled")
+    .map((result) => result.value.items);
+  const seen = new Set<number>();
+  const items: TItem[] = [];
+
+  for (let index = 0; items.length < limit; index++) {
+    let foundItemAtIndex = false;
+    for (const resultItems of resultSets) {
+      const item = resultItems[index];
+      if (!item) continue;
+      foundItemAtIndex = true;
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      items.push(item);
+      if (items.length >= limit) return { items };
+    }
+    if (!foundItemAtIndex) break;
+  }
+
+  return { items };
+}
+
 export function GlobalSearch({ navigate }: Props) {
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState(false);
@@ -80,7 +105,9 @@ export function GlobalSearch({ navigate }: Props) {
     queryKey: ["global-search", deferredTerm, searchableLabels.join(",")],
     enabled: deferredTerm.length >= 2 && searchableLabels.length > 0,
     queryFn: async () => {
-      const query = { q: deferredTerm, perPage: 5, direction: "desc" as const };
+      const query = { q: deferredTerm, perPage: 8, direction: "desc" as const };
+      const aliasCriterion = { value: deferredTerm, modifier: "INCLUDES" as const };
+      const aliasFindFilter = { perPage: query.perPage, sort: "name", direction: "asc" as const };
       const searches: SearchDefinition[] = [
         ...(readableEntities.scenes ? [{
           key: "scenes",
@@ -101,11 +128,14 @@ export function GlobalSearch({ navigate }: Props) {
           label: "Performers",
           icon: Users,
           hostType: "performer" as const,
-          load: () => performers.find({ ...query, sort: "name", direction: "asc" }),
+          load: () => mergeSearches<PerformerSearchItems[number]>(query.perPage, [
+            performers.find({ ...query, sort: "name", direction: "asc" }),
+            performers.findFiltered({ findFilter: aliasFindFilter, objectFilter: { aliasesCriterion: aliasCriterion } }),
+          ]),
           mapItems: (items: unknown[]) => (items as PerformerSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
-            subtitle: item.disambiguation || undefined,
+            subtitle: item.aliases?.length ? `Aliases: ${item.aliases.slice(0, 3).join(", ")}` : item.disambiguation || undefined,
             route: { page: "performer", id: item.id },
             hostType: "performer" as const,
           })),
@@ -115,11 +145,14 @@ export function GlobalSearch({ navigate }: Props) {
           label: "Studios",
           icon: Building2,
           hostType: "studio" as const,
-          load: () => studios.find({ ...query, sort: "name", direction: "asc" }),
+          load: () => mergeSearches<StudioSearchItems[number]>(query.perPage, [
+            studios.find({ ...query, sort: "name", direction: "asc" }),
+            studios.findFiltered({ findFilter: aliasFindFilter, objectFilter: { aliasesCriterion: aliasCriterion } }),
+          ]),
           mapItems: (items: unknown[]) => (items as StudioSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
-            subtitle: item.parentName || undefined,
+            subtitle: item.aliases?.length ? `Aliases: ${item.aliases.slice(0, 3).join(", ")}` : item.parentName || undefined,
             route: { page: "studio", id: item.id },
             hostType: "studio" as const,
           })),
@@ -129,11 +162,14 @@ export function GlobalSearch({ navigate }: Props) {
           label: "Tags",
           icon: Tag,
           hostType: "tag" as const,
-          load: () => tags.find({ ...query, sort: "name", direction: "asc" }),
+          load: () => mergeSearches<TagSearchItems[number]>(query.perPage, [
+            tags.find({ ...query, sort: "name", direction: "asc" }),
+            tags.findFiltered({ findFilter: aliasFindFilter, objectFilter: { aliasesCriterion: aliasCriterion } }),
+          ]),
           mapItems: (items: unknown[]) => (items as TagSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
-            subtitle: item.description || undefined,
+            subtitle: item.aliases?.length ? `Aliases: ${item.aliases.slice(0, 3).join(", ")}` : item.description || undefined,
             route: { page: "tag", id: item.id },
             hostType: "tag" as const,
           })),

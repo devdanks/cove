@@ -6,6 +6,18 @@ function generateRandomSortSeed() {
   return Math.floor(Math.random() * MAX_RANDOM_SORT_SEED) || 1;
 }
 
+export function reshuffleRandomSort(filter: FindFilter): FindFilter {
+  if (filter.sort !== "random") {
+    return withSeededRandomSort(filter, filter);
+  }
+
+  return {
+    ...filter,
+    page: 1,
+    seed: generateRandomSortSeed(),
+  };
+}
+
 export function withSeededRandomSort(currentFilter: FindFilter, nextFilter: FindFilter): FindFilter {
   if (nextFilter.sort === "random") {
     if (currentFilter.sort !== "random") {

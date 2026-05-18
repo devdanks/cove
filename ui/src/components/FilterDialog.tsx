@@ -239,6 +239,7 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
   { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "likeCounter", label: "Likes", type: "number", filterKey: "likeCounterCriterion" },
   { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
+  { id: "isVr", label: "VR", type: "bool", filterKey: "isVrCriterion" },
   { id: "duration", label: "Duration", type: "duration", filterKey: "durationCriterion" },
   { id: "tagDuration", label: "Tag Duration", type: "tagDuration", entityType: "tags", filterKey: "tagDurationCriterion" },
   { id: "resolution", label: "Resolution", type: "resolution", filterKey: "resolutionCriterion" },

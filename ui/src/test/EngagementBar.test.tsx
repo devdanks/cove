@@ -10,8 +10,8 @@ describe("EngagementBar", () => {
 
     render(<EngagementBar favorite={false} onFavoriteChange={onFavoriteChange} />);
 
-    const favoriteButton = screen.getByRole("button", { name: "Add to favorites" });
-    expect(favoriteButton).toHaveAttribute("title", "Add to favorites");
+    const favoriteButton = screen.getByRole("button", { name: "Favorite" });
+    expect(favoriteButton).toHaveAttribute("title", "Favorite");
     expect(favoriteButton).not.toHaveTextContent("Favorite");
 
     await user.click(favoriteButton);

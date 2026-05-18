@@ -35,6 +35,8 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
         builder.HasIndex(s => s.CreatedAt);
         builder.HasIndex(s => s.UpdatedAt);
         builder.HasIndex(s => s.Organized);
+        builder.HasIndex(s => s.IsVr);
+        builder.Property(s => s.IsVr).HasDefaultValue(false);
         builder.Property(s => s.FileCount).HasDefaultValue(0);
         builder.Property(s => s.MaxDuration).HasDefaultValue(0d);
         builder.Property(s => s.MaxResolution).HasDefaultValue(0);

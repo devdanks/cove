@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { performers, entityImages } from "../api/client";
 import type { EntityEngagement, FindFilter, Performer, PerformerCreate, PerformerFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -28,6 +27,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
+import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 
 /** Convert 2-letter ISO country code to flag emoji */
 function countryToFlag(code: string): string {
@@ -46,7 +46,7 @@ export function PerformersPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("performers");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "name", direction: "asc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_scene_date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -138,21 +138,10 @@ export function PerformersPage({ onNavigate }: Props) {
         availableDisplayModes={["grid", "list", "wall", "tagger"]}
         allowInfinitePageSize
         showPagingControls={!listData.infinitePageSize}
-        selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
-        onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
-        selectAllMatchingLabel={`Select all ${totalCount} matching`}
-        selectAllMatchingPending={selectAllMatchingPending}
-        infiniteScroll={listData.infinitePageSize ? {
-          hasNextPage: listData.infiniteQuery.hasNextPage,
-          hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
-          isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
-          isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
-          onLoadMore: listData.loadMore,
-          onLoadPrevious: listData.loadPrevious,
-          loadedCount: listData.infiniteQuery.loadedThroughCount,
-          previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
-          totalCount,
-        } : undefined}
+        selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
+        onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
+        selectAllMatchingLabel="Select shown"
+        infiniteScroll={listData.infiniteScroll}
         wallColumnCount={wallColumnCount}
         onWallColumnCountChange={setWallColumnCount}
         onNew={canWritePerformer ? () => setShowCreate(true) : undefined}
@@ -160,7 +149,7 @@ export function PerformersPage({ onNavigate }: Props) {
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
         selectedIds={selectedIds}
-        onSelectAll={selectAll}
+        onSelectAll={listData.infinitePageSize ? handleSelectAllMatching : selectAll}
         onSelectNone={selectNone}
         onInvertSelection={invertSelection}
         selectionActions={
@@ -190,12 +179,19 @@ export function PerformersPage({ onNavigate }: Props) {
       {displayMode === "tagger" ? (
         <PerformerTagger performers={items} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} onNavigate={(performerId) => onNavigate({ page: "performer", id: performerId })} />
       ) : displayMode === "wall" ? (
-        <div className="flex gap-1 px-2">
-          {wallColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="flex min-w-0 flex-1 flex-col gap-1">
-              {column.map((performer) => (
+        <VirtualizedWallColumns
+          columns={wallColumns}
+          getItemKey={(performer) => performer.id}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          estimateItemHeight={280}
+          gap={4}
+          className="flex gap-1 px-2"
+          columnClassName="flex min-w-0 flex-1 flex-col gap-1"
+          renderItem={(performer) => (
                 <EntityWallCard
-                  key={performer.id}
                   title={performer.name}
                   imageSrc={entityImages.performerImageUrl(performer.id, performer.updatedAt)}
                   route={{ page: "performer", id: performer.id }}
@@ -204,15 +200,20 @@ export function PerformersPage({ onNavigate }: Props) {
                   onSelect={() => toggle(performer.id)}
                   onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })}
                 />
-              ))}
-            </div>
-          ))}
-        </div>
+          )}
+        />
       ) : displayMode === "grid" ? (
-        <EntityCardGrid minCardWidth="var(--card-min-width, 160px)">
-          {items.map((p) => (
+        <VirtualizedEntityGrid
+          items={items}
+          getItemKey={(p) => p.id}
+          minCardWidth="var(--card-min-width, 160px)"
+          estimateRowHeight={340}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          renderItem={(p) => (
             <PerformerTile
-              key={p.id}
               performer={p}
               engagement={engagementById.get(p.id)}
               onClick={() => selecting ? toggle(p.id) : onNavigate({ page: "performer", id: p.id })}
@@ -221,8 +222,8 @@ export function PerformersPage({ onNavigate }: Props) {
               onSelect={() => toggle(p.id)}
               selecting={selecting}
             />
-          ))}
-        </EntityCardGrid>
+          )}
+        />
       ) : (
         <PerformerListTable performers={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}

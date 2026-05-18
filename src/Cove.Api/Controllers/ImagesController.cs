@@ -80,8 +80,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             Photographer = dto.Photographer,
             Organized = dto.Organized,
             StudioId = dto.StudioId,
-            Date = ParseDate(dto.Date),
-            CustomFields = dto.CustomFields
+            Date = ParseDate(dto.Date)
         };
 
         if (dto.Urls?.Count > 0)
@@ -94,6 +93,8 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             image.ImageGalleries = dto.GalleryIds.Select(gid => new ImageGallery { GalleryId = gid }).ToList();
 
         image = await imageRepo.AddAsync(image, ct);
+        if (dto.CustomFields != null)
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Image, image.Id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Image, image.Id, dto.Rating, cancellationToken: ct);
         if (dto.TagIds?.Count > 0 && tagProvenanceService != null)
@@ -142,8 +143,6 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             image.ImageGalleries.Clear();
             image.ImageGalleries = dto.GalleryIds.Select(gid => new ImageGallery { GalleryId = gid, ImageId = id }).ToList();
         }
-        if (dto.CustomFields != null) image.CustomFields = dto.CustomFields;
-
         if (dto.TagIds != null && tagProvenanceService != null)
         {
             await tagProvenanceService.SyncTagSetAsync(
@@ -155,6 +154,8 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         }
 
         await imageRepo.UpdateAsync(image, ct);
+        if (dto.CustomFields != null)
+            await customFields.SaveValuesAsync(CustomFieldEntityTypes.Image, id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Image, id, dto.Rating, cancellationToken: ct);
         var updated = await imageRepo.GetByIdWithRelationsAsync(id, ct);
@@ -189,10 +190,11 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             : await tagProvenanceService.GetLookupAsync(AffinityHostType.Image, image.Id, tagIds, cancellationToken);
 
         var snapshot = (await engagementService.GetSnapshotsAsync(AffinityHostType.Image, [image.Id], cancellationToken)).GetValueOrDefault(image.Id);
-        return MapToDto(image, null, provenanceLookup, snapshot, principalAccessor?.Current?.UserId != null);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Image, image.Id, cancellationToken);
+        return MapToDto(image, customFieldValues, null, provenanceLookup, snapshot, principalAccessor?.Current?.UserId != null);
     }
 
-    private ImageDto MapToDto(Image i, int? galleryCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
+    private ImageDto MapToDto(Image i, Dictionary<string, object>? customFieldValues = null, int? galleryCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
         i.Organized,
         i.StudioId, i.Studio?.Name,
@@ -211,7 +213,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             f.Width,
             f.Height,
             f.Size)).ToList() ?? [],
-        i.CustomFields,
+        customFieldValues,
         i.CreatedAt.ToString("o"), i.UpdatedAt.ToString("o")
     );
 
@@ -222,10 +224,11 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
 
         var preferUserSnapshot = principalAccessor?.Current?.UserId != null;
         var snapshots = await engagementService.GetSnapshotsAsync(AffinityHostType.Image, items.Select(item => item.Id), ct);
-        return items.Select(i => MapListToDto(i, i.GalleryCount, snapshots.GetValueOrDefault(i.Id), preferUserSnapshot)).ToList();
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Image, items.Select(item => item.Id), ct);
+        return items.Select(i => MapListToDto(i, i.GalleryCount, GetCustomFields(customFieldValues, i.Id), snapshots.GetValueOrDefault(i.Id), preferUserSnapshot)).ToList();
     }
 
-    private ImageDto MapListToDto(Image i, int galleryCount, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
+    private ImageDto MapListToDto(Image i, int galleryCount, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
         i.Organized,
         i.StudioId, i.Studio?.Name,
@@ -244,9 +247,12 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             f.Width,
             f.Height,
             f.Size)).ToList() ?? [],
-        null,
+        customFieldValues,
         i.CreatedAt.ToString("o"), i.UpdatedAt.ToString("o")
     );
+
+    private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
+        => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;
 
     // ===== Activity Tracking =====
 

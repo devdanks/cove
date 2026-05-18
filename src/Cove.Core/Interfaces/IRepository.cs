@@ -111,6 +111,7 @@ public class SceneFilter
     public string? Path { get; set; }
     public int? Rating { get; set; }
     public bool? Organized { get; set; }
+    public bool? IsVr { get; set; }
     public int? StudioId { get; set; }
     public int? GroupId { get; set; }
     public int? GalleryId { get; set; }
@@ -129,6 +130,7 @@ public class SceneFilter
     public MultiIdCriterion? StudiosCriterion { get; set; }
     public MultiIdCriterion? GroupsCriterion { get; set; }
     public BoolCriterion? OrganizedCriterion { get; set; }
+    public BoolCriterion? IsVrCriterion { get; set; }
     public BoolCriterion? InteractiveCriterion { get; set; }
     public StringCriterion? PathCriterion { get; set; }
     public FingerprintCriterion? FingerprintCriterion { get; set; }

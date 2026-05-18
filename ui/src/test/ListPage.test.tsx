@@ -222,6 +222,40 @@ describe("ListPage active filter chips", () => {
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sort: "random", direction: "asc", seed: 12345 }));
   });
 
+  it("shows a shuffle button for random sort and replaces the seed", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+    const onFilterChange = vi.fn();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouteRegistryProvider>
+          <ListPage
+            title="Scenes"
+            filter={{ page: 3, perPage: 40, sort: "random", direction: "desc", seed: 12345 }}
+            onFilterChange={onFilterChange}
+            totalCount={0}
+            isLoading={false}
+            sortOptions={[{ value: "random", label: "Random" }]}
+          >
+            <div>content</div>
+          </ListPage>
+        </RouteRegistryProvider>
+      </QueryClientProvider>
+    );
+
+    await user.click(screen.getByTitle("Shuffle"));
+
+    expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sort: "random", page: 1, seed: 1073741823 }));
+  });
+
   it("uses the wide filter dialog layout for custom reference field filters", async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({

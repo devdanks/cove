@@ -29,6 +29,7 @@ import {
   Search,
   Users,
   KeyRound,
+  Keyboard,
   FileText,
   Layers,
   UserCog,
@@ -82,7 +83,7 @@ import { KEYBINDING_GROUPS, keybindingDefault } from "../keyboard/keybindings";
 import { openTutorialStoryboard } from "../components/TutorialStoryboardDialog";
 import { customFieldDefinitionsQueryKey } from "../hooks/useCustomFieldDefinitions";
 
-type SettingsTab = "tasks" | "library" | "interface" | "user-settings" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
+type SettingsTab = "tasks" | "library" | "interface" | "keyboard-shortcuts" | "user-settings" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
 
 type ResolvedTrackingPreferences = {
   enabled: boolean;
@@ -117,6 +118,7 @@ const primaryTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[
   { key: "tasks", label: "Tasks", icon: PlayCircle },
   { key: "library", label: "Library", icon: FolderOpen },
   { key: "interface", label: "Interface", icon: Monitor },
+  { key: "keyboard-shortcuts", label: "Keyboard Shortcuts", icon: Keyboard },
   { key: "user-settings", label: "User Settings", icon: UserCog },
   { key: "display-profiles", label: "Display Profiles", icon: Layers },
   { key: "ai-data", label: "AI Data", icon: Database },
@@ -144,6 +146,7 @@ const tabDescriptions: Record<SettingsTab, string> = {
   tasks: "Scan, generate, and maintenance operations.",
   library: "Content locations, generated assets, and scan rules.",
   interface: "Language, custom title, navigation, and rating presentation.",
+  "keyboard-shortcuts": "Shortcut overrides and the full keyboard reference.",
   "user-settings": "Preferences that follow the current user or shared profile.",
   "display-profiles": "Manage resolved-span display profiles and the rules attached to each profile.",
   "ai-data": "Inspect and safely purge AI-produced embeddings, detections, segments, tag provenance, and face-owned data.",
@@ -1394,42 +1397,8 @@ export function SettingsPage() {
               </div>
             </SectionCard>
 
-            <SectionCard title="Keyboard Shortcuts" description="Override the registered global and list-page shortcut keys.">
-              <div className="space-y-5">
-                {KEYBINDING_GROUPS.map((group) => (
-                  <div key={group.group} className="space-y-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted">{group.group}</div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {group.definitions.map((definition) => (
-                        <TextField
-                          key={definition.id}
-                          label={definition.label}
-                          value={draft.ui.keybindingOverrides?.[definition.id] ?? definition.keys}
-                          onChange={(value) => updateKeybindingOverride(definition.id, value)}
-                          placeholder={definition.keys}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => updateDraft((current) => ({ ...current, ui: { ...current.ui, keybindingOverrides: {} } }))}
-                  className="rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground"
-                >
-                  Reset shortcuts
-                </button>
-              </div>
-            </SectionCard>
-
             <SectionCard title="Custom Fields" description="Define typed metadata fields for entities that need extra structured values.">
               <div className="space-y-4">
-                {syncCustomFieldsMutation.isPending ? (
-                  <div className="inline-flex items-center gap-2 text-sm text-secondary">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving custom fields...
-                  </div>
-                ) : null}
                 {hasInvalidPersistedCustomFields ? (
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
                     Existing custom fields need a key or label and at least one entity selected before they can be saved.
@@ -1809,6 +1778,40 @@ export function SettingsPage() {
           ) : (
             <LocalInterfacePanel serverRatingOptions={draftState?.ui.ratingSystemOptions} />
           )
+        )}
+
+        {resolvedActiveTab === "keyboard-shortcuts" && (
+          <>
+            {canWriteSystemSettings ? (
+              <SectionCard title="Keyboard Shortcuts" description="Override the registered global and list-page shortcut keys.">
+                <div className="space-y-5">
+                  {KEYBINDING_GROUPS.map((group) => (
+                    <div key={group.group} className="space-y-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted">{group.group}</div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {group.definitions.map((definition) => (
+                          <TextField
+                            key={definition.id}
+                            label={definition.label}
+                            value={draft.ui.keybindingOverrides?.[definition.id] ?? definition.keys}
+                            onChange={(value) => updateKeybindingOverride(definition.id, value)}
+                            placeholder={definition.keys}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => updateDraft((current) => ({ ...current, ui: { ...current.ui, keybindingOverrides: {} } }))}
+                    className="rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground"
+                  >
+                    Reset shortcuts
+                  </button>
+                </div>
+              </SectionCard>
+            ) : null}
+          </>
         )}
 
         {resolvedActiveTab === "user-settings" && <UserSettingsPanel />}
@@ -2705,14 +2708,6 @@ export function SettingsPage() {
               </SectionCard>
             )}
 
-            <SectionCard title="Keyboard Shortcuts" description="Press ? anywhere to view the full shortcut reference.">
-              <div className="grid gap-3 md:grid-cols-2 text-sm">
-                <div className="flex justify-between"><span className="text-secondary">Global navigation</span><span className="font-mono text-xs bg-card px-2 py-0.5 rounded">g</span></div>
-                <div className="flex justify-between"><span className="text-secondary">Theater mode (scenes)</span><span className="font-mono text-xs bg-card px-2 py-0.5 rounded">,</span></div>
-                <div className="flex justify-between"><span className="text-secondary">Show all shortcuts</span><span className="font-mono text-xs bg-card px-2 py-0.5 rounded">?</span></div>
-                <div className="flex justify-between"><span className="text-secondary">Search / filter</span><span className="font-mono text-xs bg-card px-2 py-0.5 rounded">/</span></div>
-              </div>
-            </SectionCard>
           </>
         )}
       </div>
@@ -2825,6 +2820,7 @@ function UserSettingsPanel() {
   const accountBackedPreferences = supportsServerBackedUiPreferences(user);
   const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
   const [trackingPreferences, setTrackingPreferences] = useState<ResolvedTrackingPreferences>(() => resolveTrackingPreferences(user?.uiPreferences?.tracking));
+  const [excludeVr, setExcludeVr] = useState(user?.uiPreferences?.scenes?.excludeVr ?? false);
   const [logoutPending, setLogoutPending] = useState(false);
 
   const handleLogout = async () => {
@@ -2839,6 +2835,7 @@ function UserSettingsPanel() {
 
   useEffect(() => {
     setTrackingPreferences(resolveTrackingPreferences(user?.uiPreferences?.tracking));
+    setExcludeVr(user?.uiPreferences?.scenes?.excludeVr ?? false);
   }, [user]);
 
   const updateTrackingPreferences = (patch: Partial<ResolvedTrackingPreferences>) => {
@@ -2851,6 +2848,18 @@ function UserSettingsPanel() {
     updateAuthenticatedUserUiPreferences((current) => ({
       ...(current ?? {}),
       tracking: nextTracking,
+    }));
+  };
+
+  const updateScenePreferences = (patch: { excludeVr?: boolean }) => {
+    const nextExcludeVr = patch.excludeVr ?? excludeVr;
+    setExcludeVr(nextExcludeVr);
+    updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      scenes: {
+        ...(current?.scenes ?? {}),
+        excludeVr: nextExcludeVr,
+      },
     }));
   };
 
@@ -2931,6 +2940,14 @@ function UserSettingsPanel() {
             />
           </div>
         </div>
+      </SectionCard>
+
+      <SectionCard title="Scene Lists" description="Defaults for browsing scene collections.">
+        <CheckboxLabel
+          label="Exclude VR"
+          checked={excludeVr}
+          onChange={(checked) => updateScenePreferences({ excludeVr: checked })}
+        />
       </SectionCard>
     </div>
   );

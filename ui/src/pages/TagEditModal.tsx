@@ -5,6 +5,7 @@ import type { TagDetail, TagUpdate, Tag } from "../api/types";
 import { EditModal, Field, NumberInput, SaveButton, SelectInput, TextArea, TextInput } from "../components/EditModal";
 import { ImageInput } from "../components/ImageInput";
 import { CustomFieldsEditor } from "../components/shared";
+import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { StringListEditor } from "../components/StringListEditor";
 import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
 
@@ -33,6 +34,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
   const [aliases, setAliases] = useState(tag.aliases);
   const [selectedParentIds, setSelectedParentIds] = useState<number[]>(tag.parents.map((t) => t.id));
   const [selectedChildIds, setSelectedChildIds] = useState<number[]>(tag.children.map((t) => t.id));
+  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(tag.remoteIds?.length ? tag.remoteIds : []);
 
   // Tag search for parents
   const [parentSearch, setParentSearch] = useState("");
@@ -65,6 +67,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
     setAliases(tag.aliases);
     setSelectedParentIds(tag.parents.map((t) => t.id));
     setSelectedChildIds(tag.children.map((t) => t.id));
+    setRemoteIds(tag.remoteIds?.length ? tag.remoteIds : []);
     setCustomFields({ ...(tag.customFields ?? {}) });
   }, [tag]);
 
@@ -94,6 +97,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       aliases: aliasList,
       parentIds: selectedParentIds,
       childIds: selectedChildIds,
+      remoteIds: normalizeRemoteIds(remoteIds),
       customFields,
     });
   };
@@ -204,10 +208,6 @@ export function TagEditModal({ tag, open, onClose }: Props) {
         </div>
       </Field>
 
-      <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="tag" />
-      </Field>
-
       {/* Parent Tags */}
       <Field label="Parent Tags">
         <SelectedTagChips tags={selectedParents} onRemove={(tag) => setSelectedParentIds(selectedParentIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
@@ -236,6 +236,14 @@ export function TagEditModal({ tag, open, onClose }: Props) {
         {childSearch && filteredChildren.length > 0 && (
           <GroupedTagOptionList tags={filteredChildren} maxItems={20} onSelect={(tag) => { setSelectedChildIds([...selectedChildIds, tag.id]); setChildSearch(""); }} />
         )}
+      </Field>
+
+      <Field label="Remote IDs">
+        <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
+      </Field>
+
+      <Field label="Custom Fields">
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="tag" />
       </Field>
 
       <div className="flex justify-end gap-3 mt-4">

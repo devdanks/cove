@@ -10,7 +10,6 @@ import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCa
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { FaceTile } from "../components/EntityCards";
 import { formatDate } from "../components/shared";
 import { useListUrlState } from "../hooks/useListUrlState";
@@ -18,6 +17,7 @@ import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 interface Props {
   onNavigate: (r: any) => void;
@@ -316,27 +316,16 @@ export function FacesPage({ onNavigate }: Props) {
         availableDisplayModes={["grid", "list"]}
         allowInfinitePageSize
         showPagingControls={!listData.infinitePageSize}
-        selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
-        onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
-        selectAllMatchingLabel={`Select all ${totalCount} matching`}
-        selectAllMatchingPending={selectAllMatchingPending}
-        infiniteScroll={listData.infinitePageSize ? {
-          hasNextPage: listData.infiniteQuery.hasNextPage,
-          hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
-          isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
-          isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
-          onLoadMore: listData.loadMore,
-          onLoadPrevious: listData.loadPrevious,
-          loadedCount: listData.infiniteQuery.loadedThroughCount,
-          previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
-          totalCount,
-        } : undefined}
+        selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
+        onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
+        selectAllMatchingLabel="Select shown"
+        infiniteScroll={listData.infiniteScroll}
         criteriaDefinitions={[]}
         objectFilter={objectFilter}
         onObjectFilterChange={handleObjectFilterChange}
         customFilterSections={faceFilterSections}
         selectedIds={selectedIds}
-        onSelectAll={selectAll}
+        onSelectAll={listData.infinitePageSize ? handleSelectAllMatching : selectAll}
         onSelectNone={selectNone}
         onInvertSelection={invertSelection}
         selectionActions={(
@@ -381,10 +370,19 @@ export function FacesPage({ onNavigate }: Props) {
         metadataByline={<span className="hidden text-xs text-muted lg:inline">Review face clusters with suggestions, links, and sample counts.</span>}
       >
         {displayMode === "grid" ? (
-          <EntityCardGrid gapClassName="gap-4">
-            {items.map((face) => (
+          <VirtualizedEntityGrid
+            items={items}
+            getItemKey={(face) => face.id}
+            minCardWidth="var(--card-min-width, 200px)"
+            estimateRowHeight={340}
+            gap={16}
+            gapClassName="gap-4"
+            infinitePageSize={listData.infinitePageSize}
+            hasNextPage={listData.infiniteQuery.hasNextPage}
+            isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+            loadMore={listData.loadMore}
+            renderItem={(face) => (
               <FaceTile
-                key={face.id}
                 face={face}
                 onClick={() => onNavigate({ page: "face", id: face.id })}
                 selected={selectedIds.has(face.id)}
@@ -404,8 +402,8 @@ export function FacesPage({ onNavigate }: Props) {
                   />
                 )}
               </FaceTile>
-            ))}
-          </EntityCardGrid>
+            )}
+          />
         ) : (
           <FaceListTable
             faces={items}

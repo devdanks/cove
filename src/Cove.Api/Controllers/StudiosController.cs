@@ -15,9 +15,10 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.StudiosRead)]
-public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
+public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService? customFields = null) : ControllerBase
 {
     private sealed record StudioUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount);
+    private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
 
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -39,7 +40,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
         var (items, totalCount) = await studioRepo.FindAsync(filter, findFilter, ct);
         var usageCountsByStudioId = await LoadStudioUsageCountsAsync(items.Select(item => item.Id), ct);
-        var dtos = MapListToDtos(items, usageCountsByStudioId);
+        var dtos = await MapListToDtos(items, usageCountsByStudioId, ct);
         return Ok(new PaginatedResponse<StudioDto>(dtos, totalCount, page, perPage));
     }
 
@@ -50,7 +51,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         var filter = req.ObjectFilter ?? new StudioFilter();
         var (items, totalCount) = await studioRepo.FindAsync(filter, findFilter, ct);
         var usageCountsByStudioId = await LoadStudioUsageCountsAsync(items.Select(item => item.Id), ct);
-        var dtos = MapListToDtos(items, usageCountsByStudioId);
+        var dtos = await MapListToDtos(items, usageCountsByStudioId, ct);
         return Ok(new PaginatedResponse<StudioDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -71,14 +72,16 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         {
             Name = dto.Name, ParentId = dto.ParentId,
             Favorite = dto.Favorite, Details = dto.Details,
-            IgnoreAutoTag = dto.IgnoreAutoTag, Organized = dto.Organized,
-            CustomFields = dto.CustomFields
+            IgnoreAutoTag = dto.IgnoreAutoTag, Organized = dto.Organized
         };
         if (dto.Urls?.Count > 0) studio.Urls = dto.Urls.Select(u => new StudioUrl { Url = u }).ToList();
         if (dto.Aliases?.Count > 0) studio.Aliases = dto.Aliases.Select(a => new StudioAlias { Alias = a }).ToList();
         if (dto.TagIds?.Count > 0) studio.StudioTags = dto.TagIds.Select(id => new StudioTag { TagId = id }).ToList();
+        if (dto.RemoteIds?.Count > 0) studio.RemoteIds = NormalizeRemoteIds(dto.RemoteIds).Select(remoteId => new StudioRemoteId { Endpoint = remoteId.Endpoint, RemoteId = remoteId.RemoteId }).ToList();
 
         studio = await studioRepo.AddAsync(studio, ct);
+        if (dto.CustomFields != null)
+            await _customFields.SaveValuesAsync(CustomFieldEntityTypes.Studio, studio.Id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Studio, studio.Id, dto.Rating, cancellationToken: ct);
         if (dto.Urls?.Count > 0)
@@ -119,9 +122,14 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             studio.StudioTags.Clear();
             studio.StudioTags = dto.TagIds.Select(tid => new StudioTag { TagId = tid, StudioId = id }).ToList();
         }
-        if (dto.CustomFields != null) studio.CustomFields = dto.CustomFields;
-
+        if (dto.RemoteIds != null)
+        {
+            studio.RemoteIds.Clear();
+            studio.RemoteIds = NormalizeRemoteIds(dto.RemoteIds).Select(remoteId => new StudioRemoteId { StudioId = id, Endpoint = remoteId.Endpoint, RemoteId = remoteId.RemoteId }).ToList();
+        }
         await studioRepo.UpdateAsync(studio, ct);
+        if (dto.CustomFields != null)
+            await _customFields.SaveValuesAsync(CustomFieldEntityTypes.Studio, id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Studio, id, dto.Rating, cancellationToken: ct);
         if (dto.Urls != null)
@@ -139,6 +147,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     {
         var s = await studioRepo.GetByIdAsync(id, ct);
         if (s == null) return NotFound();
+        await _customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Studio, id, ct);
         await studioRepo.DeleteAsync(id, ct);
         return NoContent();
     }
@@ -193,10 +202,11 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     private async Task<StudioDto> MapToDetailDtoAsync(Studio studio, CancellationToken ct)
     {
         var usageCounts = (await LoadStudioUsageCountsAsync([studio.Id], ct)).GetValueOrDefault(studio.Id);
-        return MapToDto(studio, usageCounts);
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, studio.Id, ct);
+        return MapToDto(studio, usageCounts, customFieldValues);
     }
 
-    private StudioDto MapToDto(Studio s, StudioUsageCounts? usageCounts = null) => new(
+    private StudioDto MapToDto(Studio s, StudioUsageCounts? usageCounts = null, Dictionary<string, object>? customFieldValues = null) => new(
         s.Id, s.Name, s.ParentId, s.Parent?.Name, s.Favorite, s.Details, s.IgnoreAutoTag, s.Organized,
         s.Urls.Select(u => u.Url).ToList(),
         s.Aliases.Select(a => a.Alias).ToList(),
@@ -211,16 +221,29 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         usageCounts?.AudioCount ?? 0,
         usageCounts?.TextCount ?? 0,
         s.ImageBlobId != null ? EntityImageUrls.Studio(ControllerContext.HttpContext, s.Id, s.UpdatedAt) : null,
-        s.CustomFields,
+        customFieldValues,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
 
-    private List<StudioDto> MapListToDtos(IReadOnlyList<Studio> items, IReadOnlyDictionary<int, StudioUsageCounts> usageCountsByStudioId)
+    private static List<StudioRemoteIdDto> NormalizeRemoteIds(IEnumerable<StudioRemoteIdDto> remoteIds)
+        => remoteIds
+            .Select(remoteId => new StudioRemoteIdDto(remoteId.Endpoint.Trim(), remoteId.RemoteId.Trim()))
+            .Where(remoteId => !string.IsNullOrWhiteSpace(remoteId.Endpoint) && !string.IsNullOrWhiteSpace(remoteId.RemoteId))
+            .GroupBy(remoteId => new { Endpoint = remoteId.Endpoint.ToUpperInvariant(), RemoteId = remoteId.RemoteId.ToUpperInvariant() })
+            .Select(group => group.First())
+            .ToList();
+
+    private async Task<List<StudioDto>> MapListToDtos(IReadOnlyList<Studio> items, IReadOnlyDictionary<int, StudioUsageCounts> usageCountsByStudioId, CancellationToken ct)
     {
-        return items.Count == 0
-            ? []
-            : items.Select(studio => MapToDto(studio, usageCountsByStudioId.GetValueOrDefault(studio.Id))).ToList();
+        if (items.Count == 0)
+            return [];
+
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, items.Select(item => item.Id), ct);
+        return items.Select(studio => MapToDto(studio, usageCountsByStudioId.GetValueOrDefault(studio.Id), GetCustomFields(customFieldValues, studio.Id))).ToList();
     }
+
+    private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
+        => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;
 
     private async Task<Dictionary<int, StudioUsageCounts>> LoadStudioUsageCountsAsync(IEnumerable<int> studioIds, CancellationToken ct)
     {
@@ -347,7 +370,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
         await db.SaveChangesAsync(ct);
         var result = await studioRepo.GetByIdWithRelationsAsync(target.Id, ct);
-        return Ok(MapToDto(result!));
+        return Ok(await MapToDetailDtoAsync(result!, ct));
     }
 
     // ===== Metadata Server =====
@@ -407,7 +430,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
         await db.SaveChangesAsync(ct);
         var updated = await studioRepo.GetByIdWithRelationsAsync(id, ct);
-        return Ok(MapToDto(updated!));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     [HttpPost("{id:int}/metadata-server/submit-draft")]

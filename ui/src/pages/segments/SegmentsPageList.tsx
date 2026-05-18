@@ -18,6 +18,10 @@ interface Props {
   selectedIds: Set<string | number>;
   onToggle: (id: string | number) => void;
   selecting: boolean;
+  infinitePageSize: boolean;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  loadMore: () => void;
 }
 
 export function SegmentsPageList({
@@ -34,15 +38,19 @@ export function SegmentsPageList({
   selectedIds,
   onToggle,
   selecting,
+  infinitePageSize,
+  hasNextPage,
+  isFetchingNextPage,
+  loadMore,
 }: Props) {
   const items = isRawView ? rawItems : spanItems;
 
   return (
     <>
       {isRawView ? (
-        <RawSegmentResults displayMode={displayMode} items={rawItems} canReadScenes={canReadScenes} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} />
+        <RawSegmentResults displayMode={displayMode} items={rawItems} canReadScenes={canReadScenes} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} />
       ) : (
-        <DerivedSpanResults displayMode={displayMode} items={spanItems} canReadScenes={canReadScenes} onNavigate={onNavigate} onViewRawSegments={onViewRawSegments} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} />
+        <DerivedSpanResults displayMode={displayMode} items={spanItems} canReadScenes={canReadScenes} onNavigate={onNavigate} onViewRawSegments={onViewRawSegments} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} />
       )}
 
       {items.length === 0 && !isLoading ? (

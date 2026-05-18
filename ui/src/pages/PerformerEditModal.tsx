@@ -7,6 +7,7 @@ import { EditModal, Field, TextInput, TextArea, NumberInput, SaveButton } from "
 import { InteractiveRatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
+import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { GroupedTagOptionList, SelectedTagChips, type SelectableTag } from "../components/TagSelector";
 
 interface Props {
@@ -66,6 +67,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
   const [selectedTagsById, setSelectedTagsById] = useState<Record<number, SelectedTagOption>>(() => buildSelectedTagLookup(performer.tags));
   const [tagSearch, setTagSearch] = useState("");
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(performer.customFields ?? {}) });
+  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(performer.remoteIds.map((remoteId) => ({ ...remoteId })));
   const trimmedTagSearch = tagSearch.trim();
 
   const { data: tagResults, isLoading: tagResultsLoading } = useQuery({
@@ -104,6 +106,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
     setSelectedTagsById(buildSelectedTagLookup(performer.tags));
     setTagSearch("");
     setCustomFields({ ...(performer.customFields ?? {}) });
+    setRemoteIds(performer.remoteIds.map((remoteId) => ({ ...remoteId })));
   }, [performer]);
 
   const mutation = useMutation({
@@ -145,6 +148,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
       aliases: aliasList,
       tagIds: selectedTagIds,
       customFields,
+      remoteIds: normalizeRemoteIds(remoteIds),
     });
   };
 
@@ -332,6 +336,9 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
         </label>
       </div>
 
+      <Field label="Remote IDs">
+        <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
+      </Field>
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="performer" />
       </Field>

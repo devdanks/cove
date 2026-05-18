@@ -215,7 +215,7 @@ function RatingNumberInput({
 
         onChange(convertFromRatingFormat(clampDisplayRating(normalizeDisplayRatingInput(event.target.value, parsed, options), options), options));
       }}
-      className={inputClassName ?? "w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"}
+      className={inputClassName ?? "w-20 max-w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"}
     />
   );
 }
@@ -386,7 +386,6 @@ export function InteractiveRating({ value, onChange, readOnly = false }: { value
             </button>
           ))}
         </div>
-        {(hoverValue ?? label) && <span className="text-sm text-secondary">{hoverValue != null ? trimTrailingZeros(hoverValue) : label}</span>}
       </div>
     );
   }
@@ -396,7 +395,7 @@ export function InteractiveRating({ value, onChange, readOnly = false }: { value
   }
 
   return (
-    <div className="w-24">
+    <div className="w-20 max-w-full">
       <RatingNumberInput
         value={value}
         onChange={onChange ?? (() => {})}

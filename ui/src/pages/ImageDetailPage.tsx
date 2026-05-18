@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Eye, FolderOpen, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Pencil, Search, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, FolderOpen, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Search, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -62,6 +62,9 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const trackImageActivity = canEngageImage && trackingEnabled;
   const {
     engagement: imageEngagement,
+    favorite: imageFavorite,
+    favoritePending: imageFavoritePending,
+    setFavorite: setImageFavorite,
     rating: imageRating,
     setRating: setImageRating,
   } = useEntityEngagement("image", id, {
@@ -90,7 +93,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const revealFileMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
   const canRevealFiles = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
   const imageLikeCount = imageEngagement?.likeCount ?? 0;
-  const imageDerivedLikeCount = imageEngagement?.derivedLikeCount ?? 0;
   const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
   const displayTitle = image ? getImageDisplayTitle(image) : `Image ${id}`;
   const tabs = useMemo(() => {
@@ -212,7 +214,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     },
     {
       key: "l",
-      description: "Add like",
+      description: "Likes",
       handler: () => {
         if (canEngageImage) {
           incrementLikeMut.mutate();
@@ -586,21 +588,17 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
               <InteractiveRating value={imageRating} onChange={(value) => setImageRating(value)} readOnly={!canEngageImage} />
             </div>
           ),
+          favorite: imageFavorite,
+          favoritePending: imageFavoritePending,
+          onFavoriteChange: canEngageImage ? setImageFavorite : undefined,
           additionalMetrics: [
             {
               label: "Likes",
               value: imageLikeCount,
               icon: <ThumbsUp className={["h-4 w-4", imageLikeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />,
-              title: "Add like",
+              title: "Likes",
               onClick: canEngageImage ? () => incrementLikeMut.mutate() : undefined,
               active: imageLikeCount > 0,
-            },
-            {
-              label: "Derived Likes",
-              value: imageDerivedLikeCount,
-              icon: <ThumbsUp className={["h-4 w-4", imageDerivedLikeCount > 0 ? "text-accent" : ""].join(" ")} />,
-              title: "Derived likes",
-              active: imageDerivedLikeCount > 0,
             },
             {
               label: "Page Visits",
@@ -621,16 +619,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                 title={image.organized ? "Organized" : "Mark organized"}
               >
                 <Check className="h-4 w-4" />
-              </button>
-            ) : null}
-            {canWriteImage ? (
-              <button
-                type="button"
-                onClick={() => setActiveTab("edit")}
-                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
-                title="Edit"
-              >
-                <Pencil className="h-4 w-4" />
               </button>
             ) : null}
             {canDeleteImage ? (

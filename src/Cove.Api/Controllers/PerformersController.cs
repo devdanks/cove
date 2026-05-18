@@ -15,9 +15,10 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.PerformersRead)]
-public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService) : ControllerBase
+public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService? customFields = null) : ControllerBase
 {
     private sealed record PerformerUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount);
+    private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
 
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -40,7 +41,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
 
         var (items, totalCount) = await performerRepo.FindAsync(filter, findFilter, ct);
         var usageCountsByPerformerId = await LoadPerformerUsageCountsAsync(items.Select(item => item.Id), ct);
-        var dtos = items.Select(p => MapToDto(p, usageCountsByPerformerId.GetValueOrDefault(p.Id))).ToList();
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, items.Select(item => item.Id), ct);
+        var dtos = items.Select(p => MapToDto(p, usageCountsByPerformerId.GetValueOrDefault(p.Id), GetCustomFields(customFieldValues, p.Id))).ToList();
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, page, perPage));
     }
 
@@ -51,7 +53,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         var filter = req.ObjectFilter ?? new PerformerFilter();
         var (items, totalCount) = await performerRepo.FindAsync(filter, findFilter, ct);
         var usageCountsByPerformerId = await LoadPerformerUsageCountsAsync(items.Select(item => item.Id), ct);
-        var dtos = items.Select(p => MapToDto(p, usageCountsByPerformerId.GetValueOrDefault(p.Id))).ToList();
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, items.Select(item => item.Id), ct);
+        var dtos = items.Select(p => MapToDto(p, usageCountsByPerformerId.GetValueOrDefault(p.Id), GetCustomFields(customFieldValues, p.Id))).ToList();
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage));
     }
 
@@ -118,7 +121,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         query = ApplyGroupSort(query, sort, direction == "desc");
         var totalCount = await query.CountAsync(ct);
         var groups = await query.Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
-        return Ok(new PaginatedResponse<GroupDto>(groups.Select(MapGroupToDto).ToList(), totalCount, page, perPage));
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, groups.Select(group => group.Id), ct);
+        return Ok(new PaginatedResponse<GroupDto>(groups.Select(group => MapGroupToDto(group, GetCustomFields(customFieldValues, group.Id))).ToList(), totalCount, page, perPage));
     }
 
     [HttpGet("{id:int}/appears-with")]
@@ -183,9 +187,10 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             .ToListAsync(ct);
         var performersById = performers.ToDictionary(performer => performer.Id);
         var usageCountsByPerformerId = await LoadPerformerUsageCountsAsync(pageIds, ct);
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, pageIds, ct);
         var dtos = pageRows
             .Where(row => performersById.ContainsKey(row.PerformerId))
-            .Select(row => MapToDto(performersById[row.PerformerId], usageCountsByPerformerId.GetValueOrDefault(row.PerformerId)))
+            .Select(row => MapToDto(performersById[row.PerformerId], usageCountsByPerformerId.GetValueOrDefault(row.PerformerId), GetCustomFields(customFieldValues, row.PerformerId)))
             .ToList();
 
         return Ok(new PaginatedResponse<PerformerDto>(dtos, totalCount, page, perPage));
@@ -206,14 +211,16 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             CareerStart = ParseDate(dto.CareerStart), CareerEnd = ParseDate(dto.CareerEnd),
             Tattoos = dto.Tattoos, Piercings = dto.Piercings,
             Favorite = dto.Favorite, Details = dto.Details,
-            IgnoreAutoTag = dto.IgnoreAutoTag,
-            CustomFields = dto.CustomFields
+            IgnoreAutoTag = dto.IgnoreAutoTag
         };
         if (dto.Urls?.Count > 0) performer.Urls = dto.Urls.Select(u => new PerformerUrl { Url = u }).ToList();
         if (dto.Aliases?.Count > 0) performer.Aliases = dto.Aliases.Select(a => new PerformerAlias { Alias = a }).ToList();
         if (dto.TagIds?.Count > 0) performer.PerformerTags = dto.TagIds.Select(id => new PerformerTag { TagId = id }).ToList();
+        if (dto.RemoteIds?.Count > 0) performer.RemoteIds = NormalizeRemoteIds(dto.RemoteIds).Select(remoteId => new PerformerRemoteId { Endpoint = remoteId.Endpoint, RemoteId = remoteId.RemoteId }).ToList();
 
         performer = await performerRepo.AddAsync(performer, ct);
+        if (dto.CustomFields != null)
+            await _customFields.SaveValuesAsync(CustomFieldEntityTypes.Performer, performer.Id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Performer, performer.Id, dto.Rating, cancellationToken: ct);
         if (dto.Urls?.Count > 0)
@@ -270,9 +277,14 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             p.PerformerTags.Clear();
             p.PerformerTags = dto.TagIds.Select(tid => new PerformerTag { TagId = tid, PerformerId = id }).ToList();
         }
-        if (dto.CustomFields != null) p.CustomFields = dto.CustomFields;
-
+        if (dto.RemoteIds != null)
+        {
+            p.RemoteIds.Clear();
+            p.RemoteIds = NormalizeRemoteIds(dto.RemoteIds).Select(remoteId => new PerformerRemoteId { PerformerId = id, Endpoint = remoteId.Endpoint, RemoteId = remoteId.RemoteId }).ToList();
+        }
         await performerRepo.UpdateAsync(p, ct);
+        if (dto.CustomFields != null)
+            await _customFields.SaveValuesAsync(CustomFieldEntityTypes.Performer, id, dto.CustomFields, ct);
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Performer, id, dto.Rating, cancellationToken: ct);
         if (dto.Urls != null)
@@ -492,6 +504,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     {
         var p = await performerRepo.GetByIdAsync(id, ct);
         if (p == null) return NotFound();
+        await _customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Performer, id, ct);
         await performerRepo.DeleteAsync(id, ct);
         return NoContent();
     }
@@ -499,7 +512,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     private async Task<PerformerDto> MapToDetailDtoAsync(Performer performer, CancellationToken ct)
     {
         var usageCounts = (await LoadPerformerUsageCountsAsync([performer.Id], ct)).GetValueOrDefault(performer.Id);
-        return MapToDto(performer, usageCounts);
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, performer.Id, ct);
+        return MapToDto(performer, usageCounts, customFieldValues);
     }
 
     private static IQueryable<Group> ApplyGroupSort(IQueryable<Group> query, string? sort, bool desc) => sort switch
@@ -511,7 +525,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         _ => desc ? query.OrderByDescending(group => group.Name) : query.OrderBy(group => group.Name),
     };
 
-    private GroupDto MapGroupToDto(Group group) => new(
+    private GroupDto MapGroupToDto(Group group, Dictionary<string, object>? customFieldValues = null) => new(
         group.Id,
         group.Name,
         group.Aliases,
@@ -528,7 +542,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         group.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange),
         group.SubGroupRelations?.Count ?? 0,
         group.ContainingGroupRelations?.Count ?? 0,
-        group.CustomFields,
+        customFieldValues,
         group.CreatedAt.ToString("o"),
         group.UpdatedAt.ToString("o"),
         group.FrontImageBlobId != null ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt) : null,
@@ -542,7 +556,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         group.ShowInSceneLists,
         group.AllowedHostTypes);
 
-    private PerformerDto MapToDto(Performer p, PerformerUsageCounts? usageCounts = null) => new(
+    private PerformerDto MapToDto(Performer p, PerformerUsageCounts? usageCounts = null, Dictionary<string, object>? customFieldValues = null) => new(
         p.Id, p.Name, p.Disambiguation, p.Gender?.ToString(),
         p.Birthdate?.ToString("yyyy-MM-dd"), p.DeathDate?.ToString("yyyy-MM-dd"),
         p.Ethnicity, p.Country, p.EyeColor, p.HairColor, p.HeightCm, p.Weight,
@@ -560,9 +574,20 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         usageCounts?.AudioCount ?? 0,
         usageCounts?.TextCount ?? 0,
         p.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, p.Id, p.UpdatedAt) : null,
-        p.CustomFields,
+        customFieldValues,
         p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o")
     );
+
+    private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
+        => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;
+
+    private static List<PerformerRemoteIdDto> NormalizeRemoteIds(IEnumerable<PerformerRemoteIdDto> remoteIds)
+        => remoteIds
+            .Select(remoteId => new PerformerRemoteIdDto(remoteId.Endpoint.Trim(), remoteId.RemoteId.Trim()))
+            .Where(remoteId => !string.IsNullOrWhiteSpace(remoteId.Endpoint) && !string.IsNullOrWhiteSpace(remoteId.RemoteId))
+            .GroupBy(remoteId => new { Endpoint = remoteId.Endpoint.ToUpperInvariant(), RemoteId = remoteId.RemoteId.ToUpperInvariant() })
+            .Select(group => group.First())
+            .ToList();
 
     private async Task<Dictionary<int, PerformerUsageCounts>> LoadPerformerUsageCountsAsync(IEnumerable<int> performerIds, CancellationToken ct)
     {
@@ -752,6 +777,6 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
 
         await db.SaveChangesAsync(ct);
         var result = await performerRepo.GetByIdWithRelationsAsync(target.Id, ct);
-        return Ok(MapToDto(result!));
+        return Ok(await MapToDetailDtoAsync(result!, ct));
     }
 }

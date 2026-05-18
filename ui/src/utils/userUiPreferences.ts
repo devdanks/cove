@@ -137,8 +137,13 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     ? (preferences as Record<string, unknown>)[legacyTrackingEnabledKey]
     : undefined;
   const tracking = normalizeTrackingPreferences(preferences?.tracking, legacyTrackingEnabled);
-  const scenes = typeof preferences?.scenes?.includeCompilationGroups === "boolean"
-    ? { includeCompilationGroups: preferences.scenes.includeCompilationGroups }
+  const includeCompilationGroups = preferences?.scenes?.includeCompilationGroups;
+  const excludeVr = preferences?.scenes?.excludeVr;
+  const scenes = typeof includeCompilationGroups === "boolean" || typeof excludeVr === "boolean"
+    ? {
+        ...(typeof includeCompilationGroups === "boolean" ? { includeCompilationGroups } : {}),
+        ...(typeof excludeVr === "boolean" ? { excludeVr } : {}),
+      }
     : null;
   const playback = normalizePlaybackPreferences(preferences?.playback);
   const keybindingOverrides = normalizeKeybindingOverrides(preferences?.keybindingOverrides);

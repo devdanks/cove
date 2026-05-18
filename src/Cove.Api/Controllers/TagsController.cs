@@ -208,6 +208,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (dto.Aliases?.Count > 0) tag.Aliases = dto.Aliases.Select(a => new TagAlias { Alias = a }).ToList();
         if (dto.ParentIds?.Count > 0) tag.ParentRelations = dto.ParentIds.Select(pid => new TagParent { ParentId = pid }).ToList();
         if (dto.ChildIds?.Count > 0) tag.ChildRelations = dto.ChildIds.Select(cid => new TagParent { ChildId = cid }).ToList();
+        if (dto.RemoteIds?.Count > 0) tag.RemoteIds = NormalizeRemoteIds(dto.RemoteIds).Select(remoteId => new TagRemoteId { Endpoint = remoteId.Endpoint, RemoteId = remoteId.RemoteId }).ToList();
 
         tag = await tagRepo.AddAsync(tag, ct);
         if (dto.CustomFields != null)
@@ -228,6 +229,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             : await db.Tags
                 .Include(t => t.Aliases)
                 .Include(t => t.TagGroup)
+                .Include(t => t.RemoteIds)
                 .Include(t => t.ParentRelations)
                 .Include(t => t.ChildRelations)
                 .FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -264,6 +266,11 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             tag.ChildRelations.Clear();
             tag.ChildRelations = dto.ChildIds.Select(cid => new TagParent { ParentId = id, ChildId = cid }).ToList();
         }
+        if (dto.RemoteIds != null)
+        {
+            tag.RemoteIds.Clear();
+            tag.RemoteIds = NormalizeRemoteIds(dto.RemoteIds).Select(remoteId => new TagRemoteId { TagId = id, Endpoint = remoteId.Endpoint, RemoteId = remoteId.RemoteId }).ToList();
+        }
         if (tagRepo != null)
         {
             await tagRepo.UpdateAsync(tag, ct);
@@ -282,6 +289,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 .AsNoTracking()
                 .Include(t => t.Aliases)
                 .Include(t => t.TagGroup)
+                .Include(t => t.RemoteIds)
                 .Include(t => t.ParentRelations).ThenInclude(tp => tp.Parent).ThenInclude(parent => parent!.TagGroup)
                 .Include(t => t.ChildRelations).ThenInclude(tp => tp.Child).ThenInclude(child => child!.TagGroup)
                 .FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -487,7 +495,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 t.TagGroup?.Name,
                 t.TagGroup?.Color,
                 t.MinOccurrenceSec,
-                t.MinOccurrencePercent);
+                t.MinOccurrencePercent,
+                t.RemoteIds.Select(remoteId => new TagRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList());
     }
 
     private List<TagListDto> MapTagListDtos(IReadOnlyList<Tag> items, IReadOnlyDictionary<int, TagUsageCounts> usageCountsByTagId)
@@ -629,6 +638,13 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
     private static double? NormalizeOptionalPercent(double? value)
         => value is > 0 ? Math.Min(value.Value, 100d) : null;
+
+    private static List<TagRemoteIdDto> NormalizeRemoteIds(IEnumerable<TagRemoteIdDto> remoteIds)
+        => remoteIds
+            .Select(remoteId => new TagRemoteIdDto(remoteId.Endpoint.Trim(), remoteId.RemoteId.Trim()))
+            .Where(remoteId => remoteId.Endpoint.Length > 0 && remoteId.RemoteId.Length > 0)
+            .DistinctBy(remoteId => (remoteId.Endpoint.ToUpperInvariant(), remoteId.RemoteId.ToUpperInvariant()))
+            .ToList();
 
     private async Task<ActionResult<TagDetailDto>?> ValidateTagMetadataAsync(string? color, int? tagGroupId, CancellationToken ct)
     {

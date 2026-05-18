@@ -70,11 +70,29 @@ export function EntityHeroLayout({
   contentClassName,
   children,
 }: EntityHeroLayoutProps) {
-  const resolvedImageContainerClassName = imageContainerClassName ?? "relative flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/35 md:h-36 md:w-36";
+  const resolvedImageContainerClassName = imageContainerClassName ?? "relative flex h-48 w-48 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/35 md:h-56 md:w-56";
   const resolvedImageClassName = imageClassName ?? "h-full w-full object-cover";
   const resolvedFallbackClassName = imageFallbackClassName ?? "h-full w-full items-center justify-center bg-card text-muted";
-  const resolvedHeroRowClassName = heroRowClassName ?? "flex flex-col gap-6 md:flex-row md:items-end";
+  const resolvedHeroRowClassName = heroRowClassName ?? "flex flex-col gap-6 md:flex-row md:items-start";
   const resolvedContentClassName = contentClassName ?? "w-full px-4 py-6";
+  const favoriteTitle = favorite ? "Remove favorite" : "Favorite";
+  const favoriteAction = typeof favorite === "boolean" ? (
+    onFavoriteToggle ? (
+      <button
+        type="button"
+        onClick={onFavoriteToggle}
+        aria-pressed={favorite}
+        title={favoriteTitle}
+        className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:border-accent hover:text-foreground ${favorite ? "text-red-400" : "text-accent"}`}
+      >
+        <Heart className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
+      </button>
+    ) : (
+      <span title={favoriteTitle} className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card ${favorite ? "text-red-400" : "text-accent"}`}>
+        <Heart className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
+      </span>
+    )
+  ) : null;
 
   return (
     <div className="min-h-screen">
@@ -132,32 +150,12 @@ export function EntityHeroLayout({
             <div className="min-w-0 flex-1">
               <div className="mb-2 flex items-start gap-4">
                 <div className="min-w-0 flex-1">
-                  <h1 className="truncate text-2xl font-bold text-foreground sm:text-3xl md:text-4xl">{title}</h1>
+                  <h1 className="truncate text-2xl font-bold text-foreground sm:text-3xl">{title}</h1>
                   {subtitle ? <div className="mt-1 text-sm text-secondary">{subtitle}</div> : null}
                   {sortName ? <p className="mt-1 text-sm text-muted">Sort name: {sortName}</p> : null}
                   {aliases ? <p className="mt-1 text-sm text-secondary">Also known as: {aliases}</p> : null}
                 </div>
-                {typeof favorite === "boolean" ? (
-                  onFavoriteToggle ? (
-                    <button
-                      type="button"
-                      onClick={onFavoriteToggle}
-                      className={`rounded-full p-2 transition-colors ${
-                        favorite
-                          ? "bg-red-500/15 text-red-500"
-                          : "bg-card text-muted hover:text-red-400"
-                      }`}
-                      title={favorite ? "Remove from favorites" : "Add to favorites"}
-                    >
-                      <Heart className={`h-6 w-6 ${favorite ? "fill-current" : ""}`} />
-                    </button>
-                  ) : favorite ? (
-                    <span className="rounded-full bg-red-500/15 p-2 text-red-500" title="Favorite">
-                      <Heart className="h-6 w-6 fill-current" />
-                    </span>
-                  ) : null
-                ) : null}
-                {titleActions}
+                {titleActions || favoriteAction ? <div className="flex items-center gap-2">{titleActions}{favoriteAction}</div> : null}
               </div>
 
               {description ? (

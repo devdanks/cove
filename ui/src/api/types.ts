@@ -8,6 +8,7 @@ export interface Scene {
   director?: string;
   date?: string;
   organized: boolean;
+  isVr?: boolean;
   studioId?: number;
   studioName?: string;
   urls: string[];
@@ -48,12 +49,14 @@ export interface SceneCreate {
   date?: string;
   rating?: number;
   organized?: boolean;
+  isVr?: boolean;
   studioId?: number;
   urls?: string[];
   tagIds?: number[];
   performerIds?: number[];
   galleryIds?: number[];
   groups?: SceneGroupInput[];
+  remoteIds?: SceneRemoteId[];
   customFields?: Record<string, unknown>;
   parentSceneId?: number | null;
   clipStartSec?: number | null;
@@ -148,6 +151,7 @@ export interface PerformerCreate {
   urls?: string[];
   aliases?: string[];
   tagIds?: number[];
+  remoteIds?: PerformerRemoteId[];
   customFields?: Record<string, unknown>;
 }
 
@@ -213,6 +217,11 @@ export interface Tag {
   performerCount?: number;
   studioCount?: number;
   provenance?: TagProvenance[];
+}
+
+export interface TagRemoteId {
+  endpoint: string;
+  remoteId: string;
 }
 
 export interface TagProvenance {
@@ -290,6 +299,7 @@ export interface TagDetail extends Tag {
   audioCount: number;
   textCount: number;
   segmentCount: number;
+  remoteIds: TagRemoteId[];
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -340,6 +350,7 @@ export interface TagCreate {
   aliases?: string[];
   parentIds?: number[];
   childIds?: number[];
+  remoteIds?: TagRemoteId[];
   customFields?: Record<string, unknown>;
 }
 
@@ -388,6 +399,7 @@ export interface StudioCreate {
   urls?: string[];
   aliases?: string[];
   tagIds?: number[];
+  remoteIds?: StudioRemoteId[];
   customFields?: Record<string, unknown>;
 }
 
@@ -1596,6 +1608,7 @@ export interface UserTrackingPreferences {
 
 export interface UserScenesPreferences {
   includeCompilationGroups?: boolean | null;
+  excludeVr?: boolean | null;
 }
 
 export interface UserPlaybackPreferences {
@@ -2289,6 +2302,7 @@ export interface SceneFilterCriteria {
   code?: string;
   path?: string;
   organized?: boolean;
+  isVr?: boolean;
   includeCompilationGroups?: boolean;
   studioId?: number;
   groupId?: number;
@@ -2306,6 +2320,7 @@ export interface SceneFilterCriteria {
   studiosCriterion?: MultiIdCriterion;
   groupsCriterion?: MultiIdCriterion;
   organizedCriterion?: BoolCriterion;
+  isVrCriterion?: BoolCriterion;
   interactiveCriterion?: BoolCriterion;
   pathCriterion?: StringCriterion;
   fingerprintCriterion?: FingerprintCriterion;

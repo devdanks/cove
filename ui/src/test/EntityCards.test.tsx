@@ -142,6 +142,20 @@ describe("SceneCard navigation", () => {
     expect(screen.getByTitle("Likes: 1")).toBeInTheDocument();
     expect(screen.queryByText(/^O$/)).not.toBeInTheDocument();
   });
+
+  it("does not render a favorite card control when the card is not favorited", () => {
+    render(<SceneCard scene={baseScene as any} engagement={{ hostId: 42, isFavorite: false, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 0, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
+
+    expect(screen.queryByTitle("Favorite")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Favorite" })).not.toBeInTheDocument();
+  });
+
+  it("renders a non-interactive favorite indicator when the card is favorited", () => {
+    render(<SceneCard scene={baseScene as any} engagement={{ hostId: 42, isFavorite: true, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 0, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
+
+    expect(screen.getByTitle("Favorite")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Favorite" })).not.toBeInTheDocument();
+  });
 });
 
 describe("FileInfoTab", () => {

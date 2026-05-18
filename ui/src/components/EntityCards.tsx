@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNo
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { scenes, images, performers, galleries, studios, groups, audios, entityImages } from "../api/client";
-import type { Audio, EntityEngagement, Face, FaceAppearance, Gallery, Group, GroupSummary, Image, PerformerSummary, Scene, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
+import type { AffinityHostType, Audio, EntityEngagement, Face, FaceAppearance, Gallery, Group, GroupSummary, Image, PerformerSummary, Scene, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
 import { BookOpenText, Building2, FileText, Fingerprint, FolderOpen, Headphones, Layers, Link2, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp, Mic2, MonitorPlay, PlayCircle, Merge } from "lucide-react";
@@ -21,6 +21,18 @@ export function LikeCounter({ count }: { count: number }) {
     <span className="flex items-center gap-1 p-1 text-muted" title={`Likes: ${count}`}>
       <ThumbsUp className="h-3.5 w-3.5 fill-accent text-accent" />
       <span className="text-xs">{count}</span>
+    </span>
+  );
+}
+
+export function CardFavoriteButton(props: { hostType: AffinityHostType; hostId: number; favorite: boolean }) {
+  if (!props.favorite) {
+    return null;
+  }
+
+  return (
+    <span className="inline-flex min-h-7 items-center justify-center p-1 text-red-400" title="Favorite" aria-label="Favorite">
+      <Heart className="h-4 w-4 fill-current" />
     </span>
   );
 }
@@ -357,9 +369,10 @@ export function GroupsPopoverContent({ filter }: { filter: Record<string, string
 
 export function SceneCardPopovers({ scene, engagement, onNavigate }: { scene: Scene; engagement?: EntityEngagement; onNavigate?: (r: any) => void }) {
   const likeCount = engagement?.likeCount ?? 0;
+  const hasFavorite = engagement?.isFavorite === true;
   const hasPopovers =
     scene.tags.length > 0 || scene.performers.length > 0 || scene.groups.length > 0 ||
-    scene.galleries.length > 0 || likeCount > 0 || scene.organized;
+    scene.galleries.length > 0 || likeCount > 0 || hasFavorite || scene.organized;
   return (
     <>
       <hr className="border-border/50 my-0" />
@@ -388,6 +401,9 @@ export function SceneCardPopovers({ scene, engagement, onNavigate }: { scene: Sc
         {likeCount > 0 && (
           <LikeCounter count={likeCount} />
         )}
+        {hasFavorite ? (
+          <CardFavoriteButton hostType="scene" hostId={scene.id} favorite={engagement?.isFavorite ?? false} />
+        ) : null}
         {scene.groups.length > 0 && (
           <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={scene.groups.length} title="Groups" preferBelow>
             <div className="flex flex-col gap-0.5">
@@ -512,6 +528,18 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
     : engagement?.resumeTime;
   const progressPercent = duration > 0 && visibleResumeTime ? Math.min(100, (visibleResumeTime / duration) * 100) : 0;
   const cardTitle = scene.title || file?.basename || "Untitled";
+  const [scrubSeconds, setScrubSeconds] = useState<number | null>(null);
+  const scrubPercent = duration > 0 && scrubSeconds != null ? Math.min(100, Math.max(0, ((scrubSeconds - (scene.clipStartSec ?? 0)) / duration) * 100)) : 0;
+  const scrubImageUrl = scrubSeconds != null ? scenes.screenshotUrl(scene.id, scene.updatedAt, scrubSeconds) : null;
+
+  const updateScrubPreview = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (duration <= 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const percent = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)));
+    const clipStart = scene.clipStartSec ?? 0;
+    const nextSeconds = Math.round(clipStart + percent * duration);
+    setScrubSeconds((current) => current === nextSeconds ? current : nextSeconds);
+  }, [duration, scene.clipStartSec]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -537,6 +565,14 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
           loading="lazy"
         />
         <video ref={videoRef} disableRemotePlayback playsInline muted loop preload="none" src={previewUrl} className="scene-card-preview-video" />
+        {scrubImageUrl ? (
+          <img
+            src={scrubImageUrl}
+            alt=""
+            className="absolute inset-0 z-[7] h-full w-full object-cover"
+            draggable={false}
+          />
+        ) : null}
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
         {!selecting && (
           <BookmarkButton
@@ -574,6 +610,23 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
         {progressPercent > 0 && (
           <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/40 z-[6]"><div className="h-full bg-accent" style={{ width: `${progressPercent}%` }} /></div>
         )}
+        {duration > 0 && !selecting ? (
+          <div
+            className="absolute inset-x-0 bottom-0 z-[9] h-10 cursor-ew-resize"
+            onMouseEnter={updateScrubPreview}
+            onMouseMove={updateScrubPreview}
+            onMouseLeave={() => setScrubSeconds(null)}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            aria-hidden="true"
+          >
+            <div className={`absolute inset-x-1 bottom-1 h-1 rounded-full bg-black/55 transition-opacity ${scrubSeconds != null ? "opacity-100" : "opacity-0"}`}>
+              <div className="h-full rounded-full bg-accent" style={{ width: `${scrubPercent}%` }} />
+            </div>
+          </div>
+        ) : null}
         <RatingBanner rating={engagement?.rating} />
       </div>
       <div className="card-body px-2.5 pt-2 pb-2 border-t border-border/50 flex-1 flex flex-col gap-1.5 min-h-0">
@@ -837,7 +890,8 @@ interface ImageTileProps {
 
 export function ImageTile({ image, engagement, onClick, onPreview, onDetails, onNavigate, onQuickView, selected, onSelect, selecting, bookmarkInitiallySaved }: ImageTileProps & { engagement?: EntityEngagement }) {
   const likeCount = engagement?.likeCount ?? 0;
-  const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || likeCount > 0 || image.organized;
+  const hasFavorite = engagement?.isFavorite === true;
+  const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || likeCount > 0 || hasFavorite || image.organized;
   const displayTitle = getImageDisplayTitle(image);
   const detailsClick = onDetails ?? onClick;
   const previewClick = selecting ? onClick : (onPreview ?? detailsClick);
@@ -912,6 +966,9 @@ export function ImageTile({ image, engagement, onClick, onPreview, onDetails, on
             {likeCount > 0 && (
               <LikeCounter count={likeCount} />
             )}
+            {hasFavorite ? (
+              <CardFavoriteButton hostType="image" hostId={image.id} favorite={engagement?.isFavorite ?? false} />
+            ) : null}
             {image.organized && (
               <span className="p-1 text-muted" title="Organized"><Box className="w-3.5 h-3.5" /></span>
             )}

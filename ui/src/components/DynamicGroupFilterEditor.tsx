@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowUpDown, SlidersHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, SlidersHorizontal } from "lucide-react";
 import type { FindFilter, SceneFilterCriteria } from "../api/types";
 import { FilterDialog, SCENE_CRITERIA } from "./FilterDialog";
 import { Field } from "./EditModal";
@@ -113,7 +113,7 @@ export function DynamicGroupFilterEditor({ queryJson, onChange }: DynamicGroupFi
           className="inline-flex h-10 items-center justify-center rounded border border-border bg-input px-3 text-secondary transition-colors hover:text-foreground"
           title={findFilter.direction === "asc" ? "Ascending" : "Descending"}
         >
-          <ArrowUpDown className="h-4 w-4" />
+          {findFilter.direction === "desc" ? <ArrowDown className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
         </button>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">

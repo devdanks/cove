@@ -136,7 +136,7 @@ public sealed class TagProvenanceServiceTests
 
         var updateResult = await controller.Update(
             createdScene.Id,
-            new SceneUpdateDto(null, null, null, null, null, null, null, null, null, null, null, [secondTag.Id], null, null, null, null),
+            new SceneUpdateDto(null, null, null, null, null, null, null, null, null, null, null, [secondTag.Id], null, null, null, null, null),
             CancellationToken.None);
         var updated = Assert.IsType<OkObjectResult>(updateResult.Result);
         Assert.IsType<SceneDto>(updated.Value);

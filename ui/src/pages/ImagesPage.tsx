@@ -1,17 +1,16 @@
 import { useState, useMemo, useCallback, lazy, Suspense } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { aiVisual, images } from "../api/client";
 import type { DeleteEntityOptions, EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useListUrlState } from "../hooks/useListUrlState";
-import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
+import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { ImageIcon, Trash2, Loader2, Edit, Heart, FolderOpen, Search } from "lucide-react";
+import { ImageIcon, Trash2, Loader2, Edit, FolderOpen, Search, ThumbsUp } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
-import { ImageTile } from "../components/EntityCards";
+import { CardFavoriteButton, ImageTile } from "../components/EntityCards";
 import type { LightboxImage } from "../components/Lightbox";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
@@ -22,12 +21,12 @@ import { useWallColumns } from "../hooks/useWallColumns";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
-import { fetchAllMatchingIds } from "../utils/selectAllMatching";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { FeedCardFrame, FeedChipButton, FeedMetadataPill } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
-import { InfiniteScrollSentinel } from "../components/InfiniteScrollSentinel";
+import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
+import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 
 const Lightbox = lazy(() => import("../components/Lightbox").then((module) => ({ default: module.Lightbox })));
 const ImageCreateModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageCreateModal })));
@@ -40,7 +39,6 @@ const SEARCH_MODE_OPTIONS = [
 ];
 
 const VISUAL_MATCH_SORT_OPTION = { value: "visual_match", label: "Visual Match" };
-
 const SORT_OPTIONS = [
   { value: "updated_at", label: "Updated At" },
   { value: "created_at", label: "Created At" },
@@ -65,7 +63,7 @@ export function ImagesPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("images");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, direction: "desc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -95,12 +93,9 @@ export function ImagesPage({ onNavigate }: Props) {
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
-  const infinitePageSize = filter.perPage === 0;
-  const infiniteChunkSize = defaultState.filter.perPage ?? 40;
-  const infiniteFilterKey = useMemo(
-    () => ({ ...filter, page: 1, perPage: infiniteChunkSize }),
-    [filter, infiniteChunkSize],
-  );
+  const infinitePageSize = filter.perPage === 0 || displayMode === "feed";
+  const defaultInfiniteChunkSize = defaultState.filter.perPage && defaultState.filter.perPage > 0 ? defaultState.filter.perPage : 40;
+  const infiniteChunkSize = displayMode === "feed" ? 8 : defaultInfiniteChunkSize;
   const sortOptions = useMemo(
     () => searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SORT_OPTIONS] : SORT_OPTIONS,
     [searchMode],
@@ -129,34 +124,17 @@ export function ImagesPage({ onNavigate }: Props) {
 
   const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
     setDisplayMode(mode);
-    if (filter.page !== 1) {
-      setFilter({ ...filter, page: 1 });
+    const requiresInfinite = mode === "feed";
+    if (filter.page !== 1 || (requiresInfinite && filter.perPage !== 0)) {
+      setFilter({ ...filter, page: 1, perPage: requiresInfinite ? 0 : filter.perPage });
     }
   }, [filter, setDisplayMode, setFilter]);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["images", filter, objectFilter, searchMode],
-    queryFn: () => {
-      if (visualSearchActive) {
-        return aiVisual.searchImages({
-          findFilter: filter,
-          objectFilter: hasObjectFilter ? objectFilter as ImageFilterCriteria : undefined,
-        });
-      }
-
-      return hasObjectFilter
-        ? images.findFiltered({ findFilter: filter, objectFilter: objectFilter as ImageFilterCriteria })
-        : images.find(filter);
-    },
-    enabled: !infinitePageSize,
-  });
-
-  const infiniteImagesQuery = usePaginatedInfiniteQuery<Image>({
-    queryKey: ["images", "infinite", infiniteFilterKey, objectFilter, searchMode],
-    enabled: infinitePageSize,
+  const listData = useInfiniteListData<Image>({
+    queryKey: ["images", objectFilter, searchMode],
+    filter,
     chunkSize: infiniteChunkSize,
-    queryFn: (page, perPage) => {
-      const nextFilter = { ...filter, page, perPage };
+    queryPage: (nextFilter) => {
       if (visualSearchActive) {
         return aiVisual.searchImages({
           findFilter: nextFilter,
@@ -170,28 +148,9 @@ export function ImagesPage({ onNavigate }: Props) {
     },
   });
 
-  const items = infinitePageSize ? infiniteImagesQuery.items : (data?.items ?? []);
-  const totalCount = infinitePageSize ? infiniteImagesQuery.totalCount : (data?.totalCount ?? 0);
-  const loading = infinitePageSize ? infiniteImagesQuery.isPending : isLoading;
-  const loadMoreImages = useCallback(() => {
-    if (infiniteImagesQuery.hasNextPage && !infiniteImagesQuery.isFetchingNextPage) {
-      void infiniteImagesQuery.fetchNextPage();
-    }
-  }, [infiniteImagesQuery.fetchNextPage, infiniteImagesQuery.hasNextPage, infiniteImagesQuery.isFetchingNextPage]);
-  const loadPreviousImages = useCallback(() => {
-    if (!infiniteImagesQuery.hasPreviousPage || infiniteImagesQuery.isFetchingPreviousPage) {
-      return;
-    }
-
-    const beforeHeight = document.documentElement.scrollHeight;
-    const beforeTop = window.scrollY;
-    void infiniteImagesQuery.fetchPreviousPage().then(() => {
-      window.requestAnimationFrame(() => {
-        const afterHeight = document.documentElement.scrollHeight;
-        window.scrollTo({ top: beforeTop + (afterHeight - beforeHeight) });
-      });
-    });
-  }, [infiniteImagesQuery.fetchPreviousPage, infiniteImagesQuery.hasPreviousPage, infiniteImagesQuery.isFetchingPreviousPage]);
+  const items = listData.items;
+  const totalCount = listData.totalCount;
+  const loading = listData.isLoading;
   const { engagementById } = useEntityEngagementBatch("image", items.map((item) => item.id));
   const estimateImageWallHeight = useCallback((image: Image) => {
     const file = image.files[0];
@@ -199,7 +158,7 @@ export function ImagesPage({ onNavigate }: Props) {
   }, []);
   const wallColumnOptions = useMemo(() => ({ stable: infinitePageSize, getKey: (image: Image) => image.id }), [infinitePageSize]);
   const wallColumns = useWallColumns(items, wallColumnCount, estimateImageWallHeight, wallColumnOptions);
-  const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter, searchMode }), [infiniteFilterKey, objectFilter, searchMode]);
+  const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter, searchMode }), [listData.infiniteFilterKey, objectFilter, searchMode]);
   const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
   const selectedImage = selectedIds.size === 1 ? items.find((item) => selectedIds.has(item.id)) : undefined;
@@ -223,23 +182,11 @@ export function ImagesPage({ onNavigate }: Props) {
   const handleSelectAllMatching = useCallback(async () => {
     setSelectAllMatchingPending(true);
     try {
-      const ids = await fetchAllMatchingIds<Image>(filter, (nextFilter) => {
-        if (visualSearchActive) {
-          return aiVisual.searchImages({
-            findFilter: nextFilter,
-            objectFilter: hasObjectFilter ? objectFilter as ImageFilterCriteria : undefined,
-          });
-        }
-
-        return hasObjectFilter
-          ? images.findFiltered({ findFilter: nextFilter, objectFilter: objectFilter as ImageFilterCriteria })
-          : images.find(nextFilter);
-      });
-      selectIds(ids);
+      selectIds(await listData.fetchAllIds());
     } finally {
       setSelectAllMatchingPending(false);
     }
-  }, [filter, hasObjectFilter, objectFilter, selectIds, visualSearchActive]);
+  }, [listData, selectIds]);
 
   const bulkDeleteMut = useMutation<void, Error, DeleteEntityOptions | undefined>({
     mutationFn: async (options) => {
@@ -287,13 +234,13 @@ export function ImagesPage({ onNavigate }: Props) {
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
       showPagingControls={!infinitePageSize}
-      selectAllLabel={infinitePageSize ? "Select loaded" : undefined}
-      onSelectAllMatching={infinitePageSize ? handleSelectAllMatching : undefined}
-      selectAllMatchingLabel={`Select all ${totalCount} matching`}
-      selectAllMatchingPending={selectAllMatchingPending}
+      infiniteScroll={listData.infiniteScroll}
+      onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll}
+      selectAllPending={infinitePageSize ? selectAllMatchingPending : false}
+      onSelectAllMatching={infinitePageSize ? selectAll : undefined}
+      selectAllMatchingLabel="Select shown"
 
       selectedIds={selectedIds}
-      onSelectAll={selectAll}
       onSelectNone={selectNone}
       onInvertSelection={invertSelection}
       selectionActions={
@@ -342,32 +289,19 @@ export function ImagesPage({ onNavigate }: Props) {
         showDeleteFile
         showDeleteGenerated
       />
-      {infinitePageSize && displayMode !== "feed" && items.length > 0 && (infiniteImagesQuery.hasPreviousPage || infiniteImagesQuery.isFetchingPreviousPage) && (
-        <InfiniteScrollSentinel
-          direction="previous"
-          hasMore={Boolean(infiniteImagesQuery.hasPreviousPage)}
-          isLoading={infiniteImagesQuery.isFetchingPreviousPage}
-          onLoadMore={loadPreviousImages}
-          loadedCount={infiniteImagesQuery.firstLoadedIndex}
-          totalCount={infiniteImagesQuery.totalCount}
-          className="pt-2"
-        />
-      )}
       {displayMode === "feed" ? (
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 px-2">
-          {infinitePageSize && items.length > 0 && (infiniteImagesQuery.hasPreviousPage || infiniteImagesQuery.isFetchingPreviousPage) && (
-            <InfiniteScrollSentinel
-              direction="previous"
-              hasMore={Boolean(infiniteImagesQuery.hasPreviousPage)}
-              isLoading={infiniteImagesQuery.isFetchingPreviousPage}
-              onLoadMore={loadPreviousImages}
-              loadedCount={infiniteImagesQuery.firstLoadedIndex}
-              totalCount={infiniteImagesQuery.totalCount}
-            />
-          )}
-          {items.map((img) => (
+        <div className="mx-auto max-w-5xl px-2">
+          <VirtualizedInfiniteList
+            items={items}
+            getItemKey={(image) => image.id}
+            estimateSize={760}
+            overscan={2}
+            hasNextPage={Boolean(listData.infiniteQuery.hasNextPage)}
+            isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+            loadMore={listData.loadMore}
+            itemClassName="pb-4"
+            renderItem={({ item: img }) => (
             <ImageFeedCard
-              key={img.id}
               image={img}
               engagement={engagementById.get(img.id)}
               onNavigate={onNavigate}
@@ -375,16 +309,8 @@ export function ImagesPage({ onNavigate }: Props) {
               onSelect={() => toggle(img.id)}
               selecting={selecting}
             />
-          ))}
-          {infinitePageSize && items.length > 0 && (
-            <InfiniteScrollSentinel
-              hasMore={Boolean(infiniteImagesQuery.hasNextPage)}
-              isLoading={infiniteImagesQuery.isFetchingNextPage}
-              onLoadMore={loadMoreImages}
-              loadedCount={infiniteImagesQuery.loadedThroughCount}
-              totalCount={infiniteImagesQuery.totalCount}
-            />
-          )}
+            )}
+          />
         </div>
       ) : displayMode === "tagger" ? (
         <ScraperEntityTagger
@@ -400,10 +326,17 @@ export function ImagesPage({ onNavigate }: Props) {
           queryKey="images"
         />
       ) : displayMode === "grid" ? (
-        <EntityCardGrid minCardWidth="var(--card-min-width, 140px)">
-          {items.map((img, idx) => (
+        <VirtualizedEntityGrid
+          items={items}
+          getItemKey={(image) => image.id}
+          minCardWidth="var(--card-min-width, 140px)"
+          estimateRowHeight={260}
+          infinitePageSize={infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          renderItem={(img, idx) => (
             <ImageTile
-              key={img.id}
               image={img}
               engagement={engagementById.get(img.id)}
               onClick={() => {
@@ -425,27 +358,21 @@ export function ImagesPage({ onNavigate }: Props) {
               selecting={selecting}
               onQuickView={() => setQuickViewId(img.id)}
             />
-          ))}
-        </EntityCardGrid>
+          )}
+        />
       ) : (
-        <div className="flex gap-2 px-2">
-          {wallColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="flex min-w-0 flex-1 flex-col gap-2">
-              {column.map((img) => (
-                <ImageWallCard key={img.id} image={img} onClick={() => selecting ? toggle(img.id) : onNavigate({ page: "image", id: img.id })} selected={selectedIds.has(img.id)} selecting={selecting} onSelect={() => toggle(img.id)} />
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
-      {infinitePageSize && displayMode !== "feed" && items.length > 0 && (
-        <InfiniteScrollSentinel
-          hasMore={Boolean(infiniteImagesQuery.hasNextPage)}
-          isLoading={infiniteImagesQuery.isFetchingNextPage}
-          onLoadMore={loadMoreImages}
-          loadedCount={infiniteImagesQuery.loadedThroughCount}
-          totalCount={infiniteImagesQuery.totalCount}
-          className="pb-2"
+        <VirtualizedWallColumns
+          columns={wallColumns}
+          getItemKey={(image) => image.id}
+          infinitePageSize={infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          estimateItemHeight={320}
+          gap={8}
+          renderItem={(img) => (
+            <ImageWallCard image={img} onClick={() => selecting ? toggle(img.id) : onNavigate({ page: "image", id: img.id })} selected={selectedIds.has(img.id)} selecting={selecting} onSelect={() => toggle(img.id)} />
+          )}
         />
       )}
       {items.length === 0 && (
@@ -522,9 +449,12 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
       headerActions={(
         <>
           <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
-            <Heart className="h-3.5 w-3.5" />
+            <ThumbsUp className={["h-3.5 w-3.5", likeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />
             {likeCount}
           </span>
+          {typeof engagement?.isFavorite === "boolean" ? (
+            <CardFavoriteButton hostType="image" hostId={image.id} favorite={engagement.isFavorite} />
+          ) : null}
           {image.galleryCount > 0 ? (
             <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
               <FolderOpen className="h-3.5 w-3.5" />

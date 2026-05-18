@@ -1,5 +1,6 @@
 export const LIMITED_PRIMARY_SETTINGS_TAB_KEYS = new Set([
   "interface",
+  "keyboard-shortcuts",
   "user-settings",
   "changelog",
   "about",

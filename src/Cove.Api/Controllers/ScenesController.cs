@@ -257,7 +257,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var scene = new Scene
         {
             Title = dto.Title, Code = dto.Code, Details = dto.Details, Director = dto.Director,
-            Date = parsedDate ?? parentScene?.Date, Organized = dto.Organized, StudioId = dto.StudioId ?? parentScene?.StudioId,
+            Date = parsedDate ?? parentScene?.Date, Organized = dto.Organized, IsVr = dto.IsVr, StudioId = dto.StudioId ?? parentScene?.StudioId,
             Captions = dto.Captions, InteractiveSpeed = dto.InteractiveSpeed,
             ParentSceneId = parentScene?.Id, ClipStartSec = dto.ClipStartSec, ClipEndSec = dto.ClipEndSec,
         };
@@ -282,6 +282,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
                 OrderIndex = group.SceneIndex,
                 Kind = GroupItemKind.Scene,
             }).ToList();
+        if (dto.RemoteIds?.Count > 0)
+            scene.RemoteIds = NormalizeRemoteIds(dto.RemoteIds).Select(remoteId => new SceneRemoteId { Endpoint = remoteId.Endpoint, RemoteId = remoteId.RemoteId }).ToList();
 
         scene = await sceneRepo.AddAsync(scene, ct);
         if (dto.CustomFields != null)
@@ -332,6 +334,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         if (dto.Director != null) scene.Director = dto.Director;
         if (dto.Date != null) scene.Date = ParseDate(dto.Date);
         if (dto.Organized.HasValue) scene.Organized = dto.Organized.Value;
+        if (dto.IsVr.HasValue) scene.IsVr = dto.IsVr.Value;
         if (dto.StudioId.HasValue) scene.StudioId = dto.StudioId;
         if (dto.Captions != null) scene.Captions = dto.Captions;
         if (dto.InteractiveSpeed.HasValue) scene.InteractiveSpeed = dto.InteractiveSpeed;
@@ -373,6 +376,11 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         if (dto.Groups != null)
         {
             ReplaceWholeSceneGroupItems(scene, dto.Groups);
+        }
+        if (dto.RemoteIds != null)
+        {
+            scene.RemoteIds.Clear();
+            scene.RemoteIds = NormalizeRemoteIds(dto.RemoteIds).Select(remoteId => new SceneRemoteId { SceneId = id, Endpoint = remoteId.Endpoint, RemoteId = remoteId.RemoteId }).ToList();
         }
         if (dto.TagIds != null && tagProvenanceService != null)
         {
@@ -639,7 +647,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
-        s.Organized, s.StudioId, s.Studio?.Name,
+        s.Organized, s.IsVr, s.StudioId, s.Studio?.Name,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!, GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
@@ -677,7 +685,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     private SceneDto MapListToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
-        s.Organized, s.StudioId, s.Studio?.Name,
+        s.Organized, s.IsVr, s.StudioId, s.Studio?.Name,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!)).ToList(),
@@ -712,6 +720,14 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
     private static IEnumerable<VideoFile> EffectiveFiles(Scene scene)
         => scene.Files.Count > 0 ? scene.Files : scene.ParentScene?.Files ?? Enumerable.Empty<VideoFile>();
+
+    private static List<SceneRemoteIdDto> NormalizeRemoteIds(IEnumerable<SceneRemoteIdDto> remoteIds)
+        => remoteIds
+            .Select(remoteId => new SceneRemoteIdDto(remoteId.Endpoint.Trim(), remoteId.RemoteId.Trim()))
+            .Where(remoteId => !string.IsNullOrWhiteSpace(remoteId.Endpoint) && !string.IsNullOrWhiteSpace(remoteId.RemoteId))
+            .GroupBy(remoteId => new { Endpoint = remoteId.Endpoint.ToUpperInvariant(), RemoteId = remoteId.RemoteId.ToUpperInvariant() })
+            .Select(group => group.First())
+            .ToList();
 
     private static string? GetSceneDisplayTitle(Scene? scene)
         => !string.IsNullOrWhiteSpace(scene?.Title)
@@ -1190,6 +1206,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             if (clearFields.Contains("code")) scene.Code = null;
             if (clearFields.Contains("director")) scene.Director = null;
             if (dto.Organized.HasValue) scene.Organized = dto.Organized.Value;
+            if (dto.IsVr.HasValue) scene.IsVr = dto.IsVr.Value;
             if (dto.StudioId.HasValue) scene.StudioId = dto.StudioId;
             if (dto.Date != null) scene.Date = ParseDate(dto.Date);
             if (dto.Code != null) scene.Code = dto.Code;

@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups } from "../api/client";
 import type { EntityEngagement, FindFilter, Group, GroupCreate, GroupFilterCriteria, PaginatedResponse } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { SortableList, type DragHandleProps } from "../components/SortableList";
 import { RatingField } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
@@ -23,6 +22,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { DynamicGroupFilterEditor, FILTER_DYNAMIC_SOURCE_KEY, defaultDynamicGroupFilterQueryJson } from "../components/DynamicGroupFilterEditor";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 const SORT_OPTIONS = [
   { value: "sort_order", label: "Manual Order" },
@@ -45,7 +45,7 @@ export function GroupsPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("groups");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "sort_order", direction: "asc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -144,27 +144,16 @@ export function GroupsPage({ onNavigate }: Props) {
         availableDisplayModes={["grid", "list", "tagger"]}
         allowInfinitePageSize
         showPagingControls={!listData.infinitePageSize}
-        selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
-        onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
-        selectAllMatchingLabel={`Select all ${totalCount} matching`}
-        selectAllMatchingPending={selectAllMatchingPending}
-        infiniteScroll={listData.infinitePageSize ? {
-          hasNextPage: listData.infiniteQuery.hasNextPage,
-          hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
-          isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
-          isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
-          onLoadMore: listData.loadMore,
-          onLoadPrevious: listData.loadPrevious,
-          loadedCount: listData.infiniteQuery.loadedThroughCount,
-          previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
-          totalCount,
-        } : undefined}
+        selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
+        onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
+        selectAllMatchingLabel="Select shown"
+        infiniteScroll={listData.infiniteScroll}
         criteriaDefinitions={GROUP_CRITERIA}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
         onNew={canWriteGroup ? () => setShowCreate(true) : undefined}
         selectedIds={selectedIds}
-        onSelectAll={selectAll}
+        onSelectAll={listData.infinitePageSize ? handleSelectAllMatching : selectAll}
         onSelectNone={selectNone}
         onInvertSelection={invertSelection}
         selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} />}
@@ -207,10 +196,17 @@ export function GroupsPage({ onNavigate }: Props) {
             )}
           />
         ) : (
-          <EntityCardGrid minCardWidth="var(--card-min-width, 160px)">
-            {items.map((g) => (
+          <VirtualizedEntityGrid
+            items={items}
+            getItemKey={(group) => group.id}
+            minCardWidth="var(--card-min-width, 160px)"
+            estimateRowHeight={280}
+            infinitePageSize={listData.infinitePageSize}
+            hasNextPage={listData.infiniteQuery.hasNextPage}
+            isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+            loadMore={listData.loadMore}
+            renderItem={(g) => (
               <GroupCard
-                key={g.id}
                 group={g}
                 engagement={engagementById.get(g.id)}
                 onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "group", id: g.id })}
@@ -219,8 +215,8 @@ export function GroupsPage({ onNavigate }: Props) {
                 onSelect={() => toggle(g.id)}
                 selecting={selecting}
               />
-            ))}
-          </EntityCardGrid>
+            )}
+          />
         )
       ) : (
         <GroupListTable groups={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />

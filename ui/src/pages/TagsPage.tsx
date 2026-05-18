@@ -5,7 +5,6 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import type { EntityEngagement, FindFilter, Tag, TagCreate, TagFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { CreateModalActions, EditModal, Field, NumberInput, SelectInput, TextInput, TextArea } from "../components/EditModal";
 import { Tag as TagIcon, Film, Trash2, Loader2, Edit, Merge, Heart, Image, LayoutGrid, Layers, Users, Building2 } from "lucide-react";
@@ -31,6 +30,7 @@ import { WallMediaCard } from "../components/WallMediaCard";
 import { CustomFieldsEditor } from "../components/shared";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 
 const GRAPH_VIEW_LIMIT = 5000;
 
@@ -58,7 +58,7 @@ export function TagsPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("tags");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "name", direction: "asc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_scene_date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -174,21 +174,10 @@ export function TagsPage({ onNavigate }: Props) {
       availableDisplayModes={["grid", "list", "wall", "graph", "tagger"]}
       allowInfinitePageSize
       showPagingControls={displayMode === "graph" || !listData.infinitePageSize}
-      selectAllLabel={displayMode !== "graph" && listData.infinitePageSize ? "Select loaded" : undefined}
-      onSelectAllMatching={displayMode !== "graph" && listData.infinitePageSize ? handleSelectAllMatching : undefined}
-      selectAllMatchingLabel={`Select all ${totalCount} matching`}
-      selectAllMatchingPending={selectAllMatchingPending}
-      infiniteScroll={displayMode !== "graph" && listData.infinitePageSize ? {
-        hasNextPage: listData.infiniteQuery.hasNextPage,
-        hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
-        isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
-        isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
-        onLoadMore: listData.loadMore,
-        onLoadPrevious: listData.loadPrevious,
-        loadedCount: listData.infiniteQuery.loadedThroughCount,
-        previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
-        totalCount,
-      } : undefined}
+      selectAllPending={displayMode !== "graph" && listData.infinitePageSize ? selectAllMatchingPending : false}
+      onSelectAllMatching={displayMode !== "graph" && listData.infinitePageSize ? selectAll : undefined}
+      selectAllMatchingLabel="Select shown"
+      infiniteScroll={displayMode !== "graph" ? listData.infiniteScroll : undefined}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
       criteriaDefinitions={TAG_CRITERIA}
@@ -206,7 +195,7 @@ export function TagsPage({ onNavigate }: Props) {
       ) : null}
       onNew={canWriteTag ? () => setShowCreate(true) : undefined}
       selectedIds={selectedIds}
-      onSelectAll={selectAll}
+      onSelectAll={displayMode !== "graph" && listData.infinitePageSize ? handleSelectAllMatching : selectAll}
       onSelectNone={selectNone}
       onInvertSelection={invertSelection}
       selectionActions={(
@@ -250,12 +239,19 @@ export function TagsPage({ onNavigate }: Props) {
           } : undefined}
         />
       ) : displayMode === "wall" ? (
-        <div className="flex gap-1 px-2">
-          {wallColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="flex min-w-0 flex-1 flex-col gap-1">
-              {column.map((tag) => (
+        <VirtualizedWallColumns
+          columns={wallColumns}
+          getItemKey={(tag) => tag.id}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          estimateItemHeight={260}
+          gap={4}
+          className="flex gap-1 px-2"
+          columnClassName="flex min-w-0 flex-1 flex-col gap-1"
+          renderItem={(tag) => (
                 <EntityWallCard
-                  key={tag.id}
                   title={tag.name}
                   imageSrc={tag.imagePath}
                   route={{ page: "tag", id: tag.id }}
@@ -264,15 +260,20 @@ export function TagsPage({ onNavigate }: Props) {
                   onSelect={() => toggle(tag.id)}
                   onClick={() => selecting ? toggle(tag.id) : onNavigate({ page: "tag", id: tag.id })}
                 />
-              ))}
-            </div>
-          ))}
-        </div>
+          )}
+        />
       ) : displayMode === "grid" ? (
-        <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
-          {items.map((tag) => (
+        <VirtualizedEntityGrid
+          items={items}
+          getItemKey={(tag) => tag.id}
+          minCardWidth="var(--card-min-width, 200px)"
+          estimateRowHeight={300}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          renderItem={(tag) => (
             <TagTile
-              key={tag.id}
               tag={tag}
               engagement={engagementById.get(tag.id)}
               onClick={() => selecting ? toggle(tag.id) : onNavigate({ page: "tag", id: tag.id })}
@@ -283,8 +284,8 @@ export function TagsPage({ onNavigate }: Props) {
             >
               <ExtensionSlot slot="tag-card-footer" context={{ tag, onNavigate }} />
             </TagTile>
-          ))}
-        </EntityCardGrid>
+          )}
+        />
       ) : (
         <TagListTable tags={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}

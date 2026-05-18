@@ -8,6 +8,7 @@ public class Scene : BaseEntity
     public string? Director { get; set; }
     public DateOnly? Date { get; set; }
     public bool Organized { get; set; }
+    public bool IsVr { get; set; }
     public int? StudioId { get; set; }
     public string? Captions { get; set; }
     public int? InteractiveSpeed { get; set; }

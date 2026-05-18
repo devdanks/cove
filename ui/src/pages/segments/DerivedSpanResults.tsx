@@ -1,5 +1,5 @@
 import { ExternalLink, FolderOpen } from "lucide-react";
-import { EntityCardGrid } from "../../components/EntityCardGrid";
+import { VirtualizedEntityGrid } from "../../components/VirtualizedEntityLayouts";
 import { SegmentTile } from "../../components/EntityCards";
 import type { DisplayMode } from "../../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../../components/RouteCardLinkOverlay";
@@ -23,6 +23,10 @@ interface Props {
   selectedIds: Set<string | number>;
   onToggle: (id: string | number) => void;
   selecting: boolean;
+  infinitePageSize: boolean;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  loadMore: () => void;
 }
 
 export function DerivedSpanResults({
@@ -34,18 +38,29 @@ export function DerivedSpanResults({
   selectedIds,
   onToggle,
   selecting,
+  infinitePageSize,
+  hasNextPage,
+  isFetchingNextPage,
+  loadMore,
 }: Props) {
   if (displayMode === "grid") {
     return (
-      <EntityCardGrid minCardWidth="var(--card-min-width, 220px)">
-        {items.map((item) => {
+      <VirtualizedEntityGrid
+        items={items}
+        getItemKey={(item) => item.key}
+        minCardWidth="var(--card-min-width, 220px)"
+        estimateRowHeight={320}
+        infinitePageSize={infinitePageSize}
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        loadMore={loadMore}
+        renderItem={(item) => {
           const title = buildSpanTitle(item.span, item.sceneTitle);
           const route = { page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor };
           const primaryRawSegmentId = item.span.segmentIds[0];
 
           return (
             <SegmentTile
-              key={item.key}
               segment={{
                 id: item.id,
                 hostType: "scene",
@@ -114,8 +129,8 @@ export function DerivedSpanResults({
               )}
             />
           );
-        })}
-      </EntityCardGrid>
+        }}
+      />
     );
   }
 

@@ -978,6 +978,7 @@ namespace Cove.Data.Migrations
                     Director = table.Column<string>(type: "text", nullable: true),
                     Date = table.Column<DateOnly>(type: "date", nullable: true),
                     Organized = table.Column<bool>(type: "boolean", nullable: false),
+                    IsVr = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                     StudioId = table.Column<int>(type: "integer", nullable: true),
                     Captions = table.Column<string>(type: "text", nullable: true),
                     InteractiveSpeed = table.Column<int>(type: "integer", nullable: true),
@@ -3377,6 +3378,11 @@ namespace Cove.Data.Migrations
                 name: "IX_scenes_Organized",
                 table: "scenes",
                 column: "Organized");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_scenes_IsVr",
+                table: "scenes",
+                column: "IsVr");
 
             migrationBuilder.CreateIndex(
                 name: "IX_scenes_ParentSceneId",

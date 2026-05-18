@@ -253,9 +253,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
       onTabChange={(key) => setActiveTab(key as AudioTab)}
       engagement={{
         primaryContent: <InteractiveRating value={audioRating} onChange={(value) => setAudioRating(value)} readOnly={!canEngageAudio} />,
-        additionalMetrics: [
-          { label: "Plays", value: audioPlayCount, icon: <Eye className="h-4 w-4" /> },
-        ],
+        additionalMetrics: [],
       }}
       actions={
         <>

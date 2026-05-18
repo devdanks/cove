@@ -27,8 +27,13 @@ public static class FullTextSearchHelpers
         if (!SupportsPostgresFullText(db))
             return FilterHelpers.ApplyBooleanKeywordSearch(query, normalized, fallbackSelectors);
 
-        return query.Where(entity => EF.Property<NpgsqlTsVector>(entity, SearchVectorProperty)
+        var fullTextQuery = query.Where(entity => EF.Property<NpgsqlTsVector>(entity, SearchVectorProperty)
             .Matches(EF.Functions.WebSearchToTsQuery(SearchConfig, normalized)));
+        if (fallbackSelectors.Length == 0)
+            return fullTextQuery;
+
+        var containsQuery = FilterHelpers.ApplyBooleanKeywordSearch(query, normalized, fallbackSelectors);
+        return fullTextQuery.Concat(containsQuery).Distinct();
     }
 
     public static IQueryable<T> OrderByRelevance<T>(CoveContext db, IQueryable<T> query, string? search)

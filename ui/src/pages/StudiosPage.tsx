@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { studios, entityImages } from "../api/client";
 import type { EntityEngagement, FindFilter, Studio, StudioCreate, StudioFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { RatingBanner, RatingField } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -28,6 +27,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
+import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
@@ -52,7 +52,7 @@ export function StudiosPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("studios");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "name", direction: "asc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_scene_date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -144,21 +144,10 @@ export function StudiosPage({ onNavigate }: Props) {
         availableDisplayModes={["grid", "list", "wall", "tagger"]}
         allowInfinitePageSize
         showPagingControls={!listData.infinitePageSize}
-        selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
-        onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
-        selectAllMatchingLabel={`Select all ${totalCount} matching`}
-        selectAllMatchingPending={selectAllMatchingPending}
-        infiniteScroll={listData.infinitePageSize ? {
-          hasNextPage: listData.infiniteQuery.hasNextPage,
-          hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
-          isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
-          isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
-          onLoadMore: listData.loadMore,
-          onLoadPrevious: listData.loadPrevious,
-          loadedCount: listData.infiniteQuery.loadedThroughCount,
-          previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
-          totalCount,
-        } : undefined}
+        selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
+        onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
+        selectAllMatchingLabel="Select shown"
+        infiniteScroll={listData.infiniteScroll}
         wallColumnCount={wallColumnCount}
         onWallColumnCountChange={setWallColumnCount}
         criteriaDefinitions={STUDIO_CRITERIA}
@@ -166,7 +155,7 @@ export function StudiosPage({ onNavigate }: Props) {
         onObjectFilterChange={setObjectFilter}
         onNew={canWriteStudio ? () => setShowCreate(true) : undefined}
         selectedIds={selectedIds}
-        onSelectAll={selectAll}
+        onSelectAll={listData.infinitePageSize ? handleSelectAllMatching : selectAll}
         onSelectNone={selectNone}
         onInvertSelection={invertSelection}
         selectionActions={
@@ -196,12 +185,19 @@ export function StudiosPage({ onNavigate }: Props) {
       {displayMode === "tagger" ? (
         <StudioTagger studios={items} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
       ) : displayMode === "wall" ? (
-        <div className="flex gap-1 px-2">
-          {wallColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="flex min-w-0 flex-1 flex-col gap-1">
-              {column.map((studio) => (
+        <VirtualizedWallColumns
+          columns={wallColumns}
+          getItemKey={(studio) => studio.id}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          estimateItemHeight={260}
+          gap={4}
+          className="flex gap-1 px-2"
+          columnClassName="flex min-w-0 flex-1 flex-col gap-1"
+          renderItem={(studio) => (
                 <EntityWallCard
-                  key={studio.id}
                   title={studio.name}
                   imageSrc={entityImages.studioImageUrl(studio.id, studio.updatedAt)}
                   route={{ page: "studio", id: studio.id }}
@@ -210,15 +206,20 @@ export function StudiosPage({ onNavigate }: Props) {
                   onSelect={() => toggle(studio.id)}
                   onClick={() => selecting ? toggle(studio.id) : onNavigate({ page: "studio", id: studio.id })}
                 />
-              ))}
-            </div>
-          ))}
-        </div>
+          )}
+        />
       ) : displayMode === "grid" ? (
-        <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
-          {items.map((s) => (
+        <VirtualizedEntityGrid
+          items={items}
+          getItemKey={(studio) => studio.id}
+          minCardWidth="var(--card-min-width, 200px)"
+          estimateRowHeight={300}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          renderItem={(s) => (
             <StudioTile
-              key={s.id}
               studio={s}
               engagement={engagementById.get(s.id)}
               onClick={() => selecting ? toggle(s.id) : onNavigate({ page: "studio", id: s.id })}
@@ -229,8 +230,8 @@ export function StudiosPage({ onNavigate }: Props) {
             >
               <ExtensionSlot slot="studio-card-footer" context={{ studio: s, onNavigate }} />
             </StudioTile>
-          ))}
-        </EntityCardGrid>
+          )}
+        />
       ) : (
         <StudioListTable studios={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}

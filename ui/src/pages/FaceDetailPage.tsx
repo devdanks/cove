@@ -13,12 +13,13 @@ import { FaceSuggestionsPanel } from "../components/FaceSuggestionsPanel";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { EditModal } from "../components/EditModal";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { FaceAppearanceTile, FaceTile } from "../components/EntityCards";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { formatDate } from "../components/shared";
+import { useDetailListQuery } from "../hooks/useDetailListQuery";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 interface Props {
   id: number;
@@ -26,8 +27,9 @@ interface Props {
 }
 
 type FaceTab = "overview" | "appearances" | "similar";
+type FaceAppearanceListItem = FaceAppearance & { id: string | number };
 
-const EMPTY_APPEARANCES_PAGE: PaginatedResponse<FaceAppearance> = { items: [], totalCount: 0, page: 1, perPage: 24 };
+const EMPTY_APPEARANCES_PAGE: PaginatedResponse<FaceAppearanceListItem> = { items: [], totalCount: 0, page: 1, perPage: 24 };
 const EMPTY_SIMILAR_PAGE: PaginatedResponse<FaceSimilar> = { items: [], totalCount: 0, page: 1, perPage: 18 };
 const APPEARANCE_SORT_OPTIONS = [
   { value: "last_seen", label: "Last Seen" },
@@ -71,36 +73,38 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   const [appearanceZoomLevel, setAppearanceZoomLevel] = useState(0);
   const [similarZoomLevel, setSimilarZoomLevel] = useState(0);
 
-  const appearanceQuery = useMemo(() => ({
-    q: appearanceFilter.q?.trim() || undefined,
-    sort: appearanceFilter.sort,
-    direction: appearanceFilter.direction,
-    page: appearanceFilter.page ?? 1,
-    perPage: appearanceFilter.perPage ?? 24,
-  }), [appearanceFilter.direction, appearanceFilter.page, appearanceFilter.perPage, appearanceFilter.q, appearanceFilter.sort]);
-
-  const similarQuery = useMemo(() => ({
-    q: similarFilter.q?.trim() || undefined,
-    sort: similarFilter.sort,
-    direction: similarFilter.direction,
-    page: similarFilter.page ?? 1,
-    perPage: similarFilter.perPage ?? 18,
-    k: Math.max(80, (similarFilter.page ?? 1) * (similarFilter.perPage ?? 18) * 4),
-  }), [similarFilter.direction, similarFilter.page, similarFilter.perPage, similarFilter.q, similarFilter.sort]);
-
   const { data: face, isLoading } = useQuery({
     queryKey: ["face", id],
     queryFn: () => faces.get(id),
   });
 
-  const { data: similarFacesPage = EMPTY_SIMILAR_PAGE, isLoading: similarLoading } = useQuery({
-    queryKey: ["face", id, "similar", similarQuery],
-    queryFn: () => faces.similar(id, similarQuery),
+  const { data: similarFacesPage = EMPTY_SIMILAR_PAGE, isLoading: similarLoading, infinitePageSize: similarInfinitePageSize, infiniteQuery: similarInfiniteQuery, loadMore: loadMoreSimilar } = useDetailListQuery<FaceSimilar>({
+    queryKey: ["face", id, "similar"],
+    filter: similarFilter,
+    queryFn: (nextFilter) => faces.similar(id, {
+      q: nextFilter.q?.trim() || undefined,
+      sort: nextFilter.sort,
+      direction: nextFilter.direction,
+      page: nextFilter.page ?? 1,
+      perPage: nextFilter.perPage ?? 18,
+      k: Math.max(80, (nextFilter.page ?? 1) * (nextFilter.perPage ?? 18) * 4),
+    }),
   });
 
-  const { data: faceAppearancesPage = EMPTY_APPEARANCES_PAGE, isLoading: appearancesLoading } = useQuery({
-    queryKey: ["face", id, "appearances", appearanceQuery],
-    queryFn: () => faces.appearances(id, appearanceQuery),
+  const { data: faceAppearancesPage = EMPTY_APPEARANCES_PAGE, isLoading: appearancesLoading, infinitePageSize: appearancesInfinitePageSize, infiniteQuery: appearancesInfiniteQuery, loadMore: loadMoreAppearances } = useDetailListQuery<FaceAppearanceListItem>({
+    queryKey: ["face", id, "appearances"],
+    filter: appearanceFilter,
+    queryFn: async (nextFilter) => {
+      const page = await faces.appearances(id, {
+        q: nextFilter.q?.trim() || undefined,
+        sort: nextFilter.sort,
+        direction: nextFilter.direction,
+        page: nextFilter.page ?? 1,
+        perPage: nextFilter.perPage ?? 24,
+      });
+
+      return { ...page, items: page.items.map((appearance) => ({ ...appearance, id: appearance.appearanceId })) };
+    },
   });
 
   const { data: deleteImpact, isLoading: deleteImpactLoading } = useQuery({
@@ -552,9 +556,10 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
             zoomLevel={appearanceZoomLevel}
             onZoomChange={setAppearanceZoomLevel}
             showSearch
+            allowInfinitePageSize
           />
-          <FaceAppearancesGrid appearances={faceAppearancesPage.items} onNavigate={onNavigate} zoomLevel={appearanceZoomLevel} />
-          <FaceTabPager filter={appearanceFilter} setFilter={setAppearanceFilter} totalCount={faceAppearancesPage.totalCount} />
+          <FaceAppearancesGrid appearances={faceAppearancesPage.items} onNavigate={onNavigate} zoomLevel={appearanceZoomLevel} infinitePageSize={appearancesInfinitePageSize} hasNextPage={appearancesInfiniteQuery.hasNextPage} isFetchingNextPage={appearancesInfiniteQuery.isFetchingNextPage} loadMore={loadMoreAppearances} />
+          {!appearancesInfinitePageSize ? <FaceTabPager filter={appearanceFilter} setFilter={setAppearanceFilter} totalCount={faceAppearancesPage.totalCount} /> : null}
         </>
       )}
     </section>
@@ -586,13 +591,12 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
             zoomLevel={similarZoomLevel}
             onZoomChange={setSimilarZoomLevel}
             showSearch
+            allowInfinitePageSize
           />
-          <EntityCardGrid minCardWidth={`${280 + similarZoomLevel * 50}px`} gapClassName="gap-4">
-            {similarFacesPage.items.map((candidate) => (
-              <SimilarFaceTile key={candidate.id} face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
-            ))}
-          </EntityCardGrid>
-          <FaceTabPager filter={similarFilter} setFilter={setSimilarFilter} totalCount={similarFacesPage.totalCount} />
+          <VirtualizedEntityGrid items={similarFacesPage.items} getItemKey={(candidate) => candidate.id} minCardWidth={`${280 + similarZoomLevel * 50}px`} virtualMinColumnWidth={280 + similarZoomLevel * 50} estimateRowHeight={360} gap={16} gapClassName="gap-4" infinitePageSize={similarInfinitePageSize} hasNextPage={similarInfiniteQuery.hasNextPage} isFetchingNextPage={similarInfiniteQuery.isFetchingNextPage} loadMore={loadMoreSimilar} renderItem={(candidate) => (
+            <SimilarFaceTile face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
+          )} />
+          {!similarInfinitePageSize ? <FaceTabPager filter={similarFilter} setFilter={setSimilarFilter} totalCount={similarFacesPage.totalCount} /> : null}
         </>
       )}
     </section>
@@ -906,13 +910,11 @@ function FaceCandidateRow({ face, onSelect, disabled }: { face: Face; onSelect: 
   );
 }
 
-function FaceAppearancesGrid({ appearances, onNavigate, zoomLevel }: { appearances: FaceAppearance[]; onNavigate: (r: any) => void; zoomLevel: number }) {
+function FaceAppearancesGrid({ appearances, onNavigate, zoomLevel, infinitePageSize, hasNextPage, isFetchingNextPage, loadMore }: { appearances: FaceAppearanceListItem[]; onNavigate: (r: any) => void; zoomLevel: number; infinitePageSize: boolean; hasNextPage?: boolean; isFetchingNextPage?: boolean; loadMore: () => void }) {
   return (
-    <EntityCardGrid minCardWidth={`${220 + zoomLevel * 50}px`} gapClassName="gap-4">
-      {appearances.map((appearance) => (
-        <FaceAppearanceTile key={appearance.appearanceId} appearance={appearance} onClick={() => onNavigate({ page: appearance.hostType, id: appearance.hostId })} />
-      ))}
-    </EntityCardGrid>
+    <VirtualizedEntityGrid items={appearances} getItemKey={(appearance) => appearance.appearanceId} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={280} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} renderItem={(appearance) => (
+      <FaceAppearanceTile appearance={appearance} onClick={() => onNavigate({ page: appearance.hostType, id: appearance.hostId })} />
+    )} />
   );
 }
 

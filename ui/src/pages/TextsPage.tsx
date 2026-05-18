@@ -4,7 +4,6 @@ import { BookOpenText, FileText } from "lucide-react";
 import { system, texts } from "../api/client";
 import type { DownloaderMatch, TextCreate, TextDocument, TextFilterCriteria } from "../api/types";
 import { BookmarkButton } from "../components/BookmarkButton";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
@@ -26,6 +25,7 @@ import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePref
 import { SourceDownloadDialog } from "../components/SourceDownloadDialog";
 import { TEXT_CRITERIA } from "../components/FilterDialog";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 const SORT_OPTIONS = [
   { value: "updatedAt", label: "Updated At" },
@@ -45,7 +45,7 @@ export function TextsPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("texts");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "updatedAt", direction: "desc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -106,27 +106,16 @@ export function TextsPage({ onNavigate }: Props) {
       availableDisplayModes={["grid", "list", "tagger"]}
       allowInfinitePageSize
       showPagingControls={!listData.infinitePageSize}
-      selectAllLabel={listData.infinitePageSize ? "Select loaded" : undefined}
-      onSelectAllMatching={listData.infinitePageSize ? handleSelectAllMatching : undefined}
-      selectAllMatchingLabel={`Select all ${totalCount} matching`}
-      selectAllMatchingPending={selectAllMatchingPending}
-      infiniteScroll={listData.infinitePageSize ? {
-        hasNextPage: listData.infiniteQuery.hasNextPage,
-        hasPreviousPage: listData.infiniteQuery.hasPreviousPage,
-        isFetchingNextPage: listData.infiniteQuery.isFetchingNextPage,
-        isFetchingPreviousPage: listData.infiniteQuery.isFetchingPreviousPage,
-        onLoadMore: listData.loadMore,
-        onLoadPrevious: listData.loadPrevious,
-        loadedCount: listData.infiniteQuery.loadedThroughCount,
-        previousLoadedCount: listData.infiniteQuery.firstLoadedIndex,
-        totalCount,
-      } : undefined}
+      selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
+      onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
+      selectAllMatchingLabel="Select shown"
+      infiniteScroll={listData.infiniteScroll}
       onNew={canWriteText ? () => setShowCreate(true) : undefined}
       criteriaDefinitions={TEXT_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       selectedIds={selectedIds}
-      onSelectAll={selectAll}
+      onSelectAll={listData.infinitePageSize ? handleSelectAllMatching : selectAll}
       onSelectNone={selectNone}
       onInvertSelection={invertSelection}
       selectionActions={<BulkSelectionActions entityType="texts" selectedIds={selectedIds} onDone={selectNone} textItems={items} downloadItems={items} />}
@@ -152,10 +141,17 @@ export function TextsPage({ onNavigate }: Props) {
         ) : displayMode === "list" ? (
           <TextListTable texts={items} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} />
         ) : (
-        <EntityCardGrid minCardWidth="300px">
-          {items.map((text) => (
+        <VirtualizedEntityGrid
+          items={items}
+          getItemKey={(text) => text.id}
+          minCardWidth="var(--card-min-width, 300px)"
+          estimateRowHeight={220}
+          infinitePageSize={listData.infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
+          renderItem={(text) => (
             <TextTile
-              key={text.id}
               text={text}
               selected={selectedIds.has(text.id)}
               selecting={selecting}
@@ -163,8 +159,8 @@ export function TextsPage({ onNavigate }: Props) {
               onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })}
               onNavigate={onNavigate}
             />
-          ))}
-        </EntityCardGrid>
+          )}
+        />
         )
       )}
     </ListPage>
