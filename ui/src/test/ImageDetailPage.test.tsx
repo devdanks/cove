@@ -137,7 +137,7 @@ describe("ImageDetailPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the shared layout with faces and related tabs", async () => {
+  it("renders the shared layout with faces and related content in details", async () => {
     mockImages.get.mockResolvedValue(buildImage());
     mockFaces.imageFaces.mockResolvedValue([
       {
@@ -158,11 +158,13 @@ describe("ImageDetailPage", () => {
     expect(screen.getByTestId("media-detail-layout-media")).toBeInTheDocument();
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
+    expect(within(tabs).queryByRole("tab", { name: /related/i })).not.toBeInTheDocument();
+
     fireEvent.click(within(tabs).getByRole("tab", { name: /faces/i }));
     await waitFor(() => expect(mockFaces.imageFaces).toHaveBeenCalledWith(12));
     await waitFor(() => expect(screen.getByText("Beach Face")).toBeInTheDocument());
 
-    fireEvent.click(within(tabs).getByRole("tab", { name: /related/i }));
+    fireEvent.click(within(tabs).getByRole("tab", { name: /details/i }));
     expect(await screen.findByText("Alex")).toBeInTheDocument();
     expect(screen.getByText("Beach")).toBeInTheDocument();
 
@@ -170,7 +172,7 @@ describe("ImageDetailPage", () => {
     expect(await screen.findByText("Edit Image Panel")).toBeInTheDocument();
   });
 
-  it("supports keyboard shortcuts for related tab, lightbox, and likes count", async () => {
+  it("supports keyboard shortcuts for edit tab, lightbox, and likes count", async () => {
     mockImages.get.mockResolvedValue(buildImage());
     mockFaces.imageFaces.mockResolvedValue([]);
     mockImages.incrementLike.mockResolvedValue(undefined);
@@ -179,8 +181,8 @@ describe("ImageDetailPage", () => {
 
     await screen.findByRole("heading", { name: "Sunset Poster" });
 
-    fireEvent.keyDown(window, { key: "r" });
-    expect(await screen.findByText("Alex")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "e" });
+    expect(await screen.findByText("Edit Image Panel")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "f" });
     expect(await screen.findByRole("button", { name: "Close (Esc)" })).toBeInTheDocument();
