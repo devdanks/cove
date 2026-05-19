@@ -159,23 +159,4 @@ describe("MediaDetailLayout", () => {
     expect(screen.getByTestId("media-detail-layout-media")).toHaveClass("items-center");
     expect(screen.getByTestId("media-detail-layout-media-frame")).toHaveClass("aspect-video");
   });
-
-  it("fires the theater toggle callback from the header control", () => {
-    const onTheaterModeToggle = vi.fn();
-
-    render(
-      <MediaDetailLayout
-        title="Scene Title"
-        theaterModeSupported
-        onTheaterModeToggle={onTheaterModeToggle}
-      >
-        <MediaDetailLayout.Content>
-          <div>Body content</div>
-        </MediaDetailLayout.Content>
-      </MediaDetailLayout>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /toggle theater mode/i }));
-    expect(onTheaterModeToggle).toHaveBeenCalledWith(true);
-  });
 });

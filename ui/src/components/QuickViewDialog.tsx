@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { scenes, images, entityImages } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, getResolutionLabel, TagBadge } from "./shared";
-import { X, Play, ExternalLink, Star, User, Tag, Building2, Calendar, Film, Clock, HardDrive, Monitor } from "lucide-react";
+import { X, ExternalLink, Star, User, Tag, Building2, Calendar, Film, Clock, HardDrive, Monitor } from "lucide-react";
 import { RatingBadge } from "./Rating";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
+import { VideoPlayer } from "./VideoPlayer";
 
 interface SceneQuickViewProps {
   type: "scene";
@@ -67,19 +68,23 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
       </div>
 
       {/* Preview */}
-      <div className="relative aspect-video bg-black cursor-pointer" onClick={() => { onClose(); onNavigate({ page: "scene", id }); }}>
-        <img
-          src={scenes.screenshotUrl(scene.id, scene.updatedAt)}
-          alt=""
-          className="w-full h-full object-contain"
-        />
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black/30">
-          <Play className="w-16 h-16 text-white drop-shadow-lg" />
-        </div>
-        {duration > 0 && (
-          <span className="absolute bottom-2 right-2 bg-black/75 text-white text-xs px-2 py-0.5 rounded">
-            {formatDuration(duration)}
-          </span>
+      <div className="aspect-video bg-black">
+        {file ? (
+          <VideoPlayer
+            streamUrl={scenes.streamUrl(scene.id)}
+            posterUrl={scenes.screenshotUrl(scene.id, scene.updatedAt)}
+            format={file.format}
+            duration={duration}
+            sceneId={scene.id}
+            trackingEnabled={false}
+            showAbLoop={false}
+          />
+        ) : (
+          <img
+            src={scenes.screenshotUrl(scene.id, scene.updatedAt)}
+            alt=""
+            className="h-full w-full object-contain"
+          />
         )}
       </div>
 

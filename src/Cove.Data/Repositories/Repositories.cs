@@ -332,9 +332,9 @@ public class PerformerRepository : IPerformerRepository
             {
                 query = filter.SceneCountCriterion.Modifier switch
                 {
-                    CriterionModifier.IsNull => query.Where(p => p.SceneCount == 0),
-                    CriterionModifier.NotNull => query.Where(p => p.SceneCount > 0),
-                    _ => FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, p => p.SceneCount),
+                    CriterionModifier.IsNull => query.Where(p => !p.ScenePerformers.Any()),
+                    CriterionModifier.NotNull => query.Where(p => p.ScenePerformers.Any()),
+                    _ => FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, p => p.ScenePerformers.Count),
                 };
             }
 
@@ -352,8 +352,8 @@ public class PerformerRepository : IPerformerRepository
                 };
             }
 
-            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, p => p.ImageCount);
-            query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, p => p.GalleryCount);
+            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, p => p.ImagePerformers.Count);
+            query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, p => p.GalleryPerformers.Count);
             query = FilterHelpers.ApplyInt(query, filter.RemoteIdCountCriterion, p => p.RemoteIds.Count);
 
             // Age criterion â€” computed from Birthdate
@@ -564,9 +564,9 @@ public class PerformerRepository : IPerformerRepository
             "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Performer, desc),
             "created_at" => desc ? query.OrderByDescending(p => p.CreatedAt) : query.OrderBy(p => p.CreatedAt),
             "birthdate" => desc ? query.OrderByDescending(p => p.Birthdate) : query.OrderBy(p => p.Birthdate),
-            "scene_count" => desc ? query.OrderByDescending(p => p.SceneCount) : query.OrderBy(p => p.SceneCount),
-            "image_count" => desc ? query.OrderByDescending(p => p.ImageCount) : query.OrderBy(p => p.ImageCount),
-            "gallery_count" => desc ? query.OrderByDescending(p => p.GalleryCount) : query.OrderBy(p => p.GalleryCount),
+            "scene_count" => desc ? query.OrderByDescending(p => p.ScenePerformers.Count) : query.OrderBy(p => p.ScenePerformers.Count),
+            "image_count" => desc ? query.OrderByDescending(p => p.ImagePerformers.Count) : query.OrderBy(p => p.ImagePerformers.Count),
+            "gallery_count" => desc ? query.OrderByDescending(p => p.GalleryPerformers.Count) : query.OrderBy(p => p.GalleryPerformers.Count),
             "latest_scene_date" => desc ? query.OrderByDescending(p => p.ScenePerformers.Max(sp => sp.Scene!.Date)) : query.OrderBy(p => p.ScenePerformers.Max(sp => sp.Scene!.Date)),
             "total_file_size" => desc ? query.OrderByDescending(p => p.ScenePerformers.Sum(sp => (long?)sp.Scene!.MaxFileSize) ?? 0L) : query.OrderBy(p => p.ScenePerformers.Sum(sp => (long?)sp.Scene!.MaxFileSize) ?? 0L),
             "career_length" => ApplyCareerLengthSort(query, desc),
@@ -1991,7 +1991,7 @@ public class ImageRepository : IImageRepository
         // Count criteria
         query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, i => i.FileCount);
         query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, i => i.TagCount);
-        query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, i => i.PerformerCount);
+        query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, i => i.ImagePerformers.Count);
 
         // Performer tags criterion
         if (filter.PerformerTagsCriterion != null)
@@ -2039,7 +2039,7 @@ public class ImageRepository : IImageRepository
         "resolution" => desc ? query.OrderByDescending(i => i.MaxResolution) : query.OrderBy(i => i.MaxResolution),
         "path" => ApplyPathSort(query, desc),
         "tag_count" => desc ? query.OrderByDescending(i => i.TagCount) : query.OrderBy(i => i.TagCount),
-        "performer_count" => desc ? query.OrderByDescending(i => i.PerformerCount) : query.OrderBy(i => i.PerformerCount),
+        "performer_count" => desc ? query.OrderByDescending(i => i.ImagePerformers.Count) : query.OrderBy(i => i.ImagePerformers.Count),
         "created_at" => desc ? query.OrderByDescending(i => i.CreatedAt) : query.OrderBy(i => i.CreatedAt),
         _ => desc ? query.OrderByDescending(i => i.UpdatedAt) : query.OrderBy(i => i.UpdatedAt),
     };

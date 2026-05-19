@@ -122,6 +122,11 @@ export interface PerformerSummary {
   birthdate?: string;
   favorite: boolean;
   imagePath?: string;
+  sceneCount?: number;
+  imageCount?: number;
+  galleryCount?: number;
+  audioCount?: number;
+  textCount?: number;
 }
 
 export interface PerformerCreate {
@@ -800,6 +805,11 @@ export interface GroupItemUpdate {
 export interface GroupItemsReorder {
   ids: number[];
   startIndex?: number;
+}
+
+export interface GroupItemsRemoveHosts {
+  kind: GroupItemKind;
+  hostIds: number[];
 }
 
 export interface GroupItemSpanInput {
@@ -2637,6 +2647,7 @@ export interface SceneGroupInput {
 
 export interface BulkSceneUpdate {
   ids: number[];
+  clearFields?: string[];
   rating?: number;
   organized?: boolean;
   studioId?: number | null;
@@ -2647,6 +2658,8 @@ export interface BulkSceneUpdate {
   tagMode?: BulkUpdateMode;
   performerIds?: number[];
   performerMode?: BulkUpdateMode;
+  galleryIds?: number[];
+  galleryMode?: BulkUpdateMode;
   groupIds?: SceneGroupInput[];
   groupMode?: BulkUpdateMode;
 }
@@ -2679,6 +2692,7 @@ export interface BulkTagUpdate {
 
 export interface BulkStudioUpdate {
   ids: number[];
+  clearFields?: string[];
   rating?: number;
   favorite?: boolean;
   details?: string;
@@ -2690,6 +2704,7 @@ export interface BulkStudioUpdate {
 
 export interface BulkGalleryUpdate {
   ids: number[];
+  clearFields?: string[];
   rating?: number;
   organized?: boolean;
   studioId?: number | null;
@@ -2705,6 +2720,7 @@ export interface BulkGalleryUpdate {
 
 export interface BulkImageUpdate {
   ids: number[];
+  clearFields?: string[];
   rating?: number;
   organized?: boolean;
   studioId?: number | null;
@@ -2750,6 +2766,7 @@ export interface BulkTextUpdate {
 
 export interface BulkGroupUpdate {
   ids: number[];
+  clearFields?: string[];
   rating?: number;
   studioId?: number | null;
   date?: string;

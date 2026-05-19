@@ -1,11 +1,12 @@
 using Cove.Core.Interfaces;
 using System.Diagnostics;
+using System.Globalization;
 
 namespace Cove.Api.Services;
 
 public interface ITranscodeService
 {
-    Task<Stream?> TranscodeToMp4Async(string inputPath, string? resolution, CancellationToken ct = default);
+    Task<Stream?> TranscodeToMp4Async(string inputPath, string? resolution, double startSeconds = 0, CancellationToken ct = default);
     Task<string?> GenerateHlsManifestAsync(int sceneId, string inputPath, string? resolution, CancellationToken ct = default);
     Task<Stream?> GetHlsSegmentAsync(int sceneId, string segment, CancellationToken ct = default);
     string[] GetAvailableResolutions(int sourceWidth, int sourceHeight);
@@ -44,7 +45,7 @@ public class TranscodeService : ITranscodeService
             .ToArray();
     }
 
-    public async Task<Stream?> TranscodeToMp4Async(string inputPath, string? resolution, CancellationToken ct = default)
+    public async Task<Stream?> TranscodeToMp4Async(string inputPath, string? resolution, double startSeconds = 0, CancellationToken ct = default)
     {
         var ffmpeg = FindFfmpeg();
         if (ffmpeg == null)
@@ -61,8 +62,11 @@ public class TranscodeService : ITranscodeService
 
         var hwAccel = GetHwAccelArgs();
         var outputArgs = _config.LiveTranscodeOutputArgs ?? "-c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k";
+        var seekArgs = startSeconds > 0
+            ? $"-ss {Math.Max(0, startSeconds).ToString("0.###", CultureInfo.InvariantCulture)}"
+            : "";
 
-        var args = $"{hwAccel} -i \"{inputPath}\" {scaleFilter} {outputArgs} -movflags frag_keyframe+empty_moov -f mp4 pipe:1";
+        var args = $"{hwAccel} {seekArgs} -i \"{inputPath}\" {scaleFilter} {outputArgs} -movflags frag_keyframe+empty_moov -f mp4 pipe:1";
 
         await _transcodeSemaphore.WaitAsync(ct);
         try

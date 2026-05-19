@@ -182,14 +182,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  const removeImagesMut = useMutation({
-    mutationFn: (imageIds: number[]) => galleries.removeImages(id, imageIds),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gallery-images", id] });
-      queryClient.invalidateQueries({ queryKey: ["gallery", id] });
-    },
-  });
-
   const addImagesMut = useMutation({
     mutationFn: (imageIds: number[]) => galleries.addImages(id, imageIds),
     onSuccess: () => {
@@ -240,7 +232,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
               loadMore={loadMoreImages}
             onShowAddImages={() => setShowAddImages(true)}
             onLightbox={(idx) => { setLightboxIndex(idx); setLightboxOpen(true); }}
-            removeImagesMut={removeImagesMut}
             imageZoom={imageZoom}
             setImageZoom={setImageZoom}
             canWriteGallery={canWriteGallery}
@@ -458,7 +449,7 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
       onSelectAllMatching={selectShown}
       selectAllMatchingLabel="Select shown"
       onSelectNone={selectNone}
-      selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} />}
+      selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "gallery", id: galleryId }} />}
       criteriaDefinitions={SCENE_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
@@ -501,7 +492,7 @@ const IMAGE_SORT = [
   { label: "Created At", value: "created_at" },
 ];
 
-function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObjectFilter, onNavigate, galleryImages, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore, onShowAddImages, onLightbox, removeImagesMut, imageZoom, setImageZoom, canWriteGallery }: {
+function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObjectFilter, onNavigate, galleryImages, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore, onShowAddImages, onLightbox, imageZoom, setImageZoom, canWriteGallery }: {
   galleryId: number;
   filter: FindFilter;
   setFilter: (f: FindFilter) => void;
@@ -516,13 +507,11 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
   loadMore: () => void;
   onShowAddImages: () => void;
   onLightbox: (idx: number) => void;
-  removeImagesMut: any;
   imageZoom: number;
   setImageZoom: (z: number) => void;
   canWriteGallery: boolean;
 }) {
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState(false);
   const items = galleryImages?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
@@ -545,19 +534,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       allowInfinitePageSize
-      selectionActions={
-        <>
-          <BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} />
-          {canWriteGallery ? <button
-            onClick={() => setConfirmRemove(true)}
-            disabled={removeImagesMut.isPending}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-orange-400 hover:text-orange-300 hover:bg-orange-900/20"
-          >
-            {removeImagesMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-            Remove from Gallery
-          </button> : null}
-        </>
-      }
+      selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} removeFromParent={{ type: "gallery", id: galleryId }} />}
     />
   );
 
@@ -602,15 +579,6 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
             selecting={selecting}
           />
         )}
-      />
-      <ConfirmDialog
-        open={confirmRemove}
-        title="Remove from Gallery"
-        message={`Remove ${selectedIds.size} selected image${selectedIds.size === 1 ? "" : "s"} from this gallery?`}
-        confirmLabel={removeImagesMut.isPending ? "Removing..." : "Remove"}
-        onConfirm={() => removeImagesMut.mutate([...selectedIds], { onSuccess: () => { setConfirmRemove(false); selectNone(); } })}
-        onCancel={() => setConfirmRemove(false)}
-        isPending={removeImagesMut.isPending}
       />
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />

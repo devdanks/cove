@@ -1,20 +1,20 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, scenes, segmentDisplayProfiles, tags, tagApplications, entityImages, performers as performersApi, studios as studiosApi, galleries as galleriesApi, groups as groupsApi, metadata, fileOps } from "../api/client";
+import { faces, scenes, segmentDisplayProfiles, tagApplications, entityImages, metadata, fileOps } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay, CustomFieldsEditor } from "../components/shared";
 import { 
   Pencil, Plus, Trash2, Search, Eye, EyeOff, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
-  Gauge, Clapperboard, Monitor, FolderOpen, Layers,
+  Gauge, Clapperboard, FolderOpen, Layers, Clock, List,
   RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download, X,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import type { Detection, Face, ResolvedSpan, Scene, SceneUpdate, Segment, TagApplication } from "../api/types";
+import type { Detection, Face, PerformerSummary, ResolvedSpan, Scene, SceneUpdate, Segment, TagApplication } from "../api/types";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { InteractiveRating } from "../components/Rating";
 import { ResolvedSpansPanel } from "../components/ResolvedSpansPanel";
-import { useSceneQueue } from "../state/SceneQueueContext";
+import { useSceneQueue, type SceneQueueItem } from "../state/SceneQueueContext";
 import { useAppConfig } from "../state/AppConfigContext";
 import { useExtensions } from "../extensions/ExtensionLoader";
 import { createRouteLinkProps } from "../components/cardNavigation";
@@ -32,7 +32,7 @@ import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLa
 import { PerformerTile } from "../components/EntityCards";
 import { trackInteraction } from "../utils/interactionTracking";
 import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
-import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector, type SelectableTag } from "../components/TagSelector";
+import { EntityReferenceMultiSelector, EntityReferenceSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
 
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
 const DetailMergeDialog = lazy(() => import("../components/DetailMergeDialog").then((module) => ({ default: module.DetailMergeDialog })));
@@ -46,8 +46,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-// localStorage-backed boolean flag with safe SSR fallback. Used by the timeline
-// to remember collapse and faces-on/off state across reloads.
+// localStorage-backed boolean flag with safe SSR fallback.
 function usePersistedFlag(key: string, defaultValue: boolean): [boolean, (next: boolean | ((prev: boolean) => boolean)) => void] {
   const [value, setValue] = useState<boolean>(() => {
     if (typeof window === "undefined") return defaultValue;
@@ -68,6 +67,79 @@ function usePersistedFlag(key: string, defaultValue: boolean): [boolean, (next: 
   return [value, set];
 }
 
+function SceneQueuePanel({
+  items,
+  currentId,
+  autoplay,
+  onNavigate,
+  onClose,
+  onClear,
+  onToggleAutoplay,
+}: {
+  items: SceneQueueItem[];
+  currentId: number;
+  autoplay: boolean;
+  onNavigate: (sceneId: number, index: number) => void;
+  onClose: () => void;
+  onClear: () => void;
+  onToggleAutoplay: () => void;
+}) {
+  return (
+    <div className="max-h-72 flex-shrink-0 overflow-hidden border-t border-border bg-[#161616] text-white shadow-[0_-8px_24px_rgba(0,0,0,0.28)]">
+      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+        <div>
+          <div className="text-sm font-semibold">Play Selected Queue</div>
+          <div className="text-xs text-white/50">{items.length} scene{items.length === 1 ? "" : "s"}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onToggleAutoplay}
+            className={["rounded px-2 py-1 text-xs", autoplay ? "bg-accent/20 text-accent" : "text-white/60 hover:bg-white/10 hover:text-white"].join(" ")}
+          >
+            Auto
+          </button>
+          <button type="button" onClick={onClear} className="rounded px-2 py-1 text-xs text-white/60 hover:bg-white/10 hover:text-white">
+            Clear
+          </button>
+          <button type="button" onClick={onClose} className="rounded p-1 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close queue panel">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <div className="max-h-56 overflow-y-auto p-2">
+        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
+          {items.map((item, index) => {
+            const active = item.id === currentId;
+            return (
+              <button
+                key={`${item.id}-${index}`}
+                type="button"
+                onClick={() => onNavigate(item.id, index)}
+                className={["flex min-w-0 items-center gap-2 rounded border p-1.5 text-left transition", active ? "border-accent bg-accent/15" : "border-white/10 bg-white/[0.03] hover:border-accent/50 hover:bg-white/[0.06]"].join(" ")}
+              >
+                {item.imagePath ? (
+                  <img src={item.imagePath} alt="" className="h-10 w-16 shrink-0 rounded object-cover bg-black" loading="lazy" />
+                ) : (
+                  <div className="flex h-10 w-16 shrink-0 items-center justify-center rounded bg-black/40 text-white/35">
+                    <Clapperboard className="h-4 w-4" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium text-white">{item.title || `Scene ${item.id}`}</div>
+                  <div className="mt-0.5 truncate text-[10px] text-white/45">
+                    {index + 1}{active ? " · Now playing" : item.subtitle ? ` · ${item.subtitle}` : ""}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type TabKey = "details" | "segments" | "filters" | "file-info" | "edit" | "history" | string;
 
 export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
@@ -77,12 +149,12 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   });
   const { hasPermission, user } = useAuth();
   const { config } = useAppConfig();
-  const { hasPrev, hasNext, prevId, nextId, currentPosition, queueLength } = useSceneQueue();
+  const { queue, currentId: queueCurrentId, hasPrev, hasNext, prevId, nextId, currentPosition, queueLength, queueItems, goToIndex, clearQueue, autoplay: queueAutoplay, toggleAutoplay } = useSceneQueue();
   const { getTabsForPage, resolveComponent: resolveExtComponent } = useExtensions();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
-  const [theaterMode, setTheaterMode] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [showQueuePanel, setShowQueuePanel] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showIdentify, setShowIdentify] = useState(false);
   const [showScrapeDialog, setShowScrapeDialog] = useState(false);
@@ -332,17 +404,29 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     }
   }, [activeTab, tabs]);
 
+  useEffect(() => {
+    if (!queue || queueCurrentId === id) {
+      return;
+    }
+
+    const nextIndex = queue.sceneIds.indexOf(id);
+    if (nextIndex >= 0) {
+      goToIndex(nextIndex);
+    }
+  }, [goToIndex, id, queue, queueCurrentId]);
+
+  const queueSyncedToScene = queueCurrentId === id;
+
   const sceneKeyboardShortcuts = useMemo(() => [
-    { key: ",", description: "Toggle theater mode", handler: () => setTheaterMode(!theaterMode) },
     { key: "a", description: "Open details tab", handler: () => setActiveTab("details") },
     { key: "e", description: "Open edit tab", handler: () => canWriteScene && setActiveTab("edit") },
     { key: "s", description: "Open segments tab", handler: () => canReadSegments && setActiveTab("segments") },
     { key: "i", description: "Open file info tab", handler: () => canReadFiles && setActiveTab("file-info") },
     { key: "h", description: "Open history tab", handler: () => setActiveTab("history") },
     { key: "o", description: "Toggle favorite", handler: () => scene && canEngageScene && setSceneFavorite(!sceneFavorite) },
-    { key: "[", description: "Open previous scene", handler: () => hasPrev && prevId != null && onNavigate({ page: "scene", id: prevId }) },
-    { key: "]", description: "Open next scene", handler: () => hasNext && nextId != null && onNavigate({ page: "scene", id: nextId }) },
-  ], [canEngageScene, canReadFiles, canReadSegments, canWriteScene, hasNext, hasPrev, nextId, onNavigate, prevId, scene, sceneFavorite, theaterMode, setSceneFavorite]);
+    { key: "[", description: "Open previous scene", handler: () => queueSyncedToScene && hasPrev && prevId != null && onNavigate({ page: "scene", id: prevId }) },
+    { key: "]", description: "Open next scene", handler: () => queueSyncedToScene && hasNext && nextId != null && onNavigate({ page: "scene", id: nextId }) },
+  ], [canEngageScene, canReadFiles, canReadSegments, canWriteScene, hasNext, hasPrev, nextId, onNavigate, prevId, queueSyncedToScene, scene, sceneFavorite, setSceneFavorite]);
 
   if (isLoading) {
     return (
@@ -447,6 +531,19 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         </a>
       ) : null}
 
+      {queueLength > 1 ? (
+        <button
+          type="button"
+          onClick={() => setShowQueuePanel((value) => !value)}
+          className={["inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs transition", showQueuePanel ? "bg-accent/15 text-accent" : "text-secondary hover:bg-card hover:text-foreground"].join(" ")}
+          title="Show selected queue"
+          aria-pressed={showQueuePanel}
+        >
+          <List className="h-4 w-4" />
+          <span>{currentPosition}/{queueLength}</span>
+        </button>
+      ) : null}
+
       <div className="relative" ref={opsMenuRef}>
         <button
           type="button"
@@ -474,7 +571,6 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             {canWriteScene ? <button onClick={() => { handleResetCoverToDefault(); setShowOpsMenu(false); }} disabled={coverActionPending} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Image className="h-3.5 w-3.5" /> Use Default Cover</button> : null}
             {canWriteScene ? <div className="my-1 border-t border-border" /> : null}
             {canWriteScene ? <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Merge className="h-3.5 w-3.5" /> Merge…</button> : null}
-            <button onClick={() => { setTheaterMode(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Monitor className="h-3.5 w-3.5" /> Theater Mode</button>
             {canDeleteScene ? <div className="my-1 border-t border-border" /> : null}
             {canDeleteScene ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
           </div>
@@ -505,6 +601,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         loading={segmentsLoading}
         canEdit={canWriteSegments}
         onSeek={(time) => seekRef.current?.(time)}
+        currentTime={videoTime}
       />
     </div>
   ) : activeTab === "similar" ? (
@@ -548,9 +645,9 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             autostart={config?.ui.autostartVideo}
             showAbLoop={config?.ui.showAbLoopControls}
             trackingEnabled={trackPlaybackActivity}
-            onEnded={() => { if (hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
-            onPrev={hasPrev && prevId != null ? () => onNavigate({ page: "scene", id: prevId }) : undefined}
-            onNext={hasNext && nextId != null ? () => onNavigate({ page: "scene", id: nextId }) : undefined}
+            onEnded={() => { if (queueAutoplay && queueSyncedToScene && hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
+            onPrev={queueSyncedToScene && hasPrev && prevId != null ? () => onNavigate({ page: "scene", id: prevId }) : undefined}
+            onNext={queueSyncedToScene && hasNext && nextId != null ? () => onNavigate({ page: "scene", id: nextId }) : undefined}
           />
         ) : (
           <div className="flex h-48 items-center justify-center text-muted">No video file available</div>
@@ -564,9 +661,24 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           rawSegments={segments}
           detections={detections}
           faces={sceneFaces.map(({ face }) => face)}
+          performers={scene.performers}
           onSeek={(time) => seekRef.current?.(time)}
           currentTime={videoTime}
           profileName={activeProfileName}
+        />
+      ) : null}
+      {showQueuePanel && queueLength > 0 ? (
+        <SceneQueuePanel
+          items={queueItems}
+          currentId={id}
+          autoplay={queueAutoplay}
+          onClose={() => setShowQueuePanel(false)}
+          onClear={() => { clearQueue(); setShowQueuePanel(false); }}
+          onToggleAutoplay={toggleAutoplay}
+          onNavigate={(sceneId, index) => {
+            goToIndex(index);
+            onNavigate({ page: "scene", id: sceneId });
+          }}
         />
       ) : null}
     </div>
@@ -676,16 +788,15 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           ],
         }}
         keyboardShortcuts={sceneKeyboardShortcuts}
-        theaterModeSupported
-        isTheaterMode={theaterMode}
-        onTheaterModeToggle={setTheaterMode}
         actions={sceneActions}
       >
         <MediaDetailLayout.Content>
-          {activeTabContent}
           {activeTab === "details" ? (
-            <AspectRatingsPanel hostType="scene" hostId={id} canRate={canEngageScene} />
+            <div className="mb-4">
+              <AspectRatingsPanel hostType="scene" hostId={id} canRate={canEngageScene} />
+            </div>
           ) : null}
+          {activeTabContent}
         </MediaDetailLayout.Content>
         <ExtensionSlot slot="scene-detail-main-bottom" context={{ scene, onNavigate }} />
       </MediaDetailLayout>
@@ -1241,6 +1352,62 @@ function VideoFiltersTab({ filters, onChange }: { filters: VideoFilters; onChang
   );
 }
 
+type TimelineOverlayItem = {
+  key: string;
+  startSec: number;
+  endSec: number;
+  label: string;
+  colorHint?: string | null;
+  colorSeed?: string;
+};
+
+const SEGMENT_TIMELINE_COLORS = ["#5f6b7a", "#687264", "#766a5f", "#6d6376", "#5e7472", "#746b57", "#676b73", "#61705f"];
+const FACE_TIMELINE_COLORS = ["#566575", "#5d706e", "#65705c", "#706656", "#6c6372", "#5f6970"];
+
+function timelineHash(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index++) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function getTimelineOverlayColor(item: TimelineOverlayItem, palette: string[]) {
+  const hint = item.colorHint?.trim();
+  if (hint) return hint;
+  const seed = item.colorSeed || item.label || item.key;
+  return palette[timelineHash(seed) % palette.length];
+}
+
+function timelineLabelFits(widthPercent: number, label: string) {
+  return widthPercent >= Math.min(10, Math.max(2.4, label.length * 0.28));
+}
+
+function getSegmentTimelineLabel(
+  span: Pick<ResolvedSpan, "spanKey" | "tagName" | "kind" | "sourceKey" | "segmentIds">,
+  rawSegmentsById: Map<number, Pick<Segment, "id" | "title" | "kind" | "sourceKey" | "refId">>,
+  performersById: Map<number, Pick<PerformerSummary, "id" | "name">>,
+) {
+  const tagName = span.tagName?.trim();
+  if (tagName) return tagName;
+
+  for (const segmentId of span.segmentIds ?? []) {
+    const segment = rawSegmentsById.get(segmentId);
+    if (!segment) continue;
+
+    const kind = segment.kind?.trim().toLowerCase();
+    if (segment.refId != null && kind === "performer") {
+      const performerName = performersById.get(Number(segment.refId))?.name?.trim();
+      if (performerName) return performerName;
+    }
+
+    const title = segment.title?.trim();
+    if (title && title.toLowerCase() !== "performer") return title;
+  }
+
+  return span.kind?.trim() || span.sourceKey?.trim() || "Segment";
+}
+
 // Scene Scrubber / Timeline Component
 function SceneScrubber({ 
   sceneId, 
@@ -1249,16 +1416,18 @@ function SceneScrubber({
   rawSegments,
   detections,
   faces,
+  performers,
   onSeek,
   currentTime,
   profileName,
 }: { 
   sceneId: number; 
   duration: number; 
-  spans: Pick<ResolvedSpan, "spanKey" | "startSec" | "endSec" | "tagName" | "kind" | "colorHint" | "sourceKey" | "lane">[];
-  rawSegments: Pick<Segment, "id" | "startSec" | "endSec" | "title" | "kind" | "sourceKey">[];
+  spans: Pick<ResolvedSpan, "spanKey" | "startSec" | "endSec" | "tagName" | "kind" | "colorHint" | "sourceKey" | "lane" | "segmentIds">[];
+  rawSegments: Pick<Segment, "id" | "startSec" | "endSec" | "title" | "kind" | "sourceKey" | "refId">[];
   detections: Pick<Detection, "id" | "observedAtSec" | "class" | "score" | "refKind" | "refId">[];
   faces?: Pick<Face, "id" | "label" | "performerName" | "performerId">[];
+  performers?: Pick<PerformerSummary, "id" | "name">[];
   onSeek?: (time: number) => void;
   currentTime?: number;
   profileName?: string;
@@ -1271,11 +1440,9 @@ function SceneScrubber({
   
   const spriteVttUrl = `/api/stream/scene/${sceneId}/vtt/thumbs`;
   const spriteImageUrl = `/api/stream/scene/${sceneId}/sprite`;
-  const screenshotUrl = `/api/stream/scene/${sceneId}/screenshot`;
   const [showAllResolvedLanes, setShowAllResolvedLanes] = useState(false);
   const [showAllFaceLanes, setShowAllFaceLanes] = useState(false);
-  const [resolvedCollapsed, setResolvedCollapsed] = usePersistedFlag("cove.timeline.resolvedCollapsed", false);
-  const [facesCollapsed, setFacesCollapsed] = usePersistedFlag("cove.timeline.facesCollapsed", true);
+  const [overlaysCollapsed, setOverlaysCollapsed] = usePersistedFlag("cove.timeline.overlaysCollapsed", false);
   const [facesEnabled, setFacesEnabled] = usePersistedFlag("cove.timeline.facesEnabled", false);
   
   const formatTime = (s: number) => {
@@ -1335,20 +1502,23 @@ function SceneScrubber({
     };
   }, [sceneId, spriteVttUrl, spriteImageUrl]);
 
-  const thumbCount = spriteData ? spriteData.entries.length : Math.min(Math.ceil(duration / 10), 60);
+  const thumbCount = spriteData ? spriteData.entries.length : 0;
   const thumbWidth = 160;
-  const thumbHeight = spriteData?.entries[0] ? Math.round(thumbWidth * (spriteData.entries[0].h / spriteData.entries[0].w)) : 90;
-  const segmentLanes = useMemo(() => buildTimelineLanes(
+  const thumbHeight = spriteData?.entries[0] ? Math.round(thumbWidth * (spriteData.entries[0].h / spriteData.entries[0].w)) : 0;
+  const rawSegmentsById = useMemo(() => new Map(rawSegments.map((segment) => [segment.id, segment])), [rawSegments]);
+  const performersById = useMemo(() => new Map((performers ?? []).map((performer) => [performer.id, performer])), [performers]);
+  const segmentLanes = useMemo(() => buildTimelineLanes<TimelineOverlayItem>(
     spans.map((span) => ({
       key: span.spanKey,
       startSec: span.startSec,
       endSec: span.endSec,
-      label: span.tagName || span.kind || span.sourceKey || "Segment",
+      label: getSegmentTimelineLabel(span, rawSegmentsById, performersById),
       colorHint: span.colorHint,
+      colorSeed: `${span.kind ?? "span"}:${span.tagName ?? ""}:${span.sourceKey ?? ""}`,
     })),
-  ), [spans]);
+  ), [performersById, rawSegmentsById, spans]);
   const faceLanes = useMemo(() => {
-    if (!facesEnabled) return [] as ReturnType<typeof buildTimelineLanes<{ key: string; startSec: number; endSec: number; label: string; faceId: number }>>;
+    if (!facesEnabled) return [] as ReturnType<typeof buildTimelineLanes<TimelineOverlayItem>>;
     const facesById = new Map<number, Pick<Face, "id" | "label" | "performerName" | "performerId">>();
     for (const face of faces ?? []) facesById.set(face.id, face);
 
@@ -1377,7 +1547,7 @@ function SceneScrubber({
     }
 
     const MERGE_GAP_SEC = 2.5;
-    const items: { key: string; startSec: number; endSec: number; label: string; faceId: number }[] = [];
+    const items: TimelineOverlayItem[] = [];
     for (const [faceId, times] of buckets.entries()) {
       times.sort((left, right) => left - right);
       let windowStart = times[0];
@@ -1391,7 +1561,7 @@ function SceneScrubber({
           startSec: windowStart,
           endSec: Math.max(windowEnd, windowStart + 0.4),
           label,
-          faceId,
+          colorSeed: String(faceId),
         });
       };
       for (let i = 1; i < times.length; i++) {
@@ -1428,9 +1598,7 @@ function SceneScrubber({
       }
       return 0;
     }
-    // Fallback: evenly-spaced thumbs
-    const interval = duration / thumbCount;
-    return Math.min(Math.floor(currentTime / interval), thumbCount - 1);
+    return -1;
   }, [currentTime, spriteData, duration, thumbCount]);
 
   // Auto-scroll to active thumbnail
@@ -1448,132 +1616,129 @@ function SceneScrubber({
     if (scrollRef.current) scrollRef.current.scrollBy({ left: dir * thumbWidth * 4, behavior: "smooth" });
   };
   const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
+  const timelineDuration = Math.max(0.001, duration || 0);
   
   return (
     <div className="flex-shrink-0 bg-[#1a1a1a] border-t border-border">
-      {spans.length > 0 && (
-        <div className="border-b border-black/20 bg-[#26222d]">
-          <div className="flex items-center justify-between gap-3 border-b border-black/20 bg-[#211d27] px-2 py-1.5 pr-8 text-[10px] uppercase tracking-[0.16em] text-white/55">
-            <button
-              type="button"
-              onClick={() => setResolvedCollapsed((value) => !value)}
-              className="flex flex-1 items-center gap-1.5 text-left hover:text-white/80"
-              title={resolvedCollapsed ? "Expand resolved spans" : "Collapse resolved spans"}
-            >
-              <ChevronDown className={`h-3 w-3 transition-transform ${resolvedCollapsed ? "-rotate-90" : ""}`} />
-              <span>Resolved spans · {profileName ?? "Resolved"} · {segmentLanes.length} lane{segmentLanes.length === 1 ? "" : "s"}</span>
-            </button>
-            {!resolvedCollapsed && segmentLanes.length > 4 ? (
-              <button
-                type="button"
-                onClick={() => setShowAllResolvedLanes((value) => !value)}
-                className="shrink-0 rounded border border-white/10 px-2 py-0.5 text-[9px] text-white/70 transition-colors hover:border-white/30 hover:text-white"
-              >
-                {showAllResolvedLanes ? "Collapse" : `Show all ${segmentLanes.length}`}
-              </button>
-            ) : null}
-          </div>
-          {!resolvedCollapsed ? (
-            segmentLanes.length > 0 ? (
-              <div className="relative" style={{ height: `${Math.max(26, visibleResolvedLanes.length * 22 + 6)}px` }}>
-                {visibleResolvedLanes.map((lane, laneIndex) => lane.map(({ item, endSec }) => {
-                  const start = clampPercent((item.startSec / duration) * 100);
-                  const end = clampPercent(((endSec + 0.001) / duration) * 100);
-                  const width = Math.max(0.4, end - start);
-
-                  return (
-                    <button
-                      key={item.key}
-                      className="absolute h-[18px] overflow-hidden rounded px-1 text-left text-[10px] font-medium text-white hover:brightness-110"
-                      style={{
-                        left: `${start}%`,
-                        top: `${laneIndex * 22 + 4}px`,
-                        width: `${width}%`,
-                        backgroundColor: item.colorHint || "rgba(217, 119, 6, 0.8)",
-                      }}
-                      title={`${item.label} (${formatTimelineTime(item.startSec)} - ${formatTimelineTime(endSec)})`}
-                      onClick={() => onSeek?.(item.startSec)}
-                    >
-                      {width > 10 ? item.label : ""}
-                    </button>
-                  );
-                }))}
-              </div>
-            ) : (
-              <div className="px-2 py-2 text-[11px] text-white/55">No resolved spans are available for the current profile.</div>
-            )
-          ) : null}
-          {!resolvedCollapsed && hiddenResolvedLaneCount > 0 ? (
-            <div className="border-t border-black/20 px-2 py-1 text-[10px] text-white/45">
-              {hiddenResolvedLaneCount} additional lane{hiddenResolvedLaneCount === 1 ? "" : "s"} hidden until expanded.
+      {(spans.length > 0 || hasFaceDetections) && (
+        <div className="border-b border-black/20 bg-[#181a20]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-[#20222a] px-2 py-1.5 pr-8 text-[10px] text-white/65">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="font-semibold uppercase tracking-[0.16em] text-white/70">Timeline overlays</span>
+              {spans.length > 0 ? <span className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5">{spans.length} segment{spans.length === 1 ? "" : "s"}</span> : null}
+              {hasFaceDetections ? <span className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5">face detections</span> : null}
             </div>
-          ) : null}
-        </div>
-      )}
-      {hasFaceDetections && (
-        <div className="border-b border-black/20 bg-[#1c2f28]">
-          <div className="flex items-center justify-between gap-3 border-b border-black/20 bg-[#16261f] px-2 py-1.5 pr-8 text-[10px] uppercase tracking-[0.16em] text-white/55">
-            <button
-              type="button"
-              onClick={() => facesEnabled && setFacesCollapsed((value) => !value)}
-              className="flex flex-1 items-center gap-1.5 text-left hover:text-white/80"
-              title={!facesEnabled ? "Faces over time are hidden" : facesCollapsed ? "Expand faces over time" : "Collapse faces over time"}
-            >
-              <ChevronDown className={`h-3 w-3 transition-transform ${(!facesEnabled || facesCollapsed) ? "-rotate-90" : ""}`} />
-              <span>Faces over time{facesEnabled ? ` · ${faceLanes.length} lane${faceLanes.length === 1 ? "" : "s"}` : " · hidden"}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setFacesEnabled((value) => !value); if (!facesEnabled) setFacesCollapsed(false); }}
-              className="shrink-0 inline-flex items-center gap-1 rounded border border-white/10 px-2 py-0.5 text-[9px] text-white/70 transition-colors hover:border-white/30 hover:text-white"
-              title={facesEnabled ? "Hide face appearance bars" : "Show face appearance bars"}
-            >
-              {facesEnabled ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-              {facesEnabled ? "Hide faces" : "Show faces"}
-            </button>
-            {facesEnabled && !facesCollapsed && faceLanes.length > 2 ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-1">
               <button
                 type="button"
-                onClick={() => setShowAllFaceLanes((value) => !value)}
-                className="shrink-0 rounded border border-white/10 px-2 py-0.5 text-[9px] text-white/70 transition-colors hover:border-white/30 hover:text-white"
+                onClick={() => setOverlaysCollapsed((value) => !value)}
+                className="inline-flex items-center gap-1 rounded border border-white/10 px-2 py-0.5 text-[9px] text-white/70 transition-colors hover:border-white/30 hover:text-white"
+                title={overlaysCollapsed ? "Show timeline overlays" : "Collapse timeline overlays"}
               >
-                {showAllFaceLanes ? "Collapse" : `Show all ${faceLanes.length}`}
+                <ChevronDown className={`h-3 w-3 transition-transform ${overlaysCollapsed ? "-rotate-90" : ""}`} />
+                {overlaysCollapsed ? "Show" : "Collapse"}
               </button>
-            ) : null}
-          </div>
-          {facesEnabled && !facesCollapsed ? (
-            <>
-              <div className="relative" style={{ height: `${Math.max(26, visibleFaceLanes.length * 22 + 6)}px` }}>
-                {visibleFaceLanes.map((lane, laneIndex) => lane.map(({ item, endSec }) => {
-                  const start = clampPercent((item.startSec / duration) * 100);
-                  const end = clampPercent(((endSec + 0.001) / duration) * 100);
-                  const width = Math.max(0.4, end - start);
-
-                  return (
-                    <button
-                      key={item.key}
-                      className="absolute h-[18px] overflow-hidden rounded px-1 text-left text-[10px] font-medium text-white hover:brightness-110"
-                      style={{
-                        left: `${start}%`,
-                        top: `${laneIndex * 22 + 4}px`,
-                        width: `${width}%`,
-                        backgroundColor: "rgba(34, 197, 94, 0.78)",
-                      }}
-                      title={`${item.label} (${formatTimelineTime(item.startSec)} - ${formatTimelineTime(endSec)})`}
-                      onClick={() => onSeek?.(item.startSec)}
-                    >
-                      {width > 8 ? item.label : ""}
-                    </button>
-                  );
-                }))}
-              </div>
-              {hiddenFaceLaneCount > 0 ? (
-                <div className="border-t border-black/20 px-2 py-1 text-[10px] text-white/45">
-                  {hiddenFaceLaneCount} additional face lane{hiddenFaceLaneCount === 1 ? "" : "s"} hidden until expanded.
-                </div>
+              {!overlaysCollapsed && segmentLanes.length > 4 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllResolvedLanes((value) => !value)}
+                  className="rounded border border-white/10 px-2 py-0.5 text-[9px] text-white/70 transition-colors hover:border-white/30 hover:text-white"
+                >
+                  {showAllResolvedLanes ? "Fewer segments" : `All ${segmentLanes.length} segment lanes`}
+                </button>
               ) : null}
-            </>
-          ) : null}
+              {!overlaysCollapsed && hasFaceDetections ? (
+                <button
+                  type="button"
+                  onClick={() => setFacesEnabled((value) => !value)}
+                  className="inline-flex items-center gap-1 rounded border border-white/10 px-2 py-0.5 text-[9px] text-white/70 transition-colors hover:border-white/30 hover:text-white"
+                  title={facesEnabled ? "Hide face appearance bars" : "Show face appearance bars"}
+                >
+                  {facesEnabled ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  {facesEnabled ? "Hide faces" : "Show faces"}
+                </button>
+              ) : null}
+              {!overlaysCollapsed && facesEnabled && faceLanes.length > 2 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllFaceLanes((value) => !value)}
+                  className="rounded border border-white/10 px-2 py-0.5 text-[9px] text-white/70 transition-colors hover:border-white/30 hover:text-white"
+                >
+                  {showAllFaceLanes ? "Fewer faces" : `All ${faceLanes.length} face lanes`}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          {!overlaysCollapsed ? <div className="space-y-2 px-2 py-2">
+            {spans.length > 0 ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-white/45">
+                  <span>Segments{profileName ? ` · ${profileName}` : ""}</span>
+                  {hiddenResolvedLaneCount > 0 ? <span>{hiddenResolvedLaneCount} hidden</span> : null}
+                </div>
+                <div className="relative overflow-hidden rounded border border-white/10 bg-black/25" style={{ height: `${Math.max(28, visibleResolvedLanes.length * 24 + 6)}px` }}>
+                  {visibleResolvedLanes.map((lane, laneIndex) => lane.map(({ item, endSec }) => {
+                    const start = clampPercent((item.startSec / timelineDuration) * 100);
+                    const end = clampPercent(((endSec + 0.001) / timelineDuration) * 100);
+                    const width = Math.max(0.45, end - start);
+                    const color = getTimelineOverlayColor(item, SEGMENT_TIMELINE_COLORS);
+
+                    return (
+                      <button
+                        key={item.key}
+                        className="absolute h-5 overflow-hidden rounded-sm px-1.5 text-left text-[10px] font-semibold leading-5 text-white shadow-sm transition hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-white/70"
+                        style={{
+                          left: `${start}%`,
+                          top: `${laneIndex * 24 + 4}px`,
+                          width: `${width}%`,
+                          backgroundColor: color,
+                          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.2)",
+                        }}
+                        title={`${item.label} (${formatTimelineTime(item.startSec)} - ${formatTimelineTime(endSec)})`}
+                        onClick={() => onSeek?.(item.startSec)}
+                      >
+                        {timelineLabelFits(width, item.label) ? <span className="block truncate">{item.label}</span> : null}
+                      </button>
+                    );
+                  }))}
+                </div>
+              </div>
+            ) : null}
+            {hasFaceDetections && facesEnabled ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-white/45">
+                  <span>Faces</span>
+                  {hiddenFaceLaneCount > 0 ? <span>{hiddenFaceLaneCount} hidden</span> : null}
+                </div>
+                <div className="relative overflow-hidden rounded border border-white/10 bg-black/25" style={{ height: `${Math.max(28, visibleFaceLanes.length * 24 + 6)}px` }}>
+                  {visibleFaceLanes.map((lane, laneIndex) => lane.map(({ item, endSec }) => {
+                    const start = clampPercent((item.startSec / timelineDuration) * 100);
+                    const end = clampPercent(((endSec + 0.001) / timelineDuration) * 100);
+                    const width = Math.max(0.45, end - start);
+                    const color = getTimelineOverlayColor(item, FACE_TIMELINE_COLORS);
+
+                    return (
+                      <button
+                        key={item.key}
+                        className="absolute h-5 overflow-hidden rounded-sm px-1.5 text-left text-[10px] font-semibold leading-5 text-white shadow-sm transition hover:brightness-110 focus:outline-none focus:ring-1 focus:ring-white/70"
+                        style={{
+                          left: `${start}%`,
+                          top: `${laneIndex * 24 + 4}px`,
+                          width: `${width}%`,
+                          backgroundColor: color,
+                          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.2)",
+                        }}
+                        title={`${item.label} (${formatTimelineTime(item.startSec)} - ${formatTimelineTime(endSec)})`}
+                        onClick={() => onSeek?.(item.startSec)}
+                      >
+                        {timelineLabelFits(width, item.label) ? <span className="block truncate">{item.label}</span> : null}
+                      </button>
+                    );
+                  }))}
+                </div>
+              </div>
+            ) : null}
+          </div> : null}
         </div>
       )}
       {detections.length > 0 && (
@@ -1584,7 +1749,7 @@ function SceneScrubber({
               <button
                 key={detection.id}
                 className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/30 bg-sky-400/80 hover:bg-sky-300"
-                style={{ left: `${clampPercent((time / duration) * 100)}%` }}
+                style={{ left: `${clampPercent((time / timelineDuration) * 100)}%` }}
                 title={`${detection.class} (${Math.round(detection.score * 100)}%) at ${formatTimelineTime(time)}${detection.refKind && detection.refId != null ? ` • ${detection.refKind} #${detection.refId}` : ""}`}
                 onClick={() => onSeek?.(time)}
               />
@@ -1593,16 +1758,16 @@ function SceneScrubber({
         </div>
       )}
 
-      {/* Thumbnails scrubber - uses sprite sheet if available, falls back to individual screenshots */}
+      {spriteData && spriteLoadSettled && !spriteError ? (
       <div className="relative flex overflow-hidden" ref={containerRef}>
         <button onClick={() => scroll(-1)} className="flex-shrink-0 w-7 bg-[#222] hover:bg-[#333] text-muted border-r border-border z-10">
           <ChevronLeft className="w-4 h-4 mx-auto" />
         </button>
         
         <div ref={scrollRef} className="flex-1 flex overflow-x-auto scrollbar-thin scrollbar-thumb-border">
-          {Array.from({ length: Math.max(thumbCount, 1) }).map((_, i) => {
-            const time = spriteData ? spriteData.entries[i]?.start ?? (i / thumbCount) * duration : (i / thumbCount) * duration;
-            const entry = spriteData?.entries[i];
+          {Array.from({ length: thumbCount }).map((_, i) => {
+            const entry = spriteData.entries[i];
+            const time = entry?.start ?? 0;
             const isActive = i === activeIndex;
             return (
               <div 
@@ -1622,14 +1787,6 @@ function SceneScrubber({
                         backgroundSize: `${(spriteData!.entries[0].w * Math.ceil(Math.sqrt(thumbCount))) * (thumbWidth / entry.w)}px auto`,
                       }}
                     />
-                  ) : spriteLoadSettled && spriteError ? (
-                    <img 
-                      src={`${screenshotUrl}?seconds=${Math.floor(time)}`} 
-                      alt="" 
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
                   ) : null}
                 </div>
                 <div className="absolute bottom-0 left-0 right-0 text-center text-[10px] text-white bg-black/70 py-0.5">
@@ -1644,6 +1801,7 @@ function SceneScrubber({
           <ChevronRight className="w-4 h-4 mx-auto" />
         </button>
       </div>
+      ) : null}
     </div>
   );
 }
@@ -1694,42 +1852,75 @@ function formatTimelineTime(seconds: number) {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+function parseSegmentTimeInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const parts = trimmed.split(":").map((part) => part.trim());
+  if (parts.length > 3 || parts.some((part) => part === "" || Number.isNaN(Number(part)))) return null;
+
+  const numbers = parts.map(Number);
+  if (numbers.some((part) => part < 0 || !Number.isFinite(part))) return null;
+
+  if (numbers.length === 1) return numbers[0];
+  if (numbers.length === 2) return numbers[0] * 60 + numbers[1];
+  return numbers[0] * 3600 + numbers[1] * 60 + numbers[2];
+}
+
+function formatSegmentTimeInput(seconds: number) {
+  const safeSeconds = Math.max(0, seconds || 0);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const wholeSeconds = Math.floor(safeSeconds % 60);
+  const tenths = Math.round((safeSeconds - Math.floor(safeSeconds)) * 10);
+  const normalizedWholeSeconds = tenths === 10 ? wholeSeconds + 1 : wholeSeconds;
+  const normalizedTenths = tenths === 10 ? 0 : tenths;
+  const secondText = normalizedTenths > 0
+    ? `${normalizedWholeSeconds.toString().padStart(2, "0")}.${normalizedTenths}`
+    : normalizedWholeSeconds.toString().padStart(2, "0");
+
+  return hours > 0 ? `${hours}:${minutes.toString().padStart(2, "0")}:${secondText}` : `${minutes}:${secondText}`;
+}
+
 function SegmentsPanel({
   sceneId,
   segments,
   loading,
   canEdit,
   onSeek,
+  currentTime = 0,
 }: {
   sceneId: number;
   segments: Segment[];
   loading: boolean;
   canEdit: boolean;
   onSeek?: (time: number) => void;
+  currentTime?: number;
 }) {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [title, setTitle] = useState("");
-  const [kind, setKind] = useState("");
+  const [kind, setKind] = useState<"tag" | "performer">("tag");
   const [startSec, setStartSec] = useState(0);
   const [endSec, setEndSec] = useState<number | "">("");
-  const [tagSearch, setTagSearch] = useState("");
   const [selectedTagId, setSelectedTagId] = useState<number | null>(null);
-  const [selectedTagName, setSelectedTagName] = useState("");
-
-  const { data: tagResults } = useQuery({
-    queryKey: ["tags-search", tagSearch],
-    queryFn: () => tags.find({ q: tagSearch, perPage: 10 }),
-    enabled: tagSearch.length >= 1,
-  });
+  const [selectedPerformerId, setSelectedPerformerId] = useState<number | null>(null);
+  const [startText, setStartText] = useState("0:00");
+  const [endText, setEndText] = useState("");
+  const parsedStart = parseSegmentTimeInput(startText);
+  const parsedEnd = endText.trim() === "" ? null : parseSegmentTimeInput(endText);
+  const hasSelectedEntity = kind === "performer" ? selectedPerformerId != null : selectedTagId != null;
+  const canSaveSegment = parsedStart != null && parsedStart >= 0 && (parsedEnd == null || parsedEnd >= parsedStart) && hasSelectedEntity;
+  const kindOptions = ["tag", "performer"] as const;
 
   const createMutation = useMutation({
-    mutationFn: (data: { title?: string; kind?: string; startSec: number; endSec?: number; tagId?: number }) =>
+    mutationFn: (data: { title?: string; kind?: string; startSec: number; endSec?: number; tagId?: number; refId?: number }) =>
       scenes.segments.create(sceneId, {
         startSec: data.startSec,
         endSec: data.endSec,
         tagId: data.tagId,
+        refId: data.refId,
         kind: data.kind,
         title: data.title,
       }),
@@ -1740,19 +1931,19 @@ function SegmentsPanel({
   });
 
   const updateMutation = useMutation({
-    mutationFn: (segment: Segment) =>
-      scenes.segments.update(sceneId, segment.id, {
-        startSec,
-        endSec: endSec === "" ? undefined : endSec,
-        tagId: selectedTagId ?? undefined,
-        kind: kind || undefined,
-        refId: segment.refId,
-        payload: segment.payload,
-        sourceKey: segment.sourceKey || "user",
-        sourceRunId: segment.sourceRunId,
-        confidence: segment.confidence,
-        title: title || undefined,
-        colorHint: segment.colorHint,
+    mutationFn: (data: { segment: Segment; startSec: number; endSec?: number; tagId?: number; refId?: number; kind?: string; title?: string }) =>
+      scenes.segments.update(sceneId, data.segment.id, {
+        startSec: data.startSec,
+        endSec: data.endSec,
+        tagId: data.tagId,
+        kind: data.kind,
+        refId: data.refId ?? (data.kind === data.segment.kind ? data.segment.refId : undefined),
+        payload: data.segment.payload,
+        sourceKey: data.segment.sourceKey || "user",
+        sourceRunId: data.segment.sourceRunId,
+        confidence: data.segment.confidence,
+        title: data.title,
+        colorHint: data.segment.colorHint,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scene", sceneId, "segments"] });
@@ -1771,40 +1962,75 @@ function SegmentsPanel({
     setAdding(false);
     setEditingId(null);
     setTitle("");
-    setKind("");
-    setStartSec(0);
+    setKind("tag");
+    setStartTimeFromSeconds(0);
     setEndSec("");
-    setTagSearch("");
+    setEndText("");
     setSelectedTagId(null);
-    setSelectedTagName("");
+    setSelectedPerformerId(null);
+  };
+
+  const setStartTimeFromSeconds = (seconds: number) => {
+    const normalized = Math.max(0, seconds);
+    setStartSec(normalized);
+    setStartText(formatSegmentTimeInput(normalized));
+  };
+
+  const setEndTimeFromSeconds = (seconds: number | "") => {
+    if (seconds === "") {
+      setEndSec("");
+      setEndText("");
+      return;
+    }
+
+    const normalized = Math.max(0, seconds);
+    setEndSec(normalized);
+    setEndText(formatSegmentTimeInput(normalized));
   };
 
   const startEdit = (segment: Segment) => {
     setAdding(true);
     setEditingId(segment.id);
     setTitle(segment.title || "");
-    setKind(segment.kind || "");
-    setStartSec(segment.startSec);
-    setEndSec(segment.endSec ?? "");
-    setTagSearch("");
-    setSelectedTagId(segment.tagId ?? null);
-    setSelectedTagName(segment.tagName || "");
+    setKind(segment.kind?.toLowerCase() === "performer" ? "performer" : "tag");
+    setStartTimeFromSeconds(segment.startSec);
+    setEndTimeFromSeconds(segment.endSec ?? "");
+    setSelectedTagId(segment.kind?.toLowerCase() === "performer" ? null : segment.tagId ?? null);
+    setSelectedPerformerId(segment.kind?.toLowerCase() === "performer" && segment.refId != null ? Number(segment.refId) : null);
   };
 
   const editingSegment = editingId != null ? segments.find((segment) => segment.id === editingId) ?? null : null;
 
   const saveSegment = () => {
+    if (!canSaveSegment || parsedStart == null) {
+      return;
+    }
+
+    const nextEndSec = parsedEnd == null ? undefined : parsedEnd;
+    const nextKind = kind;
+    const nextTagId = kind === "tag" ? selectedTagId ?? undefined : undefined;
+    const nextRefId = kind === "performer" ? selectedPerformerId ?? undefined : undefined;
+
     if (editingSegment) {
-      updateMutation.mutate(editingSegment);
+      updateMutation.mutate({
+        segment: editingSegment,
+        startSec: parsedStart,
+        endSec: nextEndSec,
+        tagId: nextTagId,
+        refId: nextRefId,
+        kind: nextKind,
+        title: title || undefined,
+      });
       return;
     }
 
     createMutation.mutate({
       title: title || undefined,
-      kind: kind || undefined,
-      startSec,
-      endSec: endSec === "" ? undefined : endSec,
-      tagId: selectedTagId ?? undefined,
+      startSec: parsedStart,
+      endSec: nextEndSec,
+      tagId: nextTagId,
+      refId: nextRefId,
+      kind: nextKind,
     });
   };
 
@@ -1823,7 +2049,7 @@ function SegmentsPanel({
 
       {adding && canEdit && (
         <div className="mb-3 space-y-2 rounded border border-border bg-card p-3">
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
             <input
               type="text"
               placeholder="Segment title"
@@ -1831,64 +2057,99 @@ function SegmentsPanel({
               onChange={(event) => setTitle(event.target.value)}
               className="w-full rounded border border-border bg-input px-3 py-1.5 text-sm text-foreground"
             />
-            <input
-              type="text"
-              placeholder="Kind (intro, pose, action...)"
+            <select
               value={kind}
-              onChange={(event) => setKind(event.target.value)}
+              onChange={(event) => {
+                const nextKind = event.target.value === "performer" ? "performer" : "tag";
+                setKind(nextKind);
+                if (nextKind === "performer") {
+                  setSelectedTagId(null);
+                } else {
+                  setSelectedPerformerId(null);
+                }
+              }}
               className="w-full rounded border border-border bg-input px-3 py-1.5 text-sm text-foreground"
-            />
+            >
+              {kindOptions.map((option) => (
+                <option key={option} value={option}>{option === "tag" ? "Tag" : "Performer"}</option>
+              ))}
+            </select>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[120px_120px_minmax(0,1fr)]">
-            <input
-              type="number"
-              step="0.1"
-              min={0}
-              placeholder="Start"
-              value={startSec}
-              onChange={(event) => setStartSec(Number(event.target.value))}
-              className="rounded border border-border bg-input px-3 py-1.5 text-sm text-foreground"
-            />
-            <input
-              type="number"
-              step="0.1"
-              min={0}
-              placeholder="End"
-              value={endSec}
-              onChange={(event) => setEndSec(event.target.value === "" ? "" : Number(event.target.value))}
-              className="rounded border border-border bg-input px-3 py-1.5 text-sm text-foreground"
-            />
-            <div className="relative">
-              <div className="flex items-center rounded border border-border bg-input px-3 py-1.5 text-sm">
-                <Search className="mr-2 h-3.5 w-3.5 flex-shrink-0 text-muted" />
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(7rem,0.75fr)_minmax(7rem,0.75fr)_minmax(10rem,1.8fr)]">
+            <label className="space-y-1">
+              <span className="text-xs text-secondary">Start</span>
+              <div className="flex gap-1">
                 <input
                   type="text"
-                  placeholder={selectedTagName || "Search tag..."}
-                  value={tagSearch}
-                  onChange={(event) => { setTagSearch(event.target.value); setSelectedTagId(null); setSelectedTagName(""); }}
-                  className="w-full bg-transparent text-foreground outline-none"
+                  inputMode="decimal"
+                  placeholder="0:00"
+                  value={startText}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setStartText(next);
+                    const parsed = parseSegmentTimeInput(next);
+                    if (parsed != null) setStartSec(parsed);
+                  }}
+                  onBlur={() => setStartText(formatSegmentTimeInput(startSec))}
+                  className="min-w-0 flex-1 rounded border border-border bg-input px-3 py-1.5 font-mono text-sm text-foreground"
                 />
+                <button type="button" onClick={() => setStartTimeFromSeconds(currentTime)} className="inline-flex items-center justify-center rounded border border-border px-2 text-secondary hover:text-foreground" title="Use current time" aria-label="Use current time for segment start"><Clock className="h-3.5 w-3.5" /></button>
               </div>
-              {tagSearch && tagResults && tagResults.items.length > 0 && (
-                <div className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded border border-border bg-card shadow-lg">
-                  {tagResults.items.map((tag: { id: number; name: string }) => (
-                    <button
-                      key={tag.id}
-                      onClick={() => { setSelectedTagId(tag.id); setSelectedTagName(tag.name); setTagSearch(""); }}
-                      className="block w-full px-3 py-1.5 text-left text-sm text-secondary hover:bg-card-hover hover:text-foreground"
-                    >
-                      {tag.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs text-secondary">End</span>
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Optional"
+                  value={endText}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setEndText(next);
+                    if (next.trim() === "") {
+                      setEndSec("");
+                      return;
+                    }
+                    const parsed = parseSegmentTimeInput(next);
+                    if (parsed != null) setEndSec(parsed);
+                  }}
+                  onBlur={() => setEndText(endSec === "" ? "" : formatSegmentTimeInput(endSec))}
+                  className="min-w-0 flex-1 rounded border border-border bg-input px-3 py-1.5 font-mono text-sm text-foreground"
+                />
+                <button type="button" onClick={() => setEndTimeFromSeconds(currentTime)} className="inline-flex items-center justify-center rounded border border-border px-2 text-secondary hover:text-foreground" title="Use current time" aria-label="Use current time for segment end"><Clock className="h-3.5 w-3.5" /></button>
+              </div>
+            </label>
+            {kind === "tag" ? (
+              <label className="min-w-0 space-y-1 sm:col-span-2 xl:col-span-1">
+                <span className="text-xs text-secondary">Tag</span>
+                <EntityReferenceSelector
+                  entityType="tag"
+                  value={selectedTagId ?? undefined}
+                  onChange={(tagId) => setSelectedTagId(tagId ?? null)}
+                  placeholder="Search tags..."
+                  inputClassName="w-full rounded border border-border bg-input px-3 py-1.5 text-sm text-foreground"
+                />
+              </label>
+            ) : (
+              <label className="min-w-0 space-y-1 sm:col-span-2 xl:col-span-1">
+                <span className="text-xs text-secondary">Performer</span>
+                <EntityReferenceSelector
+                  entityType="performer"
+                  value={selectedPerformerId ?? undefined}
+                  onChange={(performerId) => setSelectedPerformerId(performerId ?? null)}
+                  placeholder="Search performers..."
+                  inputClassName="w-full rounded border border-border bg-input px-3 py-1.5 text-sm text-foreground"
+                />
+              </label>
+            )}
           </div>
+          {!canSaveSegment ? <div className="text-xs text-red-300">Use valid times and choose a {kind}.</div> : null}
           <div className="flex justify-end gap-2">
             <button onClick={resetForm} className="px-3 py-1 text-sm text-secondary hover:text-foreground">Cancel</button>
             <button
               onClick={saveSegment}
-              disabled={createMutation.isPending || updateMutation.isPending}
+              disabled={!canSaveSegment || createMutation.isPending || updateMutation.isPending}
               className="rounded bg-accent px-3 py-1 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
             >
               {editingId ? "Update" : "Save"}
@@ -2014,17 +2275,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex }))
   );
   const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildSceneEditPerformerContextTagIds(scene));
-  const [contextTagSearchByPerformer, setContextTagSearchByPerformer] = useState<Record<number, string>>({});
-  const [tagSearch, setTagSearch] = useState("");
-  const [perfSearch, setPerfSearch] = useState("");
-  const [gallerySearch, setGallerySearch] = useState("");
-  const [groupSearch, setGroupSearch] = useState("");
-
-  const { data: allTags } = useQuery({ queryKey: ["tags-all"], queryFn: () => tags.find({ perPage: 500, sort: "name", direction: "asc" }) });
-  const { data: allPerformers } = useQuery({ queryKey: ["performers-all"], queryFn: () => performersApi.find({ perPage: 500, sort: "name", direction: "asc" }) });
-  const { data: allGalleries } = useQuery({ queryKey: ["galleries-all"], queryFn: () => galleriesApi.find({ perPage: 500, sort: "title", direction: "asc" }) });
-  const { data: allGroups } = useQuery({ queryKey: ["groups-all"], queryFn: () => groupsApi.find({ perPage: 500, sort: "name", direction: "asc" }) });
-
+  const [performerOccurrenceTagsOpen, setPerformerOccurrenceTagsOpen] = useState(false);
   useEffect(() => {
     setTitle(scene.title || ""); setCode(scene.code || ""); setDetails(scene.details || "");
     setDirector(scene.director || ""); setDate(scene.date || ""); setIsVr(scene.isVr ?? false); setRating(undefined);
@@ -2035,7 +2286,6 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
     setContextTagIdsByPerformer(buildSceneEditPerformerContextTagIds(scene));
-    setContextTagSearchByPerformer({});
   }, [scene]);
 
   const mutation = useMutation({
@@ -2055,25 +2305,11 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
       tagIds: selectedTagIds, performerIds: selectedPerformerIds, galleryIds: selectedGalleryIds, groups: selectedGroups });
   };
 
-  const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, selectedTagIds);
-  const filteredPerformers = allPerformers?.items.filter((p) => !selectedPerformerIds.includes(p.id) && p.name.toLowerCase().includes(perfSearch.toLowerCase())) ?? [];
-  const filteredGalleries = allGalleries?.items.filter((g) => !selectedGalleryIds.includes(g.id) && (g.title || "").toLowerCase().includes(gallerySearch.toLowerCase())) ?? [];
-  const selectedGroupIds = selectedGroups.map((g) => g.groupId);
-  const filteredGroupsList = allGroups?.items.filter((g) => !selectedGroupIds.includes(g.id) && g.name.toLowerCase().includes(groupSearch.toLowerCase())) ?? [];
-  const selectedTags = selectedTagIds
-    .map((id) => allTags?.items.find((tag) => tag.id === id) ?? scene.tags.find((tag) => tag.id === id))
-    .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag));
-  const selectedPerformers = selectedPerformerIds
-    .map((id) => allPerformers?.items.find((performer) => performer.id === id) ?? scene.performers.find((performer) => performer.id === id))
-    .filter((performer): performer is NonNullable<typeof performer> => Boolean(performer));
-  const selectedGalleries = selectedGalleryIds
-    .map((id) => allGalleries?.items.find((gallery) => gallery.id === id) ?? scene.galleries.find((gallery) => gallery.id === id))
-    .filter((gallery): gallery is NonNullable<typeof gallery> => Boolean(gallery));
-  const knownContextTags = (scene.contextTagApplications ?? []).map((application) => application.tag);
-  const knownTags = [...(allTags?.items ?? []), ...scene.tags, ...knownContextTags];
-  const tagById = new Map(knownTags.map((tag) => [tag.id, tag]));
   const setPerformerContextTagIds = (performerId: number, tagIds: number[]) => {
     setContextTagIdsByPerformer((current) => ({ ...current, [performerId]: Array.from(new Set(tagIds)) }));
+  };
+  const setSelectedGroupIds = (groupIds: number[]) => {
+    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
   };
 
   const inputCls = "w-full bg-input border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent";
@@ -2101,75 +2337,55 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
       {/* Tags */}
       <div className="space-y-1">
         <span className="text-xs text-secondary">Tags</span>
-        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds(selectedTagIds.filter((id) => id !== tag.id))} className="mb-1 flex flex-wrap gap-1" />
-        <input value={tagSearch} onChange={(e) => setTagSearch(e.target.value)} placeholder="Search tags…" className={inputCls} />
-        {tagSearch && filteredTags.length > 0 && <GroupedTagOptionList tags={filteredTags} maxItems={20} onSelect={(tag) => { setSelectedTagIds([...selectedTagIds, tag.id]); setTagSearch(""); }} />}
+        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
       </div>
 
       {/* Performers */}
       <div className="space-y-1">
         <span className="text-xs text-secondary">Performers</span>
-        <div className="flex flex-wrap gap-1 mb-1">
-          {selectedPerformers.map((p) => <span key={p.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-accent/10 text-accent-hover">{p.name}<button onClick={() => setSelectedPerformerIds(selectedPerformerIds.filter((id) => id !== p.id))} className="hover:text-white">×</button></span>)}
-        </div>
-        <input value={perfSearch} onChange={(e) => setPerfSearch(e.target.value)} placeholder="Search performers…" className={inputCls} />
-        {perfSearch && filteredPerformers.length > 0 && <div className="max-h-24 overflow-y-auto bg-surface rounded border border-border">{filteredPerformers.slice(0, 10).map((p) => <button key={p.id} onClick={() => { setSelectedPerformerIds([...selectedPerformerIds, p.id]); setPerfSearch(""); }} className="block w-full text-left px-3 py-1 text-sm text-foreground hover:bg-card">{p.name}{p.disambiguation ? ` (${p.disambiguation})` : ""}</button>)}</div>}
+        <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." inputClassName={inputCls} />
       </div>
 
-      {selectedPerformers.length > 0 ? (
+      {selectedPerformerIds.length > 0 ? (
         <div className="space-y-2 rounded-lg border border-border bg-surface/40 p-3">
-          <div className="text-xs font-medium uppercase tracking-wide text-secondary">Performer Occurrence Tags</div>
-          {selectedPerformers.map((performer) => {
-            const tagIds = contextTagIdsByPerformer[performer.id] ?? [];
-            const search = contextTagSearchByPerformer[performer.id] ?? "";
-            const selectedContextTags = tagIds.map((tagId) => tagById.get(tagId)).filter(Boolean) as SelectableTag[];
-            const availableTags = filterTagsForSelector(allTags?.items ?? [], search, tagIds);
+          <button
+            type="button"
+            onClick={() => setPerformerOccurrenceTagsOpen((open) => !open)}
+            className="flex w-full items-center justify-between gap-3 text-left text-xs font-medium uppercase tracking-wide text-secondary hover:text-foreground"
+          >
+            <span>Performer Occurrence Tags</span>
+            <span className="inline-flex items-center gap-2 normal-case tracking-normal text-muted">
+              {selectedPerformerIds.reduce((sum, performerId) => sum + (contextTagIdsByPerformer[performerId]?.length ?? 0), 0)} tag assignments
+              {performerOccurrenceTagsOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            </span>
+          </button>
+          {performerOccurrenceTagsOpen ? selectedPerformerIds.map((performerId) => {
+            const tagIds = contextTagIdsByPerformer[performerId] ?? [];
 
             return (
-              <div key={performer.id} className="rounded-lg border border-border bg-card/70 p-3">
+              <div key={performerId} className="rounded-lg border border-border bg-card/70 p-3">
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <div className="min-w-0 text-sm font-medium text-foreground">{performer.name}</div>
+                  <div className="min-w-0 text-sm font-medium text-foreground"><EntityReferenceValue entityType="performer" value={performerId} /></div>
                   <div className="text-xs text-muted">{tagIds.length} tag{tagIds.length === 1 ? "" : "s"}</div>
                 </div>
-                <SelectedTagChips
-                  tags={selectedContextTags}
-                  emptyText="No occurrence tags"
-                  onRemove={(tag) => setPerformerContextTagIds(performer.id, tagIds.filter((tagId) => tagId !== tag.id))}
-                  className="mb-2 flex flex-wrap gap-1.5"
-                />
-                <input
-                  value={search}
-                  onChange={(event) => setContextTagSearchByPerformer((current) => ({ ...current, [performer.id]: event.target.value }))}
+                <EntityReferenceMultiSelector
+                  entityType="tag"
+                  values={tagIds}
+                  onChange={(nextTagIds) => setPerformerContextTagIds(performerId, nextTagIds)}
                   placeholder="Search tags for this occurrence..."
-                  className={inputCls}
+                  emptyMessage="No tags found"
+                  inputClassName={inputCls}
                 />
-                {search.trim() && availableTags.length > 0 ? (
-                  <div className="mt-1">
-                    <GroupedTagOptionList
-                      tags={availableTags}
-                      selectedIds={tagIds}
-                      maxItems={20}
-                      onSelect={(tag) => {
-                        setPerformerContextTagIds(performer.id, [...tagIds, tag.id]);
-                        setContextTagSearchByPerformer((current) => ({ ...current, [performer.id]: "" }));
-                      }}
-                    />
-                  </div>
-                ) : null}
               </div>
             );
-          })}
+          }) : null}
         </div>
       ) : null}
 
       {/* Galleries */}
       <div className="space-y-1">
         <span className="text-xs text-secondary">Galleries</span>
-        <div className="flex flex-wrap gap-1 mb-1">
-          {selectedGalleries.map((g) => <span key={g.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-900 text-emerald-300">{g.title || "Untitled"}<button onClick={() => setSelectedGalleryIds(selectedGalleryIds.filter((id) => id !== g.id))} className="hover:text-white">×</button></span>)}
-        </div>
-        <input value={gallerySearch} onChange={(e) => setGallerySearch(e.target.value)} placeholder="Search galleries…" className={inputCls} />
-        {gallerySearch && filteredGalleries.length > 0 && <div className="max-h-24 overflow-y-auto bg-surface rounded border border-border">{filteredGalleries.slice(0, 10).map((g) => <button key={g.id} onClick={() => { setSelectedGalleryIds([...selectedGalleryIds, g.id]); setGallerySearch(""); }} className="block w-full text-left px-3 py-1 text-sm text-foreground hover:bg-card">{g.title || "Untitled"}</button>)}</div>}
+        <EntityReferenceMultiSelector entityType="gallery" values={selectedGalleryIds} onChange={setSelectedGalleryIds} placeholder="Search galleries..." inputClassName={inputCls} />
       </div>
 
       {/* Groups */}
@@ -2177,11 +2393,10 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
         <span className="text-xs text-secondary">Groups</span>
         <div className="space-y-1 mb-1">
           {selectedGroups.map((sg) => {
-            const group = allGroups?.items.find((g) => g.id === sg.groupId);
             return (
               <div key={sg.groupId} className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-orange-900 text-orange-300">
-                  {group?.name || `Group #${sg.groupId}`}
+                  <EntityReferenceValue entityType="group" value={sg.groupId} />
                   <button onClick={() => setSelectedGroups(selectedGroups.filter((g) => g.groupId !== sg.groupId))} className="hover:text-white">×</button>
                 </span>
                 <label className="flex items-center gap-1 text-xs text-muted">
@@ -2194,8 +2409,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
             );
           })}
         </div>
-        <input value={groupSearch} onChange={(e) => setGroupSearch(e.target.value)} placeholder="Search groups…" className={inputCls} />
-        {groupSearch && filteredGroupsList.length > 0 && <div className="max-h-24 overflow-y-auto bg-surface rounded border border-border">{filteredGroupsList.slice(0, 10).map((g) => <button key={g.id} onClick={() => { setSelectedGroups([...selectedGroups, { groupId: g.id, sceneIndex: 0 }]); setGroupSearch(""); }} className="block w-full text-left px-3 py-1 text-sm text-foreground hover:bg-card">{g.name}</button>)}</div>}
+        <EntityReferenceMultiSelector entityType="group" values={selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." inputClassName={inputCls} />
       </div>
 
       <div className="space-y-1"><span className="text-xs text-secondary">Remote IDs</span><RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} metadataServers={config?.scraping?.metadataServers} /></div>

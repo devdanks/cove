@@ -6,6 +6,7 @@ import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
+import { useAiVisualAvailability } from "../hooks/useAiVisualAvailability";
 import { RatingField } from "../components/Rating";
 import { SceneTagger } from "../components/SceneTagger";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -54,7 +55,6 @@ const SceneBatchScrapeDialog = lazy(() => import("../components/SceneBatchScrape
 const BatchDownloadOptionsDialog = lazy(() => import("../components/BatchDownloadOptionsDialog").then((module) => ({ default: module.BatchDownloadOptionsDialog })));
 const MergeDialog = lazy(() => import("../components/MergeDialog").then((module) => ({ default: module.MergeDialog })));
 const IdentifyDialog = lazy(() => import("../components/IdentifyDialog").then((module) => ({ default: module.IdentifyDialog })));
-const SceneQueue = lazy(() => import("../components/SceneQueue").then((module) => ({ default: module.SceneQueue })));
 const QuickViewDialog = lazy(() => import("../components/QuickViewDialog").then((module) => ({ default: module.QuickViewDialog })));
 
 const SEARCH_MODE_OPTIONS = [
@@ -88,6 +88,7 @@ export function ScenesPage({ onNavigate }: Props) {
       displayMode: "grid" as DisplayMode,
     };
   }, []);
+  const aiVisualAvailable = useAiVisualAvailability();
   const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode, searchMode, setSearchMode } = useListUrlState({
     resetKey: "scenes",
     defaultFilter: defaultState.filter,
@@ -95,7 +96,7 @@ export function ScenesPage({ onNavigate }: Props) {
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list", "wall", "tagger", "feed", "vertical"] as const,
     defaultSearchMode: "text",
-    allowedSearchModes: ["text", "visual"],
+    allowedSearchModes: aiVisualAvailable ? ["text", "visual"] : ["text"],
     allowInfinitePageSize: true,
   });
   const [showCreate, setShowCreate] = useState(false);
@@ -104,7 +105,6 @@ export function ScenesPage({ onNavigate }: Props) {
   const [showIdentify, setShowIdentify] = useState(false);
   const [showBatchScrape, setShowBatchScrape] = useState(false);
   const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
-  const [showQueue, setShowQueue] = useState(false);
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [wallColumnCount, setWallColumnCount] = useState(5);
@@ -250,7 +250,7 @@ export function ScenesPage({ onNavigate }: Props) {
     Object.entries(effectiveObjectFilter).filter(([key]) => key !== INCLUDE_COMPILATIONS_FILTER_KEY),
   ), [effectiveObjectFilter]);
   const hasObjectFilter = Object.keys(backendObjectFilter).length > 0;
-  const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
+  const visualSearchActive = aiVisualAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
   const infinitePageSize = filter.perPage === 0 || infiniteOnlyDisplayMode;
   const defaultInfiniteChunkSize = defaultState.filter.perPage && defaultState.filter.perPage > 0 ? defaultState.filter.perPage : 40;
   const infiniteChunkSize = displayMode === "vertical" ? 6 : displayMode === "feed" ? 10 : defaultInfiniteChunkSize;
@@ -264,12 +264,26 @@ export function ScenesPage({ onNavigate }: Props) {
       setFilter({ ...filter, page: 1, perPage: 0 });
     }
   }, [filter, infiniteOnlyDisplayMode, setFilter]);
+  const searchModeOptions = useMemo(() => aiVisualAvailable ? SEARCH_MODE_OPTIONS : SEARCH_MODE_OPTIONS.filter((mode) => mode.value === "text"), [aiVisualAvailable]);
   const sortOptions = useMemo(
-    () => searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SCENE_SORT_OPTIONS] : SCENE_SORT_OPTIONS,
-    [searchMode],
+    () => aiVisualAvailable && searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SCENE_SORT_OPTIONS] : SCENE_SORT_OPTIONS,
+    [aiVisualAvailable, searchMode],
   );
 
+  useEffect(() => {
+    if (!aiVisualAvailable && searchMode === "visual") {
+      setSearchMode("text");
+      if (filter.sort === "visual_match") {
+        setFilter({ ...filter, sort: defaultState.filter.sort, direction: defaultState.filter.direction ?? "desc", page: 1 });
+      }
+    }
+  }, [aiVisualAvailable, defaultState.filter.direction, defaultState.filter.sort, filter, searchMode, setFilter, setSearchMode]);
+
   const handleSearchModeChange = useCallback((mode: string) => {
+    if (mode === "visual" && !aiVisualAvailable) {
+      return;
+    }
+
     setSearchMode(mode);
 
     if (mode === "visual") {
@@ -288,7 +302,7 @@ export function ScenesPage({ onNavigate }: Props) {
     }
 
     setFilter({ ...filter, page: 1 });
-  }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
+  }, [aiVisualAvailable, defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
 
   const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
     setDisplayMode(mode);
@@ -423,9 +437,33 @@ export function ScenesPage({ onNavigate }: Props) {
 
   const navigateToScene = useCallback((sceneId: number) => {
     const ids = items.map((s) => s.id);
-    if (ids.length > 0) setQueue(ids, sceneId);
+    if (ids.length > 0) {
+      setQueue(ids, sceneId, items.map((scene) => ({
+        id: scene.id,
+        title: scene.title || scene.files[0]?.basename || `Scene ${scene.id}`,
+        subtitle: scene.studioName || scene.date || undefined,
+        imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt),
+      })));
+    }
     onNavigate({ page: "scene", id: sceneId });
   }, [items, setQueue, onNavigate]);
+
+  const handlePlaySelected = useCallback(() => {
+    const selectedScenes = items.filter((scene) => selectedIds.has(scene.id));
+    const ids = selectedScenes.map((scene) => scene.id);
+    if (ids.length === 0) {
+      return;
+    }
+
+    setQueue(ids, ids[0], selectedScenes.map((scene) => ({
+      id: scene.id,
+      title: scene.title || scene.files[0]?.basename || `Scene ${scene.id}`,
+      subtitle: scene.studioName || scene.date || undefined,
+      imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt),
+    })));
+    selectNone();
+    onNavigate({ page: "scene", id: ids[0] });
+  }, [items, onNavigate, selectNone, selectedIds, setQueue]);
 
   const handleSelectAllMatching = useCallback(async () => {
     setSelectAllMatchingPending(true);
@@ -492,16 +530,6 @@ export function ScenesPage({ onNavigate }: Props) {
     },
   });
 
-  // Metadata byline standard layout: (1:23:45 - 2.5 GB)
-  const byline = useMemo(() => {
-    const totalDur = items.reduce((sum, s) => sum + (s.files[0]?.duration ?? 0), 0);
-    const totalSize = items.reduce((sum, s) => sum + (s.files[0]?.size ?? 0), 0);
-    if (!totalDur && !totalSize) return null;
-    const parts: string[] = [];
-    if (totalDur) parts.push(formatDuration(totalDur));
-    if (totalSize) parts.push(formatFileSize(totalSize));
-    return <span className="text-xs text-muted">({parts.join(" — ")})</span>;
-  }, [items]);
   const verticalOverlayTop = verticalFullscreen ? 12 : Math.max(12, verticalViewerTop + 12);
   const verticalViewerStyle = verticalFullscreen ? undefined : { height: verticalViewerHeight != null ? `${verticalViewerHeight}px` : "calc(100dvh - 10rem)" };
   const verticalActiveIndex = useMemo(() => items.findIndex((scene) => scene.id === activeVerticalSceneId), [items, activeVerticalSceneId]);
@@ -551,8 +579,8 @@ export function ScenesPage({ onNavigate }: Props) {
       totalCount={totalCount ?? 0}
       isLoading={loading}
       searchMode={searchMode}
-      searchModes={SEARCH_MODE_OPTIONS}
-      searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Search scenes, tags, performers..."}
+      searchModes={searchModeOptions}
+      searchPlaceholder={aiVisualAvailable && searchMode === "visual" ? "Search visuals..." : "Search scenes, tags, performers..."}
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}
@@ -560,7 +588,6 @@ export function ScenesPage({ onNavigate }: Props) {
       availableDisplayModes={["grid", "list", "wall", "tagger", "feed", "vertical"]}
       allowInfinitePageSize
       infinitePageSizeOnly={infiniteOnlyDisplayMode}
-      metadataByline={byline}
       criteriaDefinitions={SCENE_CRITERIA}
       objectFilter={normalizedObjectFilter}
       onObjectFilterChange={setObjectFilter}
@@ -640,7 +667,7 @@ export function ScenesPage({ onNavigate }: Props) {
             </button>
           )}
           <button
-            onClick={() => setShowQueue(true)}
+            onClick={handlePlaySelected}
             className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 hover:text-green-300 hover:bg-green-900/20"
           >
             <Play className="w-3 h-3" />
@@ -915,18 +942,6 @@ export function ScenesPage({ onNavigate }: Props) {
           open={showIdentify}
           onClose={() => { setShowIdentify(false); selectNone(); }}
           sceneIds={[...selectedIds]}
-        />
-      ) : null}
-      {showQueue ? (
-        <SceneQueue
-          scenes={items.filter((s) => selectedIds.has(s.id)).map((s) => ({
-            id: s.id,
-            title: s.title || s.files[0]?.basename,
-            duration: s.files[0]?.duration,
-            screenshotUrl: scenes.screenshotUrl(s.id, s.updatedAt),
-          }))}
-          onClose={() => { setShowQueue(false); selectNone(); }}
-          onNavigate={onNavigate}
         />
       ) : null}
       {quickViewId !== null ? (

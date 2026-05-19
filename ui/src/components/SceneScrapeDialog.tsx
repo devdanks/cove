@@ -32,6 +32,10 @@ interface Props {
   open: boolean;
   onClose: () => void;
   scene: SceneScrapeScene;
+  initialScraperId?: string;
+  initialInputKind?: InputKind;
+  autoRunKey?: string | number;
+  onApplied?: (attempt: ScrapeAttempt) => void;
 }
 
 function formatAttemptTime(value: string) {
@@ -62,7 +66,7 @@ function upsertReplaceField(current: string[], field: string, enabled: boolean) 
   return current.filter((value) => value !== field);
 }
 
-export function SceneScrapeDialog({ open, onClose, scene }: Props) {
+export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, initialInputKind, autoRunKey, onApplied }: Props) {
   const queryClient = useQueryClient();
   const { config } = useAppConfig();
   const [preferences, setPreferences] = useState<ScrapeApplyPreferences>(() => loadScrapeApplyPreferences());
@@ -78,6 +82,7 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
   const [tagActions, setTagActions] = useState<ScrapeRelationActionMap>({});
   const [performerActions, setPerformerActions] = useState<ScrapeRelationActionMap>({});
   const [error, setError] = useState<string | null>(null);
+  const [autoRunConsumedKey, setAutoRunConsumedKey] = useState<string | number | null>(null);
 
   const { data: scrapers = [] } = useQuery({
     queryKey: ["system-scrapers"],
@@ -175,20 +180,29 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
       return;
     }
 
+    if (autoRunKey != null && autoRunConsumedKey !== autoRunKey) {
+      return;
+    }
+
     if (!selectedAttempt && recentAttempts.length > 0) {
       setSelectedAttempt(recentAttempts[0] ?? null);
     }
-  }, [open, recentAttempts, selectedAttempt]);
+  }, [autoRunConsumedKey, autoRunKey, open, recentAttempts, selectedAttempt]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
+    if (initialScraperId && sceneScrapers.some((scraper) => scraper.id === initialScraperId)) {
+      setSelectedScraperId(initialScraperId);
+      return;
+    }
+
     if (!selectedScraperId || !sceneScrapers.some((scraper) => scraper.id === selectedScraperId)) {
       setSelectedScraperId(findPreferredScraperId(sceneScrapers, scene.urls[0], scraperPreferences));
     }
-  }, [open, scene.urls, sceneScrapers, scraperPreferences, selectedScraperId]);
+  }, [initialScraperId, open, scene.urls, sceneScrapers, scraperPreferences, selectedScraperId]);
 
   useEffect(() => {
     if (!selectedAttempt) {
@@ -221,8 +235,13 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
       return;
     }
 
+    if (initialInputKind && supportsScrapeKind(selectedScraper, initialInputKind)) {
+      setInputKind(initialInputKind);
+      return;
+    }
+
     setInputKind((current) => findDefaultKind(selectedScraper, current));
-  }, [selectedScraper]);
+  }, [initialInputKind, selectedScraper]);
 
   useEffect(() => {
     if (!scrapedData) {
@@ -289,6 +308,20 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
     },
   });
 
+  useEffect(() => {
+    if (!open || autoRunKey == null || autoRunConsumedKey === autoRunKey || !selectedScraper) {
+      return;
+    }
+
+    if (!supportsScrapeKind(selectedScraper, inputKind) || selectedAttempt || runMutation.isPending) {
+      return;
+    }
+
+    setAutoRunConsumedKey(autoRunKey);
+    setError(null);
+    runMutation.mutate();
+  }, [autoRunConsumedKey, autoRunKey, inputKind, open, runMutation, selectedAttempt, selectedScraper]);
+
   const applyMutation = useMutation({
     mutationFn: async () => {
       if (!selectedAttempt) {
@@ -315,6 +348,7 @@ export function SceneScrapeDialog({ open, onClose, scene }: Props) {
         queryClient.invalidateQueries({ queryKey: ["scenes"] }),
         queryClient.invalidateQueries({ queryKey: ["scrape-attempts", "scene", scene.id] }),
       ]);
+      onApplied?.(attempt);
       onClose();
     },
     onError: (mutationError: Error) => {

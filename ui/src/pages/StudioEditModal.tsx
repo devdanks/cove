@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { studios, tags as tagsApi, entityImages } from "../api/client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { studios, entityImages } from "../api/client";
 import type { Studio, StudioUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { ImageInput } from "../components/ImageInput";
@@ -8,7 +8,7 @@ import { InteractiveRatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
-import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
+import { EntityReferenceMultiSelector, EntityReferenceSelector } from "../components/EntityReferenceSelector";
 
 interface Props {
   studio: Studio;
@@ -28,20 +28,8 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
   const [parentId, setParentId] = useState<number | undefined>(studio.parentId ?? undefined);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(studio.tags.map((t) => t.id));
 
-  // Tag search
-  const [tagSearch, setTagSearch] = useState("");
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(studio.customFields ?? {}) });
   const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(studio.remoteIds.map((remoteId) => ({ ...remoteId })));
-  const { data: allTags } = useQuery({
-    queryKey: ["tags-all"],
-    queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
-  });
-
-  // Parent studio list
-  const { data: allStudios } = useQuery({
-    queryKey: ["studios-all"],
-    queryFn: () => studios.find({ perPage: 500, sort: "name", direction: "asc" }),
-  });
 
   useEffect(() => {
     setName(studio.name);
@@ -82,12 +70,6 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
     });
   };
 
-  const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, selectedTagIds);
-  const selectedTags = allTags?.items.filter((t) => selectedTagIds.includes(t.id)) ?? studio.tags;
-
-  // Exclude self from parent studio options
-  const parentStudioOptions = allStudios?.items.filter((s) => s.id !== studio.id) ?? [];
-
   return (
     <EditModal title={`Edit Studio: ${studio.name}`} open={open} onClose={onClose}>
       <div className="flex gap-6 mb-4">
@@ -107,16 +89,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
           <TextInput value={name} onChange={setName} placeholder="Studio name" />
         </Field>
         <Field label="Parent Studio">
-          <select
-            value={parentId ?? ""}
-            onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : undefined)}
-            className="w-full bg-card border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
-          >
-            <option value="">None</option>
-            {parentStudioOptions.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          <EntityReferenceSelector entityType="studio" value={parentId} onChange={setParentId} placeholder="Search parent studios..." excludeIds={[studio.id]} />
         </Field>
       </div>
 
@@ -144,17 +117,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
 
       {/* Tags */}
       <Field label="Tags">
-        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds(selectedTagIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
-        <input
-          type="text"
-          value={tagSearch}
-          onChange={(e) => setTagSearch(e.target.value)}
-          placeholder="Search tags..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {tagSearch && filteredTags.length > 0 && (
-          <GroupedTagOptionList tags={filteredTags} maxItems={20} onSelect={(tag) => { setSelectedTagIds([...selectedTagIds, tag.id]); setTagSearch(""); }} />
-        )}
+        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." />
       </Field>
 
       <Field label="Remote IDs">

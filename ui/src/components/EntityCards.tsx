@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { scenes, images, performers, galleries, studios, groups, audios, entityImages } from "../api/client";
+import { scenes, images, performers, galleries, studios, groups, audios, texts, entityImages } from "../api/client";
 import type { AffinityHostType, Audio, EntityEngagement, Face, FaceAppearance, Gallery, Group, GroupSummary, Image, PerformerSummary, Scene, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
-import { BookOpenText, Building2, FileText, Fingerprint, FolderOpen, Headphones, Layers, Link2, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp, Mic2, MonitorPlay, PlayCircle, Merge } from "lucide-react";
+import { BookOpenText, Building2, FileText, Fingerprint, FolderOpen, GripVertical, Headphones, Layers, Link2, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp, Mic2, MonitorPlay, PlayCircle, Merge } from "lucide-react";
 import { createRouteLinkProps, createNestedRouteLinkProps } from "./cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "./RouteCardLinkOverlay";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
@@ -14,6 +14,87 @@ import { BookmarkButton } from "./BookmarkButton";
 
 function createNestedEntityNavigationHandlers<T extends HTMLAnchorElement>(route: { page: string; id: number }, onNavigate?: (route: any) => void) {
   return createNestedRouteLinkProps<T>(route, () => onNavigate?.(route));
+}
+
+interface EntityTileDragHandleProps {
+  tabIndex: number;
+  role: "button";
+  "aria-label": string;
+  "aria-pressed": boolean;
+  onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+}
+
+interface EntityTileFrameProps {
+  route: { page: string; id: number };
+  label: string;
+  onClick: () => void;
+  media: ReactNode;
+  body: ReactNode;
+  footer?: ReactNode;
+  children?: ReactNode;
+  selected?: boolean;
+  onSelect?: () => void;
+  selecting?: boolean;
+  mediaClassName?: string;
+  bodyClassName?: string;
+  extensionClassName?: string;
+  className?: string;
+  dragHandleProps?: EntityTileDragHandleProps;
+  isDragging?: boolean;
+  isOver?: boolean;
+}
+
+function EntityTileFrame({
+  route,
+  label,
+  onClick,
+  media,
+  body,
+  footer,
+  children,
+  selected,
+  onSelect,
+  selecting,
+  mediaClassName = "aspect-video bg-gradient-to-br from-surface to-card",
+  bodyClassName = "p-2.5",
+  extensionClassName = "px-2 py-1.5",
+  className = "",
+  dragHandleProps,
+  isDragging,
+  isOver,
+}: EntityTileFrameProps) {
+  return (
+    <div
+      onClick={selecting ? onClick : undefined}
+      className={`entity-card group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"} ${isDragging ? "opacity-50" : ""} ${isOver ? "outline outline-2 outline-accent" : ""} ${className}`}
+    >
+      <RouteCardLinkOverlay route={route} onClick={onClick} label={label} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
+      <div className={`relative flex shrink-0 items-center justify-center overflow-hidden ${mediaClassName}`}>
+        {media}
+        {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
+      </div>
+      <div className={`card-body flex flex-1 flex-col gap-1 border-t border-border/50 ${bodyClassName}`}>{body}</div>
+      {footer ? (
+        <>
+          <hr className="border-border/50 my-0" />
+          <div className="relative z-10 flex min-h-[28px] flex-wrap items-center justify-center gap-1 rounded-b px-2 py-1.5 card-popovers">
+            {footer}
+          </div>
+        </>
+      ) : null}
+      {children ? <div className={`relative z-10 border-t border-border/50 ${extensionClassName}`}>{children}</div> : null}
+      {dragHandleProps ? (
+        <span
+          {...dragHandleProps}
+          onClick={(event) => event.stopPropagation()}
+          className="absolute bottom-1.5 right-1.5 z-20 inline-flex h-7 w-7 cursor-grab items-center justify-center rounded bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 active:cursor-grabbing group-hover:opacity-100 focus:opacity-100"
+          title="Drag to reorder"
+        >
+          <GripVertical className="h-4 w-4" />
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 export function LikeCounter({ count }: { count: number }) {
@@ -94,6 +175,36 @@ export function GalleryPreviewList({ galleries: galleryItems, onNavigate }: { ga
   );
 }
 
+function EntityLinkIcon({ page, color }: { page: string; color?: string | null }) {
+  if (page === "tag" && color) {
+    return <span className="h-3 w-3 rounded-full border border-border" style={{ backgroundColor: color }} />;
+  }
+
+  const className = "h-3.5 w-3.5 shrink-0 text-muted";
+  switch (page) {
+    case "audio":
+      return <Headphones className={className} />;
+    case "gallery":
+      return <ImagesIcon className={className} />;
+    case "group":
+      return <Layers className={className} />;
+    case "image":
+      return <ImagesIcon className={className} />;
+    case "performer":
+      return <User className={className} />;
+    case "scene":
+      return <Film className={className} />;
+    case "studio":
+      return <Building2 className={className} />;
+    case "tag":
+      return <Tag className={className} />;
+    case "text":
+      return <FileText className={className} />;
+    default:
+      return <Link2 className={className} />;
+  }
+}
+
 function EntityLinkList({ items, page, onNavigate }: { items: Array<{ id: number; label: string; color?: string | null }>; page: string; onNavigate?: (route: any) => void }) {
   return (
     <div className="space-y-1">
@@ -101,7 +212,7 @@ function EntityLinkList({ items, page, onNavigate }: { items: Array<{ id: number
         const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page, id: item.id }, onNavigate);
         return (
           <a key={`${page}-${item.id}`} {...navigationHandlers} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs font-medium text-accent transition-colors hover:bg-card-hover hover:underline">
-            {item.color ? <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} /> : null}
+            <EntityLinkIcon page={page} color={item.color} />
             <span className="min-w-0 truncate">{item.label}</span>
           </a>
         );
@@ -281,6 +392,56 @@ export function ImagesPopoverContent({ filter }: { filter: Record<string, string
   );
 }
 
+// ===== Lazy audio list popover content =====
+
+export function AudiosPopoverContent({ filter }: { filter: Record<string, string | number> }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["audios-popover", filter],
+    queryFn: () => audios.find({ perPage: 10, sort: "created_at", direction: "desc" }, filter),
+  });
+  if (isLoading) return <p className="text-[11px] text-muted px-1">Loading...</p>;
+  const items = data?.items ?? [];
+  if (items.length === 0) return <p className="text-[11px] text-muted px-1">No audio</p>;
+  return (
+    <div className="space-y-1">
+      {items.map((audio) => (
+        <div key={audio.id} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-card">
+          <Headphones className="h-3.5 w-3.5 flex-shrink-0 text-muted" />
+          <span className="truncate text-[11px] text-foreground">{getAudioDisplayTitle(audio)}</span>
+        </div>
+      ))}
+      {(data?.totalCount ?? 0) > 10 && (
+        <p className="text-[10px] text-muted px-1 pt-0.5">+ {(data!.totalCount) - 10} more</p>
+      )}
+    </div>
+  );
+}
+
+// ===== Lazy text list popover content =====
+
+export function TextsPopoverContent({ filter }: { filter: Record<string, string | number> }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["texts-popover", filter],
+    queryFn: () => texts.find({ perPage: 10, sort: "created_at", direction: "desc" }, filter),
+  });
+  if (isLoading) return <p className="text-[11px] text-muted px-1">Loading...</p>;
+  const items = data?.items ?? [];
+  if (items.length === 0) return <p className="text-[11px] text-muted px-1">No texts</p>;
+  return (
+    <div className="space-y-1">
+      {items.map((text) => (
+        <div key={text.id} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-card">
+          <FileText className="h-3.5 w-3.5 flex-shrink-0 text-muted" />
+          <span className="truncate text-[11px] text-foreground">{getTextDisplayTitle(text)}</span>
+        </div>
+      ))}
+      {(data?.totalCount ?? 0) > 10 && (
+        <p className="text-[10px] text-muted px-1 pt-0.5">+ {(data!.totalCount) - 10} more</p>
+      )}
+    </div>
+  );
+}
+
 // ===== Lazy performer list popover content =====
 
 export function PerformersPopoverContent({ filter }: { filter: Record<string, string | number> }) {
@@ -385,17 +546,7 @@ export function SceneCardPopovers({ scene, engagement, onNavigate }: { scene: Sc
         )}
         {scene.tags.length > 0 && (
           <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={scene.tags.length} title="Tags" preferBelow>
-            <div className="flex flex-wrap gap-1">
-              {scene.tags.map((t: any) => {
-                const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page: "tag", id: t.id }, onNavigate);
-
-                return (
-                <a key={t.id} {...navigationHandlers}
-                  className="text-[11px] text-accent hover:underline cursor-pointer px-1.5 py-0.5 rounded bg-card border border-border hover:border-accent/40 transition-colors whitespace-nowrap">
-                  {t.name}
-                </a>
-              );})}
-            </div>
+            <EntityLinkList items={scene.tags.map((tag: any) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" onNavigate={onNavigate} />
           </PopoverButton>
         )}
         {likeCount > 0 && (
@@ -405,29 +556,13 @@ export function SceneCardPopovers({ scene, engagement, onNavigate }: { scene: Sc
           <CardFavoriteButton hostType="scene" hostId={scene.id} favorite={engagement?.isFavorite ?? false} />
         ) : null}
         {scene.groups.length > 0 && (
-          <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={scene.groups.length} title="Groups" preferBelow>
-            <div className="flex flex-col gap-0.5">
-              {scene.groups.map((g: any) => {
-                const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page: "group", id: g.id }, onNavigate);
-
-                return (
-                <a key={g.id} {...navigationHandlers}
-                  className="block text-xs text-accent hover:underline cursor-pointer truncate text-left px-2 py-1 rounded hover:bg-card-hover transition-colors">{g.name}</a>
-              );})}
-            </div>
+          <PopoverButton icon={<Layers className="w-3.5 h-3.5" />} count={scene.groups.length} title="Groups" preferBelow>
+            <EntityLinkList items={scene.groups.map((group: any) => ({ id: group.id, label: group.name }))} page="group" onNavigate={onNavigate} />
           </PopoverButton>
         )}
         {scene.galleries.length > 0 && (
           <PopoverButton icon={<ImagesIcon className="w-3.5 h-3.5" />} count={scene.galleries.length} title="Galleries" preferBelow>
-            <div className="flex flex-col gap-0.5">
-              {scene.galleries.map((g: any) => {
-                const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page: "gallery", id: g.id }, onNavigate);
-
-                return (
-                <a key={g.id} {...navigationHandlers}
-                  className="block text-xs text-accent hover:underline cursor-pointer truncate text-left px-2 py-1 rounded hover:bg-card-hover transition-colors">{g.title || "Untitled"}</a>
-              );})}
-            </div>
+            <EntityLinkList items={scene.galleries.map((gallery: any) => ({ id: gallery.id, label: gallery.title || "Untitled" }))} page="gallery" onNavigate={onNavigate} />
           </PopoverButton>
         )}
         {scene.organized && (
@@ -699,6 +834,7 @@ export function SceneTile({ scene, onClick }: SceneTileProps) {
 interface PerformerTileEntity {
   id: number;
   name: string;
+  imagePath?: string | null;
   country?: string;
   birthdate?: string;
   favorite?: boolean;
@@ -706,6 +842,8 @@ interface PerformerTileEntity {
   sceneCount?: number;
   imageCount?: number;
   galleryCount?: number;
+  audioCount?: number;
+  textCount?: number;
   groupCount?: number;
 }
 
@@ -723,33 +861,43 @@ export function PerformerTile({ performer, engagement, onClick, onNavigate, chil
   const sceneCount = performer.sceneCount ?? 0;
   const imageCount = performer.imageCount ?? 0;
   const galleryCount = performer.galleryCount ?? 0;
+  const audioCount = performer.audioCount ?? 0;
+  const textCount = performer.textCount ?? 0;
   const groupCount = performer.groupCount ?? 0;
+  const performerImageUrl = performer.imagePath ?? entityImages.performerImageUrl(performer.id);
+  const hasFooter = (performer.tags?.length ?? 0) > 0 || sceneCount > 0 || imageCount > 0 || galleryCount > 0 || audioCount > 0 || textCount > 0 || groupCount > 0;
 
   return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
-      <RouteCardLinkOverlay route={{ page: "performer", id: performer.id }} onClick={onClick} label={`Open performer ${performer.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="aspect-[2/3] overflow-hidden bg-gradient-to-b from-card to-surface relative">
-        <img src={entityImages.performerImageUrl(performer.id)} alt={performer.name} className="h-full w-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-        <RatingBanner rating={engagement?.rating} />
-        {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
-        {performer.favorite && (
-          <div className="absolute top-1.5 right-1.5 z-[5]">
-            <Heart className="w-4 h-4 fill-red-500 text-red-500 drop-shadow-md" />
-          </div>
-        )}
-      </div>
-      <div className="card-body border-t border-border/50 p-2.5 flex-1 flex flex-col gap-1.5">
-        <p className="card-title font-semibold text-foreground line-clamp-2 group-hover:text-accent">{performer.name}</p>
-        <div className="flex items-center gap-2 text-[11px] text-muted">
-          {performer.country && <span>{performer.country}</span>}
-          {performer.birthdate && <span>{performer.birthdate}</span>}
-        </div>
-        {performer.sceneCount != null ? <p className="text-xs text-secondary">{sceneCount} scene{sceneCount !== 1 ? "s" : ""}</p> : null}
-      </div>
-      {(performer.tags?.length || sceneCount > 0 || imageCount > 0 || galleryCount > 0 || groupCount > 0) ? (
+    <EntityTileFrame
+      route={{ page: "performer", id: performer.id }}
+      label={`Open performer ${performer.name}`}
+      onClick={onClick}
+      selected={selected}
+      onSelect={onSelect}
+      selecting={selecting}
+      mediaClassName="aspect-[2/3] bg-gradient-to-b from-card to-surface"
+      bodyClassName="p-2.5"
+      media={(
         <>
-          <hr className="border-border/50 my-0" />
-          <div className="relative z-10 flex flex-wrap items-center justify-center gap-1 px-2 py-1.5 rounded-b card-popovers min-h-[28px]">
+          <img src={performerImageUrl} alt={performer.name} className="h-full w-full object-cover" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+          <div className="hidden h-full w-full items-center justify-center"><User className="h-12 w-12 text-muted" /></div>
+          <RatingBanner rating={engagement?.rating} />
+          {performer.favorite ? <Heart className="absolute right-1.5 top-1.5 z-[5] h-4 w-4 fill-red-500 text-red-500 drop-shadow-md" /> : null}
+        </>
+      )}
+      body={(
+        <>
+          <p className="card-title line-clamp-2 font-semibold text-foreground group-hover:text-accent">{performer.name}</p>
+          {(performer.country || performer.birthdate) ? (
+            <div className="flex items-center gap-2 text-[11px] text-muted">
+              {performer.country ? <span>{performer.country}</span> : null}
+              {performer.birthdate ? <span>{performer.birthdate}</span> : null}
+            </div>
+          ) : null}
+        </>
+      )}
+      footer={hasFooter ? (
+        <>
             {performer.tags && performer.tags.length > 0 && (
               <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={performer.tags.length} title="Tags" preferBelow>
                 <div className="flex flex-wrap gap-1">
@@ -780,12 +928,23 @@ export function PerformerTile({ performer, engagement, onClick, onNavigate, chil
                 <GalleriesPopoverContent filter={{ performerIds: String(performer.id) }} />
               </PopoverButton>
             )}
+            {audioCount > 0 && (
+              <PopoverButton icon={<Headphones className="w-3.5 h-3.5" />} count={audioCount} title="Audio" wide preferBelow>
+                <AudiosPopoverContent filter={{ performerIds: String(performer.id) }} />
+              </PopoverButton>
+            )}
+            {textCount > 0 && (
+              <PopoverButton icon={<FileText className="w-3.5 h-3.5" />} count={textCount} title="Texts" wide preferBelow>
+                <TextsPopoverContent filter={{ performerIds: String(performer.id) }} />
+              </PopoverButton>
+            )}
             {groupCount > 0 ? <span className="flex items-center gap-0.5 text-xs text-muted px-1" title="Groups"><Layers className="w-3 h-3" /> {groupCount}</span> : null}
-          </div>
         </>
       ) : null}
-      {children ? <div className="relative z-10 border-t border-border/50 px-2 py-2">{children}</div> : null}
-    </div>
+      extensionClassName="px-2 py-2"
+    >
+      {children}
+    </EntityTileFrame>
   );
 }
 
@@ -802,49 +961,56 @@ interface StudioTileProps {
 }
 
 export function StudioTile({ studio, engagement, onClick, onNavigate, children, selected, onSelect, selecting }: StudioTileProps & { engagement?: EntityEngagement }) {
+  const hasFooter = studio.tags.length > 0 || studio.sceneCount > 0 || studio.performerCount > 0 || studio.imageCount > 0 || studio.galleryCount > 0 || studio.groupCount > 0 || studio.childStudioCount > 0;
+
   return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
-      <RouteCardLinkOverlay route={{ page: "studio", id: studio.id }} onClick={onClick} label={`Open studio ${studio.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="relative flex aspect-video shrink-0 items-center justify-center overflow-hidden bg-gradient-to-br from-surface to-card">
-        {studio.imagePath ? (
-          <>
-            <img
-              src={studio.imagePath}
-              alt={studio.name}
-              className="box-border h-full w-full object-contain p-4"
-              loading="lazy"
-              onError={(event) => {
-                const image = event.target as HTMLImageElement;
-                image.style.display = "none";
-                const fallback = image.nextElementSibling as HTMLElement | null;
-                if (fallback) fallback.style.display = "flex";
-              }}
-            />
-            <div className="hidden h-full w-full items-center justify-center">
-              <Building2 className="h-10 w-10 text-muted" />
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center justify-center h-full w-full">
-            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>
-          </div>
-        )}
-        <RatingBanner rating={engagement?.rating} />
-        {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
-        {studio.favorite && (
-          <div className="absolute top-1.5 right-1.5 z-[5]">
-            <Heart className="w-4 h-4 fill-red-500 text-red-500 drop-shadow-md" />
-          </div>
-        )}
-      </div>
-      <div className="card-body border-t border-border/50 p-2.5 flex-1 flex flex-col gap-1">
-        <p className="card-title font-semibold text-foreground line-clamp-2 group-hover:text-accent">{studio.name}</p>
-        <p className="text-xs text-secondary">{studio.sceneCount} scene{studio.sceneCount !== 1 ? "s" : ""}</p>
-      </div>
-      {(studio.sceneCount > 0 || studio.performerCount > 0 || studio.imageCount > 0 || studio.childStudioCount > 0) && (
+    <EntityTileFrame
+      route={{ page: "studio", id: studio.id }}
+      label={`Open studio ${studio.name}`}
+      onClick={onClick}
+      selected={selected}
+      onSelect={onSelect}
+      selecting={selecting}
+      media={(
         <>
-          <hr className="border-border/50 my-0" />
-          <div className="relative z-10 flex flex-wrap items-center justify-center gap-1 px-2 py-1.5 rounded-b card-popovers min-h-[28px]">
+          {studio.imagePath ? (
+            <>
+              <img
+                src={studio.imagePath}
+                alt={studio.name}
+                className="box-border h-full w-full object-contain p-4"
+                loading="lazy"
+                onError={(event) => {
+                  const image = event.currentTarget;
+                  image.style.display = "none";
+                  const fallback = image.nextElementSibling as HTMLElement | null;
+                  if (fallback) fallback.style.display = "flex";
+                }}
+              />
+              <div className="hidden h-full w-full items-center justify-center">
+                <Building2 className="h-10 w-10 text-muted" />
+              </div>
+            </>
+          ) : (
+            <Building2 className="h-10 w-10 text-muted" />
+          )}
+          <RatingBanner rating={engagement?.rating} />
+          {studio.favorite ? <Heart className="absolute right-1.5 top-1.5 z-[5] h-4 w-4 fill-red-500 text-red-500 drop-shadow-md" /> : null}
+        </>
+      )}
+      body={(
+        <>
+          <p className="card-title line-clamp-2 font-semibold text-foreground group-hover:text-accent">{studio.name}</p>
+          {studio.parentName ? <p className="truncate text-xs text-secondary">{studio.parentName}</p> : null}
+        </>
+      )}
+      footer={hasFooter ? (
+        <>
+            {studio.tags.length > 0 ? (
+              <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={studio.tags.length} title="Tags" preferBelow>
+                <EntityLinkList items={studio.tags.map((tag) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" onNavigate={onNavigate} />
+              </PopoverButton>
+            ) : null}
             {studio.sceneCount > 0 && (
               <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={studio.sceneCount} title="Scenes" wide preferBelow>
                 <ScenesPopoverContent filter={{ studioId: studio.id }} />
@@ -860,16 +1026,26 @@ export function StudioTile({ studio, engagement, onClick, onNavigate, children, 
                 <ImagesPopoverContent filter={{ studioId: studio.id }} />
               </PopoverButton>
             )}
+            {studio.galleryCount > 0 && (
+              <PopoverButton icon={<FolderOpen className="w-3.5 h-3.5" />} count={studio.galleryCount} title="Galleries" wide preferBelow>
+                <GalleriesPopoverContent filter={{ studioId: studio.id }} />
+              </PopoverButton>
+            )}
+            {studio.groupCount > 0 && (
+              <PopoverButton icon={<Layers className="w-3.5 h-3.5" />} count={studio.groupCount} title="Groups" wide preferBelow>
+                <GroupsPopoverContent filter={{ studioId: studio.id }} />
+              </PopoverButton>
+            )}
             {studio.childStudioCount > 0 && (
               <PopoverButton icon={<Building2 className="w-3.5 h-3.5" />} count={studio.childStudioCount} title="Sub-studios" wide preferBelow>
                 <StudiosPopoverContent filter={{ parentId: studio.id }} />
               </PopoverButton>
             )}
-          </div>
         </>
-      )}
-      {children ? <div className="relative z-10 border-t border-border/50 px-2 py-1.5">{children}</div> : null}
-    </div>
+      ) : null}
+    >
+      {children}
+    </EntityTileFrame>
   );
 }
 
@@ -891,7 +1067,8 @@ interface ImageTileProps {
 export function ImageTile({ image, engagement, onClick, onPreview, onDetails, onNavigate, onQuickView, selected, onSelect, selecting, bookmarkInitiallySaved }: ImageTileProps & { engagement?: EntityEngagement }) {
   const likeCount = engagement?.likeCount ?? 0;
   const hasFavorite = engagement?.isFavorite === true;
-  const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || likeCount > 0 || hasFavorite || image.organized;
+  const imageGroups = image.groups ?? [];
+  const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || imageGroups.length > 0 || likeCount > 0 || hasFavorite || image.organized;
   const displayTitle = getImageDisplayTitle(image);
   const detailsClick = onDetails ?? onClick;
   const previewClick = selecting ? onClick : (onPreview ?? detailsClick);
@@ -963,6 +1140,11 @@ export function ImageTile({ image, engagement, onClick, onPreview, onDetails, on
                 <GalleriesPopoverContent filter={{ imageId: image.id }} />
               </PopoverButton>
             )}
+            {imageGroups.length > 0 ? (
+              <PopoverButton icon={<Layers className="w-3.5 h-3.5" />} count={imageGroups.length} title="Groups" preferBelow>
+                <EntityLinkList items={imageGroups.map((group) => ({ id: group.id, label: group.name }))} page="group" onNavigate={onNavigate} />
+              </PopoverButton>
+            ) : null}
             {likeCount > 0 && (
               <LikeCounter count={likeCount} />
             )}
@@ -993,37 +1175,47 @@ interface GalleryTileProps {
 
 export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected, onSelect, selecting, bookmarkInitiallySaved }: GalleryTileProps & { engagement?: EntityEngagement }) {
   const hasFooter = gallery.imageCount > 0 || gallery.sceneCount > 0 || gallery.tags.length > 0 || gallery.performers.length > 0 || gallery.organized;
+  const title = gallery.title || "Untitled";
 
   return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
-      <RouteCardLinkOverlay route={{ page: "gallery", id: gallery.id }} onClick={onClick} label={`Open gallery ${gallery.title || "Untitled"}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card relative overflow-hidden">
-        {gallery.coverPath ? (
-          <img src={gallery.coverPath} alt={gallery.title || ""} className="h-full w-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-        ) : (
-          <FolderOpen className="h-10 w-10 text-muted" />
-        )}
-        <RatingBanner rating={engagement?.rating} />
-        {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
-        {!selecting && (
-          <BookmarkButton
-            hostType="gallery"
-            hostId={gallery.id}
-            compact
-            deferUntilHover
-            initialSaved={bookmarkInitiallySaved}
-            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
-          />
-        )}
-      </div>
-      <div className="card-body border-t border-border/50 p-2.5 flex-1 flex flex-col gap-1">
-        <p className="card-title font-semibold text-foreground line-clamp-2 group-hover:text-accent">{gallery.title || "Untitled"}</p>
-        <p className="text-xs text-secondary">{gallery.imageCount} image{gallery.imageCount !== 1 ? "s" : ""}</p>
-      </div>
-      {hasFooter ? (
+    <EntityTileFrame
+      route={{ page: "gallery", id: gallery.id }}
+      label={`Open gallery ${title}`}
+      onClick={onClick}
+      selected={selected}
+      onSelect={onSelect}
+      selecting={selecting}
+      media={(
         <>
-          <hr className="border-border/50 my-0" />
-          <div className="relative z-10 flex flex-wrap items-center justify-center gap-1 px-2 py-1.5 rounded-b card-popovers min-h-[28px]">
+          {gallery.coverPath ? (
+            <>
+              <img src={gallery.coverPath} alt={title} className="h-full w-full object-cover" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+              <div className="hidden h-full w-full items-center justify-center"><FolderOpen className="h-10 w-10 text-muted" /></div>
+            </>
+          ) : (
+            <FolderOpen className="h-10 w-10 text-muted" />
+          )}
+          <RatingBanner rating={engagement?.rating} />
+          {!selecting ? (
+            <BookmarkButton
+              hostType="gallery"
+              hostId={gallery.id}
+              compact
+              deferUntilHover
+              initialSaved={bookmarkInitiallySaved}
+              className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+            />
+          ) : null}
+        </>
+      )}
+      body={(
+        <>
+          <p className="card-title line-clamp-2 font-semibold text-foreground group-hover:text-accent">{title}</p>
+          {(gallery.date || gallery.studioName) ? <p className="truncate text-xs text-secondary">{gallery.date || gallery.studioName}</p> : null}
+        </>
+      )}
+      footer={hasFooter ? (
+        <>
             {gallery.imageCount > 0 ? (
               <PopoverButton icon={<ImagesIcon className="w-3.5 h-3.5" />} count={gallery.imageCount} title="Images" wide preferBelow>
                 <ImagesPopoverContent filter={{ galleryId: gallery.id }} />
@@ -1045,10 +1237,9 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
               </PopoverButton>
             ) : null}
             {gallery.organized ? <span className="p-1 text-muted" title="Organized"><Box className="w-3.5 h-3.5" /></span> : null}
-          </div>
         </>
       ) : null}
-    </div>
+    />
   );
 }
 
@@ -1057,50 +1248,62 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
 interface GroupTileProps {
   group: Group;
   onClick: () => void;
+  onNavigate?: (r: any) => void;
   selected?: boolean;
   onSelect?: () => void;
   selecting?: boolean;
   bookmarkInitiallySaved?: boolean;
+  dragHandleProps?: EntityTileDragHandleProps;
+  isDragging?: boolean;
+  isOver?: boolean;
 }
 
-export function GroupTile({ group, engagement, onClick, selected, onSelect, selecting, bookmarkInitiallySaved }: GroupTileProps & { engagement?: EntityEngagement }) {
-  const count = group.itemCount ?? (group.kind === "dynamic" ? group.cachedItemCount ?? group.sceneCount : group.sceneCount);
-  const countLabel = `${count} item${count !== 1 ? "s" : ""}`;
+export function GroupTile({ group, engagement, onClick, onNavigate, selected, onSelect, selecting, bookmarkInitiallySaved, dragHandleProps, isDragging, isOver }: GroupTileProps & { engagement?: EntityEngagement }) {
   const hasFooter = (group.tags?.length ?? 0) > 0 || group.sceneCount > 0;
 
   return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-colors flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
-      <RouteCardLinkOverlay route={{ page: "group", id: group.id }} onClick={onClick} label={`Open group ${group.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card relative overflow-hidden">
-        {group.frontImagePath ? (
-          <img src={group.frontImagePath} alt={group.name} className="h-full w-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-        ) : (
-          <Layers className="h-10 w-10 text-muted" />
-        )}
-        <RatingBanner rating={engagement?.rating} />
-        {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
-        {!selecting && (
-          <BookmarkButton
-            hostType="group"
-            hostId={group.id}
-            compact
-            deferUntilHover
-            initialSaved={bookmarkInitiallySaved}
-            className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
-          />
-        )}
-        {group.kind === "dynamic" ? (
-          <span className="absolute bottom-1 left-1 rounded bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">Dynamic</span>
-        ) : null}
-      </div>
-      <div className="card-body border-t border-border/50 p-2.5 flex-1 flex flex-col gap-1">
-        <p className="card-title font-semibold text-foreground line-clamp-2 group-hover:text-accent">{group.name}</p>
-        <p className="text-xs text-secondary">{countLabel}</p>
-      </div>
-      {hasFooter ? (
+    <EntityTileFrame
+      route={{ page: "group", id: group.id }}
+      label={`Open group ${group.name}`}
+      onClick={onClick}
+      selected={selected}
+      onSelect={onSelect}
+      selecting={selecting}
+      dragHandleProps={dragHandleProps}
+      isDragging={isDragging}
+      isOver={isOver}
+      media={(
         <>
-          <hr className="border-border/50 my-0" />
-          <div className="relative z-10 flex flex-wrap items-center justify-center gap-1 px-2 py-1.5 rounded-b card-popovers min-h-[28px]">
+          {group.frontImagePath ? (
+            <>
+              <img src={group.frontImagePath} alt={group.name} className="h-full w-full object-cover" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+              <div className="hidden h-full w-full items-center justify-center"><Layers className="h-10 w-10 text-muted" /></div>
+            </>
+          ) : (
+            <Layers className="h-10 w-10 text-muted" />
+          )}
+          <RatingBanner rating={engagement?.rating} />
+          {!selecting ? (
+            <BookmarkButton
+              hostType="group"
+              hostId={group.id}
+              compact
+              deferUntilHover
+              initialSaved={bookmarkInitiallySaved}
+              className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+            />
+          ) : null}
+          {group.kind === "dynamic" ? <span className="absolute bottom-1 left-1 rounded bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">Dynamic</span> : null}
+        </>
+      )}
+      body={(
+        <>
+          <p className="card-title line-clamp-2 font-semibold text-foreground group-hover:text-accent">{group.name}</p>
+          {(group.date || group.studioName) ? <p className="truncate text-xs text-secondary">{group.date || group.studioName}</p> : null}
+        </>
+      )}
+      footer={hasFooter ? (
+        <>
             {group.sceneCount > 0 ? (
               <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={group.sceneCount} title="Scenes" wide preferBelow>
                 <ScenesPopoverContent filter={{ groupId: group.id }} />
@@ -1108,13 +1311,12 @@ export function GroupTile({ group, engagement, onClick, selected, onSelect, sele
             ) : null}
             {(group.tags?.length ?? 0) > 0 ? (
               <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={group.tags.length} title="Tags" preferBelow>
-                <EntityLinkList items={group.tags.map((tag) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" />
+                <EntityLinkList items={group.tags.map((tag) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" onNavigate={onNavigate} />
               </PopoverButton>
             ) : null}
-          </div>
         </>
       ) : null}
-    </div>
+    />
   );
 }
 
@@ -1239,22 +1441,38 @@ export function TextTile({ text, selected, onSelect, selecting, onClick, onNavig
 
 export function TagTile({ tag, engagement, onClick, onNavigate, children, selected, onSelect, selecting }: { tag: TagType; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; children?: ReactNode; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const favorite = engagement?.isFavorite ?? tag.favorite;
+  const hasFooter = Boolean(tag.sceneCount || tag.segmentCount || tag.imageCount || tag.galleryCount || tag.groupCount || tag.performerCount || tag.studioCount);
 
   return (
-    <div onClick={selecting ? onClick : undefined} className={`entity-card bg-card rounded overflow-hidden border hover:border-accent/60 transition-all cursor-pointer group relative ${selected ? "border-accent ring-2 ring-accent" : "border-border"}`}>
-      <RouteCardLinkOverlay route={{ page: "tag", id: tag.id }} onClick={onClick} label={`Open tag ${tag.name}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="aspect-video bg-surface flex items-center justify-center relative overflow-hidden">
-        {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
-        {favorite ? <Heart className="absolute right-2 top-2 z-10 h-4 w-4 fill-red-500 text-red-500 drop-shadow" /> : null}
-        {tag.imagePath ? <img src={tag.imagePath} alt={tag.name} className="w-full h-full object-cover" loading="lazy" /> : <Tag className="w-10 h-10 text-muted opacity-30" />}
-      </div>
-      <div className="card-body border-t border-border/50 p-2 text-center">
-        <h3 className="font-medium text-sm text-foreground truncate">{tag.name}</h3>
-        {tag.tagGroupName ? <div className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] text-secondary"><span className="h-2 w-2 rounded-full border border-border" style={{ backgroundColor: tag.tagGroupColor ?? "transparent" }} /><span className="truncate">{tag.tagGroupName}</span></div> : null}
-        {tag.description ? <p className="text-xs text-secondary mt-0.5 line-clamp-1">{tag.description}</p> : null}
-      </div>
-      {(tag.sceneCount || tag.segmentCount || tag.imageCount || tag.galleryCount || tag.groupCount || tag.performerCount || tag.studioCount) ? (
-        <div className="relative z-10 flex items-center justify-center gap-2 px-2 pb-2 border-t border-border/50 pt-1.5 flex-wrap">
+    <EntityTileFrame
+      route={{ page: "tag", id: tag.id }}
+      label={`Open tag ${tag.name}`}
+      onClick={onClick}
+      selected={selected}
+      onSelect={onSelect}
+      selecting={selecting}
+      media={(
+        <>
+          {favorite ? <Heart className="absolute right-2 top-2 z-10 h-4 w-4 fill-red-500 text-red-500 drop-shadow" /> : null}
+          {tag.imagePath ? (
+            <>
+              <img src={tag.imagePath} alt={tag.name} className="h-full w-full object-cover" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+              <div className="hidden h-full w-full items-center justify-center"><Tag className="h-10 w-10 text-muted" /></div>
+            </>
+          ) : (
+            <Tag className="h-10 w-10 text-muted" />
+          )}
+        </>
+      )}
+      body={(
+        <>
+          <h3 className="card-title truncate text-sm font-semibold text-foreground group-hover:text-accent">{tag.name}</h3>
+          {tag.tagGroupName ? <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] text-secondary"><span className="h-2 w-2 rounded-full border border-border" style={{ backgroundColor: tag.tagGroupColor ?? "transparent" }} /><span className="truncate">{tag.tagGroupName}</span></div> : null}
+          {tag.description ? <p className="line-clamp-1 text-xs text-secondary">{tag.description}</p> : null}
+        </>
+      )}
+      footer={hasFooter ? (
+        <>
           {tag.sceneCount != null && tag.sceneCount > 0 ? <PopoverButton icon={<Film className="w-3 h-3" />} count={tag.sceneCount} title="Scenes" wide preferBelow><ScenesPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
           {tag.imageCount != null && tag.imageCount > 0 ? <PopoverButton icon={<ImagesIcon className="w-3 h-3" />} count={tag.imageCount} title="Images" wide preferBelow><ImagesPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
           {tag.galleryCount != null && tag.galleryCount > 0 ? <PopoverButton icon={<FolderOpen className="w-3 h-3" />} count={tag.galleryCount} title="Galleries" wide preferBelow><GalleriesPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
@@ -1262,10 +1480,11 @@ export function TagTile({ tag, engagement, onClick, onNavigate, children, select
           {tag.segmentCount != null && tag.segmentCount > 0 ? <span className="flex items-center gap-0.5 text-xs text-muted" title="Segments"><Layers className="w-3 h-3" /> {tag.segmentCount}</span> : null}
           {tag.performerCount != null && tag.performerCount > 0 ? <PopoverButton icon={<User className="w-3 h-3" />} count={tag.performerCount} title="Performers" wide preferBelow><PerformersPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
           {tag.studioCount != null && tag.studioCount > 0 ? <PopoverButton icon={<Building2 className="w-3 h-3" />} count={tag.studioCount} title="Studios" wide preferBelow><StudiosPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
-        </div>
+        </>
       ) : null}
-      {children ? <div className="relative z-10 border-t border-border/50 px-2 py-1.5">{children}</div> : null}
-    </div>
+    >
+      {children}
+    </EntityTileFrame>
   );
 }
 

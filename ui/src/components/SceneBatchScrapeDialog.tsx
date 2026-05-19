@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Loader2, Search, X } from "lucide-react";
 import { scrapeAttempts, system } from "../api/client";
 import { useAppConfig } from "../state/AppConfigContext";
+import { SceneScrapeDialog } from "./SceneScrapeDialog";
 import type { BatchInputKind, ScrapeApplyPreferences, SceneScrapeScene } from "./sceneScrapeUtils";
 import {
   findDefaultKind,
@@ -56,7 +57,9 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
   const [inputKind, setInputKind] = useState<BatchInputKind>("url");
   const [autoApply, setAutoApply] = useState(true);
   const [results, setResults] = useState<BatchResult[]>([]);
+  const [reviewIndex, setReviewIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const reviewAppliedRef = useRef(false);
 
   const { data: scrapers = [] } = useQuery({
     queryKey: ["system-scrapers"],
@@ -75,6 +78,7 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
     () => sceneScrapers.find((scraper) => scraper.id === selectedScraperId),
     [sceneScrapers, selectedScraperId],
   );
+  const sceneIdsKey = useMemo(() => scenes.map((scene) => scene.id).join(","), [scenes]);
 
   useEffect(() => {
     if (!open) {
@@ -94,9 +98,10 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
     }
 
     setResults([]);
+    setReviewIndex(null);
     setAutoApply(true);
     setError(null);
-  }, [open, scenes]);
+  }, [open, sceneIdsKey]);
 
   useEffect(() => {
     if (!open) {
@@ -121,6 +126,48 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
 
   const updateResult = (sceneId: number, patch: Partial<BatchResult>) => {
     setResults((current) => current.map((result) => (result.sceneId === sceneId ? { ...result, ...patch } : result)));
+  };
+
+  const startReviewFlow = () => {
+    if (!selectedScraper) {
+      setError("Select a scraper first.");
+      return;
+    }
+
+    if (scenes.length === 0) {
+      setError("Select at least one scene to batch scrape.");
+      return;
+    }
+
+    reviewAppliedRef.current = false;
+    setResults(scenes.map((scene, index) => ({
+      sceneId: scene.id,
+      label: getSceneLabel(scene),
+      status: index === 0 ? "queued" : "pending",
+      message: index === 0 ? "Opening review dialog." : "Waiting for previous reviews.",
+    })));
+    setReviewIndex(0);
+  };
+
+  const advanceReviewFlow = () => {
+    if (reviewIndex == null) {
+      return;
+    }
+
+    const scene = scenes[reviewIndex];
+    if (scene && !reviewAppliedRef.current) {
+      updateResult(scene.id, { status: "skipped", message: "Review closed without applying changes." });
+    }
+
+    reviewAppliedRef.current = false;
+    const nextIndex = reviewIndex + 1;
+    if (nextIndex < scenes.length) {
+      const nextScene = scenes[nextIndex];
+      updateResult(nextScene.id, { status: "queued", message: "Opening review dialog." });
+      setReviewIndex(nextIndex);
+    } else {
+      setReviewIndex(null);
+    }
   };
 
   const runMutation = useMutation({
@@ -169,6 +216,8 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
 
   const canRun = Boolean(selectedScraper) && supportsScrapeKind(selectedScraper, inputKind);
   const completedCount = results.filter((result) => result.status !== "pending").length;
+  const reviewScene = reviewIndex != null ? scenes[reviewIndex] : null;
+  const reviewAutoRunKey = reviewScene ? `${selectedScraperId}:${inputKind}:${reviewScene.id}:${reviewIndex}` : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -320,7 +369,7 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
                   <div className="text-xs text-secondary">{completedCount} of {scenes.length} scene{scenes.length === 1 ? "" : "s"} processed.</div>
                 </div>
                 <div className="text-xs text-muted">
-                  {autoApply ? "Scrapes will be applied with default field choices." : "Scrapes will only create attempts for later review."}
+                  {autoApply ? "Scrapes will be applied with default field choices." : "Each scrape opens in review before the next scene starts."}
                 </div>
               </div>
 
@@ -363,16 +412,35 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
           <button
             onClick={() => {
               setError(null);
-              runMutation.mutate();
+              if (autoApply) {
+                runMutation.mutate();
+              } else {
+                startReviewFlow();
+              }
             }}
-            disabled={!canRun || runMutation.isPending || scenes.length === 0}
+            disabled={!canRun || runMutation.isPending || scenes.length === 0 || reviewIndex != null}
             className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60"
           >
             {runMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-            {autoApply ? "Queue Scrape And Apply" : "Queue Scrape Job"}
+            {autoApply ? "Queue Scrape And Apply" : "Scrape And Review"}
           </button>
         </div>
       </div>
+      {reviewScene ? (
+        <SceneScrapeDialog
+          key={reviewAutoRunKey ?? reviewScene.id}
+          open
+          scene={reviewScene}
+          initialScraperId={selectedScraperId}
+          initialInputKind={inputKind}
+          autoRunKey={reviewAutoRunKey ?? undefined}
+          onApplied={() => {
+            reviewAppliedRef.current = true;
+            updateResult(reviewScene.id, { status: "applied", message: "Reviewed and applied selected fields." });
+          }}
+          onClose={advanceReviewFlow}
+        />
+      ) : null}
     </div>
   );
 }

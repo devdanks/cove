@@ -22,6 +22,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
     private bool HasUserScopedEngagement => principalAccessor?.Current?.UserId != null;
     private static string GetVisibleBasename(string path, string basename) => string.IsNullOrWhiteSpace(basename) ? System.IO.Path.GetFileName(path) : basename;
+    private sealed record PerformerSupplementalCounts(int AudioCount, int TextCount);
 
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -135,6 +136,9 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             CreatedAt = scene.CreatedAt,
             UpdatedAt = scene.UpdatedAt,
             Duration = scene.MaxDuration,
+            BitRate = db.VideoFiles
+                .Where(file => file.SceneId == (scene.ParentSceneId ?? scene.Id))
+                .Max(file => (long?)file.BitRate) ?? 0L,
             Rating = userId.HasValue
                 ? db.Ratings.Where(item => item.UserId == userId.Value && item.HostType == RatingHostType.Scene && item.HostId == scene.Id && item.Aspect == "overall").Select(item => item.Value).FirstOrDefault()
                 : 0,
@@ -148,6 +152,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             CreatedAt = group.CreatedAt,
             UpdatedAt = group.UpdatedAt,
             Duration = group.Duration ?? 0,
+            BitRate = 0,
             Rating = userId.HasValue
                 ? db.Ratings.Where(item => item.UserId == userId.Value && item.HostType == RatingHostType.Group && item.HostId == group.Id && item.Aspect == "overall").Select(item => item.Value).FirstOrDefault()
                 : 0,
@@ -560,9 +565,37 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var fieldProvenance = fieldProvenanceService == null
             ? null
             : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Scene, scene.Id, cancellationToken)).ToList();
+        var performerCounts = await LoadPerformerSupplementalCountsAsync(
+            scene.ScenePerformers
+                .Where(scenePerformer => scenePerformer.Performer != null)
+                .Select(scenePerformer => scenePerformer.Performer!.Id)
+                .Distinct()
+                .ToArray(),
+            cancellationToken);
 
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, scene.Id, cancellationToken);
-        return MapToDto(scene, customFieldValues, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications, fieldProvenance);
+        return MapToDto(scene, customFieldValues, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications, fieldProvenance, performerCounts);
+    }
+
+    private async Task<IReadOnlyDictionary<int, PerformerSupplementalCounts>> LoadPerformerSupplementalCountsAsync(IReadOnlyCollection<int> performerIds, CancellationToken cancellationToken)
+    {
+        if (performerIds.Count == 0) return new Dictionary<int, PerformerSupplementalCounts>();
+
+        var audioCounts = await db.Set<AudioPerformer>()
+            .Where(audioPerformer => performerIds.Contains(audioPerformer.PerformerId))
+            .GroupBy(audioPerformer => audioPerformer.PerformerId)
+            .Select(group => new { PerformerId = group.Key, Count = group.Select(audioPerformer => audioPerformer.AudioId).Distinct().Count() })
+            .ToDictionaryAsync(item => item.PerformerId, item => item.Count, cancellationToken);
+
+        var textCounts = await db.Set<TextPerformer>()
+            .Where(textPerformer => performerIds.Contains(textPerformer.PerformerId))
+            .GroupBy(textPerformer => textPerformer.PerformerId)
+            .Select(group => new { PerformerId = group.Key, Count = group.Select(textPerformer => textPerformer.TextDocumentId).Distinct().Count() })
+            .ToDictionaryAsync(item => item.PerformerId, item => item.Count, cancellationToken);
+
+        return performerIds.ToDictionary(
+            id => id,
+            id => new PerformerSupplementalCounts(audioCounts.GetValueOrDefault(id), textCounts.GetValueOrDefault(id)));
     }
 
     private sealed class SceneListEntryKey
@@ -574,6 +607,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public double Duration { get; set; }
+        public long BitRate { get; set; }
         public int Rating { get; set; }
     }
 
@@ -597,6 +631,9 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             "duration" => desc
                 ? query.OrderByDescending(item => item.Duration).ThenByDescending(item => item.Id)
                 : query.OrderBy(item => item.Duration).ThenBy(item => item.Id),
+            "bitrate" => desc
+                ? query.OrderByDescending(item => item.BitRate).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.BitRate).ThenBy(item => item.Id),
             "random" => desc
                 ? query.OrderByDescending(item => ((long)item.Id * 1103515245L + randomSeed + (item.Kind == "compilation" ? 7919 : 0)) % 2147483647L).ThenByDescending(item => item.Id)
                 : query.OrderBy(item => ((long)item.Id * 1103515245L + randomSeed + (item.Kind == "compilation" ? 7919 : 0)) % 2147483647L).ThenBy(item => item.Id),
@@ -644,14 +681,14 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             : null;
     }
 
-    private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
+    private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null, IReadOnlyDictionary<int, PerformerSupplementalCounts>? performerCounts = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
         s.Organized, s.IsVr, s.StudioId, s.Studio?.Name,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!, GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
-        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
+        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => MapPerformerSummary(sp.Performer!, performerCounts)).ToList(),
         EffectiveFiles(s).Select(f => new VideoFileDto(
             f.Id,
             CanReadFiles ? f.Path : string.Empty,
@@ -689,7 +726,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
         s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!)).ToList(),
-        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => new PerformerSummaryDto(sp.Performer!.Id, sp.Performer.Name, sp.Performer.Disambiguation, sp.Performer.Gender?.ToString(), sp.Performer.Birthdate?.ToString("yyyy-MM-dd"), sp.Performer.Favorite, sp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, sp.Performer.Id, sp.Performer.UpdatedAt) : null)).ToList(),
+        s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => MapPerformerSummary(sp.Performer!, null)).ToList(),
         EffectiveFiles(s).Select(f => new VideoFileDto(
             f.Id,
             CanReadFiles ? f.Path : string.Empty,
@@ -717,6 +754,26 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         ChildSceneCount: s.ChildScenes.Count,
         ImagePath: s.ImageBlobId != null ? EntityImageUrls.Scene(ControllerContext.HttpContext, s.Id, s.UpdatedAt, 1280) : null
     );
+
+    private PerformerSummaryDto MapPerformerSummary(Performer performer, IReadOnlyDictionary<int, PerformerSupplementalCounts>? supplementalCounts)
+    {
+        var supplemental = supplementalCounts != null && supplementalCounts.TryGetValue(performer.Id, out var counts)
+            ? counts
+            : null;
+        return new PerformerSummaryDto(
+            performer.Id,
+            performer.Name,
+            performer.Disambiguation,
+            performer.Gender?.ToString(),
+            performer.Birthdate?.ToString("yyyy-MM-dd"),
+            performer.Favorite,
+            performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, performer.Id, performer.UpdatedAt) : null,
+            performer.SceneCount,
+            performer.ImageCount,
+            performer.GalleryCount,
+            supplemental?.AudioCount ?? 0,
+            supplemental?.TextCount ?? 0);
+    }
 
     private static IEnumerable<VideoFile> EffectiveFiles(Scene scene)
         => scene.Files.Count > 0 ? scene.Files : scene.ParentScene?.Files ?? Enumerable.Empty<VideoFile>();
@@ -1192,6 +1249,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var scenes = await db.Scenes
             .Include(s => s.SceneTags)
             .Include(s => s.ScenePerformers)
+            .Include(s => s.SceneGalleries)
             .Include(s => s.GroupItems)
             .Where(s => dto.Ids.Contains(s.Id))
             .ToListAsync(ct);
@@ -1252,6 +1310,22 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             else if (dto.PerformerIds != null && dto.PerformerMode == BulkUpdateMode.Remove)
             {
                 scene.ScenePerformers = scene.ScenePerformers.Where(sp => !dto.PerformerIds.Contains(sp.PerformerId)).ToList();
+            }
+
+            if (dto.GalleryIds != null && dto.GalleryMode == BulkUpdateMode.Set)
+            {
+                scene.SceneGalleries.Clear();
+                scene.SceneGalleries = dto.GalleryIds.Select(gid => new SceneGallery { GalleryId = gid, SceneId = scene.Id }).ToList();
+            }
+            else if (dto.GalleryIds != null && dto.GalleryMode == BulkUpdateMode.Add)
+            {
+                var existing = scene.SceneGalleries.Select(sg => sg.GalleryId).ToHashSet();
+                foreach (var gid in dto.GalleryIds.Where(g => !existing.Contains(g)))
+                    scene.SceneGalleries.Add(new SceneGallery { GalleryId = gid, SceneId = scene.Id });
+            }
+            else if (dto.GalleryIds != null && dto.GalleryMode == BulkUpdateMode.Remove)
+            {
+                scene.SceneGalleries = scene.SceneGalleries.Where(sg => !dto.GalleryIds.Contains(sg.GalleryId)).ToList();
             }
 
             if (dto.GroupIds != null && dto.GroupMode == BulkUpdateMode.Set)

@@ -7,7 +7,7 @@ import { ImageInput } from "../components/ImageInput";
 import { CustomFieldsEditor } from "../components/shared";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { StringListEditor } from "../components/StringListEditor";
-import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
+import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 
 interface Props {
   tag: TagDetail;
@@ -36,16 +36,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
   const [selectedChildIds, setSelectedChildIds] = useState<number[]>(tag.children.map((t) => t.id));
   const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(tag.remoteIds?.length ? tag.remoteIds : []);
 
-  // Tag search for parents
-  const [parentSearch, setParentSearch] = useState("");
-  // Tag search for children
-  const [childSearch, setChildSearch] = useState("");
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(tag.customFields ?? {}) });
-
-  const { data: allTags } = useQuery({
-    queryKey: ["tags-all"],
-    queryFn: () => tags.find({ perPage: 500, sort: "name", direction: "asc" }),
-  });
 
   const { data: groups = [] } = useQuery({
     queryKey: ["tag-groups"],
@@ -101,15 +92,6 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       customFields,
     });
   };
-
-  // Exclude self from parent/child options
-  const excludedIds = new Set([tag.id, ...selectedParentIds, ...selectedChildIds]);
-
-  const filteredParents = filterTagsForSelector(allTags?.items ?? [], parentSearch, excludedIds);
-  const filteredChildren = filterTagsForSelector(allTags?.items ?? [], childSearch, excludedIds);
-
-  const selectedParents = allTags?.items.filter((t) => selectedParentIds.includes(t.id)) ?? tag.parents;
-  const selectedChildren = allTags?.items.filter((t) => selectedChildIds.includes(t.id)) ?? tag.children;
 
   return (
     <EditModal title={`Edit Tag: ${tag.name}`} open={open} onClose={onClose}>
@@ -210,32 +192,12 @@ export function TagEditModal({ tag, open, onClose }: Props) {
 
       {/* Parent Tags */}
       <Field label="Parent Tags">
-        <SelectedTagChips tags={selectedParents} onRemove={(tag) => setSelectedParentIds(selectedParentIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
-        <input
-          type="text"
-          value={parentSearch}
-          onChange={(e) => setParentSearch(e.target.value)}
-          placeholder="Search parent tags..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {parentSearch && filteredParents.length > 0 && (
-          <GroupedTagOptionList tags={filteredParents} maxItems={20} onSelect={(tag) => { setSelectedParentIds([...selectedParentIds, tag.id]); setParentSearch(""); }} />
-        )}
+        <EntityReferenceMultiSelector entityType="tag" values={selectedParentIds} onChange={setSelectedParentIds} placeholder="Search parent tags..." excludeIds={[tag.id, ...selectedChildIds]} />
       </Field>
 
       {/* Child Tags */}
       <Field label="Child Tags">
-        <SelectedTagChips tags={selectedChildren} onRemove={(tag) => setSelectedChildIds(selectedChildIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
-        <input
-          type="text"
-          value={childSearch}
-          onChange={(e) => setChildSearch(e.target.value)}
-          placeholder="Search child tags..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {childSearch && filteredChildren.length > 0 && (
-          <GroupedTagOptionList tags={filteredChildren} maxItems={20} onSelect={(tag) => { setSelectedChildIds([...selectedChildIds, tag.id]); setChildSearch(""); }} />
-        )}
+        <EntityReferenceMultiSelector entityType="tag" values={selectedChildIds} onChange={setSelectedChildIds} placeholder="Search child tags..." excludeIds={[tag.id, ...selectedParentIds]} />
       </Field>
 
       <Field label="Remote IDs">

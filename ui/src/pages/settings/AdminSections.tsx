@@ -6,8 +6,6 @@ import {
   contentRulesApi,
   rolesApi,
   shareLinksApi,
-  studios as studiosApi,
-  tags as tagsApi,
   usersApi,
   type ApiTokenIssuedRow,
   type ApiTokenRow,
@@ -22,6 +20,7 @@ import {
 } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { buildRoutePath } from "../../router/location";
+import { EntityReferenceSelector } from "../../components/EntityReferenceSelector";
 
 const ENTITY_KINDS = ["scene", "performer", "tag", "studio", "gallery", "image", "group", "segment"] as const;
 const SCOPE_KINDS = ["all", "tag", "studio", "identifier", "attribute", "expression"] as const;
@@ -332,62 +331,7 @@ function formatContentRuleScope(rule: Pick<ContentRuleRow, "scopeKind" | "scopeV
 }
 
 function SingleEntitySelector({ entityType, value, onChange, placeholder }: { entityType: "tags" | "studios"; value?: number; onChange: (value: number | undefined) => void; placeholder: string }) {
-  const [searchText, setSearchText] = useState("");
-  const { data: items, isLoading } = useQuery({
-    queryKey: ["content-rule-selector", entityType],
-    queryFn: async () => {
-      if (entityType === "tags") {
-        return (await tagsApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items.map((item) => ({ id: item.id, label: item.name }));
-      }
-
-      return (await studiosApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items.map((item) => ({ id: item.id, label: item.name }));
-    },
-    staleTime: 60000,
-  });
-
-  const selectedItem = items?.find((item) => item.id === value);
-  const filteredItems = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    return (items ?? []).filter((item) => item.id !== value && (!q || item.label.toLowerCase().includes(q))).slice(0, 25);
-  }, [items, searchText, value]);
-
-  return (
-    <div className="space-y-2">
-      {selectedItem ? (
-        <div className="inline-flex items-center gap-2 rounded border border-app bg-surface-2 px-2 py-1 text-xs text-foreground">
-          {selectedItem.label}
-          <button type="button" className="text-secondary hover:text-red-400" onClick={() => onChange(undefined)}>Clear</button>
-        </div>
-      ) : null}
-
-      <input
-        className="input"
-        value={searchText}
-        onChange={(event) => setSearchText(event.target.value)}
-        placeholder={placeholder}
-      />
-
-      {searchText.trim() ? (
-        <div className="max-h-36 overflow-y-auto rounded border border-app bg-surface-2">
-          {isLoading ? <div className="px-3 py-2 text-sm text-secondary">Loading…</div> : null}
-          {!isLoading && filteredItems.length === 0 ? <div className="px-3 py-2 text-sm text-secondary">No matches.</div> : null}
-          {filteredItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="block w-full border-b border-app/40 px-3 py-2 text-left text-sm hover:bg-surface last:border-b-0"
-              onClick={() => {
-                onChange(item.id);
-                setSearchText("");
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
+  return <EntityReferenceSelector entityType={entityType === "tags" ? "tag" : "studio"} value={value} onChange={onChange} placeholder={placeholder} inputClassName="input" />;
 }
 
 function ContentRuleScopeFields({ scopeKind, draft, onChange }: { scopeKind: SimpleScopeKind; draft: ContentRuleScopeDraft; onChange: (update: Partial<ContentRuleScopeDraft>) => void }) {

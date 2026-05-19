@@ -12,7 +12,6 @@ const staticSections: ShortcutSection[] = [
   {
     title: "Scene Detail",
     shortcuts: [
-      { keys: ",", description: "Toggle theater mode" },
       { keys: "s", description: "Open segments" },
       { keys: "d", description: "Open detections" },
       { keys: "i", description: "Open file info" },

@@ -949,8 +949,8 @@ export function ListPage({
         </div>
 
         {/* Search */}
-        <form onSubmit={handleSearch} className="flex shrink-0 items-center gap-1" style={{ width: searchModes?.length ? "22rem" : "18rem", maxWidth: "100%" }}>
-          {searchModes && searchModes.length > 0 && onSearchModeChange && (
+        <form onSubmit={handleSearch} className="flex shrink-0 items-center gap-1" style={{ width: searchModes && searchModes.length > 1 ? "22rem" : "18rem", maxWidth: "100%" }}>
+          {searchModes && searchModes.length > 1 && onSearchModeChange && (
             <select
               value={searchMode ?? searchModes[0]?.value ?? "text"}
               onChange={(e) => {

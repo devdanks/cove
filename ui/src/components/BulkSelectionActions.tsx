@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Download, Edit, Loader2, Trash2, Search, Play } from "lucide-react";
+import { Download, Edit, Loader2, Trash2, Search, Play, Unlink } from "lucide-react";
 import { scenes as scenesApi, images, galleries, performers, groups, studios, tags, audios, texts } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
@@ -52,6 +52,109 @@ const ENTITY_RESOURCE_MAP = {
   texts: "text",
 } as const;
 
+type BulkSelectionEntityType = keyof typeof FIELDS_MAP;
+export type NestedListParent = {
+  type: "tag" | "performer" | "studio" | "group" | "gallery";
+  id: number;
+  label?: string;
+};
+
+type RemoveFromParentAction = {
+  label: string;
+  parentLabel: string;
+  permissionTarget: "child" | "parent";
+  run: (ids: number[]) => Promise<unknown>;
+};
+
+function getEntityLabel(entityType: BulkSelectionEntityType, count: number) {
+  const singular = ENTITY_RESOURCE_MAP[entityType];
+  return count === 1 ? singular : entityType;
+}
+
+function getParentLabel(parent: NestedListParent) {
+  return parent.label?.trim() || `this ${parent.type}`;
+}
+
+function getRemoveFromParentAction(entityType: BulkSelectionEntityType, parent?: NestedListParent): RemoveFromParentAction | null {
+  if (!parent) return null;
+  const parentLabel = getParentLabel(parent);
+
+  if (parent.type === "tag") {
+    const run = (ids: number[]) => {
+      switch (entityType) {
+        case "scenes": return scenesApi.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        case "images": return images.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        case "galleries": return galleries.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        case "performers": return performers.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        case "groups": return groups.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        case "studios": return studios.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        case "audios": return audios.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        case "texts": return texts.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        default: return Promise.reject(new Error("This nested removal is not supported."));
+      }
+    };
+    return { label: `Remove from ${parentLabel}`, parentLabel, permissionTarget: "child", run };
+  }
+
+  if (parent.type === "performer") {
+    const run = (ids: number[]) => {
+      switch (entityType) {
+        case "scenes": return scenesApi.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
+        case "images": return images.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
+        case "galleries": return galleries.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
+        case "audios": return audios.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
+        case "texts": return texts.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
+        default: return Promise.reject(new Error("This nested removal is not supported."));
+      }
+    };
+    return { label: `Remove from ${parentLabel}`, parentLabel, permissionTarget: "child", run };
+  }
+
+  if (parent.type === "studio") {
+    const run = (ids: number[]) => {
+      switch (entityType) {
+        case "scenes": return scenesApi.bulkUpdate({ ids, clearFields: ["studioId"] });
+        case "images": return images.bulkUpdate({ ids, clearFields: ["studioId"] });
+        case "galleries": return galleries.bulkUpdate({ ids, clearFields: ["studioId"] });
+        case "groups": return groups.bulkUpdate({ ids, clearFields: ["studioId"] });
+        case "studios": return studios.bulkUpdate({ ids, clearFields: ["parentId"] });
+        case "audios": return audios.bulkUpdate({ ids, clearFields: ["studioId"] });
+        case "texts": return texts.bulkUpdate({ ids, clearFields: ["studioId"] });
+        default: return Promise.reject(new Error("This nested removal is not supported."));
+      }
+    };
+    return { label: `Remove from ${parentLabel}`, parentLabel, permissionTarget: "child", run };
+  }
+
+  if (parent.type === "gallery") {
+    const run = (ids: number[]) => {
+      switch (entityType) {
+        case "images": return galleries.removeImages(parent.id, ids);
+        case "scenes": return scenesApi.bulkUpdate({ ids, galleryIds: [parent.id], galleryMode: "REMOVE" });
+        default: return Promise.reject(new Error("This nested removal is not supported."));
+      }
+    };
+    return { label: `Remove from ${parentLabel}`, parentLabel, permissionTarget: entityType === "images" ? "parent" : "child", run };
+  }
+
+  if (parent.type === "group") {
+    const run = (ids: number[]) => {
+      switch (entityType) {
+        case "scenes": return scenesApi.bulkUpdate({ ids, groupIds: [{ groupId: parent.id, sceneIndex: 0 }], groupMode: "REMOVE" });
+        case "images": return groups.items.removeHosts(parent.id, { kind: "image", hostIds: ids });
+        case "galleries": return groups.items.removeHosts(parent.id, { kind: "gallery", hostIds: ids });
+        case "audios": return groups.items.removeHosts(parent.id, { kind: "audio", hostIds: ids });
+        case "texts": return groups.items.removeHosts(parent.id, { kind: "text", hostIds: ids });
+        case "groups": return Promise.all(ids.map((id) => groups.removeSubGroup(parent.id, id)));
+        default: return Promise.reject(new Error("This nested removal is not supported."));
+      }
+    };
+    return { label: `Remove from ${parentLabel}`, parentLabel, permissionTarget: entityType === "scenes" ? "child" : "parent", run };
+  }
+
+  return null;
+}
+
 function getMutationErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : error ? String(error) : null;
 }
@@ -67,15 +170,17 @@ interface Props {
   downloadItems?: DownloadSelectionItem[];
   /** Navigate callback for the scene queue player */
   onNavigate?: (route: any) => void;
+  removeFromParent?: NestedListParent;
 }
 
-export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneItems, audioItems, textItems, downloadItems, onNavigate }: Props) {
+export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneItems, audioItems, textItems, downloadItems, onNavigate, removeFromParent }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showIdentify, setShowIdentify] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [showScrape, setShowScrape] = useState(false);
   const [showBatchDownloadOptions, setShowBatchDownloadOptions] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRemoveFromParentConfirm, setShowRemoveFromParentConfirm] = useState(false);
   const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
   const api = API_MAP[entityType];
@@ -83,6 +188,14 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
   const resource = ENTITY_RESOURCE_MAP[entityType];
   const canWrite = canWriteEntity(resource, hasPermission);
   const canDelete = canDeleteEntity(resource, hasPermission);
+  const removeFromParentAction = useMemo(
+    () => getRemoveFromParentAction(entityType, removeFromParent),
+    [entityType, removeFromParent?.id, removeFromParent?.label, removeFromParent?.type],
+  );
+  const canRemoveFromParent = !!removeFromParentAction
+    && (removeFromParentAction.permissionTarget === "parent"
+      ? canWriteEntity(removeFromParent!.type, hasPermission)
+      : canWrite);
   const supportsDeleteOptions = entityType === "scenes" || entityType === "images" || entityType === "audios" || entityType === "texts";
 
   const bulkDeleteMut = useMutation<void, Error, DeleteEntityOptions | undefined>({
@@ -97,6 +210,18 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
       await api.bulkUpdate({ ids: [...selectedIds], ...values } as any);
     },
     onSuccess: () => { queryClient.invalidateQueries(); setShowBulkEdit(false); onDone(); },
+  });
+
+  const removeFromParentMut = useMutation<void, Error>({
+    mutationFn: async () => {
+      if (!removeFromParentAction) return;
+      await removeFromParentAction.run([...selectedIds]);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+      setShowRemoveFromParentConfirm(false);
+      onDone();
+    },
   });
 
   const isScenes = entityType === "scenes";
@@ -232,6 +357,16 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           Play
         </button>
       )}
+      {canRemoveFromParent && removeFromParentAction && (
+        <button
+          onClick={() => setShowRemoveFromParentConfirm(true)}
+          disabled={removeFromParentMut.isPending}
+          className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-orange-400 hover:text-orange-300 hover:bg-orange-900/20 disabled:opacity-60"
+        >
+          {removeFromParentMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Unlink className="w-3 h-3" />}
+          {removeFromParentAction.label}
+        </button>
+      )}
       <ExtensionSelectionActions entityType={entityType} selectedIds={selectedIds} />
       {canDelete && (
         <button
@@ -295,6 +430,16 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           }}
         />
       )}
+      <ConfirmDialog
+        open={showRemoveFromParentConfirm}
+        title={removeFromParentAction?.label ?? "Remove from parent"}
+        message={`Remove ${selectedIds.size} selected ${getEntityLabel(entityType, selectedIds.size)} from ${removeFromParentAction?.parentLabel ?? "this parent"}?`}
+        confirmLabel={removeFromParentMut.isPending ? "Removing..." : "Remove"}
+        onConfirm={() => removeFromParentMut.mutate()}
+        onCancel={() => { removeFromParentMut.reset(); setShowRemoveFromParentConfirm(false); }}
+        isPending={removeFromParentMut.isPending}
+        errorMessage={getMutationErrorMessage(removeFromParentMut.error)}
+      />
       <ConfirmDialog
         open={showDeleteConfirm}
         title={`Delete ${selectedIds.size} ${resource}${selectedIds.size === 1 ? "" : "s"}`}

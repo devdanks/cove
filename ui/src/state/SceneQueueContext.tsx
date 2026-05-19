@@ -4,11 +4,19 @@ interface SceneQueueState {
   sceneIds: number[];
   currentIndex: number;
   autoplay: boolean;
+  items?: Record<number, SceneQueueItem>;
+}
+
+export interface SceneQueueItem {
+  id: number;
+  title?: string | null;
+  subtitle?: string | null;
+  imagePath?: string | null;
 }
 
 interface SceneQueueContextValue {
   queue: SceneQueueState | null;
-  setQueue: (ids: number[], currentId: number) => void;
+  setQueue: (ids: number[], currentId: number, items?: SceneQueueItem[]) => void;
   clearQueue: () => void;
   currentId: number | null;
   prevId: number | null;
@@ -20,6 +28,7 @@ interface SceneQueueContextValue {
   autoplay: boolean;
   queueLength: number;
   currentPosition: number;
+  queueItems: SceneQueueItem[];
 }
 
 const SceneQueueContext = createContext<SceneQueueContextValue | null>(null);
@@ -27,9 +36,13 @@ const SceneQueueContext = createContext<SceneQueueContextValue | null>(null);
 export function SceneQueueProvider({ children }: { children: ReactNode }) {
   const [queue, setQueueState] = useState<SceneQueueState | null>(null);
 
-  const setQueue = useCallback((ids: number[], currentId: number) => {
+  const setQueue = useCallback((ids: number[], currentId: number, items?: SceneQueueItem[]) => {
     const idx = ids.indexOf(currentId);
-    setQueueState({ sceneIds: ids, currentIndex: idx >= 0 ? idx : 0, autoplay: false });
+    const itemMap = items?.reduce<Record<number, SceneQueueItem>>((map, item) => {
+      map[item.id] = item;
+      return map;
+    }, {});
+    setQueueState({ sceneIds: ids, currentIndex: idx >= 0 ? idx : 0, autoplay: false, items: itemMap });
   }, []);
 
   const clearQueue = useCallback(() => setQueueState(null), []);
@@ -37,6 +50,9 @@ export function SceneQueueProvider({ children }: { children: ReactNode }) {
   const currentId = queue ? queue.sceneIds[queue.currentIndex] ?? null : null;
   const prevId = queue && queue.currentIndex > 0 ? queue.sceneIds[queue.currentIndex - 1] : null;
   const nextId = queue && queue.currentIndex < queue.sceneIds.length - 1 ? queue.sceneIds[queue.currentIndex + 1] : null;
+  const queueItems = queue
+    ? queue.sceneIds.map((id) => queue.items?.[id] ?? { id })
+    : [];
 
   const goToIndex = useCallback((index: number) => {
     if (!queue || index < 0 || index >= queue.sceneIds.length) return null;
@@ -65,6 +81,7 @@ export function SceneQueueProvider({ children }: { children: ReactNode }) {
         autoplay: queue?.autoplay ?? false,
         queueLength: queue?.sceneIds.length ?? 0,
         currentPosition: queue ? queue.currentIndex + 1 : 0,
+        queueItems,
       }}
     >
       {children}

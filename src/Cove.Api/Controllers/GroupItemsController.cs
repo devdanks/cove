@@ -211,6 +211,29 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
         return NoContent();
     }
 
+    [HttpPost("items/remove-hosts")]
+    [RequiresPermission(Permissions.GroupsWrite)]
+    [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite, RouteValueName = "groupId")]
+    public async Task<IActionResult> RemoveHosts(int groupId, [FromBody] GroupItemsRemoveHostsDto dto, CancellationToken ct)
+    {
+        var hostIds = dto.HostIds.Where(id => id > 0).Distinct().ToArray();
+        if (hostIds.Length == 0)
+            return Ok(new { removed = 0 });
+
+        var hostType = NormalizeHostType(null, dto.Kind);
+        var items = await db.GroupItems
+            .Where(item => item.GroupId == groupId && item.Kind == dto.Kind && item.HostType.ToLower() == hostType && hostIds.Contains(item.HostId))
+            .ToListAsync(ct);
+
+        if (items.Count == 0)
+            return Ok(new { removed = 0 });
+
+        db.GroupItems.RemoveRange(items);
+        await ReindexItemsAsync(groupId, ct);
+        await db.SaveChangesAsync(ct);
+        return Ok(new { removed = items.Count });
+    }
+
     [HttpPut("items/reorder")]
     [RequiresPermission(Permissions.GroupsWrite)]
     [RequiresEntityAccess(EntityKinds.Group, Permissions.GroupsWrite, RouteValueName = "groupId")]

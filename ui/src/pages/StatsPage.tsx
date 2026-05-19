@@ -371,11 +371,6 @@ function PerformerCard({ performer, onNavigate }: { performer: Performer; onNavi
             <Users className="w-10 h-10 text-muted" />
           </div>
         )}
-        {performer.sceneCount > 0 && (
-          <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] px-1.5 py-0.5 rounded">
-            {performer.sceneCount} scenes
-          </span>
-        )}
       </div>
       <div className="text-sm font-medium truncate group-hover:text-accent transition-colors">
         {performer.name}
@@ -436,9 +431,6 @@ function StudioCard({ studio, onNavigate }: { studio: Studio; onNavigate?: (r: {
       <div className="text-sm font-medium truncate group-hover:text-accent transition-colors">
         {studio.name}
       </div>
-      {studio.sceneCount > 0 && (
-        <div className="text-xs text-muted">{studio.sceneCount} scenes</div>
-      )}
     </a>
   );
 }

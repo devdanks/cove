@@ -314,7 +314,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
                 segment.SourceKey,
                 segment.Kind,
                 segment.TagId,
-                segment.Tag?.SegmentColorOverride ?? rule?.ColorOverride ?? segment.ColorHint,
+                segment.Tag?.SegmentColorOverride ?? segment.Tag?.Color ?? rule?.ColorOverride ?? segment.ColorHint,
                 segment.Tag?.SegmentLaneOverride ?? rule?.Lane,
                 rule?.CollapseToInstant == true || durationSec <= 0,
                 rule?.MergeGapSec ?? 0d);

@@ -3,13 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups } from "../api/client";
 import type { EntityEngagement, FindFilter, Group, GroupCreate, GroupFilterCriteria, PaginatedResponse } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { SortableList, type DragHandleProps } from "../components/SortableList";
+import { SortableList } from "../components/SortableList";
 import { RatingField } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { formatDate } from "../components/shared";
-import { Layers, Trash2, Loader2, Edit, GripVertical } from "lucide-react";
+import { Layers, Trash2, Loader2, Edit } from "lucide-react";
 import { GroupTile } from "../components/EntityCards";
 import { GROUP_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GROUP_BULK_FIELDS } from "../components/BulkEditDialog";
@@ -181,7 +181,7 @@ export function GroupsPage({ onNavigate }: Props) {
             className="grid gap-3"
             style={{ gridTemplateColumns: "repeat(auto-fill, minmax(var(--card-min-width, 160px), 1fr))" }}
             renderItem={(g, { dragHandleProps, isDragging, isOver }) => (
-              <GroupCard
+              <GroupTile
                 group={g}
                 engagement={engagementById.get(g.id)}
                 onClick={() => onNavigate({ page: "group", id: g.id })}
@@ -206,7 +206,7 @@ export function GroupsPage({ onNavigate }: Props) {
             isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
             loadMore={listData.loadMore}
             renderItem={(g) => (
-              <GroupCard
+              <GroupTile
                 group={g}
                 engagement={engagementById.get(g.id)}
                 onClick={() => selecting ? toggle(g.id) : onNavigate({ page: "group", id: g.id })}
@@ -238,24 +238,6 @@ export function GroupsPage({ onNavigate }: Props) {
         isPending={bulkEditMut.isPending}
       />
     </>
-  );
-}
-
-function GroupCard({ group, engagement, onClick, selected, onSelect, selecting, dragHandleProps, isDragging, isOver }: { group: Group; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; dragHandleProps?: DragHandleProps; isDragging?: boolean; isOver?: boolean }) {
-  return (
-    <div className={`relative h-full transition-opacity ${isDragging ? "opacity-50" : ""} ${isOver ? "rounded-lg outline outline-2 outline-accent" : ""}`}>
-      <GroupTile group={group} engagement={engagement} onClick={onClick} selected={selected} onSelect={onSelect} selecting={selecting} />
-      {dragHandleProps ? (
-        <span
-          {...dragHandleProps}
-          onClick={(event) => event.stopPropagation()}
-          className="absolute bottom-1.5 right-1.5 z-20 inline-flex h-7 w-7 cursor-grab items-center justify-center rounded bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 active:cursor-grabbing group-hover:opacity-100 focus:opacity-100"
-          title="Drag to reorder"
-        >
-          <GripVertical className="h-4 w-4" />
-        </span>
-      ) : null}
-    </div>
   );
 }
 

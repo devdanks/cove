@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, lazy, Suspense } from "react";
+import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { aiVisual, images } from "../api/client";
 import type { DeleteEntityOptions, EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
@@ -6,6 +6,7 @@ import { ListPage, type DisplayMode } from "../components/ListPage";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
+import { useAiVisualAvailability } from "../hooks/useAiVisualAvailability";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { ImageIcon, Trash2, Loader2, Edit, FolderOpen, Search, ThumbsUp } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
@@ -68,6 +69,7 @@ export function ImagesPage({ onNavigate }: Props) {
       displayMode: "grid" as DisplayMode,
     };
   }, []);
+  const aiVisualAvailable = useAiVisualAvailability();
   const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode, searchMode, setSearchMode } = useListUrlState({
     resetKey: "images",
     defaultFilter: defaultState.filter,
@@ -75,7 +77,7 @@ export function ImagesPage({ onNavigate }: Props) {
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "wall", "tagger", "feed"] as const,
     defaultSearchMode: "text",
-    allowedSearchModes: ["text", "visual"],
+    allowedSearchModes: aiVisualAvailable ? ["text", "visual"] : ["text"],
     allowInfinitePageSize: true,
   });
   const [showCreate, setShowCreate] = useState(false);
@@ -92,16 +94,30 @@ export function ImagesPage({ onNavigate }: Props) {
   const canDeleteImage = canDeleteEntity("image", hasPermission);
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const visualSearchActive = searchMode === "visual" && Boolean(filter.q?.trim());
+  const visualSearchActive = aiVisualAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
   const infinitePageSize = filter.perPage === 0 || displayMode === "feed";
   const defaultInfiniteChunkSize = defaultState.filter.perPage && defaultState.filter.perPage > 0 ? defaultState.filter.perPage : 40;
   const infiniteChunkSize = displayMode === "feed" ? 8 : defaultInfiniteChunkSize;
+  const searchModeOptions = useMemo(() => aiVisualAvailable ? SEARCH_MODE_OPTIONS : SEARCH_MODE_OPTIONS.filter((mode) => mode.value === "text"), [aiVisualAvailable]);
   const sortOptions = useMemo(
-    () => searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SORT_OPTIONS] : SORT_OPTIONS,
-    [searchMode],
+    () => aiVisualAvailable && searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SORT_OPTIONS] : SORT_OPTIONS,
+    [aiVisualAvailable, searchMode],
   );
 
+  useEffect(() => {
+    if (!aiVisualAvailable && searchMode === "visual") {
+      setSearchMode("text");
+      if (filter.sort === "visual_match") {
+        setFilter({ ...filter, sort: defaultState.filter.sort, direction: defaultState.filter.direction ?? "desc", page: 1 });
+      }
+    }
+  }, [aiVisualAvailable, defaultState.filter.direction, defaultState.filter.sort, filter, searchMode, setFilter, setSearchMode]);
+
   const handleSearchModeChange = useCallback((mode: string) => {
+    if (mode === "visual" && !aiVisualAvailable) {
+      return;
+    }
+
     setSearchMode(mode);
 
     if (mode === "visual") {
@@ -120,7 +136,7 @@ export function ImagesPage({ onNavigate }: Props) {
     }
 
     setFilter({ ...filter, page: 1 });
-  }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
+  }, [aiVisualAvailable, defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
 
   const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
     setDisplayMode(mode);
@@ -219,8 +235,8 @@ export function ImagesPage({ onNavigate }: Props) {
       totalCount={totalCount}
       isLoading={loading}
       searchMode={searchMode}
-      searchModes={SEARCH_MODE_OPTIONS}
-      searchPlaceholder={searchMode === "visual" ? "Search visuals..." : "Search images, tags, performers..."}
+      searchModes={searchModeOptions}
+      searchPlaceholder={aiVisualAvailable && searchMode === "visual" ? "Search visuals..." : "Search images, tags, performers..."}
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}

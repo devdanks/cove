@@ -66,9 +66,6 @@ export interface MediaDetailLayoutProps {
   engagement?: EngagementBarProps;
   actions?: ReactNode;
   keyboardShortcuts?: MediaDetailKeyboardShortcut[];
-  theaterModeSupported?: boolean;
-  isTheaterMode?: boolean;
-  onTheaterModeToggle?: (value: boolean) => void;
   isLoading?: boolean;
   error?: string | null;
   children?: ReactNode;

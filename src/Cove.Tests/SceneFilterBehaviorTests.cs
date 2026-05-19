@@ -3,6 +3,7 @@ using Cove.Api.Services;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Enums;
 using Cove.Core.Interfaces;
 using Cove.Data;
 using Cove.Data.Repositories;
@@ -102,6 +103,10 @@ public class SceneFilterBehaviorTests
             new Scene { Title = "no-file" });
         await context.SaveChangesAsync();
 
+        var scenesByTitle = context.Scenes.ToDictionary(scene => scene.Title ?? string.Empty);
+        scenesByTitle["high-bitrate"].MaxBitRate = 0;
+        scenesByTitle["low-bitrate"].MaxBitRate = 9_000_000;
+
         var repository = new SceneRepository(context);
         var filter = new SceneFilter
         {
@@ -116,6 +121,34 @@ public class SceneFilterBehaviorTests
 
         Assert.Equal(1, totalCount);
         Assert.Equal(["high-bitrate"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+    }
+
+    [Fact]
+    public async Task BitrateSort_UsesSceneFileBitrateWhenSummaryIsStale()
+    {
+        await using var context = CreateContext();
+        context.Scenes.AddRange(
+            CreateSceneWithFile("high-bitrate", bitRate: 2_500_000),
+            CreateSceneWithFile("low-bitrate", bitRate: 500_000),
+            CreateSceneWithFile("mid-bitrate", bitRate: 1_500_000));
+        await context.SaveChangesAsync();
+
+        var scenesByTitle = context.Scenes.ToDictionary(scene => scene.Title ?? string.Empty);
+        scenesByTitle["high-bitrate"].MaxBitRate = 0;
+        scenesByTitle["low-bitrate"].MaxBitRate = 9_000_000;
+        scenesByTitle["mid-bitrate"].MaxBitRate = 1;
+
+        var repository = new SceneRepository(context);
+        var (items, totalCount) = await repository.FindAsync(null, new FindFilter
+        {
+            Page = 1,
+            PerPage = 50,
+            Sort = "bitrate",
+            Direction = SortDirection.Asc,
+        });
+
+        Assert.Equal(3, totalCount);
+        Assert.Equal(["low-bitrate", "mid-bitrate", "high-bitrate"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
     }
 
     [Fact]

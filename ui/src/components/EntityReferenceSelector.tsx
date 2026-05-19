@@ -71,6 +71,7 @@ export function EntityReferenceSelector({
   placeholder,
   disabled = false,
   inputClassName,
+  excludeIds,
 }: {
   entityType: EntityReferenceType;
   value?: number;
@@ -78,6 +79,7 @@ export function EntityReferenceSelector({
   placeholder?: string;
   disabled?: boolean;
   inputClassName?: string;
+  excludeIds?: Iterable<number>;
 }) {
   const [searchText, setSearchText] = useState("");
   const trimmedSearch = searchText.trim();
@@ -100,9 +102,10 @@ export function EntityReferenceSelector({
   });
 
   const selected = selectedSearchOption ?? selectedOption;
+  const excluded = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
   const visibleResults = useMemo(
-    () => searchOptions.filter((option) => option.id !== value),
-    [searchOptions, value],
+    () => searchOptions.filter((option) => option.id !== value && !excluded.has(option.id)),
+    [excluded, searchOptions, value],
   );
 
   return (
@@ -168,11 +171,23 @@ export function EntityReferenceMultiSelector({
   values,
   onChange,
   placeholder,
+  emptyMessage,
+  disabled = false,
+  inputClassName,
+  resultsClassName,
+  containerClassName,
+  excludeIds,
 }: {
   entityType: EntityReferenceType;
   values: number[];
   onChange: (values: number[]) => void;
   placeholder?: string;
+  emptyMessage?: string;
+  disabled?: boolean;
+  inputClassName?: string;
+  resultsClassName?: string;
+  containerClassName?: string;
+  excludeIds?: Iterable<number>;
 }) {
   const [searchText, setSearchText] = useState("");
   const trimmedSearch = searchText.trim();
@@ -181,19 +196,20 @@ export function EntityReferenceMultiSelector({
   const { data: searchResults, isLoading } = useQuery({
     queryKey: ["entity-reference-selector", entityType, trimmedSearch],
     queryFn: () => searchEntityReferences(entityType, trimmedSearch),
-    enabled: trimmedSearch.length >= 1,
+    enabled: !disabled && trimmedSearch.length >= 1,
     staleTime: 60_000,
   });
 
   const searchOptions = searchResults ?? [];
   const selectedOptions = useEntityReferenceOptions(entityType, values, searchOptions);
+  const excluded = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
   const visibleResults = useMemo(
-    () => searchOptions.filter((option) => !values.includes(option.id)),
-    [searchOptions, values],
+    () => searchOptions.filter((option) => !values.includes(option.id) && !excluded.has(option.id)),
+    [excluded, searchOptions, values],
   );
 
   return (
-    <div className="space-y-2">
+    <div className={containerClassName ?? "space-y-2"}>
       {values.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {values.map((id) => {
@@ -207,6 +223,7 @@ export function EntityReferenceMultiSelector({
                   onClick={() => onChange(values.filter((value) => value !== id))}
                   className="hover:text-red-400"
                   aria-label={`Remove ${option?.label ?? labels.singular}`}
+                  disabled={disabled}
                 >
                   <X className="h-2.5 w-2.5" />
                 </button>
@@ -221,14 +238,15 @@ export function EntityReferenceMultiSelector({
         value={searchText}
         onChange={(event) => setSearchText(event.target.value)}
         placeholder={placeholder ?? `Search ${labels.plural}...`}
-        className="w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
+        disabled={disabled}
+        className={inputClassName ?? "w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-muted disabled:opacity-50 focus:border-accent focus:outline-none"}
       />
 
       {trimmedSearch ? (
-        <div className="max-h-40 overflow-y-auto rounded border border-border bg-surface">
+        <div className={resultsClassName ?? "max-h-40 overflow-y-auto rounded border border-border bg-surface"}>
           {isLoading ? <div className="px-3 py-2 text-sm text-muted">Loading...</div> : null}
           {!isLoading && visibleResults.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-muted">No {labels.plural} found</div>
+            <div className="px-3 py-2 text-sm text-muted">{emptyMessage ?? `No ${labels.plural} found`}</div>
           ) : null}
           {visibleResults.map((option) => (
             <button

@@ -210,12 +210,13 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     // ===== Transcoding / HLS =====
 
     [HttpGet("scene/{sceneId:int}/transcode")]
-    public async Task<IActionResult> TranscodeScene(int sceneId, [FromQuery] string? resolution, CancellationToken ct)
+    public async Task<IActionResult> TranscodeScene(int sceneId, [FromQuery] string? resolution, [FromQuery] double? start, CancellationToken ct)
     {
         var filePath = await GetSceneFilePathAsync(sceneId, ct);
         if (filePath == null) return NotFound();
 
-        var stream = await transcodeService.TranscodeToMp4Async(filePath, resolution, ct);
+        var startSeconds = start.HasValue && double.IsFinite(start.Value) ? Math.Max(0, start.Value) : 0;
+        var stream = await transcodeService.TranscodeToMp4Async(filePath, resolution, startSeconds, ct);
         if (stream == null) return StatusCode(503, "Transcoding unavailable — FFmpeg not found");
 
         Response.Headers["Accept-Ranges"] = "none";

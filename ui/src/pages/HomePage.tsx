@@ -466,9 +466,6 @@ function PerformerRecommendationCard({ performer, engagement, onNavigate }: { pe
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{performer.name}</p>
         {performer.disambiguation && <p className="text-xs text-muted truncate">{performer.disambiguation}</p>}
       </div>
-      <div className="flex items-center gap-2 px-2 pb-1.5 text-xs text-muted">
-        {performer.sceneCount > 0 && <span>{performer.sceneCount} scenes</span>}
-      </div>
     </a>
   );
 }
@@ -496,9 +493,6 @@ function StudioRecommendationCard({ studio, engagement, onNavigate }: { studio: 
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{studio.name}</p>
       </div>
-      <div className="flex items-center gap-2 px-2 pb-1.5 text-xs text-muted">
-        {studio.sceneCount > 0 && <span>{studio.sceneCount} scenes</span>}
-      </div>
     </a>
   );
 }
@@ -524,11 +518,6 @@ function TagRecommendationCard({ tag, onNavigate }: { tag: Tag; onNavigate: (r: 
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{tag.name}</p>
       </div>
-      {tag.sceneCount !== undefined && tag.sceneCount > 0 && (
-        <div className="px-2 pb-1.5 text-xs text-muted">
-          {tag.sceneCount} scenes
-        </div>
-      )}
     </a>
   );
 }
@@ -557,9 +546,6 @@ function GalleryRecommendationCard({ gallery, engagement, onNavigate }: { galler
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{gallery.title || "Untitled"}</p>
         {gallery.date && <p className="text-xs text-muted">{gallery.date}</p>}
       </div>
-      <div className="flex items-center gap-2 px-2 pb-1.5 text-xs text-muted">
-        {gallery.imageCount > 0 && <span>{gallery.imageCount} images</span>}
-      </div>
     </a>
   );
 }
@@ -587,9 +573,6 @@ function GroupRecommendationCard({ group, engagement, onNavigate }: { group: Gro
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">{group.name}</p>
         {group.date && <p className="text-xs text-muted">{group.date}</p>}
-      </div>
-      <div className="flex items-center gap-2 px-2 pb-1.5 text-xs text-muted">
-        {group.sceneCount > 0 && <span>{group.sceneCount} scenes</span>}
       </div>
     </a>
   );

@@ -154,6 +154,7 @@ export function VideoPlayer({
   const effectiveResumeTime = config?.ui.alwaysResumeOnPlayback === false ? undefined : resumeTime;
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const volumeTrackRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurTime] = useState(0);
   const [buffered, setBuffered] = useState(0);
@@ -172,6 +173,7 @@ export function VideoPlayer({
   const [showCaptions, setShowCaptions] = useState(false);
   const [showQuality, setShowQuality] = useState(false);
   const [selectedQuality, setSelectedQuality] = useState<string>("Direct");
+  const [transcodeStartSec, setTranscodeStartSec] = useState(0);
   const [availableQualities, setAvailableQualities] = useState<string[]>([]);
   const [faceOverlayEnabled, setFaceOverlayEnabled] = usePersistedFlag(FACE_OVERLAY_KEY, false);
   const playbackTracker = useRef(createPlaybackTracker());
@@ -212,6 +214,7 @@ export function VideoPlayer({
     lastHideInteractionAt.current = 0;
     playTriggered.current = false;
     pendingAutostartRef.current = false;
+    setTranscodeStartSec(0);
   }, [sceneId]);
 
   useEffect(() => {
@@ -232,17 +235,42 @@ export function VideoPlayer({
     v.muted = muted;
   }, []);
 
+  const toAbsoluteTime = useCallback((mediaTime: number) => (
+    selectedQuality === "Direct" ? mediaTime : transcodeStartSec + mediaTime
+  ), [selectedQuality, transcodeStartSec]);
+
+  const seekToAbsoluteTime = useCallback((targetTime: number, forcePlay = false) => {
+    const video = videoRef.current;
+    const maxTarget = Number.isFinite(duration) && duration > 0 ? duration : targetTime;
+    const target = Math.min(Math.max(0, targetTime), Math.max(0, maxTarget));
+    const rounded = roundPlaybackTime(target);
+
+    if (selectedQuality === "Direct") {
+      if (video) {
+        video.currentTime = target;
+        if (forcePlay) video.play().catch(() => {});
+      }
+      setCurTime(rounded);
+      onTimeUpdateProp?.(rounded);
+      lastSeenTime.current = rounded;
+      return;
+    }
+
+    const shouldPlay = forcePlay || Boolean(video && !video.paused);
+    sourceRestoreRef.current = { time: target, shouldPlay };
+    setCurTime(rounded);
+    onTimeUpdateProp?.(rounded);
+    lastSeenTime.current = rounded;
+    setTranscodeStartSec(target);
+  }, [duration, onTimeUpdateProp, selectedQuality]);
+
   useEffect(() => {
     if (onSeekRegister) {
       onSeekRegister((time: number) => {
-        const v = videoRef.current;
-        if (v) {
-          v.currentTime = time;
-          v.play().catch(() => {});
-        }
+        seekToAbsoluteTime(time, true);
       });
     }
-  }, [onSeekRegister]);
+  }, [onSeekRegister, seekToAbsoluteTime]);
 
   const updateVideoBox = useCallback(() => {
     const video = videoRef.current;
@@ -420,7 +448,8 @@ export function VideoPlayer({
     [detections, segments],
   );
 
-  const effectiveStreamUrl = selectedQuality === "Direct" ? streamUrl : scenes.transcodeUrl(sceneId, selectedQuality);
+  const effectiveStreamUrl = selectedQuality === "Direct" ? streamUrl : scenes.transcodeUrl(sceneId, selectedQuality, transcodeStartSec > 0 ? transcodeStartSec : undefined);
+  const effectiveSourceType = selectedQuality === "Direct" ? getVideoSourceMimeType(format) : "video/mp4";
 
   useEffect(() => {
     const v = videoRef.current;
@@ -428,7 +457,11 @@ export function VideoPlayer({
       ? Math.min(Math.max(effectiveResumeTime ?? clip.start, clip.start), clip.end ?? duration)
       : effectiveResumeTime ?? defaultPlaybackStartTime;
     if (v && nextTime != null) {
-      v.currentTime = nextTime;
+      if (selectedQuality === "Direct") {
+        v.currentTime = nextTime;
+      } else {
+        setTranscodeStartSec(nextTime);
+      }
       setCurTime(roundPlaybackTime(nextTime));
     }
 
@@ -437,7 +470,7 @@ export function VideoPlayer({
     } else if (clip) {
       setAbLoop({ a: null, b: null });
     }
-  }, [clip?.end, clip?.loop, clip?.start, defaultPlaybackStartTime, duration, effectiveResumeTime, sceneId, streamUrl]);
+  }, [clip?.end, clip?.loop, clip?.start, defaultPlaybackStartTime, duration, effectiveResumeTime, sceneId, selectedQuality, streamUrl]);
 
   useEffect(() => {
     if (!autostart) {
@@ -482,13 +515,13 @@ export function VideoPlayer({
     const v = videoRef.current;
     if (!v) return;
     const handler = () => {
-      if (v.currentTime >= abLoop.b!) {
-        v.currentTime = abLoop.a!;
+      if (toAbsoluteTime(v.currentTime) >= abLoop.b!) {
+        seekToAbsoluteTime(abLoop.a!, false);
       }
     };
     v.addEventListener("timeupdate", handler);
     return () => v.removeEventListener("timeupdate", handler);
-  }, [abLoop]);
+  }, [abLoop, seekToAbsoluteTime, toAbsoluteTime]);
 
   useEffect(() => {
     if (journalFlushed.current) {
@@ -508,12 +541,12 @@ export function VideoPlayer({
     playbackTracker.current.recordInterval({
       startSec,
       endSec,
-      mediaDurationSec: video.duration || 0,
+      mediaDurationSec: duration || video.duration || 0,
       currentPositionSec: endSec,
       state,
       mode,
     });
-  }, [playbackTrackingTarget]);
+  }, [duration, playbackTrackingTarget]);
 
   const flushIntervalKeepalive = useCallback((state: string) => {
     flushInterval(state, "keepalive");
@@ -536,13 +569,14 @@ export function VideoPlayer({
     }
 
     const handleClipBoundary = () => {
-      if (video.currentTime < clipStart) {
-        video.currentTime = clipStart;
+      const absoluteTime = toAbsoluteTime(video.currentTime);
+      if (absoluteTime < clipStart) {
+        seekToAbsoluteTime(clipStart, false);
         setCurTime(roundPlaybackTime(clipStart));
         return;
       }
 
-      if (video.currentTime < clipEnd - 0.05) {
+      if (absoluteTime < clipEnd - 0.05) {
         clipEndedHandled.current = false;
         return;
       }
@@ -551,7 +585,7 @@ export function VideoPlayer({
         if (intervalStart.current !== null) {
           flushInterval("active");
         }
-        video.currentTime = clipStart;
+        seekToAbsoluteTime(clipStart, false);
         setCurTime(roundPlaybackTime(clipStart));
         lastSeenTime.current = roundPlaybackTime(clipStart);
         if (intervalStart.current !== null) {
@@ -566,7 +600,7 @@ export function VideoPlayer({
 
       clipEndedHandled.current = true;
       video.pause();
-      video.currentTime = clipEnd;
+      seekToAbsoluteTime(clipEnd, false);
       lastSeenTime.current = roundPlaybackTime(clipEnd);
       setCurTime(roundPlaybackTime(clipEnd));
       flushInterval("ended");
@@ -579,7 +613,7 @@ export function VideoPlayer({
     return () => {
       video.removeEventListener("timeupdate", handleClipBoundary);
     };
-  }, [clip, clipEnd, clipStart, flushInterval, loop, onEndedProp, startTrackedInterval]);
+  }, [clip, clipEnd, clipStart, flushInterval, loop, onEndedProp, seekToAbsoluteTime, startTrackedInterval, toAbsoluteTime]);
 
   useEffect(() => {
     if (!playbackTrackingTarget) {
@@ -630,7 +664,7 @@ export function VideoPlayer({
 
   const prepareClipForPlayback = useCallback(() => {
     const video = videoRef.current;
-    const currentPosition = roundPlaybackTime(video?.currentTime ?? currentTime);
+    const currentPosition = roundPlaybackTime(video ? toAbsoluteTime(video.currentTime) : currentTime);
 
     if (!video || !clip || loop) {
       return currentPosition;
@@ -639,14 +673,14 @@ export function VideoPlayer({
     if (clipEndedHandled.current || currentPosition >= clipEnd - 0.05 || currentPosition < clipStart) {
       const startPosition = roundPlaybackTime(clipStart);
       clipEndedHandled.current = false;
-      video.currentTime = clipStart;
+      seekToAbsoluteTime(clipStart, false);
       lastSeenTime.current = startPosition;
       setCurTime(startPosition);
       return startPosition;
     }
 
     return currentPosition;
-  }, [clip, clipEnd, clipStart, currentTime, loop]);
+  }, [clip, clipEnd, clipStart, currentTime, loop, seekToAbsoluteTime, toAbsoluteTime]);
 
   const playVideo = useCallback(() => {
     const video = videoRef.current;
@@ -670,11 +704,11 @@ export function VideoPlayer({
           break;
         case "ArrowLeft":
           event.preventDefault();
-          v.currentTime = Math.max(0, v.currentTime - (event.shiftKey ? 10 : 5));
+          seekToAbsoluteTime(currentTime - (event.shiftKey ? 10 : 5));
           break;
         case "ArrowRight":
           event.preventDefault();
-          v.currentTime = Math.min(v.duration, v.currentTime + (event.shiftKey ? 10 : 5));
+          seekToAbsoluteTime(currentTime + (event.shiftKey ? 10 : 5));
           break;
         case "ArrowUp":
           event.preventDefault();
@@ -700,14 +734,14 @@ export function VideoPlayer({
         case "0": case "1": case "2": case "3": case "4":
         case "5": case "6": case "7": case "8": case "9":
           event.preventDefault();
-          v.currentTime = v.duration * (Number(event.key) / 10);
+          seekToAbsoluteTime(timelineStart + timelineDuration * (Number(event.key) / 10));
           break;
       }
       resetHideTimer();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [playVideo, resetHideTimer]);
+  }, [currentTime, playVideo, resetHideTimer, seekToAbsoluteTime, timelineDuration, timelineStart]);
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -720,20 +754,41 @@ export function VideoPlayer({
     if (!v) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    v.currentTime = timelineStart + pct * timelineDuration;
+    seekToAbsoluteTime(timelineStart + pct * timelineDuration);
   };
 
-  const changeVolume = (event: React.MouseEvent<HTMLDivElement>) => {
+  const setVolumeFromClientX = useCallback((clientX: number) => {
     const v = videoRef.current;
-    if (!v) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const track = volumeTrackRef.current;
+    if (!v || !track) return;
+    const rect = track.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     v.volume = pct;
     v.muted = false;
     setVol(pct);
     setMuted(false);
     localStorage.setItem(VOLUME_KEY, String(pct));
     localStorage.setItem(MUTED_KEY, "false");
+  }, []);
+
+  const changeVolume = (event: React.MouseEvent<HTMLDivElement>) => {
+    setVolumeFromClientX(event.clientX);
+  };
+
+  const startVolumeDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setVolumeFromClientX(event.clientX);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => setVolumeFromClientX(moveEvent.clientX);
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", handlePointerUp, { once: true });
   };
 
   const toggleFullscreen = () => {
@@ -750,9 +805,14 @@ export function VideoPlayer({
 
   const changeQuality = (quality: string) => {
     const v = videoRef.current;
-    const curTime = v?.currentTime ?? 0;
+    const curTime = v ? toAbsoluteTime(v.currentTime) : currentTime;
     const wasPlaying = v ? !v.paused : false;
     sourceRestoreRef.current = { time: curTime, shouldPlay: wasPlaying };
+    if (quality === "Direct") {
+      setTranscodeStartSec(0);
+    } else {
+      setTranscodeStartSec(curTime);
+    }
     setSelectedQuality(quality);
     setShowQuality(false);
   };
@@ -774,11 +834,11 @@ export function VideoPlayer({
     const shouldAutoplayAfterLoad = pendingRestore?.shouldPlay || pendingAutostartRef.current;
 
     const handleLoadedMetadata = () => {
-      const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : duration;
+      const mediaDuration = selectedQuality === "Direct" && Number.isFinite(video.duration) && video.duration > 0 ? video.duration : duration;
       const configuredStartTime = getConfiguredPlaybackStartTime(mediaDuration, playerVideoStartPercent, playerVideoStartMinDuration);
       const targetTime = pendingRestore?.time ?? (clip ? clip.start : effectiveResumeTime ?? configuredStartTime);
       if (targetTime != null && Number.isFinite(targetTime)) {
-        video.currentTime = targetTime;
+        video.currentTime = selectedQuality === "Direct" ? targetTime : Math.max(0, targetTime - transcodeStartSec);
         setCurTime(roundPlaybackTime(targetTime));
       }
 
@@ -793,7 +853,7 @@ export function VideoPlayer({
     return () => {
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
     };
-  }, [clip, effectiveResumeTime, effectiveStreamUrl, format]);
+  }, [clip, duration, effectiveResumeTime, effectiveStreamUrl, format, playerVideoStartMinDuration, playerVideoStartPercent, selectedQuality, transcodeStartSec]);
 
   const togglePip = async () => {
     const v = videoRef.current;
@@ -813,9 +873,9 @@ export function VideoPlayer({
     const v = videoRef.current;
     if (!v) return;
     if (abLoop.a == null) {
-      setAbLoop({ a: v.currentTime, b: null });
+      setAbLoop({ a: currentTime, b: null });
     } else if (abLoop.b == null) {
-      const rawEnd = v.currentTime;
+      const rawEnd = currentTime;
       const cappedEnd = maxLoopDuration > 0 && rawEnd > abLoop.a
         ? Math.min(rawEnd, abLoop.a + maxLoopDuration)
         : rawEnd;
@@ -871,13 +931,13 @@ export function VideoPlayer({
         onSeeked={() => {
           const video = videoRef.current;
           if (video && !video.paused) {
-            const time = roundPlaybackTime(video.currentTime);
+            const time = roundPlaybackTime(toAbsoluteTime(video.currentTime));
             startTrackedInterval(time);
           }
         }}
         onTimeUpdate={() => {
           const v = videoRef.current;
-          const time = roundPlaybackTime(v?.currentTime ?? 0);
+          const time = roundPlaybackTime(v ? toAbsoluteTime(v.currentTime) : 0);
           setCurTime(time);
           onTimeUpdateProp?.(time);
           lastSeenTime.current = time;
@@ -892,14 +952,13 @@ export function VideoPlayer({
         }}
         onProgress={() => {
           const v = videoRef.current;
-          if (v && v.buffered.length > 0) setBuffered(v.buffered.end(v.buffered.length - 1));
+          if (v && v.buffered.length > 0) setBuffered(Math.min(duration, toAbsoluteTime(v.buffered.end(v.buffered.length - 1))));
         }}
         onEnded={() => {
           if (loop) {
             flushInterval("active");
             intervalStart.current = null;
-            const v = videoRef.current;
-            if (v) { v.currentTime = 0; v.play().catch(() => {}); }
+            seekToAbsoluteTime(timelineStart, true);
             return;
           }
           setPlaying(false);
@@ -908,7 +967,7 @@ export function VideoPlayer({
           onEndedProp?.();
         }}
       >
-        <source src={effectiveStreamUrl} type={getVideoSourceMimeType(format)} />
+        <source src={effectiveStreamUrl} type={effectiveSourceType} />
         {captions?.map((cap, idx) => (
           <track
             key={cap.id}
@@ -1001,10 +1060,10 @@ export function VideoPlayer({
             </button>
           )}
 
-          <button onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10); }} className="hover:text-accent p-1" title="Back 10s">
+          <button onClick={() => seekToAbsoluteTime(currentTime - 10)} className="hover:text-accent p-1" title="Back 10s">
             <SkipBack className="w-4 h-4" />
           </button>
-          <button onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration, v.currentTime + 10); }} className="hover:text-accent p-1" title="Forward 10s">
+          <button onClick={() => seekToAbsoluteTime(currentTime + 10)} className="hover:text-accent p-1" title="Forward 10s">
             <SkipForward className="w-4 h-4" />
           </button>
 
@@ -1017,7 +1076,7 @@ export function VideoPlayer({
           }} className="hover:text-accent p-1">
             {muted || vol === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
-          <div className="w-20 h-3 flex items-center cursor-pointer group/vol" onClick={changeVolume}>
+          <div ref={volumeTrackRef} className="w-20 h-3 flex items-center cursor-pointer group/vol touch-none" onClick={changeVolume} onPointerDown={startVolumeDrag}>
             <div className="w-full h-1 bg-white/20 rounded-full relative">
               <div className="absolute top-0 left-0 h-full bg-white rounded-full" style={{ width: `${(muted ? 0 : vol) * 100}%` }} />
             </div>

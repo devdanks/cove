@@ -1,14 +1,13 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, tags, performers, scenes as scenesApi } from "../api/client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { galleries } from "../api/client";
 import type { Gallery, GalleryUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
-import { Search, X } from "lucide-react";
 import { InteractiveRatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
-import { GroupedTagOptionList, SelectedTagChips } from "../components/TagSelector";
+import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 
 interface Props {
   gallery: Gallery;
@@ -33,18 +32,6 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
     sceneIds: gallery.sceneIds ?? [],
   });
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(gallery.customFields ?? {}) });
-
-  const [tagSearch, setTagSearch] = useState("");
-  const [performerSearch, setPerformerSearch] = useState("");
-  const [sceneSearch, setSceneSearch] = useState("");
-
-  const { data: tagResults } = useQuery({ queryKey: ["tags-search", tagSearch], queryFn: () => tags.find({ q: tagSearch, perPage: 20 }), enabled: tagSearch.length > 0 });
-  const { data: performerResults } = useQuery({ queryKey: ["performers-search", performerSearch], queryFn: () => performers.find({ q: performerSearch, perPage: 20 }), enabled: performerSearch.length > 0 });
-  const { data: sceneResults } = useQuery({ queryKey: ["scenes-search", sceneSearch], queryFn: () => scenesApi.find({ q: sceneSearch, perPage: 20 }), enabled: sceneSearch.length > 0 });
-
-  const knownTagsById = new Map([...gallery.tags, ...(tagResults?.items ?? [])].map((tag) => [tag.id, tag]));
-  const selectedTags = form.tagIds.map((tagId) => knownTagsById.get(tagId)).filter(Boolean) as Gallery["tags"];
-  const selectedPerformers = gallery.performers.filter((p) => form.performerIds.includes(p.id));
 
   const mutation = useMutation({
     mutationFn: (data: GalleryUpdate) => galleries.update(gallery.id, data),
@@ -110,79 +97,17 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
 
       {/* Tags picker */}
       <Field label="Tags">
-        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setForm({ ...form, tagIds: form.tagIds.filter((id) => id !== tag.id) })} className="mb-2 flex flex-wrap gap-1" />
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2 top-2.5 text-secondary" />
-          <input
-            type="text" value={tagSearch} onChange={(e) => setTagSearch(e.target.value)} placeholder="Search tags..."
-            className="w-full bg-card border border-border rounded pl-8 pr-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
-          />
-          {tagSearch && tagResults && (
-            <GroupedTagOptionList
-              tags={tagResults.items.filter((tag) => !form.tagIds.includes(tag.id))}
-              maxItems={20}
-              className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded border border-border bg-surface shadow-xl"
-              onSelect={(tag) => { setForm({ ...form, tagIds: [...form.tagIds, tag.id] }); setTagSearch(""); }}
-            />
-          )}
-        </div>
+        <EntityReferenceMultiSelector entityType="tag" values={form.tagIds} onChange={(tagIds) => setForm({ ...form, tagIds })} placeholder="Search tags..." />
       </Field>
 
       {/* Performers picker */}
       <Field label="Performers">
-        <div className="flex flex-wrap gap-1 mb-2">
-          {selectedPerformers.map((p) => (
-            <span key={p.id} className="bg-accent/10 text-accent-hover text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-              {p.name}
-              <X className="w-3 h-3 cursor-pointer" onClick={() => setForm({ ...form, performerIds: form.performerIds.filter((id) => id !== p.id) })} />
-            </span>
-          ))}
-        </div>
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2 top-2.5 text-secondary" />
-          <input
-            type="text" value={performerSearch} onChange={(e) => setPerformerSearch(e.target.value)} placeholder="Search performers..."
-            className="w-full bg-card border border-border rounded pl-8 pr-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
-          />
-          {performerSearch && performerResults && (
-            <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded max-h-32 overflow-y-auto">
-              {performerResults.items.filter((p) => !form.performerIds.includes(p.id)).map((p) => (
-                <div key={p.id} onClick={() => { setForm({ ...form, performerIds: [...form.performerIds, p.id] }); setPerformerSearch(""); }}
-                  className="px-3 py-1.5 text-sm hover:bg-card-hover cursor-pointer">{p.name}</div>
-              ))}
-            </div>
-          )}
-        </div>
+        <EntityReferenceMultiSelector entityType="performer" values={form.performerIds} onChange={(performerIds) => setForm({ ...form, performerIds })} placeholder="Search performers..." />
       </Field>
 
       {/* Scenes */}
       <Field label="Scenes">
-        <div className="flex flex-wrap gap-1 mb-2">
-          {form.sceneIds.map((sid) => {
-            const s = sceneResults?.items.find((sc) => sc.id === sid);
-            return (
-              <span key={sid} className="bg-teal-600/30 text-teal-300 text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-                {s?.title || s?.files?.[0]?.basename || "Untitled scene"}
-                <X className="w-3 h-3 cursor-pointer" onClick={() => setForm({ ...form, sceneIds: form.sceneIds.filter((id) => id !== sid) })} />
-              </span>
-            );
-          })}
-        </div>
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2 top-2.5 text-secondary" />
-          <input
-            type="text" value={sceneSearch} onChange={(e) => setSceneSearch(e.target.value)} placeholder="Search scenes..."
-            className="w-full bg-card border border-border rounded pl-8 pr-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
-          />
-          {sceneSearch && sceneResults && (
-            <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded max-h-32 overflow-y-auto">
-              {sceneResults.items.filter((sc) => !form.sceneIds.includes(sc.id)).map((sc) => (
-                <div key={sc.id} onClick={() => { setForm({ ...form, sceneIds: [...form.sceneIds, sc.id] }); setSceneSearch(""); }}
-                  className="px-3 py-1.5 text-sm hover:bg-card-hover cursor-pointer">{sc.title || sc.files?.[0]?.basename || "Untitled scene"}</div>
-              ))}
-            </div>
-          )}
-        </div>
+        <EntityReferenceMultiSelector entityType="scene" values={form.sceneIds} onChange={(sceneIds) => setForm({ ...form, sceneIds })} placeholder="Search scenes..." />
       </Field>
 
       <Field label="Custom Fields">

@@ -145,9 +145,14 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             .Include(g => g.GroupTags)
             .Where(g => dto.Ids.Contains(g.Id))
             .ToListAsync(ct);
+        var clearFields = dto.ClearFields?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
 
         foreach (var g in groups)
         {
+            if (clearFields.Contains("studioId")) g.StudioId = null;
+            if (clearFields.Contains("date")) g.Date = null;
+            if (clearFields.Contains("director")) g.Director = null;
+            if (clearFields.Contains("synopsis")) g.Synopsis = null;
             if (dto.StudioId.HasValue) g.StudioId = dto.StudioId;
             if (dto.Date != null) g.Date = ParseDate(dto.Date);
             if (dto.Director != null) g.Director = dto.Director;

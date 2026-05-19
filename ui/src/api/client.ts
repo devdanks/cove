@@ -12,7 +12,7 @@ import type {
   TextDocument, TextCreate, TextUpdate, TextContent,
   Group, GroupCreate, GroupUpdate,
   GroupReorder,
-  GroupItem, GroupItemCreate, GroupItemsFromSpans, GroupItemsReorder, GroupItemUpdate,
+  GroupItem, GroupItemCreate, GroupItemsFromSpans, GroupItemsRemoveHosts, GroupItemsReorder, GroupItemUpdate,
   GroupPlaybackManifest,
   BookmarkDto, BookmarkToggle, BookmarkState, BookmarkBatchRequest,
   DynamicGroupSource,
@@ -383,7 +383,7 @@ export const scenes = {
   previewUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview`),
   previewStatusUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview/status`),
   captionUrl: (sceneId: number, captionId: number) => buildMediaUrl(`/stream/scene/${sceneId}/caption/${captionId}`),
-  transcodeUrl: (id: number, resolution?: string) => buildMediaUrl(`/stream/scene/${id}/transcode`, undefined, undefined, { resolution }),
+  transcodeUrl: (id: number, resolution?: string, start?: number) => buildMediaUrl(`/stream/scene/${id}/transcode`, undefined, undefined, { resolution, start }),
   hlsMasterUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/hls/master.m3u8`),
   getResolutions: (id: number) => request<string[]>(`/stream/scene/${id}/resolutions`),
   segments: {
@@ -807,6 +807,8 @@ export const groups = {
       request<GroupItem>(`/groups/${groupId}/items/${itemId}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (groupId: number, itemId: number) =>
       request<void>(`/groups/${groupId}/items/${itemId}`, { method: "DELETE" }),
+    removeHosts: (groupId: number, data: GroupItemsRemoveHosts) =>
+      request<void>(`/groups/${groupId}/items/remove-hosts`, { method: "POST", body: JSON.stringify(data) }),
     reorder: (groupId: number, data: GroupItemsReorder) =>
       request<void>(`/groups/${groupId}/items/reorder`, { method: "PUT", body: JSON.stringify(data) }),
     fromSpans: (groupId: number, data: GroupItemsFromSpans) =>

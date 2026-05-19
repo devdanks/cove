@@ -75,10 +75,6 @@ a, button { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, o
   background: linear-gradient(180deg, var(--color-surface), var(--color-background));
 }
 
-/* Theater mode */
-html.theater-mode nav.cove-navbar { display: none; }
-html.theater-mode main { max-width: none !important; padding: 0 !important; }
-
 /* Hide scrollbar for horizontal carousels */
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
@@ -1217,10 +1213,6 @@ a, button { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, o
 .detail-hero-gradient {
   background: linear-gradient(180deg, var(--color-shell-surface), var(--color-shell-bg));
 }
-
-/* Theater mode */
-html.theater-mode nav.cove-navbar { display: none; }
-html.theater-mode main { max-width: none !important; padding: 0 !important; }
 
 /* Hide scrollbar for horizontal carousels */
 .scrollbar-hide::-webkit-scrollbar { display: none; }

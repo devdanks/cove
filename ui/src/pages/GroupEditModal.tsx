@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { groups, tags as tagsApi, entityImages } from "../api/client";
+import { groups, entityImages } from "../api/client";
 import type { Group, GroupUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, NumberInput, SaveButton } from "../components/EditModal";
 import { ImageInput } from "../components/ImageInput";
@@ -8,7 +8,7 @@ import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
-import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
+import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 import { DynamicGroupFilterEditor, FILTER_DYNAMIC_SOURCE_KEY, defaultDynamicGroupFilterQueryJson } from "../components/DynamicGroupFilterEditor";
 
 interface Props {
@@ -36,13 +36,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const [cacheTtlSec, setCacheTtlSec] = useState(group.cacheTtlSec ?? 60);
   const [showInSceneLists, setShowInSceneLists] = useState(group.showInSceneLists ?? false);
 
-  // Tag search
-  const [tagSearch, setTagSearch] = useState("");
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(group.customFields ?? {}) });
-  const { data: allTags } = useQuery({
-    queryKey: ["tags-all"],
-    queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
-  });
   const { data: dynamicSources = [] } = useQuery({
     queryKey: ["group-dynamic-sources"],
     queryFn: () => groups.dynamicSources(),
@@ -98,9 +92,6 @@ export function GroupEditModal({ group, open, onClose }: Props) {
       showInSceneLists,
     });
   };
-
-  const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, selectedTagIds);
-  const selectedTags = allTags?.items.filter((t) => selectedTagIds.includes(t.id)) ?? group.tags;
 
   return (
     <EditModal title={`Edit Group: ${group.name}`} open={open} onClose={onClose}>
@@ -222,17 +213,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
 
       {/* Tags */}
       <Field label="Tags">
-        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds(selectedTagIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
-        <input
-          type="text"
-          value={tagSearch}
-          onChange={(e) => setTagSearch(e.target.value)}
-          placeholder="Search tags..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {tagSearch && filteredTags.length > 0 && (
-          <GroupedTagOptionList tags={filteredTags} maxItems={20} onSelect={(tag) => { setSelectedTagIds([...selectedTagIds, tag.id]); setTagSearch(""); }} />
-        )}
+        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." />
       </Field>
 
       <Field label="Custom Fields">

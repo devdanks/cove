@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { images, system, tags as tagsApi, performers as performersApi, galleries as galleriesApi, groups as groupsApi } from "../api/client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { images, system } from "../api/client";
 import type { DownloaderMatch, Image, ImageCreate, SceneGroupInput } from "../api/types";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
-import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector } from "../components/TagSelector";
+import { EntityReferenceMultiSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
 import { FileBackedCreateSource, type CreateSourceMode } from "../components/FileBackedCreateSource";
 import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundError, type UrlDownloadMode } from "../utils/createFromUrlDownload";
 import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
@@ -130,42 +130,9 @@ function cloneFormState(state: ImageFormState): ImageFormState {
 
 function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPending, error, image, resetSignal, createAnother, onCreateAnotherChange, sourceMode = "metadata", onSourceModeChange, filePath = "", onFilePathChange, url = "", onUrlChange, urlDownloadMode = "now", onUrlDownloadModeChange, scrapeMetadata = false, onScrapeMetadataChange, noDownloaderFound = false, onCreateWithoutDownload, onDismissNoDownloader, onCreateFromFile, onCreateFromUrl, renderMode = "modal" }: ImageMetadataModalProps) {
   const [form, setForm] = useState<ImageFormState>(() => cloneFormState(initialState));
-  const [tagSearch, setTagSearch] = useState("");
-  const [perfSearch, setPerfSearch] = useState("");
-  const [gallerySearch, setGallerySearch] = useState("");
-  const [groupSearch, setGroupSearch] = useState("");
-
-  const { data: allTags } = useQuery({
-    queryKey: ["tags-all"],
-    queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
-    enabled: open,
-  });
-
-  const { data: allPerformers } = useQuery({
-    queryKey: ["performers-all"],
-    queryFn: () => performersApi.find({ perPage: 500, sort: "name", direction: "asc" }),
-    enabled: open,
-  });
-
-  const { data: allGalleries } = useQuery({
-    queryKey: ["galleries-all"],
-    queryFn: () => galleriesApi.find({ perPage: 500, sort: "title", direction: "asc" }),
-    enabled: open,
-  });
-
-  const { data: allGroups } = useQuery({
-    queryKey: ["groups-all"],
-    queryFn: () => groupsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
-    enabled: open,
-  });
-
   useEffect(() => {
     if (!open) return;
     setForm(cloneFormState(initialState));
-    setTagSearch("");
-    setPerfSearch("");
-    setGallerySearch("");
-    setGroupSearch("");
   }, [initialState, open, resetSignal]);
 
   const buildPayload = (): ImageCreate => {
@@ -213,18 +180,12 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
     }
   };
 
-  const filteredTags = filterTagsForSelector(allTags?.items ?? [], tagSearch, form.selectedTagIds);
-
-  const filteredPerformers = allPerformers?.items.filter(
-    (performer) => !form.selectedPerformerIds.includes(performer.id) && performer.name.toLowerCase().includes(perfSearch.toLowerCase())
-  ) ?? [];
-  const selectedGroupIds = form.selectedGroups.map((group) => group.groupId);
-  const filteredGroups = allGroups?.items.filter(
-    (group) => !selectedGroupIds.includes(group.id) && group.name.toLowerCase().includes(groupSearch.toLowerCase())
-  ) ?? [];
-
-  const selectedTags = allTags?.items.filter((tag) => form.selectedTagIds.includes(tag.id)) ?? image?.tags ?? [];
-  const selectedPerformers = allPerformers?.items.filter((performer) => form.selectedPerformerIds.includes(performer.id)) ?? image?.performers ?? [];
+  const setSelectedGroupIds = (groupIds: number[]) => {
+    setForm({
+      ...form,
+      selectedGroups: groupIds.map((groupId) => form.selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }),
+    });
+  };
 
   const formContent = (
     <>
@@ -289,122 +250,30 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       </Field>
 
       <Field label="Tags">
-        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setForm({ ...form, selectedTagIds: form.selectedTagIds.filter((id) => id !== tag.id) })} className="mb-2 flex flex-wrap gap-1.5" />
-        <input
-          type="text"
-          value={tagSearch}
-          onChange={(e) => setTagSearch(e.target.value)}
-          placeholder="Search tags..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {tagSearch && filteredTags.length > 0 && (
-          <GroupedTagOptionList tags={filteredTags} maxItems={20} onSelect={(tag) => { setForm({ ...form, selectedTagIds: [...form.selectedTagIds, tag.id] }); setTagSearch(""); }} />
-        )}
+        <EntityReferenceMultiSelector entityType="tag" values={form.selectedTagIds} onChange={(selectedTagIds) => setForm({ ...form, selectedTagIds })} placeholder="Search tags..." />
       </Field>
 
       <Field label="Performers">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedPerformers.map((performer) => (
-            <span key={performer.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/10 text-accent-hover">
-              {performer.name}
-              <button onClick={() => setForm({ ...form, selectedPerformerIds: form.selectedPerformerIds.filter((id) => id !== performer.id) })} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
-        <input
-          type="text"
-          value={perfSearch}
-          onChange={(e) => setPerfSearch(e.target.value)}
-          placeholder="Search performers..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {perfSearch && filteredPerformers.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredPerformers.slice(0, 10).map((performer) => (
-              <button
-                key={performer.id}
-                onClick={() => { setForm({ ...form, selectedPerformerIds: [...form.selectedPerformerIds, performer.id] }); setPerfSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {performer.name}{performer.disambiguation ? ` (${performer.disambiguation})` : ""}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="performer" values={form.selectedPerformerIds} onChange={(selectedPerformerIds) => setForm({ ...form, selectedPerformerIds })} placeholder="Search performers..." />
       </Field>
 
       {/* Galleries */}
       <Field label="Galleries">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {form.selectedGalleryIds.map((gid) => {
-            const g = allGalleries?.items.find((gal) => gal.id === gid);
-            return (
-              <span key={gid} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-900 text-emerald-300">
-                {g?.title || g?.files?.[0]?.path?.split(/[\\/]/).pop() || "Untitled gallery"}
-                <button onClick={() => setForm({ ...form, selectedGalleryIds: form.selectedGalleryIds.filter((id) => id !== gid) })} className="hover:text-white">×</button>
-              </span>
-            );
-          })}
-        </div>
-        <input
-          type="text"
-          value={gallerySearch}
-          onChange={(e) => setGallerySearch(e.target.value)}
-          placeholder="Search galleries..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {gallerySearch && (allGalleries?.items.filter(
-          (g) => !form.selectedGalleryIds.includes(g.id) && (g.title || "").toLowerCase().includes(gallerySearch.toLowerCase())
-        ) ?? []).length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {(allGalleries?.items.filter(
-              (g) => !form.selectedGalleryIds.includes(g.id) && (g.title || "").toLowerCase().includes(gallerySearch.toLowerCase())
-            ) ?? []).slice(0, 10).map((g) => (
-              <button
-                key={g.id}
-                onClick={() => { setForm({ ...form, selectedGalleryIds: [...form.selectedGalleryIds, g.id] }); setGallerySearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {g.title || "Untitled"}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="gallery" values={form.selectedGalleryIds} onChange={(selectedGalleryIds) => setForm({ ...form, selectedGalleryIds })} placeholder="Search galleries..." />
       </Field>
 
       <Field label="Groups">
         <div className="flex flex-wrap gap-1.5 mb-2">
           {form.selectedGroups.map((selectedGroup) => {
-            const group = allGroups?.items.find((item) => item.id === selectedGroup.groupId)
-              ?? image?.groups?.find((item) => item.id === selectedGroup.groupId);
             return (
               <span key={selectedGroup.groupId} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-900 text-orange-300">
-                {group?.name || "Untitled group"}
+                <EntityReferenceValue entityType="group" value={selectedGroup.groupId} />
                 <button onClick={() => setForm({ ...form, selectedGroups: form.selectedGroups.filter((item) => item.groupId !== selectedGroup.groupId) })} className="hover:text-white">×</button>
               </span>
             );
           })}
         </div>
-        <input
-          type="text"
-          value={groupSearch}
-          onChange={(e) => setGroupSearch(e.target.value)}
-          placeholder="Search groups..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {groupSearch && filteredGroups.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredGroups.slice(0, 10).map((group) => (
-              <button
-                key={group.id}
-                onClick={() => { setForm({ ...form, selectedGroups: [...form.selectedGroups, { groupId: group.id, sceneIndex: 0 }] }); setGroupSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {group.name}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="group" values={form.selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." />
       </Field>
 
       <label className="flex items-center gap-2 text-sm text-secondary mb-4 cursor-pointer">

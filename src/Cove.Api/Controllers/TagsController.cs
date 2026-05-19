@@ -7,6 +7,7 @@ using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
 using Cove.Core.Interfaces;
+using Cove.Data.Services;
 using IAuthorizationService = Cove.Core.Auth.IAuthorizationService;
 
 namespace Cove.Api.Controllers;
@@ -14,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.TagsRead)]
-public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, CustomFieldService customFields) : ControllerBase
+public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, CustomFieldService customFields, SegmentSpanResolver? spanResolver = null) : ControllerBase
 {
     private sealed record TagUsageCounts(
         int SceneCount,
@@ -31,6 +32,25 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     }
 
     private sealed record GraphRelation(int ParentId, int ChildId);
+
+    private async Task EvictSegmentSpanCachesForTagsAsync(IEnumerable<int> tagIds, CancellationToken ct)
+    {
+        if (spanResolver is null)
+            return;
+
+        var ids = tagIds.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length == 0)
+            return;
+
+        var sceneIds = await db.Segments.AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
+            .Select(segment => segment.HostId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        foreach (var sceneId in sceneIds)
+            spanResolver.EvictScene(sceneId);
+    }
 
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -283,6 +303,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             await customFields.SaveValuesAsync(CustomFieldEntityTypes.Tag, id, dto.CustomFields, ct);
         if (dto.Aliases != null)
             await entityIdentifiers.SyncAsync(EntityKinds.Tag, id, IdentifierSchemes.Alias, dto.Aliases, null, ct);
+        await EvictSegmentSpanCachesForTagsAsync([id], ct);
         var updated = tagRepo != null
             ? await tagRepo.GetByIdWithRelationsAsync(id, ct)
             : await db.Tags
@@ -761,6 +782,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         }
 
         await db.SaveChangesAsync(ct);
+        await EvictSegmentSpanCachesForTagsAsync(tags.Select(tag => tag.Id), ct);
         return Ok(new { updated = tags.Count });
     }
 

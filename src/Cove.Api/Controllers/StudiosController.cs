@@ -163,9 +163,12 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             .Include(s => s.StudioTags)
             .Where(s => dto.Ids.Contains(s.Id))
             .ToListAsync(ct);
+        var clearFields = dto.ClearFields?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
 
         foreach (var s in studios)
         {
+            if (clearFields.Contains("parentId")) s.ParentId = null;
+            if (clearFields.Contains("details")) s.Details = null;
             if (dto.Favorite.HasValue) s.Favorite = dto.Favorite.Value;
             if (dto.Details != null) s.Details = dto.Details;
             if (dto.IgnoreAutoTag.HasValue) s.IgnoreAutoTag = dto.IgnoreAutoTag.Value;

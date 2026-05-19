@@ -1,10 +1,9 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { X, Plus, Minus } from "lucide-react";
+import { useState } from "react";
+import { X } from "lucide-react";
 import { InteractiveRating } from "./Rating";
-import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi } from "../api/client";
 import type { BulkUpdateMode } from "../api/types";
 import { StudioSelector } from "./StudioSelector";
+import { EntityReferenceMultiSelector, type EntityReferenceType } from "./EntityReferenceSelector";
 
 // ===== Generic Bulk Edit Dialog =====
 
@@ -264,36 +263,6 @@ function MultiIdBulkEditor({
   onValueChange: (v: unknown) => void;
   onModeChange: (m: BulkUpdateMode) => void;
 }) {
-  const [searchText, setSearchText] = useState("");
-
-  const { data: entities } = useQuery({
-    queryKey: [entityType, "all"],
-    queryFn: async () => {
-      switch (entityType) {
-        case "tags": return (await tagsApi.find({ perPage: 1000, sort: "name", direction: "asc" })).items;
-        case "performers": return (await performersApi.find({ perPage: 1000, sort: "name", direction: "asc" })).items;
-        case "studios": return (await studiosApi.find({ perPage: 1000, sort: "name", direction: "asc" })).items;
-        case "groups": return (await groupsApi.find({ perPage: 1000, sort: "name", direction: "asc" })).items;
-        case "galleries": return (await galleriesApi.find({ perPage: 1000, sort: "title", direction: "asc" })).items;
-        default: return [];
-      }
-    },
-    staleTime: 60000,
-  });
-
-  const getName = (e: any) => e.name || e.title || "Untitled item";
-
-  const filteredEntities = useMemo(() => {
-    if (!entities) return [];
-    const q = searchText.toLowerCase();
-    return q ? entities.filter((e: any) => getName(e).toLowerCase().includes(q)) : entities;
-  }, [entities, searchText]);
-
-  const toggleId = (id: number) => {
-    const next = value.includes(id) ? value.filter((i) => i !== id) : [...value, id];
-    onValueChange(next);
-  };
-
   return (
     <div className="space-y-2">
       {/* Mode selector */}
@@ -311,48 +280,26 @@ function MultiIdBulkEditor({
         ))}
       </div>
 
-      {/* Selected */}
-      {value.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {value.map((id) => {
-            const entity = entities?.find((e: any) => e.id === id);
-            return (
-              <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-card text-foreground border border-border">
-                {entity ? getName(entity) : "Unavailable item"}
-                <button onClick={() => toggleId(id)} className="hover:text-red-400">
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Search */}
-      <input
-        type="text"
-        value={searchText}
-        onChange={(e) => setSearchText(e.target.value)}
+      <EntityReferenceMultiSelector
+        entityType={toReferenceEntityType(entityType)}
+        values={value}
+        onChange={onValueChange as (values: number[]) => void}
         placeholder={`Search ${entityType}...`}
-        className="w-full bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
+        inputClassName="w-full bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
+        resultsClassName="max-h-32 overflow-y-auto border border-border rounded bg-input"
       />
-      <div className="max-h-32 overflow-y-auto border border-border rounded bg-input">
-        {filteredEntities.slice(0, 50).map((entity: any) => {
-          const isSelected = value.includes(entity.id);
-          return (
-            <button
-              key={entity.id}
-              onClick={() => toggleId(entity.id)}
-              className={`w-full text-left px-2 py-1 text-xs hover:bg-card flex items-center gap-1 ${isSelected ? "text-accent" : "text-foreground"}`}
-            >
-              {isSelected ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-              {getName(entity)}
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
+}
+
+function toReferenceEntityType(entityType: "tags" | "performers" | "studios" | "groups" | "galleries"): EntityReferenceType {
+  switch (entityType) {
+    case "tags": return "tag";
+    case "performers": return "performer";
+    case "studios": return "studio";
+    case "groups": return "group";
+    case "galleries": return "gallery";
+  }
 }
 
 const BULK_MODE_LABELS: Record<BulkUpdateMode, string> = {

@@ -453,7 +453,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
       onSelectAllMatching={selectShown}
       selectAllMatchingLabel="Select shown"
       onSelectNone={selectNone}
-      selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} />}
+      selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "group", id: groupId }} />}
       criteriaDefinitions={SCENE_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}

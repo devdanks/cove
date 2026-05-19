@@ -329,11 +329,17 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             .AsSplitQuery()
             .Where(i => dto.Ids.Contains(i.Id))
             .ToListAsync(ct);
+        var clearFields = dto.ClearFields?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
 
         foreach (var image in images)
         {
             var previousTagIds = dto.TagIds != null ? image.ImageTags.Select(imageTag => imageTag.TagId).ToArray() : [];
 
+            if (clearFields.Contains("studioId")) image.StudioId = null;
+            if (clearFields.Contains("date")) image.Date = null;
+            if (clearFields.Contains("code")) image.Code = null;
+            if (clearFields.Contains("details")) image.Details = null;
+            if (clearFields.Contains("photographer")) image.Photographer = null;
             if (dto.Organized.HasValue) image.Organized = dto.Organized.Value;
             if (dto.StudioId.HasValue) image.StudioId = dto.StudioId;
             if (dto.Date != null) image.Date = ParseDate(dto.Date);

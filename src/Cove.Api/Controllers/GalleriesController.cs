@@ -354,9 +354,15 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             .AsSplitQuery()
             .Where(g => dto.Ids.Contains(g.Id))
             .ToListAsync(ct);
+        var clearFields = dto.ClearFields?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
 
         foreach (var gallery in galleries)
         {
+            if (clearFields.Contains("studioId")) gallery.StudioId = null;
+            if (clearFields.Contains("date")) gallery.Date = null;
+            if (clearFields.Contains("code")) gallery.Code = null;
+            if (clearFields.Contains("details")) gallery.Details = null;
+            if (clearFields.Contains("photographer")) gallery.Photographer = null;
             if (dto.Organized.HasValue) gallery.Organized = dto.Organized.Value;
             if (dto.StudioId.HasValue) gallery.StudioId = dto.StudioId;
             if (dto.Date != null) gallery.Date = ParseDate(dto.Date);

@@ -10,7 +10,6 @@ import {
   Info,
   Layers,
   ListVideo,
-  MonitorPlay,
   Pencil,
   Puzzle,
   SlidersHorizontal,
@@ -142,20 +141,12 @@ function MediaDetailLayoutRoot({
   engagement,
   actions,
   keyboardShortcuts = [],
-  theaterModeSupported,
-  isTheaterMode,
-  onTheaterModeToggle,
   isLoading,
   error,
   children,
   headerImage,
 }: MediaDetailLayoutProps) {
-  const { theaterMode, setTheaterMode } = useMediaDetailLayout({
-    theaterModeSupported,
-    isTheaterMode,
-    onTheaterModeToggle,
-    keyboardShortcuts,
-  });
+  useMediaDetailLayout({ keyboardShortcuts });
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed();
 
   const hasTabs = tabs.length > 0;
@@ -263,24 +254,8 @@ function MediaDetailLayoutRoot({
     children
   );
 
-  // Header actions: theater toggle + page-supplied actions, mounted into the
-  // toolbar row at the top of the sidebar (right-aligned), not as a separate bar.
+  // Header actions are mounted into the toolbar row at the top of the sidebar.
   const headerActions: ReactNode[] = [];
-  if (theaterModeSupported) {
-    headerActions.push(
-      <button
-        key="theater-toggle"
-        type="button"
-        aria-label="Toggle theater mode"
-        aria-pressed={theaterMode}
-        onClick={() => setTheaterMode(!theaterMode)}
-        className="inline-flex items-center gap-1 rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
-        title={theaterMode ? "Exit theater" : "Theater mode"}
-      >
-        <MonitorPlay className="h-4 w-4" />
-      </button>,
-    );
-  }
   if (actions) {
     headerActions.push(<div key="actions" className="flex items-center gap-1">{actions}</div>);
   }
@@ -373,23 +348,15 @@ function MediaDetailLayoutRoot({
     <div className="-mx-3 sm:-mx-4 md:-mx-6 -mt-5 -mb-5 overflow-x-hidden">
       <div
         className={
-          theaterMode || !media
+          !media
             ? "flex flex-col"
             : isCompactMedia
               ? "flex flex-col lg:flex-row"
             : "flex flex-col lg:h-[calc(100vh-49px)] lg:overflow-hidden lg:flex-row"
         }
       >
-        {!theaterMode ? sidebar : null}
+        {sidebar}
         {rightColumn}
-        {theaterMode && hasTabs ? (
-          <div className="border-t border-border bg-background/40">
-            <div className="flex max-h-[45vh] min-h-0">
-              {tabsNav}
-              <div className="min-w-0 flex-1 overflow-y-auto px-6 py-4">{contentNode}</div>
-            </div>
-          </div>
-        ) : null}
       </div>
     </div>
   );

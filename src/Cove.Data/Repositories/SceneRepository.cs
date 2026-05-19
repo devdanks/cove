@@ -97,10 +97,12 @@ public class SceneRepository : ISceneRepository
         var totalCount = await filterQuery.AsNoTracking().CountAsync(ct);
 
         // Sort and paginate on the lightweight query, then fetch only the IDs
+        var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);
         var sort = findFilter?.Sort ?? "updated_at";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
         filterQuery = ApplySorting(filterQuery, sort, desc, findFilter?.Seed);
-        filterQuery = FullTextSearchHelpers.OrderByRelevance(_db, filterQuery, findFilter?.Q);
+        if (!hasExplicitSort)
+            filterQuery = FullTextSearchHelpers.OrderByRelevance(_db, filterQuery, findFilter?.Q);
 
         var page = findFilter?.Page ?? 1;
         var pagedIds = await filterQuery
@@ -119,6 +121,7 @@ public class SceneRepository : ISceneRepository
             .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
             .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
             .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
+            .Include(s => s.GroupItems).ThenInclude(item => item.Group)
             .Include(s => s.Files)
             .AsSplitQuery()
             .Where(s => pagedIds.Contains(s.Id))
@@ -173,7 +176,7 @@ public class SceneRepository : ISceneRepository
                 query = ApplyIntCriterion(query, filter.FrameRateCriterion, s => (int)s.MaxFrameRate);
 
             if (filter.BitrateInterval != null)
-                query = ApplyIntCriterion(query, filter.BitrateInterval, s => (int)(s.MaxBitRate / 1000));
+                query = ApplyBitrateCriterion(query, filter.BitrateInterval);
 
             if (filter.FileCountCriterion != null)
                 query = ApplyIntCriterion(query, filter.FileCountCriterion, s => s.FileCount);
@@ -395,7 +398,7 @@ public class SceneRepository : ISceneRepository
         "path" => ApplyPathSort(query, desc),
         "resolution" => desc ? query.OrderByDescending(s => s.MaxHeight) : query.OrderBy(s => s.MaxHeight),
         "framerate" => desc ? query.OrderByDescending(s => s.MaxFrameRate) : query.OrderBy(s => s.MaxFrameRate),
-        "bitrate" => desc ? query.OrderByDescending(s => s.MaxBitRate) : query.OrderBy(s => s.MaxBitRate),
+        "bitrate" => ApplyBitrateSort(query, desc),
         "phash" => ApplyPhashSort(query, desc),
         "perceptual_similarity" => ApplyPhashSort(query, desc),
         "tag_count" => desc
@@ -423,6 +426,45 @@ public class SceneRepository : ISceneRepository
         return desc
             ? sortQuery.OrderBy(item => item.LastFavoriteAt == null ? 1 : 0).ThenByDescending(item => item.LastFavoriteAt).Select(item => item.Scene)
             : sortQuery.OrderBy(item => item.LastFavoriteAt == null ? 1 : 0).ThenBy(item => item.LastFavoriteAt).Select(item => item.Scene);
+    }
+
+    private IQueryable<Scene> ApplyBitrateCriterion(IQueryable<Scene> query, IntCriterion criterion)
+    {
+        var val = (long)criterion.Value;
+        var val2 = (long)(criterion.Value2 ?? criterion.Value);
+        var bitRateQuery = query.Select(scene => new
+        {
+            Scene = scene,
+            BitRateKbps = ((_db.VideoFiles
+                .Where(file => file.SceneId == (scene.ParentSceneId ?? scene.Id))
+                .Max(file => (long?)file.BitRate) ?? 0L) / 1000L),
+        });
+
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => bitRateQuery.Where(item => item.BitRateKbps == val).Select(item => item.Scene),
+            CriterionModifier.NotEquals => bitRateQuery.Where(item => item.BitRateKbps != val).Select(item => item.Scene),
+            CriterionModifier.GreaterThan => bitRateQuery.Where(item => item.BitRateKbps > val).Select(item => item.Scene),
+            CriterionModifier.LessThan => bitRateQuery.Where(item => item.BitRateKbps < val).Select(item => item.Scene),
+            CriterionModifier.Between => bitRateQuery.Where(item => item.BitRateKbps >= val && item.BitRateKbps <= val2).Select(item => item.Scene),
+            CriterionModifier.NotBetween => bitRateQuery.Where(item => item.BitRateKbps < val || item.BitRateKbps > val2).Select(item => item.Scene),
+            _ => query,
+        };
+    }
+
+    private IQueryable<Scene> ApplyBitrateSort(IQueryable<Scene> query, bool desc)
+    {
+        var bitRateQuery = query.Select(scene => new
+        {
+            Scene = scene,
+            BitRate = _db.VideoFiles
+                .Where(file => file.SceneId == (scene.ParentSceneId ?? scene.Id))
+                .Max(file => (long?)file.BitRate) ?? 0L,
+        });
+
+        return desc
+            ? bitRateQuery.OrderByDescending(item => item.BitRate).ThenByDescending(item => item.Scene.Id).Select(item => item.Scene)
+            : bitRateQuery.OrderBy(item => item.BitRate).ThenBy(item => item.Scene.Id).Select(item => item.Scene);
     }
 
     private static IQueryable<Scene> ApplyFileModTimeSort(IQueryable<Scene> query, bool desc)

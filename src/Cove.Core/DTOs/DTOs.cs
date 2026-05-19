@@ -68,7 +68,7 @@ public record PerformerDto(
 
 public record PerformerRemoteIdDto(string Endpoint, string RemoteId);
 
-public record PerformerSummaryDto(int Id, string Name, string? Disambiguation, string? Gender, string? Birthdate, bool Favorite, string? ImagePath);
+public record PerformerSummaryDto(int Id, string Name, string? Disambiguation, string? Gender, string? Birthdate, bool Favorite, string? ImagePath, int SceneCount = 0, int ImageCount = 0, int GalleryCount = 0, int AudioCount = 0, int TextCount = 0);
 
 public record GallerySummaryDto(int Id, string? Title, string? Date);
 
@@ -428,6 +428,8 @@ public record GroupItemUpdateDto(
     string? Notes);
 
 public record GroupItemsReorderDto(List<int> Ids, int StartIndex = 0);
+
+public record GroupItemsRemoveHostsDto(GroupItemKind Kind, List<int> HostIds);
 
 public record GroupItemSpanInputDto(
     string? SpanKey,
@@ -1697,6 +1699,8 @@ public record BulkSceneUpdateDto
     public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
     public List<int>? PerformerIds { get; init; }
     public BulkUpdateMode PerformerMode { get; init; } = BulkUpdateMode.Add;
+    public List<int>? GalleryIds { get; init; }
+    public BulkUpdateMode GalleryMode { get; init; } = BulkUpdateMode.Add;
     public List<SceneGroupInputDto>? GroupIds { get; init; }
     public BulkUpdateMode GroupMode { get; init; } = BulkUpdateMode.Add;
 }
@@ -1716,6 +1720,7 @@ public record BulkPerformerUpdateDto
 public record BulkImageUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Organized { get; init; }
     public int? StudioId { get; init; }
@@ -1734,6 +1739,7 @@ public record BulkImageUpdateDto
 public record BulkGalleryUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Organized { get; init; }
     public int? StudioId { get; init; }
@@ -1780,6 +1786,7 @@ public record BulkTextDocumentUpdateDto
 public record BulkStudioUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public bool? Favorite { get; init; }
     public string? Details { get; init; }
@@ -1808,6 +1815,7 @@ public record BulkTagUpdateDto
 public record BulkGroupUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public int? Rating { get; init; }
     public int? StudioId { get; init; }
     public string? Date { get; init; }

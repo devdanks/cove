@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { scenes, tags as tagsApi, performers as performersApi, galleries as galleriesApi, groups as groupsApi, tagApplications } from "../api/client";
-import type { Scene, SceneUpdate, Tag, Performer, Studio, TagApplication } from "../api/types";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { scenes, tagApplications } from "../api/client";
+import type { Scene, SceneUpdate, TagApplication } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StudioSelector } from "../components/StudioSelector";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
-import { GroupedTagOptionList, SelectedTagChips, filterTagsForSelector, type SelectableTag } from "../components/TagSelector";
+import { EntityReferenceMultiSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
 
 interface Props {
   scene: Scene;
@@ -37,37 +37,8 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex }))
   );
   const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(scene));
-  const [contextTagSearchByPerformer, setContextTagSearchByPerformer] = useState<Record<number, string>>({});
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(scene.customFields ?? {}) });
   const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(scene.remoteIds.map((remoteId) => ({ ...remoteId })));
-
-  // Tag search
-  const [tagSearch, setTagSearch] = useState("");
-  const { data: allTags } = useQuery({
-    queryKey: ["tags-all"],
-    queryFn: () => tagsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
-  });
-
-  // Performer search
-  const [perfSearch, setPerfSearch] = useState("");
-  const { data: allPerformers } = useQuery({
-    queryKey: ["performers-all"],
-    queryFn: () => performersApi.find({ perPage: 500, sort: "name", direction: "asc" }),
-  });
-
-  // Gallery search
-  const [gallerySearch, setGallerySearch] = useState("");
-  const { data: allGalleries } = useQuery({
-    queryKey: ["galleries-all"],
-    queryFn: () => galleriesApi.find({ perPage: 500, sort: "title", direction: "asc" }),
-  });
-
-  // Group search
-  const [groupSearch, setGroupSearch] = useState("");
-  const { data: allGroups } = useQuery({
-    queryKey: ["groups-all"],
-    queryFn: () => groupsApi.find({ perPage: 500, sort: "name", direction: "asc" }),
-  });
 
   useEffect(() => {
     setTitle(scene.title || "");
@@ -84,7 +55,6 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
     setContextTagIdsByPerformer(buildPerformerContextTagIds(scene));
-    setContextTagSearchByPerformer({});
     setCustomFields({ ...(scene.customFields ?? {}) });
     setRemoteIds(scene.remoteIds.map((remoteId) => ({ ...remoteId })));
   }, [scene]);
@@ -124,33 +94,12 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     });
   };
 
-  const filteredTags = allTags?.items.filter(
-    (t) => !selectedTagIds.includes(t.id) && t.name.toLowerCase().includes(tagSearch.toLowerCase())
-  ) ?? [];
-
-  const filteredPerformers = allPerformers?.items.filter(
-    (p) => !selectedPerformerIds.includes(p.id) && p.name.toLowerCase().includes(perfSearch.toLowerCase())
-  ) ?? [];
-
-  const filteredGalleries = allGalleries?.items.filter(
-    (g) => !selectedGalleryIds.includes(g.id) && (g.title || "").toLowerCase().includes(gallerySearch.toLowerCase())
-  ) ?? [];
-
-  const selectedGroupIds = selectedGroups.map((g) => g.groupId);
-  const filteredGroups = allGroups?.items.filter(
-    (g) => !selectedGroupIds.includes(g.id) && g.name.toLowerCase().includes(groupSearch.toLowerCase())
-  ) ?? [];
-
-  const selectedTags = allTags?.items.filter((t) => selectedTagIds.includes(t.id)) ?? scene.tags;
-  const selectedPerformers = allPerformers?.items.filter((p) => selectedPerformerIds.includes(p.id)) ??
-    scene.performers.map((p) => ({ ...p, disambiguation: p.disambiguation, favorite: p.favorite }));
-  const selectedGalleries = allGalleries?.items.filter((g) => selectedGalleryIds.includes(g.id)) ?? scene.galleries;
-  const knownContextTags = (scene.contextTagApplications ?? []).map((application) => application.tag);
-  const knownTags = [...(allTags?.items ?? []), ...scene.tags, ...knownContextTags];
-  const tagById = new Map(knownTags.map((tag) => [tag.id, tag]));
-
   const setPerformerContextTagIds = (performerId: number, tagIds: number[]) => {
     setContextTagIdsByPerformer((current) => ({ ...current, [performerId]: Array.from(new Set(tagIds)) }));
+  };
+
+  const setSelectedGroupIds = (groupIds: number[]) => {
+    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
   };
 
   return (
@@ -225,95 +174,34 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
 
       {/* Tags */}
       <Field label="Tags">
-        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds(selectedTagIds.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
-        <input
-          type="text"
-          value={tagSearch}
-          onChange={(e) => setTagSearch(e.target.value)}
-          placeholder="Search tags..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {tagSearch && filteredTags.length > 0 && (
-          <GroupedTagOptionList tags={filteredTags} selectedIds={selectedTagIds} maxItems={20} onSelect={(tag) => { setSelectedTagIds([...selectedTagIds, tag.id]); setTagSearch(""); }} />
-        )}
+        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." />
       </Field>
 
       {/* Performers */}
       <Field label="Performers">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedPerformers.map((p) => (
-            <span
-              key={p.id}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/10 text-accent-hover"
-            >
-              {p.name}
-              <button onClick={() => setSelectedPerformerIds(selectedPerformerIds.filter((id) => id !== p.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
-        <input
-          type="text"
-          value={perfSearch}
-          onChange={(e) => setPerfSearch(e.target.value)}
-          placeholder="Search performers..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {perfSearch && filteredPerformers.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredPerformers.slice(0, 10).map((p) => (
-              <button
-                key={p.id}
-                onClick={() => { setSelectedPerformerIds([...selectedPerformerIds, p.id]); setPerfSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {p.name}{p.disambiguation ? ` (${p.disambiguation})` : ""}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." />
       </Field>
 
-      {selectedPerformers.length > 0 ? (
+      {selectedPerformerIds.length > 0 ? (
         <Field label="Performer Occurrence Tags">
           <div className="space-y-3 rounded-lg border border-border bg-surface/40 p-3">
-            {selectedPerformers.map((performer) => {
-              const tagIds = contextTagIdsByPerformer[performer.id] ?? [];
-              const search = contextTagSearchByPerformer[performer.id] ?? "";
-              const selectedContextTags = tagIds.map((tagId) => tagById.get(tagId)).filter(Boolean) as SelectableTag[];
-              const availableTags = filterTagsForSelector(allTags?.items ?? [], search, tagIds);
+            {selectedPerformerIds.map((performerId) => {
+              const tagIds = contextTagIdsByPerformer[performerId] ?? [];
 
               return (
-                <div key={performer.id} className="rounded-lg border border-border bg-card/70 p-3">
+                <div key={performerId} className="rounded-lg border border-border bg-card/70 p-3">
                   <div className="mb-2 flex items-center justify-between gap-3">
-                    <div className="min-w-0 text-sm font-medium text-foreground">{performer.name}</div>
+                    <div className="min-w-0 text-sm font-medium text-foreground"><EntityReferenceValue entityType="performer" value={performerId} /></div>
                     <div className="text-xs text-muted">{tagIds.length} tag{tagIds.length === 1 ? "" : "s"}</div>
                   </div>
-                  <SelectedTagChips
-                    tags={selectedContextTags}
-                    emptyText="No occurrence tags"
-                    onRemove={(tag) => setPerformerContextTagIds(performer.id, tagIds.filter((tagId) => tagId !== tag.id))}
-                    className="mb-2 flex flex-wrap gap-1.5"
-                  />
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(event) => setContextTagSearchByPerformer((current) => ({ ...current, [performer.id]: event.target.value }))}
+                  <EntityReferenceMultiSelector
+                    entityType="tag"
+                    values={tagIds}
+                    onChange={(nextTagIds) => setPerformerContextTagIds(performerId, nextTagIds)}
                     placeholder="Search tags for this occurrence..."
-                    className="w-full rounded border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
+                    emptyMessage="No tags found"
+                    inputClassName="w-full rounded border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
                   />
-                  {search.trim() && availableTags.length > 0 ? (
-                    <div className="mt-1">
-                      <GroupedTagOptionList
-                        tags={availableTags}
-                        selectedIds={tagIds}
-                        maxItems={20}
-                        onSelect={(tag) => {
-                          setPerformerContextTagIds(performer.id, [...tagIds, tag.id]);
-                          setContextTagSearchByPerformer((current) => ({ ...current, [performer.id]: "" }));
-                        }}
-                      />
-                    </div>
-                  ) : null}
                 </div>
               );
             })}
@@ -322,48 +210,17 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       ) : null}
 
       <Field label="Galleries">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedGalleries.map((gallery) => (
-            <span
-              key={gallery.id}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-900 text-emerald-300"
-            >
-              {gallery.title || "Untitled"}
-              <button onClick={() => setSelectedGalleryIds(selectedGalleryIds.filter((id) => id !== gallery.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
-        <input
-          type="text"
-          value={gallerySearch}
-          onChange={(e) => setGallerySearch(e.target.value)}
-          placeholder="Search galleries..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {gallerySearch && filteredGalleries.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredGalleries.slice(0, 10).map((gallery) => (
-              <button
-                key={gallery.id}
-                onClick={() => { setSelectedGalleryIds([...selectedGalleryIds, gallery.id]); setGallerySearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {gallery.title || "Untitled"}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="gallery" values={selectedGalleryIds} onChange={setSelectedGalleryIds} placeholder="Search galleries..." />
       </Field>
 
       {/* Groups */}
       <Field label="Groups">
         <div className="space-y-1.5 mb-2">
           {selectedGroups.map((sg) => {
-            const group = allGroups?.items.find((g) => g.id === sg.groupId);
             return (
               <div key={sg.groupId} className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-900 text-orange-300">
-                  {group?.name || "Untitled group"}
+                  <EntityReferenceValue entityType="group" value={sg.groupId} />
                   <button onClick={() => setSelectedGroups(selectedGroups.filter((g) => g.groupId !== sg.groupId))} className="hover:text-white">×</button>
                 </span>
                 <label className="flex items-center gap-1 text-xs text-secondary">
@@ -380,26 +237,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
             );
           })}
         </div>
-        <input
-          type="text"
-          value={groupSearch}
-          onChange={(e) => setGroupSearch(e.target.value)}
-          placeholder="Search groups..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {groupSearch && filteredGroups.length > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {filteredGroups.slice(0, 10).map((group) => (
-              <button
-                key={group.id}
-                onClick={() => { setSelectedGroups([...selectedGroups, { groupId: group.id, sceneIndex: 0 }]); setGroupSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {group.name}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="group" values={selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." />
       </Field>
 
       <Field label="Remote IDs">

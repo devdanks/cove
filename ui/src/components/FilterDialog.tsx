@@ -2,7 +2,8 @@ import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } fro
 import { useQuery } from "@tanstack/react-query";
 import { X, ChevronDown, ChevronRight, Search, Pin, PinOff, Plus, Minus, Star } from "lucide-react";
 import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi, scenes as scenesApi, tagGroups as tagGroupsApi } from "../api/client";
-import { filterTagsForSelector, GroupedTagOptionList } from "./TagSelector";
+import { GroupedTagOptionList } from "./TagSelector";
+import { EntityReferenceSelector } from "./EntityReferenceSelector";
 import {
   convertToRatingFormat,
   convertFromRatingFormat,
@@ -258,7 +259,7 @@ export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
   { id: "videoCodec", label: "Video Codec", type: "string", filterKey: "videoCodecCriterion" },
   { id: "audioCodec", label: "Audio Codec", type: "string", filterKey: "audioCodecCriterion" },
   { id: "frameRate", label: "Frame Rate", type: "number", filterKey: "frameRateCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "bitrate", label: "Bitrate", type: "number", filterKey: "bitrateInterval" },
+  { id: "bitrate", label: "Bitrate (kbps)", type: "number", filterKey: "bitrateInterval" },
   { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "performerFavorite", label: "Performer Favorite", type: "bool", filterKey: "performerFavoriteCriterion" },
   { id: "resumeTime", label: "Resume Time", type: "number", filterKey: "resumeTimeCriterion" },
@@ -1130,11 +1131,6 @@ function getEditableTagDurationClauses(value?: TagDurationCriterion): TagDuratio
 function TagDurationEditor({ value, onChange, modifiers }: { value?: TagDurationCriterion; onChange: (v: unknown) => void; modifiers: CriterionModifier[] }) {
   const clauses = getEditableTagDurationClauses(value);
   const existingNames: Record<string, string> = value?._names ?? {};
-  const { data: tags } = useQuery({
-    queryKey: ["tags", "all"],
-    queryFn: () => tagsApi.find({ perPage: 5000, sort: "name", direction: "asc" }).then((response) => response.items),
-    staleTime: 60000,
-  });
 
   const commit = (nextClauses: TagDurationClause[], nextNames: Record<string, string> = existingNames) => {
     const cleanedClauses = nextClauses.map((clause) => ({
@@ -1176,8 +1172,6 @@ function TagDurationEditor({ value, onChange, modifiers }: { value?: TagDuration
             key={`${clause.tagId ?? "draft"}-${index}`}
             clause={clause}
             modifiers={modifiers}
-            tags={tags ?? []}
-            existingNames={existingNames}
             excludedTagIds={selectedTagIds.filter((tagId) => tagId !== clause.tagId)}
             onChange={(patch, namesPatch) => updateClause(index, patch, namesPatch)}
             onRemove={clauses.length > 1 || value != null ? () => removeClause(index) : undefined}
@@ -1199,30 +1193,19 @@ function TagDurationEditor({ value, onChange, modifiers }: { value?: TagDuration
 function TagDurationClauseEditor({
   clause,
   modifiers,
-  tags,
-  existingNames,
   excludedTagIds,
   onChange,
   onRemove,
 }: {
   clause: TagDurationClause;
   modifiers: CriterionModifier[];
-  tags: Array<{ id: number; name: string; color?: string | null; tagGroupId?: number | null; tagGroupName?: string | null; tagGroupColor?: string | null }>;
-  existingNames: Record<string, string>;
   excludedTagIds: number[];
   onChange: (patch: Partial<TagDurationClause>, namesPatch?: Record<string, string>) => void;
   onRemove?: () => void;
 }) {
-  const [tagSearch, setTagSearch] = useState("");
   const modifier = clause.modifier ?? "GREATER_THAN";
   const unit = clause.unit ?? "seconds";
   const isBetween = modifier === "BETWEEN" || modifier === "NOT_BETWEEN";
-  const selectedTag = tags.find((tag) => tag.id === clause.tagId);
-  const selectedTagName = clause.tagId ? selectedTag?.name ?? existingNames[String(clause.tagId)] ?? `Tag #${clause.tagId}` : null;
-  const tagResults = useMemo(
-    () => filterTagsForSelector(tags, tagSearch, excludedTagIds).slice(0, 50),
-    [excludedTagIds, tagSearch, tags]
-  );
 
   const update = (patch: Partial<TagDurationClause>, namesPatch?: Record<string, string>) => {
     onChange({ modifier, unit, ...patch }, namesPatch);
@@ -1246,33 +1229,14 @@ function TagDurationClauseEditor({
       <ModifierSelector modifiers={modifiers} selected={modifier} onSelect={(m) => update({ modifier: m })} />
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
         <div className="relative">
-          {selectedTagName ? (
-            <div className="mb-1 flex items-center justify-between gap-2 rounded border border-accent/30 bg-accent/10 px-2 py-1 text-xs text-foreground">
-              <span className="min-w-0 truncate">{selectedTagName}</span>
-              <button
-                type="button"
-                onClick={() => update({ tagId: undefined })}
-                aria-label="Clear tag duration tag"
-                className="text-muted hover:text-foreground"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          ) : null}
-          <input
-            type="text"
-            value={tagSearch}
-            onChange={(event) => setTagSearch(event.target.value)}
+          <EntityReferenceSelector
+            entityType="tag"
+            value={clause.tagId}
+            onChange={(tagId, option) => update({ tagId }, tagId && option ? { [String(tagId)]: option.label } : undefined)}
             placeholder="Search tags"
-            className="w-full rounded border border-border bg-input px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+            inputClassName="w-full rounded border border-border bg-input px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+            excludeIds={excludedTagIds}
           />
-          {tagResults.length > 0 && tagSearch.trim() !== "" ? (
-            <GroupedTagOptionList
-              tags={tagResults}
-              onSelect={(tag) => { update({ tagId: tag.id }, { [String(tag.id)]: tag.name }); setTagSearch(""); }}
-              className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded border border-border bg-surface shadow-xl"
-            />
-          ) : null}
         </div>
         <select
           value={unit}
@@ -1729,19 +1693,19 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
   const includeHierarchy = (value as any)?.depth === -1;
   const existingNames: Record<string, string> = (value as any)?._names ?? {};
   const [searchText, setSearchText] = useState("");
+  const trimmedSearchText = searchText.trim();
 
-  // Fetch entities for selection
   const { data: entities } = useQuery({
-    queryKey: [entityType, "all"],
+    queryKey: ["multi-id-selector", entityType, trimmedSearchText],
     queryFn: async () => {
       switch (entityType) {
-        case "tags": return (await tagsApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items;
+        case "tags": return (await tagsApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "name", direction: "asc" })).items;
         case "tagGroups": return await tagGroupsApi.list();
-        case "performers": return (await performersApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items;
-        case "studios": return (await studiosApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items;
-        case "groups": return (await groupsApi.find({ perPage: 5000, sort: "name", direction: "asc" })).items;
-        case "galleries": return (await galleriesApi.find({ perPage: 5000, sort: "title", direction: "asc" })).items;
-        case "scenes": return (await scenesApi.find({ perPage: 5000, sort: "title", direction: "asc" })).items;
+        case "performers": return (await performersApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "name", direction: "asc" })).items;
+        case "studios": return (await studiosApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "name", direction: "asc" })).items;
+        case "groups": return (await groupsApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "name", direction: "asc" })).items;
+        case "galleries": return (await galleriesApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "title", direction: "asc" })).items;
+        case "scenes": return (await scenesApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "title", direction: "asc" })).items;
         default: return [];
       }
     },
@@ -1772,9 +1736,10 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
 
   const filteredEntities = useMemo(() => {
     if (!entities) return [];
+    if (entityType !== "tagGroups") return entities;
     const q = searchText.toLowerCase();
     return q ? entities.filter((e: any) => (e.name || e.title || "").toLowerCase().includes(q)) : entities;
-  }, [entities, searchText]);
+  }, [entities, entityType, searchText]);
 
   const addInclude = (id: number) => {
     const nextInc = includedIds.includes(id) ? includedIds : [...includedIds, id];
