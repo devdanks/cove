@@ -304,17 +304,18 @@ public record GalleryUpdateDto(string? Title, string? Code, string? Date, string
 public record ImageDto(int Id, string? Title, string? Code, string? Details, string? Photographer,
     bool Organized, int? StudioId, string? StudioName, string? Date,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
-    int GalleryCount, List<int> GalleryIds, List<GallerySummaryDto> Galleries, List<ImageFileDto> Files, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
+    int GalleryCount, List<int> GalleryIds, List<GallerySummaryDto> Galleries, List<GroupSummaryDto> Groups, List<ImageFileDto> Files, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
+    List<TagApplicationDto>? ContextTagApplications = null);
 
 public record ImageFileDto(int Id, string Path, string Basename, string Format, int Width, int Height, long Size);
 
 public record ImageCreateDto(string? Title, string? Code, string? Details, string? Photographer,
     int? Rating, bool Organized, int? StudioId, string? Date,
-    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, Dictionary<string, object>? CustomFields = null);
+    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
 
 public record ImageUpdateDto(string? Title, string? Code, string? Details, string? Photographer,
     int? Rating, bool? Organized, int? StudioId, string? Date,
-    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, Dictionary<string, object>? CustomFields);
+    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
 
 // ===== AUDIO DTOs =====
 public record AudioDto(
@@ -323,7 +324,8 @@ public record AudioDto(
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     List<AudioTrackDto> Tracks, List<AudioFileDto> Files, List<GroupSummaryDto> Groups,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    int FileCount, double MaxDuration, bool HasVideoFiles, string? ImagePath = null);
+    int FileCount, double MaxDuration, bool HasVideoFiles, string? ImagePath = null,
+    List<TagApplicationDto>? ContextTagApplications = null);
 
 public record AudioFileDto(
     int Id, string Path, string Basename, string Format, double Duration,
@@ -349,7 +351,8 @@ public record TextDocumentDto(
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     List<TextFileDto> Files, List<GroupSummaryDto> Groups,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    int FileCount, int? MaxWordCount, int? MaxPageCount, string? ImagePath = null);
+    int FileCount, int? MaxWordCount, int? MaxPageCount, string? ImagePath = null,
+    List<TagApplicationDto>? ContextTagApplications = null);
 
 public record TextFileDto(
     int Id, string Path, string Basename, string Format, int? PageCount,
@@ -1206,6 +1209,8 @@ public record UiConfigDto
     public bool WallShowTitle { get; init; } = true;
     public int WallPlayback { get; init; } = 1;
     public string WallPreviewType { get; init; } = "video";
+    public string ImageObjectFit { get; init; } = "cover";
+    public string VideoObjectFit { get; init; } = "cover";
     public string FeedVideoSource { get; init; } = "preview";
     public bool FeedVideoSound { get; init; }
     public double FeedVideoStartPercent { get; init; }
@@ -1507,6 +1512,16 @@ public record BatchSceneScrapeStartRequestDto(
     bool CreateMissingStudio = true,
     bool MarkOrganized = false,
     bool HydratePerformers = false);
+
+public record BatchImageScrapeStartRequestDto(
+    string ScraperId,
+    string InputKind,
+    List<int> ImageIds,
+    bool AutoApply = true,
+    bool CreateMissingTags = true,
+    bool CreateMissingPerformers = true,
+    bool CreateMissingStudio = true,
+    bool MarkOrganized = false);
 
 public record PerformerScrapeUrlRequestDto(string? Url, bool CreateMissingTags = true);
 

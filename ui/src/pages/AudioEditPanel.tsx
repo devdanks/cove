@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { audios, entityImages } from "../api/client";
 import type { Audio, AudioUpdate, SceneGroupInput } from "../api/types";
 import { ImageInput } from "../components/ImageInput";
+import { PerformerContextTagEditor, buildPerformerContextTagIds, syncPerformerContextTags } from "../components/PerformerContextTags";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
@@ -27,6 +28,7 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(audio.customFields ?? {}) });
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(audio.tags));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(audio.performers.map((performer) => performer.id));
+  const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(audio.contextTagApplications));
   const [selectedGroups, setSelectedGroups] = useState<SceneGroupInput[]>(audio.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
   useEffect(() => {
     setTitle(audio.title ?? "");
@@ -38,11 +40,16 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
     setCustomFields({ ...(audio.customFields ?? {}) });
     setSelectedTagIds(getEditableTagIds(audio.tags));
     setSelectedPerformerIds(audio.performers.map((performer) => performer.id));
+    setContextTagIdsByPerformer(buildPerformerContextTagIds(audio.contextTagApplications));
     setSelectedGroups(audio.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
   }, [audio]);
 
   const mutation = useMutation({
-    mutationFn: (data: AudioUpdate) => audios.update(audio.id, data),
+    mutationFn: async (data: AudioUpdate) => {
+      await audios.update(audio.id, data);
+      await syncPerformerContextTags("audio", audio.id, audio.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
+      return audios.get(audio.id);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["audio", audio.id] });
       queryClient.invalidateQueries({ queryKey: ["audios"] });
@@ -139,6 +146,18 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
         <span className="text-xs text-secondary">Performers</span>
         <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." inputClassName={inputCls} />
       </div>
+
+      {selectedPerformerIds.length > 0 ? (
+        <div className="space-y-1">
+          <span className="text-xs text-secondary">Performer Occurrence Tags</span>
+          <PerformerContextTagEditor
+            performerIds={selectedPerformerIds}
+            contextTagIdsByPerformer={contextTagIdsByPerformer}
+            onChange={(performerId, tagIds) => setContextTagIdsByPerformer((current) => ({ ...current, [performerId]: tagIds }))}
+            inputClassName={inputCls}
+          />
+        </div>
+      ) : null}
 
       <div className="space-y-1">
         <span className="text-xs text-secondary">Groups</span>

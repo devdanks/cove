@@ -396,6 +396,10 @@ export function ScraperEntityTagger<T extends ScraperEntityItem>({ entityType, l
   const abortRef = useRef<AbortController | null>(null);
   const existingTagNames = useMemo(() => (tagPage?.items ?? []).map((tag) => tag.name), [tagPage]);
   const existingPerformerNames = useMemo(() => (performerPage?.items ?? []).map((performer) => performer.name), [performerPage]);
+  const batchItems = useMemo(
+    () => selectedIds && selectedIds.size > 0 ? items.filter((item) => selectedIds.has(item.id)) : items,
+    [items, selectedIds],
+  );
 
   const updatePreferences = useCallback((update: Partial<ScrapeApplyPreferences>) => {
     setPreferences((current) => {
@@ -452,11 +456,11 @@ export function ScraperEntityTagger<T extends ScraperEntityItem>({ entityType, l
     setBatchSearching(true);
     const controller = new AbortController();
     abortRef.current = controller;
-    const toSearch = items.filter((item) => !searchStates[item.id]?.saved);
+    const toSearch = batchItems.filter((item) => !searchStates[item.id]?.saved);
     await runWithConcurrency(toSearch, (item) => searchItem(item), CONCURRENCY_LIMIT, controller.signal);
     setBatchSearching(false);
     abortRef.current = null;
-  }, [items, searchItem, searchStates]);
+  }, [batchItems, searchItem, searchStates]);
 
   const cancelBatchSearch = useCallback(() => {
     abortRef.current?.abort();
@@ -482,7 +486,7 @@ export function ScraperEntityTagger<T extends ScraperEntityItem>({ entityType, l
         batchSearching={batchSearching}
         onCancelBatch={cancelBatchSearch}
         onRunAll={searchAll}
-        countLabel={`${items.length} ${label.toLowerCase()}${items.length !== 1 ? "s" : ""}`}
+        countLabel={selectedIds && selectedIds.size > 0 ? `${batchItems.length} selected` : `${items.length} ${label.toLowerCase()}${items.length !== 1 ? "s" : ""}`}
         settingsOpen={showSettings}
         onToggleSettings={() => setShowSettings((current) => !current)}
       />

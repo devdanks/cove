@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { entityImages, texts } from "../api/client";
 import type { SceneGroupInput, TextDocument, TextUpdate } from "../api/types";
 import { ImageInput } from "../components/ImageInput";
+import { PerformerContextTagEditor, buildPerformerContextTagIds, syncPerformerContextTags } from "../components/PerformerContextTags";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
@@ -26,6 +27,7 @@ export function TextEditPanel({ text, onSaved }: Props) {
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(text.customFields ?? {}) });
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(text.tags.map((tag) => tag.id));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(text.performers.map((performer) => performer.id));
+  const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(text.contextTagApplications));
   const [selectedGroups, setSelectedGroups] = useState<SceneGroupInput[]>(text.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
   useEffect(() => {
     setTitle(text.title ?? "");
@@ -37,11 +39,16 @@ export function TextEditPanel({ text, onSaved }: Props) {
     setCustomFields({ ...(text.customFields ?? {}) });
     setSelectedTagIds(text.tags.map((tag) => tag.id));
     setSelectedPerformerIds(text.performers.map((performer) => performer.id));
+    setContextTagIdsByPerformer(buildPerformerContextTagIds(text.contextTagApplications));
     setSelectedGroups(text.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
   }, [text]);
 
   const mutation = useMutation({
-    mutationFn: (data: TextUpdate) => texts.update(text.id, data),
+    mutationFn: async (data: TextUpdate) => {
+      await texts.update(text.id, data);
+      await syncPerformerContextTags("text", text.id, text.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
+      return texts.get(text.id);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["text", text.id] });
       queryClient.invalidateQueries({ queryKey: ["texts"] });
@@ -132,6 +139,18 @@ export function TextEditPanel({ text, onSaved }: Props) {
         <span className="text-xs text-secondary">Performers</span>
         <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." inputClassName={inputCls} />
       </div>
+
+      {selectedPerformerIds.length > 0 ? (
+        <div className="space-y-1">
+          <span className="text-xs text-secondary">Performer Occurrence Tags</span>
+          <PerformerContextTagEditor
+            performerIds={selectedPerformerIds}
+            contextTagIdsByPerformer={contextTagIdsByPerformer}
+            onChange={(performerId, tagIds) => setContextTagIdsByPerformer((current) => ({ ...current, [performerId]: tagIds }))}
+            inputClassName={inputCls}
+          />
+        </div>
+      ) : null}
 
       <div className="space-y-1">
         <span className="text-xs text-secondary">Groups</span>

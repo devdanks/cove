@@ -7,7 +7,7 @@ vi.mock("../components/Rating", () => ({
   RatingBadge: () => null,
 }));
 
-import { SceneCard, SceneCardPopovers } from "../components/EntityCards";
+import { PerformerTile, SceneCard, SceneCardPopovers } from "../components/EntityCards";
 import { DetailsTab, FileInfoTab } from "../pages/SceneDetailPage";
 
 const sceneFile = {
@@ -191,6 +191,20 @@ describe("SceneCard navigation", () => {
     fireEvent.mouseLeave(scrubZone!);
 
     expect(screen.queryByText("1:05")).not.toBeInTheDocument();
+  });
+});
+
+describe("PerformerTile", () => {
+  it("shows the performer fallback instead of an image when no image is present", () => {
+    const { container } = render(
+      <PerformerTile
+        performer={{ id: 7, name: "No Photo Performer", tags: [] }}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /Open performer No Photo Performer/i })).toHaveAttribute("href", "/performer/7");
+    expect(container.querySelector("img")).not.toBeInTheDocument();
   });
 });
 

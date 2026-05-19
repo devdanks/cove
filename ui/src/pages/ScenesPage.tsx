@@ -29,7 +29,7 @@ import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
-import { FeedCardFrame, FeedChipButton } from "../components/FeedCardFrame";
+import { FeedCardFrame, FeedChipButton, FeedPortraitMediaFrame, getFeedMediaStyle } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FileBackedCreateSource, type CreateSourceMode } from "../components/FileBackedCreateSource";
@@ -66,6 +66,13 @@ const VISUAL_MATCH_SORT_OPTION = { value: "visual_match", label: "Visual Match" 
 const INCLUDE_COMPILATIONS_FILTER_KEY = "includeCompilationGroups";
 const IS_VR_FILTER_KEY = "isVrCriterion";
 const VERTICAL_PORTRAIT_FILTER_KEY = "orientationCriterion";
+const MOBILE_VIEWER_MEDIA_QUERY = "(max-width: 767px), (hover: none) and (pointer: coarse)";
+
+function isMobileViewerViewport() {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(MOBILE_VIEWER_MEDIA_QUERY).matches;
+}
 
 function isIncludeCompilationGroupsEnabled(value: unknown) {
   if (typeof value === "boolean") {
@@ -108,6 +115,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [wallColumnCount, setWallColumnCount] = useState(5);
+  const [isMobileViewer, setIsMobileViewer] = useState(isMobileViewerViewport);
   const verticalViewerRef = useRef<HTMLDivElement>(null);
   const [verticalFullscreen, setVerticalFullscreen] = useState(false);
   const [verticalFullscreenDismissed, setVerticalFullscreenDismissed] = useState(false);
@@ -119,7 +127,6 @@ export function ScenesPage({ onNavigate }: Props) {
   const [verticalAutoScrollSeconds, setVerticalAutoScrollSeconds] = useState(8);
   const [verticalAutoScrollAwake, setVerticalAutoScrollAwake] = useState(true);
   const [feedAudioSceneId, setFeedAudioSceneId] = useState<number | null>(null);
-  const [activeFeedSceneId, setActiveFeedSceneId] = useState<number | null>(null);
   const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
   const queryClient = useQueryClient();
   const { setQueue } = useSceneQueue();
@@ -132,12 +139,31 @@ export function ScenesPage({ onNavigate }: Props) {
   const canDownloadScene = hasPermission("jobs.run") && canWriteScene;
   const feedVideoSource = config?.ui.feedVideoSource ?? "preview";
   const feedVideoSound = config?.ui.feedVideoSound ?? false;
+  const defaultFeedVideoSound = feedVideoSound && !isMobileViewer;
   const feedVideoStartPercent = config?.ui.feedVideoStartPercent ?? 0;
   const feedVideoStartMinDuration = config?.ui.feedVideoStartMinDuration ?? 0;
   const infiniteOnlyDisplayMode = displayMode === "feed" || displayMode === "vertical";
   const verticalItemHeight = verticalFullscreen
     ? (typeof window !== "undefined" ? window.innerHeight : 720)
     : (verticalViewerHeight ?? (typeof window !== "undefined" ? window.innerHeight : 720));
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      setIsMobileViewer(false);
+      return;
+    }
+
+    const mediaQuery = window.matchMedia(MOBILE_VIEWER_MEDIA_QUERY);
+    const syncMobileViewer = () => setIsMobileViewer(mediaQuery.matches);
+    syncMobileViewer();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", syncMobileViewer);
+      return () => mediaQuery.removeEventListener("change", syncMobileViewer);
+    }
+
+    mediaQuery.addListener(syncMobileViewer);
+    return () => mediaQuery.removeListener(syncMobileViewer);
+  }, []);
 
   useEffect(() => {
     if (displayMode !== "vertical") {
@@ -162,9 +188,9 @@ export function ScenesPage({ onNavigate }: Props) {
 
   useEffect(() => {
     if (displayMode === "vertical") {
-      setVerticalSoundEnabled(feedVideoSound);
+      setVerticalSoundEnabled(defaultFeedVideoSound);
     }
-  }, [displayMode, feedVideoSound]);
+  }, [defaultFeedVideoSound, displayMode]);
 
   useEffect(() => {
     if (displayMode !== "vertical" || verticalFullscreen) {
@@ -384,12 +410,11 @@ export function ScenesPage({ onNavigate }: Props) {
 
   useEffect(() => {
     if (displayMode !== "feed") {
-      setActiveFeedSceneId(null);
       setFeedAudioSceneId(null);
       return;
     }
-    if (!feedVideoSound) setFeedAudioSceneId(null);
-  }, [displayMode, feedVideoSound]);
+    if (!defaultFeedVideoSound) setFeedAudioSceneId(null);
+  }, [defaultFeedVideoSound, displayMode]);
 
   useEffect(() => {
     if (displayMode !== "vertical") {
@@ -531,6 +556,9 @@ export function ScenesPage({ onNavigate }: Props) {
   });
 
   const verticalOverlayTop = verticalFullscreen ? 12 : Math.max(12, verticalViewerTop + 12);
+  const verticalAutoScrollTop = verticalFullscreen
+    ? (isMobileViewer ? "64%" : "50%")
+    : verticalOverlayTop + (isMobileViewer ? 96 : 44);
   const verticalViewerStyle = verticalFullscreen ? undefined : { height: verticalViewerHeight != null ? `${verticalViewerHeight}px` : "calc(100dvh - 10rem)" };
   const verticalActiveIndex = useMemo(() => items.findIndex((scene) => scene.id === activeVerticalSceneId), [items, activeVerticalSceneId]);
 
@@ -718,7 +746,7 @@ export function ScenesPage({ onNavigate }: Props) {
             {verticalFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
           {infinitePageSize && (
-            <div className="pointer-events-none fixed right-3 z-[94] sm:right-5" style={{ top: verticalFullscreen ? "50%" : verticalOverlayTop + 44, transform: verticalFullscreen ? "translateY(-50%)" : undefined }}>
+            <div className="pointer-events-none fixed right-3 z-[94] sm:right-5" style={{ top: verticalAutoScrollTop, transform: verticalFullscreen ? "translateY(-50%)" : undefined }}>
               <div
                 className="pointer-events-auto relative flex min-h-36 w-12 items-center justify-end"
                 onPointerEnter={wakeVerticalAutoScroll}
@@ -804,15 +832,13 @@ export function ScenesPage({ onNavigate }: Props) {
             getItemKey={(scene) => scene.id}
             estimateSize={760}
             overscan={2}
+            adjustScrollOnItemSizeChange={!isMobileViewer}
             hasNextPage={Boolean(infiniteScenesQuery.hasNextPage)}
             isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
             loadMore={loadMoreScenes}
-            onActiveIndexChange={(idx) => {
-              const id = idx == null ? null : items[idx]?.id ?? null;
-              setActiveFeedSceneId(id);
-              if (feedVideoSound) setFeedAudioSceneId(id);
-            }}
-            itemClassName="pb-4"
+            onActiveIndexChange={defaultFeedVideoSound ? (idx) => setFeedAudioSceneId(idx == null ? null : items[idx]?.id ?? null) : undefined}
+            className={isMobileViewer ? "[overflow-anchor:none]" : undefined}
+            itemClassName="pb-4 [touch-action:pan-y]"
             renderItem={({ item: scene }) => (
               <SceneFeedCard
                 scene={scene}
@@ -1374,15 +1400,6 @@ function getSceneFeedVideoStartTime(scene: Scene, feedVideoSource: string, start
   return duration * (Math.min(95, Math.max(0, startPercent)) / 100);
 }
 
-function getSceneFeedMediaStyle(file: Scene["files"][number] | undefined) {
-  if (!file?.width || !file.height || file.height <= file.width) {
-    return undefined;
-  }
-
-  const ratio = file.width / file.height;
-  return { maxWidth: `min(100%, ${56 * ratio}vh, ${34 * ratio}rem)` };
-}
-
 /* ── Scene List Table ── */
 
 function SceneListTable({ entries, engagementById, onNavigate, selectedIds, onToggle, selecting }: { entries: SceneListEntry[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
@@ -1493,6 +1510,7 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
       // Browsers generally block autoplay with audio, so wall previews stay muted to animate reliably.
       muted
       aspectRatio={aspectRatio}
+      imageClassName="object-cover"
       className="group"
     >
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
@@ -1518,11 +1536,40 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
   const title = scene.title || file?.basename || `Scene ${scene.id}`;
   const duration = getSceneDisplayDuration(scene);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
-  const mediaStyle = getSceneFeedMediaStyle(file);
+  const mediaStyle = getFeedMediaStyle(file);
   const mediaIsPortrait = Boolean(mediaStyle);
   const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
   const visitCount = engagement?.pageVisitCount ?? 0;
   const likeCount = engagement?.likeCount ?? 0;
+
+  const mediaOverlay = (
+    <>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleSound();
+        }}
+        className="absolute right-2 top-2 z-20 rounded-full border border-white/15 bg-black/60 p-2 text-white shadow transition-colors hover:bg-black/80"
+        aria-label={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
+        title={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
+      >
+        {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+      </button>
+      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+      <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={() => onNavigate({ page: "scene", id: scene.id })} label={`Open scene ${title}`} selectionSafeZone />
+      {!selecting && (
+        <BookmarkButton
+          hostType="scene"
+          hostId={scene.id}
+          compact
+          deferUntilHover
+          className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+        />
+      )}
+    </>
+  );
 
   return (
     <FeedCardFrame
@@ -1555,44 +1602,49 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
         </>
       )}
       media={(
-        <WallMediaCard
-          title={title}
-          imageSrc={coverUrl}
-          videoSrc={videoSrc}
-          videoStatusSrc={videoStatusSrc}
-          useVideo={useVideo}
-          muted={!soundEnabled}
-          videoStartTimeSec={videoStartTimeSec}
-          videoPlayThreshold={0.65}
-          aspectRatio={aspectRatio}
-          style={mediaStyle}
-          className={`${mediaIsPortrait ? "mx-auto rounded-lg border border-border/60" : "rounded-none border-x-0 border-y border-border/60"} hover:border-border/60`}
-        >
-          <button
-            type="button"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onToggleSound();
-            }}
-            className="absolute right-2 top-2 z-20 rounded-full border border-white/15 bg-black/60 p-2 text-white shadow transition-colors hover:bg-black/80"
-            aria-label={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
-            title={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
+        mediaIsPortrait ? (
+          <FeedPortraitMediaFrame
+            title={title}
+            backgroundSrc={coverUrl}
+            className="cursor-pointer"
+            media={(
+              <WallMediaCard
+                title={title}
+                imageSrc={coverUrl}
+                videoSrc={videoSrc}
+                videoStatusSrc={videoStatusSrc}
+                useVideo={useVideo}
+                muted={!soundEnabled}
+                videoStartTimeSec={videoStartTimeSec}
+                videoPlayThreshold={0.65}
+                fillMedia
+                chromeless
+                imageClassName="object-contain"
+                videoClassName="object-contain"
+                className="h-full w-full bg-transparent"
+              />
+            )}
           >
-            {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-          </button>
-          <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-          <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={() => onNavigate({ page: "scene", id: scene.id })} label={`Open scene ${title}`} selectionSafeZone />
-          {!selecting && (
-            <BookmarkButton
-              hostType="scene"
-              hostId={scene.id}
-              compact
-              deferUntilHover
-              className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
-            />
-          )}
-        </WallMediaCard>
+            {mediaOverlay}
+          </FeedPortraitMediaFrame>
+        ) : (
+          <WallMediaCard
+            title={title}
+            imageSrc={coverUrl}
+            videoSrc={videoSrc}
+            videoStatusSrc={videoStatusSrc}
+            useVideo={useVideo}
+            muted={!soundEnabled}
+            videoStartTimeSec={videoStartTimeSec}
+            videoPlayThreshold={0.65}
+            aspectRatio={aspectRatio}
+            imageClassName="object-cover"
+            style={mediaStyle}
+            className="rounded-none border-x-0 border-y border-border/60 hover:border-border/60"
+          >
+            {mediaOverlay}
+          </WallMediaCard>
+        )
       )}
       title={(
         <button
@@ -1648,6 +1700,7 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnable
         videoStartTimeSec={videoStartTimeSec}
         videoPlayThreshold={0.72}
         aspectRatio="9 / 16"
+        imageClassName="object-cover"
         fillMedia={fullscreen}
         style={fullscreen
           ? { width: "min(100vw, 56.25dvh)", height: "100dvh" }

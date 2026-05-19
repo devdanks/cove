@@ -1,28 +1,25 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { performers, entityImages } from "../api/client";
+import { performers } from "../api/client";
 import type { EntityEngagement, FindFilter, Performer, PerformerCreate, PerformerFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { RatingBanner, RatingField } from "../components/Rating";
+import { RatingField } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
-import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { PERFORMER_CRITERIA } from "../components/FilterDialog";
-import { BulkEditDialog, PERFORMER_BULK_FIELDS } from "../components/BulkEditDialog";
-import { Users, Heart, Tag, Film, Image, LayoutGrid, Layers, Trash2, Loader2, Edit, Merge } from "lucide-react";
+import { Users, Heart, Merge, User } from "lucide-react";
 import { MergeDialog } from "../components/MergeDialog";
 import { PerformerTagger } from "../components/PerformerTagger";
-import { PerformerTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent, GalleriesPopoverContent } from "../components/EntityCards";
+import { PerformerTile } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useAuth } from "../auth/AuthContext";
-import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
+import { canWriteEntity } from "../auth/visibility";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
-import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
 import { CustomFieldsEditor } from "../components/shared";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { WallMediaCard } from "../components/WallMediaCard";
@@ -61,15 +58,10 @@ export function PerformersPage({ onNavigate }: Props) {
   });
   const [wallColumnCount, setWallColumnCount] = useState(6);
   const [showCreate, setShowCreate] = useState(false);
-  const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
-  const [showMetadataBatch, setShowMetadataBatch] = useState(false);
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
-  const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWritePerformer = canWriteEntity("performer", hasPermission);
-  const canDeletePerformer = canDeleteEntity("performer", hasPermission);
-  const canMetadataBatch = hasPermission("library.autotag") && canWritePerformer;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const listData = useInfiniteListData<Performer>({
@@ -99,31 +91,9 @@ export function PerformersPage({ onNavigate }: Props) {
     }
   };
 
-  const bulkDeleteMut = useMutation({
-    mutationFn: () => performers.bulkDelete([...selectedIds]),
-    onSuccess: () => { selectNone(); queryClient.invalidateQueries({ queryKey: ["performers"] }); },
-  });
-
-  const bulkEditMut = useMutation({
-    mutationFn: (values: Record<string, unknown>) =>
-      performers.bulkUpdate({ ids: [...selectedIds], ...values } as any),
-    onSuccess: () => {
-      setShowBulkEdit(false);
-      selectNone();
-      queryClient.invalidateQueries({ queryKey: ["performers"] });
-    },
-  });
-
   return (
     <>
       <PerformerCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "performer", id })} />
-      <MetadataServerBatchDialog
-        open={showMetadataBatch}
-        entityType="performer"
-        selectedIds={[...selectedIds]}
-        onClose={() => setShowMetadataBatch(false)}
-        onQueued={selectNone}
-      />
       <ListPage
         title="Performers"
         pageKey="performers"
@@ -154,15 +124,6 @@ export function PerformersPage({ onNavigate }: Props) {
         onInvertSelection={invertSelection}
         selectionActions={
           <>
-            {canMetadataBatch && (
-              <button
-                onClick={() => setShowMetadataBatch(true)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
-              >
-                <Users className="w-3 h-3" />
-                MetadataServer
-              </button>
-            )}
             {canWritePerformer && selectedIds.size >= 2 && (
               <button
                 onClick={() => setShowMerge(true)}
@@ -193,7 +154,7 @@ export function PerformersPage({ onNavigate }: Props) {
           renderItem={(performer) => (
                 <EntityWallCard
                   title={performer.name}
-                  imageSrc={entityImages.performerImageUrl(performer.id, performer.updatedAt)}
+                  imageSrc={performer.imagePath}
                   route={{ page: "performer", id: performer.id }}
                   selected={selectedIds.has(performer.id)}
                   selecting={selecting}
@@ -235,16 +196,6 @@ export function PerformersPage({ onNavigate }: Props) {
       )}
       </ListPage>
 
-      {/* Bulk Edit Dialog */}
-      <BulkEditDialog
-        open={showBulkEdit}
-        onClose={() => setShowBulkEdit(false)}
-        title="Edit Performers"
-        selectedCount={selectedIds.size}
-        fields={PERFORMER_BULK_FIELDS}
-        onApply={(values) => bulkEditMut.mutate(values)}
-        isPending={bulkEditMut.isPending}
-      />
       <MergeDialog
         open={showMerge}
         onClose={() => { setShowMerge(false); selectNone(); }}
@@ -257,9 +208,9 @@ export function PerformersPage({ onNavigate }: Props) {
   );
 }
 
-function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect, onClick }: { title: string; imageSrc: string; route: any; selected: boolean; selecting: boolean; onSelect: () => void; onClick: () => void }) {
+function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect, onClick }: { title: string; imageSrc?: string | null; route: any; selected: boolean; selecting: boolean; onSelect: () => void; onClick: () => void }) {
   return (
-    <WallMediaCard title={title} imageSrc={imageSrc} aspectRatio="2 / 3" onClick={onClick} className={selected ? "ring-2 ring-accent" : ""}>
+    <WallMediaCard title={title} imageSrc={imageSrc} aspectRatio="2 / 3" onClick={onClick} className={selected ? "ring-2 ring-accent" : ""} fallback={<User className="h-12 w-12 text-muted" />}>
       <RouteCardLinkOverlay route={route} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone />
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
       <div className="selection-safe-zone absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 text-xs font-medium text-white">

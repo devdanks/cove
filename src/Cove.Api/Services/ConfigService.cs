@@ -126,6 +126,8 @@ public class ConfigService
                 WallShowTitle = cfg.Ui.WallShowTitle,
                 WallPlayback = cfg.Ui.WallPlayback,
                 WallPreviewType = cfg.Ui.WallPreviewType,
+                ImageObjectFit = NormalizeObjectFit(cfg.Ui.ImageObjectFit),
+                VideoObjectFit = NormalizeObjectFit(cfg.Ui.VideoObjectFit),
                 FeedVideoSource = cfg.Ui.FeedVideoSource,
                 FeedVideoSound = cfg.Ui.FeedVideoSound,
                 FeedVideoStartPercent = cfg.Ui.FeedVideoStartPercent,
@@ -350,6 +352,8 @@ public class ConfigService
         cfg.Ui.WallShowTitle = dto.Ui.WallShowTitle;
         cfg.Ui.WallPlayback = dto.Ui.WallPlayback;
         cfg.Ui.WallPreviewType = string.IsNullOrWhiteSpace(dto.Ui.WallPreviewType) ? "video" : dto.Ui.WallPreviewType.Trim();
+        cfg.Ui.ImageObjectFit = NormalizeObjectFit(dto.Ui.ImageObjectFit);
+        cfg.Ui.VideoObjectFit = NormalizeObjectFit(dto.Ui.VideoObjectFit);
         cfg.Ui.FeedVideoSource = string.Equals(dto.Ui.FeedVideoSource, "video", StringComparison.OrdinalIgnoreCase) ? "video" : "preview";
         cfg.Ui.FeedVideoSound = dto.Ui.FeedVideoSound;
         cfg.Ui.FeedVideoStartPercent = Math.Clamp(dto.Ui.FeedVideoStartPercent, 0, 95);
@@ -457,6 +461,9 @@ public class ConfigService
 
         return normalizedItems;
     }
+
+    private static string NormalizeObjectFit(string? value)
+        => string.Equals(value, "contain", StringComparison.OrdinalIgnoreCase) ? "contain" : "cover";
 
     private static bool MatchesMenuItems(IReadOnlyList<string> items, IReadOnlyList<string> expected)
     {

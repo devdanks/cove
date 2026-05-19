@@ -9,6 +9,8 @@ interface Props {
   hostId: number;
   canRate: boolean;
   className?: string;
+  showHeading?: boolean;
+  variant?: "grid" | "inline";
 }
 
 interface AspectDefinition {
@@ -34,7 +36,7 @@ const DEFAULT_ASPECTS: Partial<Record<AffinityHostType, AspectDefinition[]>> = {
   ],
 };
 
-export function AspectRatingsPanel({ hostType, hostId, canRate, className }: Props) {
+export function AspectRatingsPanel({ hostType, hostId, canRate, className, showHeading = true, variant = "grid" }: Props) {
   const { ratings, isLoading } = useEntityRatings(hostType, hostId, { enabled: hostId > 0 });
   const { setRating } = useEntityEngagement(hostType, hostId, { enabled: false });
 
@@ -54,22 +56,39 @@ export function AspectRatingsPanel({ hostType, hostId, canRate, className }: Pro
 
   return (
     <section className={className}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Rating Breakdown</h3>
-        {isLoading ? <span className="text-xs text-muted">Loading...</span> : null}
-      </div>
-      <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
-        {aspects.map((aspect) => (
-          <div key={aspect.key} className="flex items-center justify-between gap-3 py-1">
-            <div className="text-xs uppercase tracking-wide text-muted">{aspect.label}</div>
-            <InteractiveRating
-              value={ratings[aspect.key]}
-              onChange={(value) => setRating(value, aspect.key)}
-              readOnly={!canRate}
-            />
-          </div>
-        ))}
-      </div>
+      {showHeading ? (
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Rating Breakdown</h3>
+          {isLoading ? <span className="text-xs text-muted">Loading...</span> : null}
+        </div>
+      ) : null}
+      {variant === "inline" ? (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          {aspects.map((aspect) => (
+            <div key={aspect.key} className="inline-flex items-center gap-2">
+              <span className="text-xs font-medium text-muted">{aspect.label}:</span>
+              <InteractiveRating
+                value={ratings[aspect.key]}
+                onChange={(value) => setRating(value, aspect.key)}
+                readOnly={!canRate}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+          {aspects.map((aspect) => (
+            <div key={aspect.key} className="flex items-center justify-between gap-3 py-1">
+              <div className="text-xs uppercase tracking-wide text-muted">{aspect.label}</div>
+              <InteractiveRating
+                value={ratings[aspect.key]}
+                onChange={(value) => setRating(value, aspect.key)}
+                readOnly={!canRate}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

@@ -119,6 +119,14 @@ function savePerformerTaggerConfig(config: TaggerConfig) {
   }
 }
 
+function getPerformerSearchErrorMessage(error: unknown) {
+  const rawMessage = error instanceof Error ? error.message : error ? String(error) : "Search failed";
+  if (/scrape returned no performer metadata/i.test(rawMessage) || /API Error 404/i.test(rawMessage)) {
+    return "No performer metadata was found for this search.";
+  }
+  return rawMessage;
+}
+
 function normalizeDecisionValue(value?: string | number | null) {
   return value === undefined || value === null ? "" : String(value).trim();
 }
@@ -363,7 +371,7 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
       } catch (err) {
         updateSearchState(performer.id, {
           loading: false,
-          error: err instanceof Error ? err.message : "Search failed",
+          error: getPerformerSearchErrorMessage(err),
         });
       }
     },

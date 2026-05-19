@@ -1993,21 +1993,7 @@ public class ImageRepository : IImageRepository
         query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, i => i.TagCount);
         query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, i => i.ImagePerformers.Count);
 
-        // Performer tags criterion
-        if (filter.PerformerTagsCriterion != null)
-        {
-            var ptIds = filter.PerformerTagsCriterion.Value;
-            query = filter.PerformerTagsCriterion.Modifier switch
-            {
-                CriterionModifier.IsNull => query.Where(i => !i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any())),
-                CriterionModifier.NotNull => query.Where(i => i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any())),
-                CriterionModifier.Includes => query.Where(i => i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
-                CriterionModifier.Excludes => query.Where(i => !i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
-                CriterionModifier.IncludesAll => query.Where(i => ptIds.All(tid => i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any(pt => pt.TagId == tid)))),
-                _ when ptIds.Count == 0 => query,
-                _ => query.Where(i => i.ImagePerformers.Any(ip => ip.Performer!.PerformerTags.Any(pt => ptIds.Contains(pt.TagId)))),
-            };
-        }
+        query = ApplyPerformerOccurrenceTagCriterion(query, filter.PerformerTagsCriterion, GetIncludedPerformerIds(filter));
 
         query = ApplyPerformerAgeCriterion(query, filter.PerformerAgeCriterion);
 
@@ -2017,6 +2003,86 @@ public class ImageRepository : IImageRepository
         query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Image, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
 
         return query;
+    }
+
+    private static int[] GetIncludedPerformerIds(ImageFilter filter)
+    {
+        var ids = new HashSet<int>();
+        if (filter.PerformerIds is { Count: > 0 })
+        {
+            foreach (var performerId in filter.PerformerIds.Where(id => id > 0))
+                ids.Add(performerId);
+        }
+
+        if (filter.PerformersCriterion?.Value is { Count: > 0 }
+            && filter.PerformersCriterion.Modifier is CriterionModifier.Includes or CriterionModifier.IncludesAll)
+        {
+            foreach (var performerId in filter.PerformersCriterion.Value.Where(id => id > 0))
+                ids.Add(performerId);
+        }
+
+        return ids.ToArray();
+    }
+
+    private IQueryable<Image> ApplyPerformerOccurrenceTagCriterion(IQueryable<Image> query, MultiIdCriterion? criterion, IReadOnlyCollection<int> performerIds)
+    {
+        if (criterion == null)
+            return query;
+
+        var tagIds = criterion.Value.Where(tagId => tagId > 0).Distinct().ToArray();
+        var excludedTagIds = criterion.Excludes?.Where(tagId => tagId > 0).Distinct().ToArray() ?? [];
+        if (tagIds.Length == 0 && excludedTagIds.Length == 0)
+            return query;
+
+        var scopedApplications = _db.TagApplications.AsNoTracking()
+            .Where(application => application.HostType == AffinityHostType.Image
+                && application.ContextType == "performer"
+                && application.ContextId != null);
+
+        if (performerIds.Count > 0)
+        {
+            var performerIdArray = performerIds.ToArray();
+            scopedApplications = scopedApplications.Where(application => application.ContextId != null && performerIdArray.Contains(application.ContextId.Value));
+        }
+
+        if (tagIds.Length > 0)
+        {
+            query = criterion.Modifier switch
+            {
+                CriterionModifier.Excludes => query.Where(image => !scopedApplications.Any(application => application.HostId == image.Id && tagIds.Contains(application.TagId))),
+                CriterionModifier.ExcludesAll => ApplyPerformerOccurrenceTagExcludesAll(query, scopedApplications, tagIds),
+                CriterionModifier.IncludesAll => ApplyPerformerOccurrenceTagIncludesAll(query, scopedApplications, tagIds),
+                _ => query.Where(image => scopedApplications.Any(application => application.HostId == image.Id && tagIds.Contains(application.TagId))),
+            };
+        }
+
+        if (excludedTagIds.Length > 0)
+        {
+            query = query.Where(image => !scopedApplications.Any(application => application.HostId == image.Id && excludedTagIds.Contains(application.TagId)));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<Image> ApplyPerformerOccurrenceTagIncludesAll(IQueryable<Image> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    {
+        foreach (var tagId in tagIds)
+        {
+            query = query.Where(image => applications.Any(application => application.HostId == image.Id && application.TagId == tagId));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<Image> ApplyPerformerOccurrenceTagExcludesAll(IQueryable<Image> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    {
+        var matchingAll = query;
+        foreach (var tagId in tagIds)
+        {
+            matchingAll = matchingAll.Where(image => applications.Any(application => application.HostId == image.Id && application.TagId == tagId));
+        }
+
+        return query.Where(image => !matchingAll.Select(match => match.Id).Contains(image.Id));
     }
 
     private IQueryable<Image> ApplySorting(IQueryable<Image> query, string sort, bool desc, int? seed = null)

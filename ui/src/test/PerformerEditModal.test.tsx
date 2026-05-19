@@ -151,4 +151,41 @@ describe("PerformerEditModal", () => {
     await waitFor(() => expect(mocks.performersUpdate).toHaveBeenCalledWith(1, expect.objectContaining({ tagIds: [7] })));
     expect(screen.getByText("Shaved Pussy")).toBeInTheDocument();
   });
+
+  it("saves aliases from separate list inputs", async () => {
+    const user = userEvent.setup();
+    const performer: Performer = {
+      id: 1,
+      name: "Sample Performer",
+      favorite: false,
+      ignoreAutoTag: false,
+      urls: [],
+      aliases: ["Old Alias", "Second Alias"],
+      tags: [],
+      remoteIds: [],
+      sceneCount: 0,
+      imageCount: 0,
+      galleryCount: 0,
+      groupCount: 0,
+      audioCount: 0,
+      textCount: 0,
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-02T00:00:00Z",
+    };
+
+    renderModal(performer);
+
+    const aliasInputs = screen.getAllByPlaceholderText("Alias");
+    expect(aliasInputs).toHaveLength(2);
+    expect(aliasInputs[0]).toHaveValue("Old Alias");
+    expect(aliasInputs[1]).toHaveValue("Second Alias");
+
+    await user.clear(aliasInputs[0]);
+    await user.type(aliasInputs[0], "New Alias");
+    await user.click(screen.getByRole("button", { name: /Add Alias/i }));
+    await user.type(screen.getAllByPlaceholderText("Alias")[2], "Third Alias");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.performersUpdate).toHaveBeenCalledWith(1, expect.objectContaining({ aliases: ["New Alias", "Second Alias", "Third Alias"] })));
+  });
 });

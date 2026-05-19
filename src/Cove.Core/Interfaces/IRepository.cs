@@ -391,6 +391,7 @@ public class AudioFilter
     public IntCriterion? FileCountCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
     public IntCriterion? PerformerCountCriterion { get; set; }
+    public MultiIdCriterion? PerformerTagsCriterion { get; set; }
     public MultiIdCriterion? TagsCriterion { get; set; }
     public MultiIdCriterion? PerformersCriterion { get; set; }
     public MultiIdCriterion? StudiosCriterion { get; set; }
@@ -415,6 +416,7 @@ public class TextDocumentFilter
     public IntCriterion? FileCountCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
     public IntCriterion? PerformerCountCriterion { get; set; }
+    public MultiIdCriterion? PerformerTagsCriterion { get; set; }
     public MultiIdCriterion? TagsCriterion { get; set; }
     public MultiIdCriterion? PerformersCriterion { get; set; }
     public MultiIdCriterion? StudiosCriterion { get; set; }

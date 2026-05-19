@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Eye, FolderOpen, ImageOff, Link as LinkIcon, Maximize, MoreVertical, Search, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, FolderOpen, ImageOff, Layers, Link as LinkIcon, Maximize, MoreVertical, RefreshCw, Search, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -16,9 +16,10 @@ import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
-import type { FaceHostFace } from "../api/types";
+import type { FaceHostFace, TagApplication } from "../api/types";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 import { ImageVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { ImageEditPanel } from "./ImageEditModal";
 
 const ImageDownloadDialog = lazy(() => import("../components/ImageDownloadDialog").then((module) => ({ default: module.ImageDownloadDialog })));
@@ -50,6 +51,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const canWriteImage = canWriteEntity("image", hasPermission);
   const canDeleteImage = canDeleteEntity("image", hasPermission);
   const canDownloadImage = hasPermission("jobs.run") && canWriteImage;
+  const canLibraryScan = hasPermission("library.scan");
   const canEngageImage = canReadEntity("image", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canReadFaces = canReadEntity("face", hasPermission);
   const canReadFiles = hasPermission("files.read");
@@ -91,6 +93,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     },
   });
   const revealFileMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
+  const rescanMut = useMutation({ mutationFn: () => images.rescan(id) });
   const canRevealFiles = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
   const imageLikeCount = imageEngagement?.likeCount ?? 0;
   const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
@@ -270,23 +273,16 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
               </div>
             ) : null}
             {canReadPerformers && currentImage.performers.length > 0 ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {currentImage.performers.map((performer) => {
-                  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, () => onNavigate({ page: "performer", id: performer.id }));
-
-                  return (
-                    <a
-                      key={performer.id}
-                      {...linkProps}
-                      className="flex items-center gap-2 rounded-lg border border-border bg-surface/40 px-3 py-2 transition-colors hover:border-accent"
-                    >
-                      <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-surface text-xs text-muted">
-                        {performer.imagePath ? <img src={performer.imagePath} alt="" className="h-full w-full object-cover" /> : performer.name[0]}
-                      </div>
-                      <span className="text-sm text-foreground">{performer.name}</span>
-                    </a>
-                  );
-                })}
+              <div className={currentImage.performers.length > 1 ? "mt-3 grid grid-cols-2 gap-3" : "mt-3 grid max-w-[220px] gap-3"}>
+                {currentImage.performers.map((performer) => (
+                  <ImagePerformerCard
+                    key={performer.id}
+                    performer={performer}
+                    contextTags={getPerformerContextTags(currentImage.contextTagApplications, performer.id)}
+                    onClick={() => onNavigate({ page: "performer", id: performer.id })}
+                    onNavigate={onNavigate}
+                  />
+                ))}
               </div>
             ) : null}
           </section>
@@ -306,12 +302,18 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         {canReadGalleries && currentImage.galleries.length > 0 ? (
           <section>
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Galleries</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {currentImage.galleries.map((gallery) => {
                 const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, () => onNavigate({ page: "gallery", id: gallery.id }));
                 return (
-                  <a key={gallery.id} {...linkProps} className="rounded-lg border border-border bg-surface/40 px-3 py-2 text-sm text-foreground transition-colors hover:border-accent hover:text-accent">
-                    {gallery.title || `Gallery ${gallery.id}`}
+                  <a key={gallery.id} {...linkProps} className="group overflow-hidden rounded-xl border border-border bg-card text-left transition-colors hover:border-accent/60">
+                    <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card">
+                      <FolderOpen className="h-10 w-10 text-muted" />
+                    </div>
+                    <div className="p-3">
+                      <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">{gallery.title || `Gallery ${gallery.id}`}</p>
+                      {gallery.date ? <p className="mt-1 text-xs text-secondary">{formatDate(gallery.date)}</p> : null}
+                    </div>
                   </a>
                 );
               })}
@@ -322,12 +324,18 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         {canReadGroups && (currentImage.groups?.length ?? 0) > 0 ? (
           <section>
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Groups</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {(currentImage.groups ?? []).map((group) => {
                 const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
                 return (
-                  <a key={group.id} {...linkProps} className="rounded-lg border border-border bg-surface/40 px-3 py-2 text-sm text-foreground transition-colors hover:border-accent hover:text-accent">
-                    {group.name}
+                  <a key={group.id} {...linkProps} className="rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-accent/60">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium text-foreground">{group.name}</div>
+                        <div className="mt-1 text-xs text-secondary">Image group</div>
+                      </div>
+                      <Layers className="h-5 w-5 text-muted" />
+                    </div>
                   </a>
                 );
               })}
@@ -353,10 +361,11 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
 
       <section>
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Details</h2>
-        <dl className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          <DetailField label="Organized" value={image.organized ? "Yes" : "No"} />
-          <DetailField label="Created" value={formatDate(image.createdAt)} />
-          <DetailField label="Updated" value={formatDate(image.updatedAt)} />
+        <dl className="mt-3 grid gap-y-1.5 text-sm" style={{ gridTemplateColumns: "auto 1fr" }}>
+          <dt className="pr-3 text-muted">Created</dt>
+          <dd className="text-foreground">{formatDate(image.createdAt)}</dd>
+          <dt className="pr-3 text-muted">Updated</dt>
+          <dd className="text-foreground">{formatDate(image.updatedAt)}</dd>
         </dl>
       </section>
 
@@ -621,16 +630,6 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                 <Check className="h-4 w-4" />
               </button>
             ) : null}
-            {canDeleteImage ? (
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(true)}
-                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-red-300"
-                title="Delete"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            ) : null}
             <div className="relative" ref={opsMenuRef}>
               <button
                 type="button"
@@ -652,6 +651,16 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                       <Search className="h-3.5 w-3.5" /> Scrape...
                     </button>
                   ) : null}
+                  {image.files.length > 0 && canLibraryScan ? (
+                    <button
+                      type="button"
+                      onClick={() => { rescanMut.mutate(); setShowOpsMenu(false); }}
+                      disabled={rescanMut.isPending}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface disabled:opacity-60"
+                    >
+                      <RefreshCw className={["h-3.5 w-3.5", rescanMut.isPending ? "animate-spin" : ""].join(" ")} /> Rescan
+                    </button>
+                  ) : null}
                   {image.files.length === 0 && canDownloadImage ? (
                     <button
                       type="button"
@@ -659,6 +668,16 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
                     >
                       <Download className="h-3.5 w-3.5" /> Download Media...
+                    </button>
+                  ) : null}
+                  {canDeleteImage ? <div className="my-1 border-t border-border" /> : null}
+                  {canDeleteImage ? (
+                    <button
+                      type="button"
+                      onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 transition-colors hover:bg-surface"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>
                   ) : null}
                 </div>
@@ -681,6 +700,30 @@ function formatImageFaceSummary(face: FaceHostFace) {
   const confidence = face.topConfidence != null ? `${Math.round(face.topConfidence <= 1 ? face.topConfidence * 100 : face.topConfidence)}%` : null;
   return confidence || "AI face";
 }
+
+function ImagePerformerCard({ performer, contextTags = [], onClick, onNavigate }: { performer: { name: string; imagePath?: string | null; disambiguation?: string | null }; contextTags?: TagApplication[]; onClick: () => void; onNavigate: (route: any) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group overflow-hidden rounded-xl border border-border bg-card text-left transition-colors hover:border-accent/60"
+    >
+      <div className="flex aspect-[2/3] items-center justify-center bg-gradient-to-b from-card to-surface">
+        {performer.imagePath ? (
+          <img src={performer.imagePath} alt={performer.name} className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <UserRound className="h-12 w-12 text-muted" />
+        )}
+      </div>
+      <div className="p-3">
+        <p className="line-clamp-2 text-sm font-medium text-foreground group-hover:text-accent">{performer.name}</p>
+        {performer.disambiguation ? <p className="mt-1 truncate text-xs text-secondary">{performer.disambiguation}</p> : null}
+        {contextTags.length > 0 ? <div className="mt-2"><PerformerContextTagList contextTags={contextTags} onNavigate={onNavigate} /></div> : null}
+      </div>
+    </button>
+  );
+}
+
 function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-border bg-surface/40 px-4 py-3">

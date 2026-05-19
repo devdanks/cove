@@ -13,7 +13,8 @@ import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
 import { InteractiveRating } from "../components/Rating";
 import { TextViewer } from "../components/TextViewer";
 import { CustomFieldsDisplay, formatDate, formatDuration, formatFileSize } from "../components/shared";
-import { EntityReferencePopovers } from "../components/EntityCards";
+import { EntityReferencePopovers, PerformerTile } from "../components/EntityCards";
+import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
@@ -362,10 +363,30 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                 </div>
               </section>
             ) : null}
-            {(canReadPerformers && text.performers.length > 0) || (canReadTags && text.tags.length > 0) || (canReadGroups && text.groups.length > 0) || (canReadStudio && text.studioId && text.studioName) ? (
+            {canReadPerformers && text.performers.length > 0 ? (
+              <section className="rounded-3xl border border-border bg-card/75 p-5">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Performers</h3>
+                <div className={text.performers.length > 1 ? "mt-4 grid grid-cols-2 gap-3" : "mt-4 grid max-w-[220px] gap-3"}>
+                  {text.performers.map((performer) => {
+                    const contextTags = getPerformerContextTags(text.contextTagApplications, performer.id);
+                    return (
+                      <PerformerTile
+                        key={performer.id}
+                        performer={performer}
+                        onClick={() => onNavigate({ page: "performer", id: performer.id })}
+                        onNavigate={onNavigate}
+                      >
+                        {contextTags.length > 0 ? <div className="space-y-2 text-xs text-secondary"><PerformerContextTagList contextTags={contextTags} onNavigate={onNavigate} /></div> : null}
+                      </PerformerTile>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+            {(canReadTags && text.tags.length > 0) || (canReadGroups && text.groups.length > 0) || (canReadStudio && text.studioId && text.studioName) ? (
               <RelatedSection icon={<Rows3 className="h-4 w-4" />} title="Related Entities">
                 <EntityReferencePopovers
-                  performers={canReadPerformers ? text.performers : []}
+                  performers={[]}
                   tags={canReadTags ? text.tags : []}
                   groups={canReadGroups ? text.groups : []}
                   studio={canReadStudio ? { id: text.studioId, name: text.studioName } : null}

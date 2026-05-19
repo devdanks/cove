@@ -289,6 +289,37 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         }, ct);
     }
 
+    public async Task<ScrapeAttemptDto?> ApplyImageAttemptWithDefaultPlanAsync(Guid id, ApplySceneScrapeAttemptDto dto, CancellationToken ct = default)
+    {
+        var attempt = await db.ScrapeAttempts.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (attempt == null || !string.Equals(attempt.EntityType, EntityKinds.Image, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
+            return null;
+
+        var resultJson = ResolveResultJson(attempt, dto.SelectedCandidateIndex);
+        if (string.IsNullOrWhiteSpace(resultJson))
+            throw new InvalidOperationException("Scrape attempt does not contain a result to apply.");
+
+        var image = await db.Images
+            .AsNoTracking()
+            .Include(item => item.Urls)
+            .Include(item => item.ImageTags).ThenInclude(item => item.Tag)
+            .Include(item => item.ImagePerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.Studio)
+            .FirstOrDefaultAsync(item => item.Id == attempt.EntityId.Value, ct);
+
+        if (image == null)
+            return null;
+
+        using var resultDocument = JsonDocument.Parse(resultJson);
+        var root = resultDocument.RootElement;
+
+        return await ApplyAttemptAsync(id, dto with
+        {
+            ReplaceFields = BuildDefaultReplaceFields(image, root),
+            CollectionModes = BuildDefaultCollectionModes(image, root),
+        }, ct);
+    }
+
     private async Task<string?> BuildEntitySnapshotJsonAsync(string entityType, int? entityId, CancellationToken ct)
     {
         if (entityId == null)
@@ -1855,12 +1886,61 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return replaceFields;
     }
 
+    private static List<string> BuildDefaultReplaceFields(Image image, JsonElement root)
+    {
+        var replaceFields = new List<string>();
+        var currentDate = image.Date?.ToString("yyyy-MM-dd");
+        var scrapedDate = GetNormalizedSceneDate(root);
+
+        var title = GetString(root, "Title", "Name");
+        if (!string.IsNullOrWhiteSpace(title) && !string.Equals(title, image.Title, StringComparison.Ordinal))
+            replaceFields.Add("title");
+
+        var code = GetString(root, "Code");
+        if (!string.IsNullOrWhiteSpace(code) && !string.Equals(code, image.Code, StringComparison.Ordinal))
+            replaceFields.Add("code");
+
+        var details = GetString(root, "Details", "Description", "Synopsis");
+        if (!string.IsNullOrWhiteSpace(details) && !string.Equals(details, image.Details, StringComparison.Ordinal))
+            replaceFields.Add("details");
+
+        var photographer = GetString(root, "Photographer");
+        if (!string.IsNullOrWhiteSpace(photographer) && !string.Equals(photographer, image.Photographer, StringComparison.Ordinal))
+            replaceFields.Add("photographer");
+
+        if (!string.IsNullOrWhiteSpace(scrapedDate) && !string.Equals(scrapedDate, currentDate, StringComparison.Ordinal))
+            replaceFields.Add("date");
+
+        return replaceFields;
+    }
+
     private static Dictionary<string, string> BuildDefaultCollectionModes(Scene scene, JsonElement root)
     {
         var currentUrls = scene.Urls.Select(item => item.Url).Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var currentTags = scene.SceneTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var currentPerformers = scene.ScenePerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var currentStudio = scene.Studio?.Name?.Trim();
+
+        var scrapedUrls = GetStringList(root, "URLs", "Url", "URL");
+        var scrapedTags = GetTagNames(root, "Tags", "Tag", "TagNames");
+        var scrapedPerformers = GetNamedItems(root, "Performers", "Performer", "PerformerNames");
+        var scrapedStudio = GetString(root, "Studio", "StudioName");
+
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["studio"] = !string.IsNullOrWhiteSpace(scrapedStudio) && !string.Equals(scrapedStudio, currentStudio, StringComparison.OrdinalIgnoreCase) ? "replace" : "skip",
+            ["urls"] = scrapedUrls.Count > 0 && !StringListsEqual(scrapedUrls, currentUrls) ? "merge" : "skip",
+            ["tags"] = scrapedTags.Count > 0 && !StringListsEqual(scrapedTags, currentTags) ? "merge" : "skip",
+            ["performers"] = scrapedPerformers.Count > 0 && !StringListsEqual(scrapedPerformers, currentPerformers) ? "merge" : "skip",
+        };
+    }
+
+    private static Dictionary<string, string> BuildDefaultCollectionModes(Image image, JsonElement root)
+    {
+        var currentUrls = image.Urls.Select(item => item.Url).Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var currentTags = image.ImageTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var currentPerformers = image.ImagePerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var currentStudio = image.Studio?.Name?.Trim();
 
         var scrapedUrls = GetStringList(root, "URLs", "Url", "URL");
         var scrapedTags = GetTagNames(root, "Tags", "Tag", "TagNames");

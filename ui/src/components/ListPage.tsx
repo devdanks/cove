@@ -1167,17 +1167,19 @@ export function ListPage({
 
           {displayMode === "wall" && wallColumnCount != null && onWallColumnCountChange && (
             <div className="flex items-center gap-1 pl-1">
+              <ZoomOut className="w-3 h-3 text-muted" />
               <input
                 type="range"
                 min={2}
                 max={8}
                 step={1}
-                value={wallColumnCount}
-                onChange={(e) => onWallColumnCountChange(Number(e.target.value))}
+                value={10 - wallColumnCount}
+                onChange={(e) => onWallColumnCountChange(10 - Number(e.target.value))}
                 className="w-16 sm:w-20 h-1 accent-accent cursor-pointer"
-                title={`Wall columns: ${wallColumnCount}`}
+                title={`Wall card size: ${10 - wallColumnCount}`}
               />
-              <span className="min-w-[1rem] text-[10px] text-muted">{wallColumnCount}</span>
+              <ZoomIn className="w-3 h-3 text-muted" />
+              <span className="min-w-[2.25rem] text-[10px] text-muted">{wallColumnCount} cols</span>
             </div>
           )}
         </div>

@@ -12,7 +12,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/scrape-attempts")]
 [RequiresPermission(Permissions.ScenesScrape, Permissions.ScenesWrite, Permissions.AudiosWrite, Permissions.TextsWrite, Permissions.ImagesWrite, Permissions.GroupsWrite, Mode = PermissionMode.Any)]
-public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService, SceneBatchScrapeService sceneBatchScrapeService, IJobService jobService, ICurrentPrincipalAccessor principalAccessor, IAuthorizationService authorizationService) : ControllerBase
+public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService, SceneBatchScrapeService sceneBatchScrapeService, ImageBatchScrapeService imageBatchScrapeService, IJobService jobService, ICurrentPrincipalAccessor principalAccessor, IAuthorizationService authorizationService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<ScrapeAttemptDto>>> List([FromQuery] string? entityType, [FromQuery] int? entityId, [FromQuery] int limit = 20, CancellationToken ct = default)
@@ -110,6 +110,45 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
         return Accepted(new { jobId, queuedCount = dto.SceneIds.Count });
     }
 
+    [HttpPost("batch-images")]
+    [RequiresPermission(Permissions.JobsRun, Permissions.ImagesWrite)]
+    public async Task<ActionResult<object>> StartImageBatch([FromBody] BatchImageScrapeStartRequestDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.ScraperId))
+            return BadRequest(new { error = "ScraperId is required." });
+
+        if (dto.ImageIds.Count == 0)
+            return BadRequest(new { error = "Select at least one image to batch scrape." });
+
+        var normalizedInputKind = dto.InputKind?.Trim().ToLowerInvariant();
+        if (normalizedInputKind is not ("url" or "name"))
+            return BadRequest(new { error = $"Unsupported batch image scrape input kind: {dto.InputKind}" });
+
+        foreach (var imageId in dto.ImageIds.Distinct())
+        {
+            var result = await authorizationService.AuthorizeAsync(
+                principalAccessor.Current,
+                Permissions.ImagesWrite,
+                new EntityRef(EntityKinds.Image, imageId.ToString(CultureInfo.InvariantCulture)),
+                ct);
+
+            if (!result.Allowed)
+                return ForbiddenResult(result);
+        }
+
+        var jobId = jobService.Enqueue(
+            "image-batch-scrape",
+            $"Scraping {dto.ImageIds.Count} image{(dto.ImageIds.Count == 1 ? string.Empty : "s")}",
+            async (progress, jobCt) =>
+            {
+                var summary = await imageBatchScrapeService.RunAsync(dto, progress, jobCt);
+                progress.Report(1d, BuildBatchImageScrapeCompletionMessage(summary));
+            },
+            exclusive: false);
+
+        return Accepted(new { jobId, queuedCount = dto.ImageIds.Count });
+    }
+
     private async Task<ObjectResult?> AuthorizeAttemptAsync(ScrapeAttemptDto attempt, bool write, CancellationToken ct)
     {
         if (!attempt.EntityId.HasValue)
@@ -184,6 +223,28 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
         var parts = new List<string>
         {
             $"Scraped {summary.ScrapedCount} of {summary.TotalCount} scene{(summary.TotalCount == 1 ? string.Empty : "s")}."
+        };
+
+        if (summary.AppliedCount > 0)
+            parts.Add($"Applied {summary.AppliedCount}.");
+
+        if (summary.PartialAppliedCount > 0)
+            parts.Add($"Applied partially {summary.PartialAppliedCount}.");
+
+        if (summary.SkippedCount > 0)
+            parts.Add($"Skipped {summary.SkippedCount}.");
+
+        if (summary.FailedCount > 0)
+            parts.Add($"Failed {summary.FailedCount}.");
+
+        return string.Join(' ', parts);
+    }
+
+    private static string BuildBatchImageScrapeCompletionMessage(ImageBatchScrapeExecutionSummary summary)
+    {
+        var parts = new List<string>
+        {
+            $"Scraped {summary.ScrapedCount} of {summary.TotalCount} image{(summary.TotalCount == 1 ? string.Empty : "s")}."
         };
 
         if (summary.AppliedCount > 0)

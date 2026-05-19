@@ -62,7 +62,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
   const [careerEnd, setCareerEnd] = useState(performer.careerEnd || "");
   const [ignoreAutoTag, setIgnoreAutoTag] = useState(performer.ignoreAutoTag ?? false);
   const [urls, setUrls] = useState(performer.urls.length > 0 ? performer.urls : [""]);
-  const [aliases, setAliases] = useState(performer.aliases.join(", "));
+  const [aliases, setAliases] = useState(performer.aliases.length > 0 ? performer.aliases : [""]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(performer.tags.map((t) => t.id));
   const [selectedTagsById, setSelectedTagsById] = useState<Record<number, SelectedTagOption>>(() => buildSelectedTagLookup(performer.tags));
   const [tagSearch, setTagSearch] = useState("");
@@ -101,7 +101,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
     setCareerEnd(performer.careerEnd || "");
     setIgnoreAutoTag(performer.ignoreAutoTag ?? false);
     setUrls(performer.urls.length > 0 ? performer.urls : [""]);
-    setAliases(performer.aliases.join(", "));
+    setAliases(performer.aliases.length > 0 ? performer.aliases : [""]);
     setSelectedTagIds(performer.tags.map((t) => t.id));
     setSelectedTagsById(buildSelectedTagLookup(performer.tags));
     setTagSearch("");
@@ -120,7 +120,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
 
   const handleSave = () => {
     const urlList = urls.map((url) => url.trim()).filter(Boolean);
-    const aliasList = aliases.split(",").map((a) => a.trim()).filter(Boolean);
+    const aliasList = aliases.map((alias) => alias.trim()).filter(Boolean);
     mutation.mutate({
       name,
       disambiguation: disambiguation || undefined,
@@ -297,8 +297,8 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <InteractiveRatingField value={rating} onChange={setRating} label="Rating" />
-        <Field label="Aliases (comma-separated)">
-          <TextInput value={aliases} onChange={setAliases} placeholder="Alias 1, Alias 2" />
+        <Field label="Aliases">
+          <StringListEditor values={aliases} onChange={setAliases} placeholder="Alias" addLabel="Add Alias" />
         </Field>
       </div>
 

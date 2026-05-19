@@ -56,6 +56,10 @@ function normalizeFeedVideoSource(value: string | undefined) {
   return value === "video" ? "video" : "preview";
 }
 
+function normalizeObjectFit(value: string | undefined) {
+  return value === "contain" ? "contain" : "cover";
+}
+
 function clampNumber(value: number | undefined, min: number, max: number) {
   if (typeof value !== "number" || Number.isNaN(value)) {
     return min;
@@ -91,6 +95,8 @@ function normalizeConfig(config: CoveConfig, userKeybindingOverrides?: Record<st
       playerVideoStartPercent: clampNumber(uiConfig.playerVideoStartPercent, 0, 95),
       playerVideoStartMinDuration: Math.max(0, uiConfig.playerVideoStartMinDuration ?? 0),
       wallPreviewType: normalizeWallPreviewType(uiConfig.wallPreviewType),
+      imageObjectFit: normalizeObjectFit(uiConfig.imageObjectFit),
+      videoObjectFit: normalizeObjectFit(uiConfig.videoObjectFit),
       feedVideoSource: normalizeFeedVideoSource(uiConfig.feedVideoSource),
       feedVideoSound: uiConfig.feedVideoSound ?? false,
       feedVideoStartPercent: clampNumber(uiConfig.feedVideoStartPercent, 0, 95),

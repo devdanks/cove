@@ -1,8 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, faces, galleries, groups, images, metadata, performers, scenes, texts, entityImages } from "../api/client";
-import type { Audio, AudioFilterCriteria, Face, FaceSimilar, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, Performer as PerformerModel, Scene, SceneFilterCriteria, MetadataServer, MetadataServerPerformerMatch, TextDocument, TextFilterCriteria } from "../api/types";
+import type { Audio, AudioFilterCriteria, Face, FaceSimilar, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, Performer as PerformerModel, PerformerFilterCriteria, Scene, SceneFilterCriteria, MetadataServer, MetadataServerPerformerMatch, TextDocument, TextFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MapPin, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
+import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MapPin, MoreHorizontal, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PerformerEditModal } from "./PerformerEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -37,7 +37,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "galleries" | "images" | "audios" | "texts" | "groups" | "appearsWith" | (string & {});
+type TabKey = "scenes" | "galleries" | "images" | "audios" | "texts" | "groups" | "appearsWith" | "similar" | (string & {});
 
 const IMAGE_SORT = [
   { value: "updated_at", label: "Updated At" },
@@ -89,6 +89,9 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const [textFilter, setTextFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
   const [groupFilter, setGroupFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const [appearsWithFilter, setAppearsWithFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
+  const [urlsExpanded, setUrlsExpanded] = useState(false);
+  const [urlsOverflowing, setUrlsOverflowing] = useState(false);
+  const urlsRef = useRef<HTMLDivElement>(null);
   const { allTabs: performerTabs, renderExtensionTab, extensionCounts } = useExtensionTabs("performer", [
     { key: "scenes", label: "Scenes", count: performer?.sceneCount },
     { key: "galleries", label: "Galleries", count: performer?.galleryCount },
@@ -97,6 +100,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     { key: "texts", label: "Texts", count: performer?.textCount },
     { key: "groups", label: "Groups", count: performer?.groupCount },
     { key: "appearsWith", label: "Appears With" },
+    { key: "similar", label: "Similar" },
   ], id);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
@@ -124,6 +128,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     texts: "texts.read",
     groups: "groups.read",
     appearsWith: "performers.read",
+    similar: "performers.read",
   }, hasPermission);
 
   const deleteMut = useMutation({
@@ -182,6 +187,29 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   }, [showOpsMenu]);
 
   useEffect(() => {
+    setUrlsExpanded(false);
+  }, [id]);
+
+  useEffect(() => {
+    const element = urlsRef.current;
+    if (!element || urlsExpanded) {
+      return;
+    }
+
+    const updateOverflow = () => setUrlsOverflowing(element.scrollHeight > element.clientHeight + 1);
+    updateOverflow();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateOverflow);
+      return () => window.removeEventListener("resize", updateOverflow);
+    }
+
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [performer?.urls, urlsExpanded]);
+
+  useEffect(() => {
     if (visiblePerformerTabs.length > 0 && !visiblePerformerTabs.some((tab) => tab.key === activeTab)) {
       setActiveTab(visiblePerformerTabs[0].key as TabKey);
     }
@@ -235,8 +263,12 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
         ]}
         heroContent={(
           <>
-            <InteractiveRating value={performerRating} onChange={(value) => setPerformerRating(value)} readOnly={!canEngagePerformer} />
-            <AspectRatingsPanel hostType="performer" hostId={id} canRate={canEngagePerformer} className="mt-3" />
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <div className="shrink-0">
+                <InteractiveRating value={performerRating} onChange={(value) => setPerformerRating(value)} readOnly={!canEngagePerformer} />
+              </div>
+              <AspectRatingsPanel hostType="performer" hostId={id} canRate={canEngagePerformer} showHeading={false} variant="inline" className="min-w-0" />
+            </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
               {performer.gender && <InfoItem icon={<UserRound className="h-4 w-4" />} label="Gender" value={performer.gender} />}
@@ -260,13 +292,26 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
             </div>
 
             {performer.urls.length > 0 ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {performer.urls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
-                    <ExternalLink className="h-3 w-3" />
-                    {(() => { try { return new URL(url).hostname.replace("www.", ""); } catch { return url; } })()}
-                  </a>
-                ))}
+              <div className="mt-4 space-y-2">
+                <div ref={urlsRef} className={`flex flex-wrap gap-2 ${urlsExpanded ? "" : "max-h-[4.5rem] overflow-hidden"}`}>
+                  {performer.urls.map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
+                      <ExternalLink className="h-3 w-3" />
+                      {(() => { try { return new URL(url).hostname.replace("www.", ""); } catch { return url; } })()}
+                    </a>
+                  ))}
+                </div>
+                {urlsOverflowing || urlsExpanded ? (
+                  <button
+                    type="button"
+                    onClick={() => setUrlsExpanded((value) => !value)}
+                    className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-xs text-secondary hover:border-accent/60 hover:text-foreground"
+                    aria-expanded={urlsExpanded}
+                    aria-label={urlsExpanded ? "Show fewer URLs" : "Show all URLs"}
+                  >
+                    {urlsExpanded ? "Show less" : <MoreHorizontal className="h-4 w-4" />}
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -282,7 +327,6 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
 
             {performer.details ? <p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{performer.details}</p> : null}
             <CustomFieldsDisplay customFields={performer.customFields} entityType="performer" />
-            <PerformerFaceSimilarityPanel performerId={id} canReadFaces={canReadFaces} onNavigate={onNavigate} />
             <PerformerMetadataServerPanel performer={performer} metadataServers={metadataServers} onNavigate={onNavigate} />
           </>
         )}
@@ -342,6 +386,9 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
           {activeTab === "appearsWith" && (
             <PerformerAppearsWithPanel performerId={id} filter={appearsWithFilter} setFilter={setAppearsWithFilter} onNavigate={onNavigate} />
           )}
+          {activeTab === "similar" && (
+            <PerformerSimilarPanel performer={performer} canReadFaces={canReadFaces} onNavigate={onNavigate} />
+          )}
           {renderExtensionTab(activeTab, id, onNavigate)}
         </div>
 
@@ -388,6 +435,164 @@ type PerformerFaceMatch = {
   bestFaceLabel?: string;
   matchingFaceIds: number[];
 };
+
+type PerformerAttributeMatch = {
+  performer: PerformerModel;
+  reasons: string[];
+};
+
+function PerformerSimilarPanel({ performer, canReadFaces, onNavigate }: { performer: PerformerModel; canReadFaces: boolean; onNavigate: (r: any) => void }) {
+  return (
+    <div className="space-y-6">
+      <PerformerFaceSimilarityPanel performerId={performer.id} canReadFaces={canReadFaces} onNavigate={onNavigate} />
+      <PerformerAttributeSimilarityPanel performer={performer} onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function PerformerAttributeSimilarityPanel({ performer, onNavigate }: { performer: PerformerModel; onNavigate: (r: any) => void }) {
+  const attributeQueries = useMemo(() => buildPerformerAttributeQueries(performer), [performer]);
+  const queryResults = useQueries({
+    queries: attributeQueries.map((query) => ({
+      queryKey: ["performer", performer.id, "similar-attribute", query.key, query.value],
+      queryFn: () => performers.findFiltered({
+        findFilter: { page: 1, perPage: 18, sort: "latest_scene_date", direction: "desc" },
+        objectFilter: query.objectFilter,
+      }),
+      enabled: attributeQueries.length > 0,
+    })),
+  });
+
+  const matches = useMemo<PerformerAttributeMatch[]>(() => {
+    const byPerformer = new Map<number, PerformerAttributeMatch & { reasonSet: Set<string> }>();
+
+    queryResults.forEach((result, index) => {
+      const label = attributeQueries[index]?.label;
+      if (!label) return;
+
+      for (const candidate of result.data?.items ?? []) {
+        if (candidate.id === performer.id) continue;
+
+        const existing = byPerformer.get(candidate.id);
+        if (existing) {
+          existing.reasonSet.add(label);
+          existing.reasons = Array.from(existing.reasonSet);
+          continue;
+        }
+
+        byPerformer.set(candidate.id, {
+          performer: candidate,
+          reasons: [label],
+          reasonSet: new Set([label]),
+        });
+      }
+    });
+
+    return Array.from(byPerformer.values())
+      .map(({ reasonSet: _reasonSet, ...match }) => match)
+      .sort((left, right) => right.reasons.length - left.reasons.length || right.performer.sceneCount - left.performer.sceneCount || left.performer.name.localeCompare(right.performer.name))
+      .slice(0, 12);
+  }, [attributeQueries, performer.id, queryResults]);
+
+  const isLoading = queryResults.some((result) => result.isLoading);
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-4">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">Similar Performers by Attributes</h2>
+        <p className="mt-1 text-sm text-secondary">Matches are grouped from shared ethnicity, hair color, measurements, height, country, and eye color.</p>
+      </div>
+
+      {attributeQueries.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-secondary">
+          This performer does not have enough profile attributes for comparison yet.
+        </div>
+      ) : isLoading ? (
+        <p className="mt-4 text-sm text-secondary">Finding similar performers...</p>
+      ) : matches.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-secondary">
+          No attribute-similar performers were found yet.
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {matches.map((match) => (
+            <SimilarPerformerAttributeCard key={match.performer.id} match={match} onNavigate={onNavigate} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SimilarPerformerAttributeCard({ match, onNavigate }: { match: PerformerAttributeMatch; onNavigate: (r: any) => void }) {
+  const imageUrl = match.performer.imagePath || entityImages.performerImageUrl(match.performer.id, match.performer.updatedAt);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate({ page: "performer", id: match.performer.id })}
+      className="flex w-full gap-3 rounded-xl border border-border bg-surface/60 p-3 text-left transition-colors hover:border-accent/60"
+    >
+      <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-surface/90">
+        {imageUrl ? (
+          <img src={imageUrl} alt={match.performer.name} className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-muted">
+            <UserRound className="h-6 w-6" />
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold text-foreground">{match.performer.name}</div>
+        {match.performer.country ? <div className="mt-1 text-xs text-secondary">{match.performer.country}</div> : null}
+        <div className="mt-2 flex flex-wrap gap-1">
+          {match.reasons.map((reason) => (
+            <span key={reason} className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">
+              {reason}
+            </span>
+          ))}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function buildPerformerAttributeQueries(performer: PerformerModel) {
+  const queries: { key: string; label: string; value: string | number; objectFilter: PerformerFilterCriteria }[] = [];
+  const addString = (key: string, label: string, value: string | undefined | null, criterionKey: keyof PerformerFilterCriteria) => {
+    const trimmed = value?.trim();
+    if (!trimmed) return;
+    queries.push({
+      key,
+      label,
+      value: trimmed,
+      objectFilter: { [criterionKey]: { modifier: "EQUALS", value: trimmed } } as PerformerFilterCriteria,
+    });
+  };
+
+  addString("ethnicity", "Ethnicity", performer.ethnicity, "ethnicityCriterion");
+  addString("hairColor", "Hair", performer.hairColor, "hairColorCriterion");
+  addString("measurements", "Measurements", performer.measurements, "measurementsCriterion");
+  addString("country", "Country", performer.country, "countryCriterion");
+  addString("eyeColor", "Eyes", performer.eyeColor, "eyeColorCriterion");
+
+  if (performer.heightCm && performer.heightCm > 0) {
+    queries.push({
+      key: "height",
+      label: "Height",
+      value: performer.heightCm,
+      objectFilter: {
+        heightCriterion: {
+          modifier: "BETWEEN",
+          value: Math.max(1, performer.heightCm - 3),
+          value2: performer.heightCm + 3,
+        },
+      },
+    });
+  }
+
+  return queries;
+}
 
 function PerformerFaceSimilarityPanel({ performerId, canReadFaces, onNavigate }: { performerId: number; canReadFaces: boolean; onNavigate: (r: any) => void }) {
   const { data: linkedFaces = [], isLoading: linkedFacesLoading } = useQuery({
@@ -1002,13 +1207,16 @@ function PerformerGroupsPanel({ performerId, filter, setFilter, onNavigate }: {
 }) {
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Group>({
     queryKey: ["performer-groups", performerId, objectFilter],
     filter,
-    queryFn: (nextFilter) => groups.findFiltered({
-      findFilter: nextFilter,
-      objectFilter: withRequiredMultiId(objectFilter as GroupFilterCriteria, "performersCriterion", performerId),
-    }),
+    queryFn: (nextFilter) => hasObjectFilter
+      ? groups.findFiltered({
+          findFilter: nextFilter,
+          objectFilter: withRequiredMultiId(objectFilter as GroupFilterCriteria, "performersCriterion", performerId),
+        })
+      : performers.groups(performerId, nextFilter),
   });
   const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter }), [infiniteFilterKey, objectFilter]);
   const { selectedIds, toggle, selectAll, selectIds, selectNone } = useMultiSelect(data?.items ?? [], { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });

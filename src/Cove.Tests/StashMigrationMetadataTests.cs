@@ -343,6 +343,35 @@ stash_boxes:
     }
 
     [Fact]
+    public void ParseStashConfig_ReadsCamelCaseMetadataServerApiKey()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"stash-config-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var configPath = Path.Combine(tempDir, "config.yml");
+
+        try
+        {
+                        File.WriteAllText(configPath, """
+stashBoxes:
+  - endpoint: https://stash-box.example/graphql
+    apiKey: camel-secret
+    name: Example Box
+""");
+
+            var stashConfig = InvokePrivateStatic(typeof(StashMigrationService), "ParseStashConfig", configPath);
+            Assert.NotNull(stashConfig);
+
+            var metadataServers = Assert.IsAssignableFrom<System.Collections.IEnumerable>(GetPrivateProperty<object>(stashConfig!, "MetadataServers"));
+            var metadataServer = Assert.Single(metadataServers.Cast<object>());
+            Assert.Equal("camel-secret", GetPrivateProperty<string>(metadataServer, "ApiKey"));
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
+        }
+    }
+
+    [Fact]
     public async Task ImportPerformersAsync_UsesCustomPerformerImageLocationFallback()
     {
         await using var context = CreateContext();

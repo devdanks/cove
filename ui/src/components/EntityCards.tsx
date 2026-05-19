@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { scenes, images, performers, galleries, studios, groups, audios, texts, entityImages } from "../api/client";
@@ -11,6 +11,13 @@ import { CardSelectionToggle, RouteCardLinkOverlay } from "./RouteCardLinkOverla
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { getAudioDisplayTitle, getTextDisplayTitle, pickPrimaryTextFile } from "../utils/audioTextDisplay";
 import { BookmarkButton } from "./BookmarkButton";
+import { useOptionalAppConfig } from "../state/AppConfigContext";
+
+function CoverImage({ className = "", ...props }: ImgHTMLAttributes<HTMLImageElement>) {
+  const appConfig = useOptionalAppConfig();
+  const fitClass = appConfig?.config?.ui.imageObjectFit === "contain" ? "object-contain" : "object-cover";
+  return <img {...props} className={`${className} ${fitClass}`.trim()} />;
+}
 
 function createNestedEntityNavigationHandlers<T extends HTMLAnchorElement>(route: { page: string; id: number }, onNavigate?: (route: any) => void) {
   return createNestedRouteLinkProps<T>(route, () => onNavigate?.(route));
@@ -132,7 +139,7 @@ export function PerformerPreviewGrid({ performers: performerItems, onNavigate }:
           >
             <div className="w-20 h-28 rounded overflow-hidden bg-surface flex-shrink-0">
               {performer.imagePath ? (
-                <img src={performer.imagePath} alt="" className="w-full h-full object-cover" loading="lazy" />
+                <CoverImage src={performer.imagePath} alt="" className="w-full h-full" loading="lazy" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center"><User className="w-8 h-8 text-muted" /></div>
               )}
@@ -159,7 +166,7 @@ export function GalleryPreviewList({ galleries: galleryItems, onNavigate }: { ga
           >
             <div className="h-12 w-12 overflow-hidden rounded bg-surface flex-shrink-0">
               {gallery.coverPath ? (
-                <img src={gallery.coverPath} alt="" className="h-full w-full object-cover" loading="lazy" />
+                <CoverImage src={gallery.coverPath} alt="" className="h-full w-full" loading="lazy" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center"><FolderOpen className="w-4 h-4 text-muted" /></div>
               )}
@@ -382,7 +389,7 @@ export function ImagesPopoverContent({ filter }: { filter: Record<string, string
     <div className="grid grid-cols-3 gap-1">
       {items.map((img) => (
         <div key={img.id} className="aspect-square rounded overflow-hidden bg-surface">
-          <img src={images.thumbnailUrl(img.id)} alt="" className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <CoverImage src={images.thumbnailUrl(img.id)} alt="" className="w-full h-full" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
         </div>
       ))}
       {(data?.totalCount ?? 0) > 10 && (
@@ -515,7 +522,7 @@ export function GroupsPopoverContent({ filter }: { filter: Record<string, string
     <div className="space-y-1">
       {items.map((g) => (
         <div key={g.id} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-card">
-          {g.frontImagePath ? <img src={g.frontImagePath} alt="" className="w-7 h-10 rounded object-cover flex-shrink-0 bg-surface" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <Layers className="w-4 h-4 text-muted flex-shrink-0" />}
+          {g.frontImagePath ? <CoverImage src={g.frontImagePath} alt="" className="w-7 h-10 rounded flex-shrink-0 bg-surface" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <Layers className="w-4 h-4 text-muted flex-shrink-0" />}
           <span className="text-[11px] text-foreground truncate">{g.name}</span>
         </div>
       ))}
@@ -618,7 +625,7 @@ function PerformerBadge({
       <a ref={badgeRef} {...navigationHandlers} onMouseEnter={onEnter} onMouseLeave={onLeave}
         className="performer-badge flex items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-0.5 min-w-0 hover:border-accent/50 transition-colors">
         {performer.imagePath ? (
-          <img src={performer.imagePath} alt="" className="h-4 w-4 rounded-full object-cover flex-shrink-0" loading="lazy" />
+          <CoverImage src={performer.imagePath} alt="" className="h-4 w-4 rounded-full flex-shrink-0" loading="lazy" />
         ) : (
           <User className="h-3.5 w-3.5 text-muted flex-shrink-0" />
         )}
@@ -633,7 +640,7 @@ function PerformerBadge({
         >
           <div className="w-full aspect-[2/3] rounded overflow-hidden bg-card mb-1.5">
             {performer.imagePath ? (
-              <img src={performer.imagePath} alt="" className="w-full h-full object-cover" loading="lazy" />
+              <CoverImage src={performer.imagePath} alt="" className="w-full h-full" loading="lazy" />
             ) : (
               <div className="w-full h-full flex items-center justify-center"><User className="w-8 h-8 text-muted" /></div>
             )}
@@ -649,6 +656,7 @@ function PerformerBadge({
 // ===== SceneCard (redesigned - cleaner, performer badges, 2-line title) =====
 
 export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNavigate, selecting, onQuickView, bookmarkInitiallySaved }: { scene: Scene; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onNavigate?: (r: any) => void; onQuickView?: () => void; bookmarkInitiallySaved?: boolean }) {
+  const appConfig = useOptionalAppConfig();
   const file = scene.files[0];
   const clipDuration = typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number"
     ? Math.max(0, scene.clipEndSec - scene.clipStartSec)
@@ -668,6 +676,7 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
   const scrubTimestamp = scrubSeconds != null ? formatDuration(scrubSeconds) : null;
   const scrubTimestampPercent = scrubSeconds != null ? Math.min(88, Math.max(12, scrubPercent)) : 0;
   const scrubImageUrl = scrubSeconds != null ? scenes.screenshotUrl(scene.id, scene.updatedAt, scrubSeconds) : null;
+  const scenePreviewObjectFit = appConfig?.config?.ui.videoObjectFit === "contain" ? "contain" : "cover";
 
   const updateScrubPreview = useCallback((event: MouseEvent<HTMLDivElement>) => {
     if (duration <= 0) return;
@@ -698,15 +707,17 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
         <img
           src={coverUrl}
           alt={scene.title || ""}
-          className="scene-card-preview-image w-full h-full object-cover"
+          className="scene-card-preview-image h-full w-full"
+          style={{ objectFit: scenePreviewObjectFit }}
           loading="lazy"
         />
-        <video ref={videoRef} disableRemotePlayback playsInline muted loop preload="none" src={previewUrl} className="scene-card-preview-video" />
+        <video ref={videoRef} disableRemotePlayback playsInline muted loop preload="none" src={previewUrl} className="scene-card-preview-video" style={{ objectFit: scenePreviewObjectFit }} />
         {scrubImageUrl ? (
           <img
             src={scrubImageUrl}
             alt=""
-            className="absolute inset-0 z-[7] h-full w-full object-cover"
+            className="absolute inset-0 z-[7] h-full w-full"
+            style={{ objectFit: scenePreviewObjectFit }}
             draggable={false}
           />
         ) : null}
@@ -874,7 +885,7 @@ export function PerformerTile({ performer, engagement, onClick, onNavigate, chil
   const audioCount = performer.audioCount ?? 0;
   const textCount = performer.textCount ?? 0;
   const groupCount = performer.groupCount ?? 0;
-  const performerImageUrl = performer.imagePath ?? entityImages.performerImageUrl(performer.id);
+  const performerImageUrl = performer.imagePath || null;
   const hasFooter = (performer.tags?.length ?? 0) > 0 || sceneCount > 0 || imageCount > 0 || galleryCount > 0 || audioCount > 0 || textCount > 0 || groupCount > 0;
 
   return (
@@ -889,8 +900,14 @@ export function PerformerTile({ performer, engagement, onClick, onNavigate, chil
       bodyClassName="p-2.5"
       media={(
         <>
-          <img src={performerImageUrl} alt={performer.name} className="h-full w-full object-cover" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
-          <div className="hidden h-full w-full items-center justify-center"><User className="h-12 w-12 text-muted" /></div>
+          {performerImageUrl ? (
+            <>
+              <CoverImage src={performerImageUrl} alt={performer.name} className="h-full w-full" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+              <div className="hidden h-full w-full items-center justify-center"><User className="h-12 w-12 text-muted" /></div>
+            </>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center"><User className="h-12 w-12 text-muted" /></div>
+          )}
           <RatingBanner rating={engagement?.rating} />
           {performer.favorite ? <Heart className="absolute right-1.5 top-1.5 z-[5] h-4 w-4 fill-red-500 text-red-500 drop-shadow-md" /> : null}
         </>
@@ -1081,12 +1098,12 @@ export function ImageTile({ image, engagement, onClick, onPreview, onDetails, on
   const hasFooter = (image.tags?.length ?? 0) > 0 || (image.performers?.length ?? 0) > 0 || (image.galleries?.length ?? 0) > 0 || imageGroups.length > 0 || likeCount > 0 || hasFavorite || image.organized;
   const displayTitle = getImageDisplayTitle(image);
   const detailsClick = onDetails ?? onClick;
-  const previewClick = selecting ? onClick : (onPreview ?? detailsClick);
+  const previewClick = onPreview ?? detailsClick;
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left shadow-md shadow-black/20 flex flex-col h-full transition-colors ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       {!onPreview ? <RouteCardLinkOverlay route={{ page: "image", id: image.id }} onClick={detailsClick} label={`Open image ${displayTitle}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} /> : null}
-      <div className="aspect-square overflow-hidden bg-surface relative" onClick={previewClick}>
-        <img src={images.thumbnailUrl(image.id)} alt={displayTitle} className="h-full w-full object-cover" loading="lazy" />
+      <div className="aspect-square overflow-hidden bg-surface relative" onClick={selecting ? undefined : previewClick}>
+        <CoverImage src={images.thumbnailUrl(image.id)} alt={displayTitle} className="h-full w-full" loading="lazy" />
         <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
         {!selecting && (
@@ -1102,7 +1119,7 @@ export function ImageTile({ image, engagement, onClick, onPreview, onDetails, on
         {image.studioName && (
           <div className="absolute top-1 right-1 text-[10px] bg-black/70 px-1 py-0.5 rounded text-white truncate max-w-[80%]">{image.studioName}</div>
         )}
-        {onQuickView && (
+        {!selecting && onQuickView && (
           <button
             onClick={(e) => { e.stopPropagation(); onQuickView(); }}
             className="absolute bottom-1 left-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-black/60 text-white hover:bg-black/80"
@@ -1113,7 +1130,7 @@ export function ImageTile({ image, engagement, onClick, onPreview, onDetails, on
         )}
       </div>
       <div className="card-body border-t border-border/50 p-2 flex-1 flex flex-col gap-1">
-        {onPreview ? (
+        {!selecting && onPreview ? (
           <a {...createRouteLinkProps<HTMLAnchorElement>({ page: "image", id: image.id }, detailsClick)} className="relative z-10 card-title font-semibold text-foreground line-clamp-2 group-hover:text-accent">
             {displayTitle}
           </a>
@@ -1199,7 +1216,7 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
         <>
           {gallery.coverPath ? (
             <>
-              <img src={gallery.coverPath} alt={title} className="h-full w-full object-cover" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+              <CoverImage src={gallery.coverPath} alt={title} className="h-full w-full" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
               <div className="hidden h-full w-full items-center justify-center"><FolderOpen className="h-10 w-10 text-muted" /></div>
             </>
           ) : (
@@ -1286,7 +1303,7 @@ export function GroupTile({ group, engagement, onClick, onNavigate, selected, on
         <>
           {group.frontImagePath ? (
             <>
-              <img src={group.frontImagePath} alt={group.name} className="h-full w-full object-cover" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+              <CoverImage src={group.frontImagePath} alt={group.name} className="h-full w-full" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
               <div className="hidden h-full w-full items-center justify-center"><Layers className="h-10 w-10 text-muted" /></div>
             </>
           ) : (
@@ -1383,7 +1400,7 @@ export function AudioTile({ audio, engagement, selected, onSelect, selecting, on
       <RouteCardLinkOverlay route={{ page: "audio", id: audio.id }} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
         {audio.imagePath ? (
-          <img src={audio.imagePath} alt={title} className="h-full w-full object-cover" loading="lazy" />
+          <CoverImage src={audio.imagePath} alt={title} className="h-full w-full" loading="lazy" />
         ) : (
           <Headphones className="h-12 w-12 text-muted opacity-50" />
         )}
@@ -1430,7 +1447,7 @@ export function TextTile({ text, selected, onSelect, selecting, onClick, onNavig
     <article onClick={selecting ? onClick : undefined} className={`entity-card group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "text", id: text.id }} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
-        {text.imagePath ? <img src={text.imagePath} alt={title} className="h-full w-full object-cover" loading="lazy" /> : <FileText className="h-12 w-12 text-muted opacity-50" />}
+        {text.imagePath ? <CoverImage src={text.imagePath} alt={title} className="h-full w-full" loading="lazy" /> : <FileText className="h-12 w-12 text-muted opacity-50" />}
         {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
         {!selecting ? <BookmarkButton hostType="text" hostId={text.id} compact deferUntilHover className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100" /> : null}
         {text.maxWordCount ? <span className="absolute bottom-1 right-1 z-[5] rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">{Intl.NumberFormat().format(text.maxWordCount)} words</span> : null}
@@ -1466,7 +1483,7 @@ export function TagTile({ tag, engagement, onClick, onNavigate, children, select
           {favorite ? <Heart className="absolute right-2 top-2 z-10 h-4 w-4 fill-red-500 text-red-500 drop-shadow" /> : null}
           {tag.imagePath ? (
             <>
-              <img src={tag.imagePath} alt={tag.name} className="h-full w-full object-cover" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+              <CoverImage src={tag.imagePath} alt={tag.name} className="h-full w-full" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
               <div className="hidden h-full w-full items-center justify-center"><Tag className="h-10 w-10 text-muted" /></div>
             </>
           ) : (

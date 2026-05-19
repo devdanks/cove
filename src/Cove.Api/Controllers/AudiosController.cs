@@ -124,7 +124,8 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         var groups = await GetGroupsAsync(id, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, id, ct);
         var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [id], ct);
-        return Ok(MapToDto(audio, groups, customFieldValues, effectiveTags));
+        var contextTagApplications = await GetContextTagApplicationsAsync(id, ct);
+        return Ok(MapToDto(audio, groups, customFieldValues, effectiveTags, contextTagApplications));
     }
 
     [HttpGet("{id:int}/stream")]
@@ -193,7 +194,8 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         var groups = await GetGroupsAsync(audio.Id, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, audio.Id, ct);
         var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [audio.Id], ct);
-        return CreatedAtAction(nameof(GetById), new { id = audio.Id }, MapToDto(created, groups, customFieldValues, effectiveTags));
+        var contextTagApplications = await GetContextTagApplicationsAsync(audio.Id, ct);
+        return CreatedAtAction(nameof(GetById), new { id = audio.Id }, MapToDto(created, groups, customFieldValues, effectiveTags, contextTagApplications));
     }
 
     [HttpPost("from-file")]
@@ -218,7 +220,8 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         var groups = await GetGroupsAsync(audioId, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, audioId, ct);
         var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [audioId], ct);
-        return CreatedAtAction(nameof(GetById), new { id = audioId }, MapToDto(audio, groups, customFieldValues, effectiveTags));
+        var contextTagApplications = await GetContextTagApplicationsAsync(audioId, ct);
+        return CreatedAtAction(nameof(GetById), new { id = audioId }, MapToDto(audio, groups, customFieldValues, effectiveTags, contextTagApplications));
     }
 
     [HttpPut("{id:int}")]
@@ -296,7 +299,8 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         var groups = await GetGroupsAsync(id, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, id, ct);
         var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [id], ct);
-        return Ok(MapToDto(updated, groups, customFieldValues, effectiveTags));
+        var contextTagApplications = await GetContextTagApplicationsAsync(id, ct);
+        return Ok(MapToDto(updated, groups, customFieldValues, effectiveTags, contextTagApplications));
     }
 
     [HttpPost("bulk")]
@@ -492,6 +496,7 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, audio => audio.AudioPerformers.Count);
         query = ApplyAudioTagCriterion(query, filter.TagsCriterion);
         query = FilterHelpers.ApplyMultiId(query, filter.PerformersCriterion, audio => audio.AudioPerformers.Select(link => link.PerformerId));
+        query = ApplyPerformerOccurrenceTagCriterion(query, filter.PerformerTagsCriterion, GetIncludedPerformerIds(filter));
         query = FilterHelpers.ApplyStudioCriterion(query, filter.StudiosCriterion, audio => audio.StudioId);
         query = FilterHelpers.ApplyMultiId(query, filter.GroupsCriterion, audio => db.GroupItems
             .Where(item => item.HostType == "audio" && item.HostId == audio.Id && item.Kind == GroupItemKind.Audio)
@@ -503,7 +508,79 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         return query;
     }
 
-    private AudioDto MapToDto(Audio audio, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues, IReadOnlyDictionary<int, List<TagDto>>? effectiveTagsByAudioId = null) => new(
+    private static int[] GetIncludedPerformerIds(AudioFilter filter)
+    {
+        if (filter.PerformersCriterion?.Value is not { Count: > 0 }
+            || filter.PerformersCriterion.Modifier is not (CriterionModifier.Includes or CriterionModifier.IncludesAll))
+        {
+            return [];
+        }
+
+        return filter.PerformersCriterion.Value.Where(id => id > 0).Distinct().ToArray();
+    }
+
+    private IQueryable<Audio> ApplyPerformerOccurrenceTagCriterion(IQueryable<Audio> query, MultiIdCriterion? criterion, IReadOnlyCollection<int> performerIds)
+    {
+        if (criterion == null)
+            return query;
+
+        var tagIds = criterion.Value.Where(tagId => tagId > 0).Distinct().ToArray();
+        var excludedTagIds = criterion.Excludes?.Where(tagId => tagId > 0).Distinct().ToArray() ?? [];
+        if (tagIds.Length == 0 && excludedTagIds.Length == 0)
+            return query;
+
+        var scopedApplications = db.TagApplications.AsNoTracking()
+            .Where(application => application.HostType == AffinityHostType.Audio
+                && application.ContextType == "performer"
+                && application.ContextId != null);
+
+        if (performerIds.Count > 0)
+        {
+            var performerIdArray = performerIds.ToArray();
+            scopedApplications = scopedApplications.Where(application => application.ContextId != null && performerIdArray.Contains(application.ContextId.Value));
+        }
+
+        if (tagIds.Length > 0)
+        {
+            query = criterion.Modifier switch
+            {
+                CriterionModifier.Excludes => query.Where(audio => !scopedApplications.Any(application => application.HostId == audio.Id && tagIds.Contains(application.TagId))),
+                CriterionModifier.ExcludesAll => ApplyPerformerOccurrenceTagExcludesAll(query, scopedApplications, tagIds),
+                CriterionModifier.IncludesAll => ApplyPerformerOccurrenceTagIncludesAll(query, scopedApplications, tagIds),
+                _ => query.Where(audio => scopedApplications.Any(application => application.HostId == audio.Id && tagIds.Contains(application.TagId))),
+            };
+        }
+
+        if (excludedTagIds.Length > 0)
+        {
+            query = query.Where(audio => !scopedApplications.Any(application => application.HostId == audio.Id && excludedTagIds.Contains(application.TagId)));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<Audio> ApplyPerformerOccurrenceTagIncludesAll(IQueryable<Audio> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    {
+        foreach (var tagId in tagIds)
+        {
+            query = query.Where(audio => applications.Any(application => application.HostId == audio.Id && application.TagId == tagId));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<Audio> ApplyPerformerOccurrenceTagExcludesAll(IQueryable<Audio> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    {
+        var matchingAll = query;
+        foreach (var tagId in tagIds)
+        {
+            matchingAll = matchingAll.Where(audio => applications.Any(application => application.HostId == audio.Id && application.TagId == tagId));
+        }
+
+        return query.Where(audio => !matchingAll.Select(match => match.Id).Contains(audio.Id));
+    }
+
+    private AudioDto MapToDto(Audio audio, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues, IReadOnlyDictionary<int, List<TagDto>>? effectiveTagsByAudioId = null, List<TagApplicationDto>? contextTagApplications = null) => new(
         audio.Id,
         audio.Title,
         audio.Code,
@@ -542,7 +619,23 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         audio.FileCount,
         audio.MaxDuration,
         audio.HasVideoFiles,
-        audio.ImageBlobId != null ? EntityImageUrls.Audio(ControllerContext.HttpContext, audio.Id, audio.UpdatedAt) : null);
+        audio.ImageBlobId != null ? EntityImageUrls.Audio(ControllerContext.HttpContext, audio.Id, audio.UpdatedAt) : null,
+        contextTagApplications);
+
+    private async Task<List<TagApplicationDto>?> GetContextTagApplicationsAsync(int audioId, CancellationToken ct)
+    {
+        var applications = await db.TagApplications.AsNoTracking()
+            .Where(item => item.HostType == AffinityHostType.Audio && item.HostId == audioId)
+            .Include(item => item.Tag).ThenInclude(tag => tag!.Aliases)
+            .Include(item => item.Tag).ThenInclude(tag => tag!.TagGroup)
+            .AsSplitQuery()
+            .OrderBy(item => item.ContextType)
+            .ThenBy(item => item.ContextId)
+            .ThenBy(item => item.Tag!.Name)
+            .ToListAsync(ct);
+
+        return applications.Count == 0 ? null : applications.Select(TagApplicationsController.Map).ToList();
+    }
 
     private IQueryable<Audio> ApplyEffectiveTagCountCriterion(IQueryable<Audio> query, IntCriterion? criterion)
     {

@@ -8,7 +8,7 @@ import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useAiVisualAvailability } from "../hooks/useAiVisualAvailability";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { ImageIcon, Trash2, Loader2, Edit, FolderOpen, Search, ThumbsUp } from "lucide-react";
+import { ImageIcon, Trash2, Loader2, Edit, FolderOpen, Play, Search, ThumbsUp, Eye } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { CardFavoriteButton, ImageTile } from "../components/EntityCards";
@@ -23,16 +23,18 @@ import { ExtensionSelectionActions } from "../components/ExtensionSelectionActio
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
-import { FeedCardFrame, FeedChipButton, FeedMetadataPill } from "../components/FeedCardFrame";
+import { FeedCardFrame, FeedChipButton, FeedMetadataPill, FeedPortraitMediaFrame, getFeedMediaStyle } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
 import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
+import { useAppConfig } from "../state/AppConfigContext";
+import { RatingBadge } from "../components/Rating";
 
 const Lightbox = lazy(() => import("../components/Lightbox").then((module) => ({ default: module.Lightbox })));
 const ImageCreateModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageCreateModal })));
 const QuickViewDialog = lazy(() => import("../components/QuickViewDialog").then((module) => ({ default: module.QuickViewDialog })));
-const MediaScrapeDialog = lazy(() => import("../components/MediaScrapeDialog").then((module) => ({ default: module.MediaScrapeDialog })));
+const ImageBatchScrapeDialog = lazy(() => import("../components/ImageBatchScrapeDialog").then((module) => ({ default: module.ImageBatchScrapeDialog })));
 
 const SEARCH_MODE_OPTIONS = [
   { value: "text", label: "Text", title: "Text search" },
@@ -84,11 +86,14 @@ export function ImagesPage({ onNavigate }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [lightboxAutoPlay, setLightboxAutoPlay] = useState(false);
+  const [lightboxScopeIds, setLightboxScopeIds] = useState<Set<number> | null>(null);
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
-  const [showScrapeDialog, setShowScrapeDialog] = useState(false);
+  const [showBatchScrape, setShowBatchScrape] = useState(false);
   const [wallColumnCount, setWallColumnCount] = useState(6);
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
+  const { config } = useAppConfig();
   const { hasPermission } = useAuth();
   const canWriteImage = canWriteEntity("image", hasPermission);
   const canDeleteImage = canDeleteEntity("image", hasPermission);
@@ -177,19 +182,40 @@ export function ImagesPage({ onNavigate }: Props) {
   const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter, searchMode }), [listData.infiniteFilterKey, objectFilter, searchMode]);
   const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
-  const selectedImage = selectedIds.size === 1 ? items.find((item) => selectedIds.has(item.id)) : undefined;
+  const selectedVisibleImages = useMemo(() => items.filter((item) => selectedIds.has(item.id)), [items, selectedIds]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const lightboxSourceItems = useMemo(
+    () => lightboxScopeIds ? items.filter((item) => lightboxScopeIds.has(item.id)) : items,
+    [items, lightboxScopeIds],
+  );
   const lightboxImages: LightboxImage[] = useMemo(
-    () => items.map((img) => ({
+    () => lightboxSourceItems.map((img) => ({
       id: img.id,
       src: images.imageUrl(img.id),
       title: getImageDisplayTitle(img),
       interactionSource: "imagesPage",
       interactionMeta: { pageKey: "images" },
     })),
-    [items],
+    [lightboxSourceItems],
   );
+
+  const closeLightbox = useCallback(() => {
+    setLightboxOpen(false);
+    setLightboxAutoPlay(false);
+    setLightboxScopeIds(null);
+  }, []);
+
+  const playSelectedImages = useCallback(() => {
+    if (selectedVisibleImages.length === 0) {
+      return;
+    }
+
+    setLightboxScopeIds(new Set(selectedVisibleImages.map((image) => image.id)));
+    setLightboxIndex(0);
+    setLightboxAutoPlay(selectedVisibleImages.length > 1);
+    setLightboxOpen(true);
+  }, [selectedVisibleImages]);
 
   const handleFilterChange = useCallback((next: typeof filter) => {
     setFilter(withSeededRandomSort(filter, next));
@@ -261,13 +287,22 @@ export function ImagesPage({ onNavigate }: Props) {
       onInvertSelection={invertSelection}
       selectionActions={
         <>
-          {canWriteImage && selectedImage ? (
+          {canWriteImage ? (
             <button
-              onClick={() => setShowScrapeDialog(true)}
+              onClick={() => setShowBatchScrape(true)}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
             >
               <Search className="w-3 h-3" />
               Scrape
+            </button>
+          ) : null}
+          {selectedVisibleImages.length > 1 ? (
+            <button
+              onClick={playSelectedImages}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
+            >
+              <Play className="w-3 h-3" />
+              Play
             </button>
           ) : null}
           {canWriteImage && (
@@ -361,6 +396,8 @@ export function ImagesPage({ onNavigate }: Props) {
               }}
               onPreview={() => {
                 if (selecting) { toggle(img.id); return; }
+                setLightboxScopeIds(null);
+                setLightboxAutoPlay(false);
                 setLightboxIndex(idx);
                 setLightboxOpen(true);
               }}
@@ -413,30 +450,19 @@ export function ImagesPage({ onNavigate }: Props) {
           images={lightboxImages}
           initialIndex={lightboxIndex}
           open={lightboxOpen}
-          onClose={() => setLightboxOpen(false)}
+          onClose={closeLightbox}
+          slideshowDelay={config?.ui.slideshowDelay}
+          autoPlay={lightboxAutoPlay}
         />
       ) : null}
       {quickViewId !== null ? (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       ) : null}
-      {showScrapeDialog && selectedImage ? (
-        <MediaScrapeDialog
-          open={showScrapeDialog}
-          onClose={() => setShowScrapeDialog(false)}
-          entityType="image"
-          entity={{
-            id: selectedImage.id,
-            title: selectedImage.title,
-            details: selectedImage.details,
-            creator: selectedImage.photographer,
-            date: selectedImage.date,
-            studioName: selectedImage.studioName,
-            urls: selectedImage.urls,
-            tags: selectedImage.tags,
-            performers: selectedImage.performers,
-            files: selectedImage.files,
-            organized: selectedImage.organized,
-          }}
+      {showBatchScrape ? (
+        <ImageBatchScrapeDialog
+          open={showBatchScrape}
+          onClose={() => setShowBatchScrape(false)}
+          images={selectedVisibleImages}
         />
       ) : null}
     </Suspense>
@@ -448,12 +474,41 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
   const displayTitle = getImageDisplayTitle(image);
   const file = image.files[0];
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "1 / 1";
+  const imageSrc = images.thumbnailUrl(image.id, 1280);
+  const mediaStyle = getFeedMediaStyle(file);
+  const mediaIsPortrait = Boolean(mediaStyle);
   const likeCount = engagement?.likeCount ?? 0;
+  const visitCount = engagement?.pageVisitCount ?? 0;
+  const openOrSelect = () => {
+    if (selecting) {
+      onSelect?.();
+      return;
+    }
+
+    onNavigate({ page: "image", id: image.id });
+  };
+
+  const mediaOverlay = (
+    <>
+      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
+      <RouteCardLinkOverlay route={{ page: "image", id: image.id }} onClick={openOrSelect} label={`Open image ${displayTitle}`} disabled={selecting} selectionSafeZone />
+      {!selecting && (
+        <BookmarkButton
+          hostType="image"
+          hostId={image.id}
+          compact
+          deferUntilHover
+          className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
+        />
+      )}
+    </>
+  );
 
   return (
     <FeedCardFrame
       dataAttribute={{ "data-feed-image-id": image.id }}
       selected={selected}
+      onClick={selecting ? openOrSelect : undefined}
       header={(
         <>
           <span className="font-semibold text-secondary">{image.studioName || "Cove images"}</span>
@@ -464,6 +519,9 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
       )}
       headerActions={(
         <>
+          <span className="inline-flex min-h-7 items-center rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+            {engagement?.rating != null ? <RatingBadge rating={engagement.rating} /> : "Unrated"}
+          </span>
           <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
             <ThumbsUp className={["h-3.5 w-3.5", likeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />
             {likeCount}
@@ -471,6 +529,10 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
           {typeof engagement?.isFavorite === "boolean" ? (
             <CardFavoriteButton hostType="image" hostId={image.id} favorite={engagement.isFavorite} />
           ) : null}
+          <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+            <Eye className="h-3.5 w-3.5" />
+            {visitCount}
+          </span>
           {image.galleryCount > 0 ? (
             <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
               <FolderOpen className="h-3.5 w-3.5" />
@@ -480,29 +542,40 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
         </>
       )}
       media={(
-        <WallMediaCard
-          title={displayTitle}
-          imageSrc={images.thumbnailUrl(image.id, 1280)}
-          aspectRatio={aspectRatio}
-          className="rounded-none border-x-0 border-y border-border/60 hover:border-border/60"
-        >
-          <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-          <RouteCardLinkOverlay route={{ page: "image", id: image.id }} onClick={() => onNavigate({ page: "image", id: image.id })} label={`Open image ${displayTitle}`} selectionSafeZone />
-          {!selecting && (
-            <BookmarkButton
-              hostType="image"
-              hostId={image.id}
-              compact
-              deferUntilHover
-              className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
-            />
-          )}
-        </WallMediaCard>
+        mediaIsPortrait ? (
+          <FeedPortraitMediaFrame
+            title={displayTitle}
+            backgroundSrc={imageSrc}
+            className="cursor-pointer"
+            media={(
+              <WallMediaCard
+                title={displayTitle}
+                imageSrc={imageSrc}
+                fillMedia
+                chromeless
+                imageClassName="object-contain"
+                className="h-full w-full bg-transparent"
+              />
+            )}
+          >
+            {mediaOverlay}
+          </FeedPortraitMediaFrame>
+        ) : (
+          <WallMediaCard
+            title={displayTitle}
+            imageSrc={imageSrc}
+            aspectRatio={aspectRatio}
+            style={mediaStyle}
+            className="rounded-none border-x-0 border-y border-border/60 hover:border-border/60"
+          >
+            {mediaOverlay}
+          </WallMediaCard>
+        )
       )}
       title={(
         <button
           type="button"
-          onClick={() => onNavigate({ page: "image", id: image.id })}
+          onClick={(event) => { event.stopPropagation(); openOrSelect(); }}
           className="text-left text-base font-semibold text-foreground transition-colors hover:text-accent"
         >
           {displayTitle}
@@ -521,7 +594,7 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
           {image.performers.slice(0, 4).map((performer) => (
             <FeedChipButton
               key={performer.id}
-              onClick={() => onNavigate({ page: "performer", id: performer.id })}
+              onClick={() => selecting ? onSelect?.() : onNavigate({ page: "performer", id: performer.id })}
             >
               {performer.name}
             </FeedChipButton>
@@ -529,7 +602,7 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
           {image.tags.slice(0, 4).map((tag) => (
             <FeedChipButton
               key={tag.id}
-              onClick={() => onNavigate({ page: "tag", id: tag.id })}
+              onClick={() => selecting ? onSelect?.() : onNavigate({ page: "tag", id: tag.id })}
             >
               #{tag.name}
             </FeedChipButton>

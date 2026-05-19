@@ -515,6 +515,7 @@ export interface Image {
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  contextTagApplications?: TagApplication[];
 }
 
 
@@ -608,6 +609,7 @@ export interface Audio {
   fileCount: number;
   maxDuration: number;
   hasVideoFiles: boolean;
+  contextTagApplications?: TagApplication[];
 }
 
 export interface AudioCreate {
@@ -670,6 +672,7 @@ export interface TextDocument {
   fileCount: number;
   maxWordCount?: number | null;
   maxPageCount?: number | null;
+  contextTagApplications?: TagApplication[];
 }
 
 export interface TextCreate {
@@ -1723,6 +1726,8 @@ export interface UiConfig {
   wallShowTitle: boolean;
   wallPlayback: number;
   wallPreviewType: string;
+  imageObjectFit: string;
+  videoObjectFit: string;
   feedVideoSource: string;
   feedVideoSound: boolean;
   feedVideoStartPercent: number;
@@ -1969,6 +1974,17 @@ export interface BatchSceneScrapeStartRequest {
   createMissingStudio?: boolean;
   markOrganized?: boolean;
   hydratePerformers?: boolean;
+}
+
+export interface BatchImageScrapeStartRequest {
+  scraperId: string;
+  inputKind: "url" | "name";
+  imageIds: number[];
+  autoApply?: boolean;
+  createMissingTags?: boolean;
+  createMissingPerformers?: boolean;
+  createMissingStudio?: boolean;
+  markOrganized?: boolean;
 }
 
 export interface DownloaderDescriptor {
@@ -2580,6 +2596,7 @@ export interface AudioFilterCriteria {
   fileCountCriterion?: IntCriterion;
   tagCountCriterion?: IntCriterion;
   performerCountCriterion?: IntCriterion;
+  performerTagsCriterion?: MultiIdCriterion;
   tagsCriterion?: MultiIdCriterion;
   performersCriterion?: MultiIdCriterion;
   studiosCriterion?: MultiIdCriterion;
@@ -2603,6 +2620,7 @@ export interface TextFilterCriteria {
   fileCountCriterion?: IntCriterion;
   tagCountCriterion?: IntCriterion;
   performerCountCriterion?: IntCriterion;
+  performerTagsCriterion?: MultiIdCriterion;
   tagsCriterion?: MultiIdCriterion;
   performersCriterion?: MultiIdCriterion;
   studiosCriterion?: MultiIdCriterion;

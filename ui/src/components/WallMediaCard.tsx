@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { HTMLAttributes, ReactNode } from "react";
+import { useOptionalAppConfig } from "../state/AppConfigContext";
 
 interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   title: string;
@@ -15,6 +16,8 @@ interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   fillMedia?: boolean;
   fallback?: ReactNode;
   imageClassName?: string;
+  videoClassName?: string;
+  chromeless?: boolean;
 }
 
 export function WallMediaCard({
@@ -30,11 +33,14 @@ export function WallMediaCard({
   aspectRatio = "1 / 1",
   fillMedia = false,
   fallback,
-  imageClassName = "object-cover",
+  imageClassName,
+  videoClassName,
+  chromeless = false,
   className,
   children,
   ...props
 }: WallMediaCardProps) {
+  const appConfig = useOptionalAppConfig();
   const mediaRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoFailed, setVideoFailed] = useState(false);
@@ -133,19 +139,28 @@ export function WallMediaCard({
     }
   }, [shouldPlayVideo, useVideo, videoSrc, videoAvailable, videoFailed]);
 
+  const imageFitClass = appConfig?.config?.ui.imageObjectFit === "contain" ? "object-contain" : "object-cover";
+  const videoFitClass = appConfig?.config?.ui.videoObjectFit === "contain" ? "object-contain" : "object-cover";
+  const resolvedImageClassName = imageClassName ?? imageFitClass;
+  const resolvedVideoClassName = videoClassName ?? videoFitClass;
+  const wrapperClassName = chromeless
+    ? `cursor-pointer overflow-hidden ${className ?? ""}`.trim()
+    : `cursor-pointer rounded overflow-hidden border border-border hover:border-accent/60 transition-all ${className ?? ""}`.trim();
+  const mediaContainerClassName = chromeless ? "bg-transparent" : "bg-surface";
+
   return (
     <div
       {...props}
-      className={`cursor-pointer rounded overflow-hidden border border-border hover:border-accent/60 transition-all ${className ?? ""}`.trim()}
+      className={wrapperClassName}
       title={title}
     >
-      <div ref={mediaRef} className={`relative w-full bg-surface ${fillMedia ? "h-full" : ""}`} style={fillMedia ? undefined : { aspectRatio }}>
+      <div ref={mediaRef} className={`relative w-full ${mediaContainerClassName} ${fillMedia ? "h-full" : ""}`.trim()} style={fillMedia ? undefined : { aspectRatio }}>
         {useVideo && videoSrc && shouldLoadVideo && videoAvailable && !videoFailed ? (
           <video
             ref={videoRef}
             src={videoSrc}
             poster={imageSrc ?? undefined}
-            className={`absolute inset-0 h-full w-full ${imageClassName}`}
+            className={`absolute inset-0 h-full w-full ${resolvedVideoClassName}`}
             muted={muted}
             playsInline
             loop
@@ -157,7 +172,7 @@ export function WallMediaCard({
           <img
             src={imageSrc}
             alt={title}
-            className={`absolute inset-0 h-full w-full ${imageClassName}`}
+            className={`absolute inset-0 h-full w-full ${resolvedImageClassName}`}
             loading="lazy"
           />
         ) : (

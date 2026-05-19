@@ -436,6 +436,11 @@ WHERE files.zip_file_id IS NOT NULL";
 
             if (metadataServerIndexes.TryGetValue(endpoint, out var existingIndex))
             {
+                if (string.IsNullOrWhiteSpace(normalizedServer.ApiKey) && !string.IsNullOrWhiteSpace(metadataServers[existingIndex].ApiKey))
+                {
+                    normalizedServer = normalizedServer with { ApiKey = metadataServers[existingIndex].ApiKey };
+                }
+
                 if (metadataServers[existingIndex] == normalizedServer)
                     continue;
 
@@ -778,7 +783,7 @@ WHERE files.zip_file_id IS NOT NULL";
                         inStashArray = false;
                     }
 
-                    if (inStashBoxesArray && !rawLine.StartsWith("stash_boxes:", StringComparison.OrdinalIgnoreCase))
+                    if (inStashBoxesArray && !IsTopLevelSection(rawLine, "stash_boxes", "stashBoxes", "metadata_providers", "metadataProviders"))
                     {
                         if (!string.IsNullOrWhiteSpace(currentEndpoint))
                         {
@@ -839,7 +844,7 @@ WHERE files.zip_file_id IS NOT NULL";
                     continue;
                 }
 
-                if (rawLine.TrimStart().StartsWith("stash_boxes:"))
+                if (IsTopLevelSection(rawLine, "stash_boxes", "stashBoxes", "metadata_providers", "metadataProviders"))
                 {
                     inStashBoxesArray = true;
                     inStashArray = false;
@@ -921,10 +926,10 @@ WHERE files.zip_file_id IS NOT NULL";
                     continue;
                 }
 
-                var apiKeyMatch = Regex.Match(stashBoxLine, @"^api_key:\s*(.+)$", RegexOptions.IgnoreCase);
+                var apiKeyMatch = Regex.Match(stashBoxLine, @"^(api[_-]?key|apikey):\s*(.+)$", RegexOptions.IgnoreCase);
                 if (apiKeyMatch.Success)
                 {
-                    currentApiKey = apiKeyMatch.Groups[1].Value.Trim().Trim('"', '\'');
+                    currentApiKey = apiKeyMatch.Groups[2].Value.Trim().Trim('"', '\'');
                     continue;
                 }
 
@@ -935,8 +940,8 @@ WHERE files.zip_file_id IS NOT NULL";
                     continue;
                 }
 
-                var maxRequestsMatch = Regex.Match(stashBoxLine, @"^max_requests_per_minute:\s*(-?\d+)$", RegexOptions.IgnoreCase);
-                if (maxRequestsMatch.Success && int.TryParse(maxRequestsMatch.Groups[1].Value, out var maxRequestsPerMinute))
+                var maxRequestsMatch = Regex.Match(stashBoxLine, @"^(max_requests_per_minute|maxRequestsPerMinute):\s*(-?\d+)$", RegexOptions.IgnoreCase);
+                if (maxRequestsMatch.Success && int.TryParse(maxRequestsMatch.Groups[2].Value, out var maxRequestsPerMinute))
                 {
                     currentMaxRequestsPerMinute = maxRequestsPerMinute;
                     continue;
@@ -970,6 +975,15 @@ WHERE files.zip_file_id IS NOT NULL";
             ResolveStashConfigPath(configDirectory, blobFilesPath),
             ResolveStashConfigPath(configDirectory, customPerformerImageLocation),
             metadataServers);
+
+        static bool IsTopLevelSection(string rawLine, params string[] names)
+        {
+            if (rawLine.Length > 0 && char.IsWhiteSpace(rawLine[0]))
+                return false;
+
+            var trimmed = rawLine.TrimStart();
+            return names.Any(name => trimmed.StartsWith($"{name}:", StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     private static string? ResolveStashConfigPath(string configDirectory, string? configuredPath)

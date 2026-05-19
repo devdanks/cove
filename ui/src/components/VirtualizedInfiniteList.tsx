@@ -38,6 +38,8 @@ export interface VirtualizedInfiniteListBaseProps<TItem> {
   loadMoreThreshold?: number;
   /** Called when the centered item (or row for grid) changes. */
   onActiveIndexChange?: (index: number | null) => void;
+  /** Disable virtualizer scroll offset corrections when dynamic item measurements change. */
+  adjustScrollOnItemSizeChange?: boolean;
 }
 
 interface SingleColumnProps<TItem> extends VirtualizedInfiniteListBaseProps<TItem> {
@@ -89,6 +91,7 @@ function SingleColumnWindowScroll<TItem>(props: SingleColumnProps<TItem>) {
     scrollMargin: parentOffsetTop,
     getItemKey: (index) => props.getItemKey(props.items[index], index),
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = props.adjustScrollOnItemSizeChange === false ? () => false : undefined;
 
   useInfiniteLoadTrigger({
     virtualItems: virtualizer.getVirtualItems(),
@@ -128,6 +131,7 @@ function SingleColumnContainerScroll<TItem>(props: SingleColumnProps<TItem> & { 
     overscan: props.overscan ?? 3,
     getItemKey: (index) => props.getItemKey(props.items[index], index),
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = props.adjustScrollOnItemSizeChange === false ? () => false : undefined;
 
   useInfiniteLoadTrigger({
     virtualItems: virtualizer.getVirtualItems(),
@@ -263,6 +267,7 @@ function GridWindowScroll<TItem>(props: GridProps<TItem>) {
       return first ? `row-${props.getItemKey(first, rowIndex * columns)}` : `row-${rowIndex}`;
     },
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = props.adjustScrollOnItemSizeChange === false ? () => false : undefined;
 
   useInfiniteLoadTriggerRows({
     virtualItems: virtualizer.getVirtualItems(),
@@ -323,6 +328,7 @@ function GridContainerScroll<TItem>(props: GridProps<TItem> & { scrollElementRef
       return first ? `row-${props.getItemKey(first, rowIndex * columns)}` : `row-${rowIndex}`;
     },
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = props.adjustScrollOnItemSizeChange === false ? () => false : undefined;
 
   useInfiniteLoadTriggerRows({
     virtualItems: virtualizer.getVirtualItems(),

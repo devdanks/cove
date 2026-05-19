@@ -299,6 +299,155 @@ public class SceneFilterBehaviorTests
         Assert.Equal(["target-tagged"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
     }
 
+    [Theory]
+    [InlineData(AffinityHostType.Image, "image")]
+    [InlineData(AffinityHostType.Audio, "audio")]
+    [InlineData(AffinityHostType.Text, "text")]
+    public async Task TagApplicationService_AddAsync_AllowsPerformerContextForMediaHosts(AffinityHostType hostType, string hostTypeValue)
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = $"{hostTypeValue}-occurrence" };
+        var performer = CreatePerformer($"{hostTypeValue}-performer", new DateOnly(2000, 1, 1));
+
+        var hostId = hostType switch
+        {
+            AffinityHostType.Image => AddImageHost(context, CreateImage($"{hostTypeValue}-host", performer)),
+            AffinityHostType.Audio => AddAudioHost(context, CreateAudio($"{hostTypeValue}-host", performer)),
+            AffinityHostType.Text => AddTextHost(context, CreateTextDocument($"{hostTypeValue}-host", performer)),
+            _ => throw new ArgumentOutOfRangeException(nameof(hostType), hostType, null),
+        };
+        context.Tags.Add(tag);
+        await context.SaveChangesAsync();
+
+        var service = new TagApplicationService(context);
+        var application = await service.AddAsync(
+            new TagApplicationCreateDto(hostTypeValue, hostId, tag.Id, "user", "performer", performer.Id),
+            CancellationToken.None);
+
+        Assert.Equal(hostType, application.HostType);
+        Assert.Equal(hostId, application.HostId);
+        Assert.Equal("performer", application.ContextType);
+        Assert.Equal(performer.Id, application.ContextId);
+        Assert.Equal(tag.Id, application.TagId);
+    }
+
+    [Fact]
+    public async Task ImageFilter_PerformerTagsCriterion_WithPerformerCriterion_MatchesSamePerformerOccurrence()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Image Occurrence Tag" };
+        var targetPerformer = CreatePerformer("Image Target", new DateOnly(2000, 1, 1));
+        var otherPerformer = CreatePerformer("Image Other", new DateOnly(2000, 1, 1));
+        var targetTaggedImage = CreateImage("target-tagged-image", targetPerformer);
+        var wrongPerformerTaggedImage = CreateImage("wrong-performer-tagged-image", targetPerformer);
+        wrongPerformerTaggedImage.ImagePerformers.Add(new ImagePerformer { Performer = otherPerformer });
+
+        context.Tags.Add(tag);
+        context.Images.AddRange(targetTaggedImage, wrongPerformerTaggedImage);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.AddRange(
+            CreatePerformerOccurrenceApplication(AffinityHostType.Image, targetTaggedImage.Id, targetPerformer.Id, tag.Id),
+            CreatePerformerOccurrenceApplication(AffinityHostType.Image, wrongPerformerTaggedImage.Id, otherPerformer.Id, tag.Id));
+        await context.SaveChangesAsync();
+
+        var repository = new ImageRepository(context);
+        var filter = new ImageFilter
+        {
+            PerformersCriterion = new MultiIdCriterion
+            {
+                Value = [targetPerformer.Id],
+                Modifier = CriterionModifier.Includes,
+            },
+            PerformerTagsCriterion = new MultiIdCriterion
+            {
+                Value = [tag.Id],
+                Modifier = CriterionModifier.Includes,
+            },
+        };
+
+        var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
+
+        Assert.Equal(1, totalCount);
+        Assert.Equal(["target-tagged-image"], items.Select(image => image.Title ?? string.Empty).ToArray());
+    }
+
+    [Fact]
+    public async Task AudiosController_FindPost_PerformerTagsCriterion_WithPerformerCriterion_MatchesSamePerformerOccurrence()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Audio Occurrence Tag" };
+        var targetPerformer = CreatePerformer("Audio Target", new DateOnly(2000, 1, 1));
+        var otherPerformer = CreatePerformer("Audio Other", new DateOnly(2000, 1, 1));
+        var targetTaggedAudio = CreateAudio("target-tagged-audio", targetPerformer);
+        var wrongPerformerTaggedAudio = CreateAudio("wrong-performer-tagged-audio", targetPerformer);
+        wrongPerformerTaggedAudio.AudioPerformers.Add(new AudioPerformer { Performer = otherPerformer });
+
+        context.Tags.Add(tag);
+        context.Audios.AddRange(targetTaggedAudio, wrongPerformerTaggedAudio);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.AddRange(
+            CreatePerformerOccurrenceApplication(AffinityHostType.Audio, targetTaggedAudio.Id, targetPerformer.Id, tag.Id),
+            CreatePerformerOccurrenceApplication(AffinityHostType.Audio, wrongPerformerTaggedAudio.Id, otherPerformer.Id, tag.Id));
+        await context.SaveChangesAsync();
+
+        var controller = new AudiosController(context, new CustomFieldService(context), null!, null!, null!, null);
+        var response = await controller.FindPost(new FilteredQueryRequest<AudioFilter>
+        {
+            FindFilter = new FindFilter { Page = 1, PerPage = 50, Sort = "title" },
+            ObjectFilter = new AudioFilter
+            {
+                PerformersCriterion = new MultiIdCriterion { Value = [targetPerformer.Id], Modifier = CriterionModifier.Includes },
+                PerformerTagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
+            },
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PaginatedResponse<AudioDto>>(ok.Value);
+        var audio = Assert.Single(payload.Items);
+
+        Assert.Equal("target-tagged-audio", audio.Title);
+    }
+
+    [Fact]
+    public async Task TextsController_FindPost_PerformerTagsCriterion_WithPerformerCriterion_MatchesSamePerformerOccurrence()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Text Occurrence Tag" };
+        var targetPerformer = CreatePerformer("Text Target", new DateOnly(2000, 1, 1));
+        var otherPerformer = CreatePerformer("Text Other", new DateOnly(2000, 1, 1));
+        var targetTaggedText = CreateTextDocument("target-tagged-text", targetPerformer);
+        var wrongPerformerTaggedText = CreateTextDocument("wrong-performer-tagged-text", targetPerformer);
+        wrongPerformerTaggedText.TextPerformers.Add(new TextPerformer { Performer = otherPerformer });
+
+        context.Tags.Add(tag);
+        context.TextDocuments.AddRange(targetTaggedText, wrongPerformerTaggedText);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.AddRange(
+            CreatePerformerOccurrenceApplication(AffinityHostType.Text, targetTaggedText.Id, targetPerformer.Id, tag.Id),
+            CreatePerformerOccurrenceApplication(AffinityHostType.Text, wrongPerformerTaggedText.Id, otherPerformer.Id, tag.Id));
+        await context.SaveChangesAsync();
+
+        var controller = new TextsController(context, new CustomFieldService(context), null!, null!, null!, null!, null);
+        var response = await controller.FindPost(new FilteredQueryRequest<TextDocumentFilter>
+        {
+            FindFilter = new FindFilter { Page = 1, PerPage = 50, Sort = "title" },
+            ObjectFilter = new TextDocumentFilter
+            {
+                PerformersCriterion = new MultiIdCriterion { Value = [targetPerformer.Id], Modifier = CriterionModifier.Includes },
+                PerformerTagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
+            },
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PaginatedResponse<TextDocumentDto>>(ok.Value);
+        var text = Assert.Single(payload.Items);
+
+        Assert.Equal("target-tagged-text", text.Title);
+    }
+
     [Fact]
     public async Task TagDurationCriterion_AppliesAllClauses()
     {
@@ -925,6 +1074,80 @@ public class SceneFilterBehaviorTests
             HostDurationSec = hostDurationSec,
             SourceKey = "test",
         };
+
+    private static TagApplication CreatePerformerOccurrenceApplication(AffinityHostType hostType, int hostId, int performerId, int tagId)
+        => new()
+        {
+            HostType = hostType,
+            HostId = hostId,
+            ContextType = "performer",
+            ContextId = performerId,
+            TagId = tagId,
+            SourceKey = "test",
+        };
+
+    private static Image CreateImage(string title, Performer? performer = null)
+    {
+        var image = new Image
+        {
+            Title = title,
+        };
+
+        if (performer != null)
+        {
+            image.ImagePerformers.Add(new ImagePerformer { Performer = performer });
+        }
+
+        return image;
+    }
+
+    private static Audio CreateAudio(string title, Performer? performer = null)
+    {
+        var audio = new Audio
+        {
+            Title = title,
+        };
+
+        if (performer != null)
+        {
+            audio.AudioPerformers.Add(new AudioPerformer { Performer = performer });
+        }
+
+        return audio;
+    }
+
+    private static TextDocument CreateTextDocument(string title, Performer? performer = null)
+    {
+        var textDocument = new TextDocument
+        {
+            Title = title,
+        };
+
+        if (performer != null)
+        {
+            textDocument.TextPerformers.Add(new TextPerformer { Performer = performer });
+        }
+
+        return textDocument;
+    }
+
+    private static int AddImageHost(CoveContext context, Image image)
+    {
+        context.Images.Add(image);
+        return image.Id;
+    }
+
+    private static int AddAudioHost(CoveContext context, Audio audio)
+    {
+        context.Audios.Add(audio);
+        return audio.Id;
+    }
+
+    private static int AddTextHost(CoveContext context, TextDocument textDocument)
+    {
+        context.TextDocuments.Add(textDocument);
+        return textDocument.Id;
+    }
 
     private static CoveContext CreateContext()
     {

@@ -8,6 +8,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { EntityReferenceMultiSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
+import { PerformerContextTagEditor, buildPerformerContextTagIds, syncPerformerContextTags } from "../components/PerformerContextTags";
 import { FileBackedCreateSource, type CreateSourceMode } from "../components/FileBackedCreateSource";
 import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundError, type UrlDownloadMode } from "../utils/createFromUrlDownload";
 import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
@@ -32,11 +33,11 @@ interface ImageFormState {
   photographer: string;
   date: string;
   rating: number | undefined;
-  organized: boolean;
   urls: string[];
   studioId: number | undefined;
   selectedTagIds: number[];
   selectedPerformerIds: number[];
+  contextTagIdsByPerformer: Record<number, number[]>;
   selectedGalleryIds: number[];
   selectedGroups: SceneGroupInput[];
   customFields: Record<string, unknown>;
@@ -47,7 +48,7 @@ interface ImageMetadataModalProps {
   open: boolean;
   onClose: () => void;
   initialState: ImageFormState;
-  onSubmit: (data: ImageCreate) => void;
+  onSubmit: (data: ImageCreate, contextTagIdsByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) => void;
   isPending: boolean;
   error: Error | null;
   image?: Image;
@@ -65,10 +66,10 @@ interface ImageMetadataModalProps {
   scrapeMetadata?: boolean;
   onScrapeMetadataChange?: (value: boolean) => void;
   noDownloaderFound?: boolean;
-  onCreateWithoutDownload?: (data: ImageCreate) => void;
+  onCreateWithoutDownload?: (data: ImageCreate, contextTagIdsByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) => void;
   onDismissNoDownloader?: () => void;
-  onCreateFromFile?: (filePath: string, data: ImageCreate) => void;
-  onCreateFromUrl?: (url: string, data: ImageCreate, downloadMode: UrlDownloadMode, scrapeMetadata: boolean) => void;
+  onCreateFromFile?: (filePath: string, data: ImageCreate, contextTagIdsByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) => void;
+  onCreateFromUrl?: (url: string, data: ImageCreate, contextTagIdsByPerformer: Record<number, number[]>, selectedPerformerIds: number[], downloadMode: UrlDownloadMode, scrapeMetadata: boolean) => void;
   renderMode?: "modal" | "panel";
 }
 
@@ -79,11 +80,11 @@ const EMPTY_FORM_STATE: ImageFormState = {
   photographer: "",
   date: "",
   rating: undefined,
-  organized: false,
   urls: [""],
   studioId: undefined,
   selectedTagIds: [],
   selectedPerformerIds: [],
+  contextTagIdsByPerformer: {},
   selectedGalleryIds: [],
   selectedGroups: [],
   customFields: {},
@@ -105,13 +106,13 @@ function toFormState(image?: Image): ImageFormState {
     photographer: image.photographer || "",
     date: image.date || "",
     rating: undefined,
-    organized: image.organized,
     urls: image.urls.length > 0 ? image.urls : [""],
     studioId: image.studioId ?? undefined,
     selectedTagIds: image.tags.map((tag) => tag.id),
     selectedPerformerIds: image.performers.map((performer) => performer.id),
+    contextTagIdsByPerformer: buildPerformerContextTagIds(image.contextTagApplications),
     selectedGalleryIds: image.galleryIds ?? [],
-      selectedGroups: (image.groups ?? []).map((group) => ({ groupId: group.id, sceneIndex: group.sceneIndex ?? 0 })),
+    selectedGroups: (image.groups ?? []).map((group) => ({ groupId: group.id, sceneIndex: group.sceneIndex ?? 0 })),
     customFields: { ...(image.customFields ?? {}) },
   };
 }
@@ -122,6 +123,7 @@ function cloneFormState(state: ImageFormState): ImageFormState {
     urls: [...state.urls],
     selectedTagIds: [...state.selectedTagIds],
     selectedPerformerIds: [...state.selectedPerformerIds],
+    contextTagIdsByPerformer: Object.fromEntries(Object.entries(state.contextTagIdsByPerformer).map(([performerId, tagIds]) => [performerId, [...tagIds]])),
     selectedGalleryIds: [...state.selectedGalleryIds],
     selectedGroups: state.selectedGroups.map((group) => ({ ...group })),
     customFields: { ...state.customFields },
@@ -144,7 +146,6 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       photographer: form.photographer.trim() || undefined,
       date: form.date || undefined,
       rating: form.rating,
-      organized: form.organized,
       studioId: form.studioId,
       urls: urlList,
       tagIds: form.selectedTagIds,
@@ -159,24 +160,24 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
     const payload = buildPayload();
     if (sourceMode === "file" && onCreateFromFile) {
       const trimmedPath = filePath.trim();
-      if (trimmedPath) onCreateFromFile(trimmedPath, payload);
+      if (trimmedPath) onCreateFromFile(trimmedPath, payload, form.contextTagIdsByPerformer, form.selectedPerformerIds);
       return;
     }
 
     if (sourceMode === "url" && onCreateFromUrl) {
       const requestedUrl = url.trim();
-      if (requestedUrl) onCreateFromUrl(requestedUrl, payload, urlDownloadMode, scrapeMetadata);
+      if (requestedUrl) onCreateFromUrl(requestedUrl, payload, form.contextTagIdsByPerformer, form.selectedPerformerIds, urlDownloadMode, scrapeMetadata);
       return;
     }
 
-    onSubmit(payload);
+    onSubmit(payload, form.contextTagIdsByPerformer, form.selectedPerformerIds);
   };
 
   const handleCreateWithoutDownload = () => {
     const requestedUrl = url.trim();
     if (requestedUrl && onCreateWithoutDownload) {
       const payload = buildPayload();
-      onCreateWithoutDownload({ ...payload, urls: mergeUrlLists(payload.urls, [requestedUrl]) });
+      onCreateWithoutDownload({ ...payload, urls: mergeUrlLists(payload.urls, [requestedUrl]) }, form.contextTagIdsByPerformer, form.selectedPerformerIds);
     }
   };
 
@@ -238,12 +239,18 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
         <TextArea value={form.details} onChange={(value) => setForm({ ...form, details: value })} placeholder="Image description" />
       </Field>
 
-      <div className="grid grid-cols-2 gap-4">
-        <RatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} />
+      {renderMode === "panel" ? (
         <Field label="Studio">
           <StudioSelector value={form.studioId} onChange={(studioId) => setForm({ ...form, studioId })} />
         </Field>
-      </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <RatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} />
+          <Field label="Studio">
+            <StudioSelector value={form.studioId} onChange={(studioId) => setForm({ ...form, studioId })} />
+          </Field>
+        </div>
+      )}
 
       <Field label="URLs">
         <StringListEditor values={form.urls} onChange={(value) => setForm({ ...form, urls: value })} placeholder="https://..." addLabel="Add URL" inputType="url" />
@@ -256,6 +263,19 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       <Field label="Performers">
         <EntityReferenceMultiSelector entityType="performer" values={form.selectedPerformerIds} onChange={(selectedPerformerIds) => setForm({ ...form, selectedPerformerIds })} placeholder="Search performers..." />
       </Field>
+
+      {form.selectedPerformerIds.length > 0 ? (
+        <Field label="Performer Occurrence Tags">
+          <PerformerContextTagEditor
+            performerIds={form.selectedPerformerIds}
+            contextTagIdsByPerformer={form.contextTagIdsByPerformer}
+            onChange={(performerId, tagIds) => setForm({
+              ...form,
+              contextTagIdsByPerformer: { ...form.contextTagIdsByPerformer, [performerId]: tagIds },
+            })}
+          />
+        </Field>
+      ) : null}
 
       {/* Galleries */}
       <Field label="Galleries">
@@ -275,11 +295,6 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
         </div>
         <EntityReferenceMultiSelector entityType="group" values={form.selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." />
       </Field>
-
-      <label className="flex items-center gap-2 text-sm text-secondary mb-4 cursor-pointer">
-        <input type="checkbox" checked={form.organized} onChange={(e) => setForm({ ...form, organized: e.target.checked })} className="rounded border-border bg-card" />
-        Organized
-      </label>
 
       <Field label="Custom Fields">
         <CustomFieldsEditor value={form.customFields} onChange={(v) => setForm({ ...form, customFields: v })} entityType="image" />
@@ -324,7 +339,11 @@ export function ImageEditPanel({ image, onSaved }: { image: Image; onSaved?: () 
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: (data: ImageCreate) => images.update(image.id, data),
+    mutationFn: async ({ data, contextTagIdsByPerformer, selectedPerformerIds }: { data: ImageCreate; contextTagIdsByPerformer: Record<number, number[]>; selectedPerformerIds: number[] }) => {
+      await images.update(image.id, data);
+      await syncPerformerContextTags("image", image.id, image.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
+      return images.get(image.id);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["image", image.id] });
       queryClient.invalidateQueries({ queryKey: ["images"] });
@@ -338,7 +357,7 @@ export function ImageEditPanel({ image, onSaved }: { image: Image; onSaved?: () 
       open
       onClose={() => onSaved?.()}
       initialState={toFormState(image)}
-      onSubmit={(data) => mutation.mutate(data)}
+      onSubmit={(data, contextTagIdsByPerformer, selectedPerformerIds) => mutation.mutate({ data, contextTagIdsByPerformer, selectedPerformerIds })}
       isPending={mutation.isPending}
       error={mutation.error as Error | null}
       image={image}
@@ -351,7 +370,11 @@ export function ImageEditModal({ image, open, onClose }: ImageEditProps) {
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: (data: ImageCreate) => images.update(image.id, data),
+    mutationFn: async ({ data, contextTagIdsByPerformer, selectedPerformerIds }: { data: ImageCreate; contextTagIdsByPerformer: Record<number, number[]>; selectedPerformerIds: number[] }) => {
+      await images.update(image.id, data);
+      await syncPerformerContextTags("image", image.id, image.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
+      return images.get(image.id);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["image", image.id] });
       queryClient.invalidateQueries({ queryKey: ["images"] });
@@ -365,7 +388,7 @@ export function ImageEditModal({ image, open, onClose }: ImageEditProps) {
       open={open}
       onClose={onClose}
       initialState={toFormState(image)}
-      onSubmit={(data) => mutation.mutate(data)}
+      onSubmit={(data, contextTagIdsByPerformer, selectedPerformerIds) => mutation.mutate({ data, contextTagIdsByPerformer, selectedPerformerIds })}
       isPending={mutation.isPending}
       error={mutation.error as Error | null}
       image={image}
@@ -399,20 +422,34 @@ export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps)
   };
 
   const mutation = useMutation({
-    mutationFn: (data: ImageCreate) => images.create(data),
+    mutationFn: async ({ data, contextTagIdsByPerformer, selectedPerformerIds }: { data: ImageCreate; contextTagIdsByPerformer: Record<number, number[]>; selectedPerformerIds: number[] }) => {
+      const created = await images.create(data);
+      if (!created?.id) {
+        return created;
+      }
+
+      await syncPerformerContextTags("image", created.id, [], contextTagIdsByPerformer, selectedPerformerIds);
+      return images.get(created.id);
+    },
     onSuccess: handleCreated,
   });
 
   const fileMutation = useMutation({
-    mutationFn: async ({ path, data }: { path: string; data: ImageCreate }) => {
+    mutationFn: async ({ path, data, contextTagIdsByPerformer, selectedPerformerIds }: { path: string; data: ImageCreate; contextTagIdsByPerformer: Record<number, number[]>; selectedPerformerIds: number[] }) => {
       const created = await images.createFromFile({ filePath: path });
-      return created?.id ? images.update(created.id, data) : created;
+      if (!created?.id) {
+        return created;
+      }
+
+      await images.update(created.id, data);
+      await syncPerformerContextTags("image", created.id, [], contextTagIdsByPerformer, selectedPerformerIds);
+      return images.get(created.id);
     },
     onSuccess: handleCreated,
   });
 
   const urlMutation = useMutation({
-    mutationFn: async ({ requestedUrl, data, downloadMode, scrapeMetadata }: { requestedUrl: string; data: ImageCreate; downloadMode: UrlDownloadMode; scrapeMetadata: boolean }) => {
+    mutationFn: async ({ requestedUrl, data, contextTagIdsByPerformer, selectedPerformerIds, downloadMode, scrapeMetadata }: { requestedUrl: string; data: ImageCreate; contextTagIdsByPerformer: Record<number, number[]>; selectedPerformerIds: number[]; downloadMode: UrlDownloadMode; scrapeMetadata: boolean }) => {
       if (downloadMode === "now") {
         const matches = (await system.matchDownloaders({ url: requestedUrl }))
           .filter((match) => match.supportedEntity.toLowerCase() === "image");
@@ -427,7 +464,13 @@ export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps)
         }
       }
 
-      return createFromUrlWithOptionalDownload({ requestedUrl, data, entity: "Image", downloadMode, scrapeMetadata, create: images.create });
+      const created = await createFromUrlWithOptionalDownload({ requestedUrl, data, entity: "Image", downloadMode, scrapeMetadata, create: images.create });
+      if (!created?.id) {
+        return created;
+      }
+
+      await syncPerformerContextTags("image", created.id, [], contextTagIdsByPerformer, selectedPerformerIds);
+      return images.get(created.id);
     },
     onSuccess: (created) => {
       if (!created) return;
@@ -450,7 +493,7 @@ export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps)
   };
 
   const handleCreateWithoutDownload = (data: ImageCreate) => {
-    mutation.mutate(data);
+    mutation.mutate({ data, contextTagIdsByPerformer: EMPTY_FORM_STATE.contextTagIdsByPerformer, selectedPerformerIds: EMPTY_FORM_STATE.selectedPerformerIds });
   };
 
   const visibleError = (mutation.error ?? fileMutation.error ?? urlMutation.error) instanceof NoDownloaderFoundError
@@ -464,7 +507,7 @@ export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps)
         open={open}
         onClose={onClose}
         initialState={EMPTY_FORM_STATE}
-        onSubmit={(data) => mutation.mutate(data)}
+        onSubmit={(data, contextTagIdsByPerformer, selectedPerformerIds) => mutation.mutate({ data, contextTagIdsByPerformer, selectedPerformerIds })}
         isPending={mutation.isPending || fileMutation.isPending || urlMutation.isPending}
         error={visibleError}
         resetSignal={resetSignal}
@@ -481,10 +524,10 @@ export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps)
         scrapeMetadata={scrapeMetadata}
         onScrapeMetadataChange={setScrapeMetadata}
         noDownloaderFound={noDownloaderFound}
-        onCreateWithoutDownload={handleCreateWithoutDownload}
+        onCreateWithoutDownload={(data, contextTagIdsByPerformer, selectedPerformerIds) => mutation.mutate({ data, contextTagIdsByPerformer, selectedPerformerIds })}
         onDismissNoDownloader={() => setNoDownloaderFound(false)}
-        onCreateFromFile={(path, data) => fileMutation.mutate({ path, data })}
-        onCreateFromUrl={(requestedUrl, data, downloadMode, scrapeMetadata) => urlMutation.mutate({ requestedUrl, data, downloadMode, scrapeMetadata })}
+        onCreateFromFile={(path, data, contextTagIdsByPerformer, selectedPerformerIds) => fileMutation.mutate({ path, data, contextTagIdsByPerformer, selectedPerformerIds })}
+        onCreateFromUrl={(requestedUrl, data, contextTagIdsByPerformer, selectedPerformerIds, downloadMode, scrapeMetadata) => urlMutation.mutate({ requestedUrl, data, contextTagIdsByPerformer, selectedPerformerIds, downloadMode, scrapeMetadata })}
       />
       {sourceDownload ? (
         <ImageSourceDownloadDialog

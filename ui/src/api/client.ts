@@ -78,6 +78,7 @@ import type {
   CreateScrapeAttemptRequest,
   ApplySceneScrapeAttemptRequest,
   BatchSceneScrapeStartRequest,
+  BatchImageScrapeStartRequest,
   BulkSceneUpdate,
   BulkPerformerUpdate,
   BulkTagUpdate,
@@ -713,6 +714,7 @@ export const images = {
   create: (data: ImageCreate) => request<Image>("/images", { method: "POST", body: JSON.stringify(data) }),
   createFromFile: (data: FileBackedCreate) => request<Image>("/images/from-file", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: ImageUpdate) => request<Image>(`/images/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  rescan: (id: number) => request<{ jobId: string }>(`/images/${id}/rescan`, { method: "POST" }),
   bulkUpdate: (data: BulkImageUpdate) => request<void>("/images/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number, options?: boolean | DeleteEntityOptions) => {
     const deleteFile = typeof options === "boolean" ? options : options?.deleteFile;
@@ -950,6 +952,8 @@ export const scrapeAttempts = {
     request<ScrapeAttempt>(`/scrape-attempts/${id}/apply`, { method: "POST", body: JSON.stringify(data) }),
   startSceneBatch: (data: BatchSceneScrapeStartRequest) =>
     request<{ jobId: string; queuedCount: number }>("/scrape-attempts/batch-scenes", { method: "POST", body: JSON.stringify(data) }),
+  startImageBatch: (data: BatchImageScrapeStartRequest) =>
+    request<{ jobId: string; queuedCount: number }>("/scrape-attempts/batch-images", { method: "POST", body: JSON.stringify(data) }),
 };
 
 export const bookmarks = {

@@ -117,7 +117,8 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
 
         var groups = await GetGroupsAsync(id, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, id, ct);
-        return Ok(MapToDto(text, groups, customFieldValues));
+        var contextTagApplications = await GetContextTagApplicationsAsync(id, ct);
+        return Ok(MapToDto(text, groups, customFieldValues, contextTagApplications));
     }
 
     [HttpGet("{id:int}/content")]
@@ -203,7 +204,8 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         if (created == null) return NotFound();
         var groups = await GetGroupsAsync(text.Id, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, text.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = text.Id }, MapToDto(created, groups, customFieldValues));
+        var contextTagApplications = await GetContextTagApplicationsAsync(text.Id, ct);
+        return CreatedAtAction(nameof(GetById), new { id = text.Id }, MapToDto(created, groups, customFieldValues, contextTagApplications));
     }
 
     [HttpPost("from-file")]
@@ -226,7 +228,8 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
 
         var groups = await GetGroupsAsync(textDocumentId, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, textDocumentId, ct);
-        return CreatedAtAction(nameof(GetById), new { id = textDocumentId }, MapToDto(text, groups, customFieldValues));
+        var contextTagApplications = await GetContextTagApplicationsAsync(textDocumentId, ct);
+        return CreatedAtAction(nameof(GetById), new { id = textDocumentId }, MapToDto(text, groups, customFieldValues, contextTagApplications));
     }
 
     [HttpPut("{id:int}")]
@@ -302,7 +305,8 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
 
         var groups = await GetGroupsAsync(id, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, id, ct);
-        return Ok(MapToDto(updated, groups, customFieldValues));
+        var contextTagApplications = await GetContextTagApplicationsAsync(id, ct);
+        return Ok(MapToDto(updated, groups, customFieldValues, contextTagApplications));
     }
 
     [HttpPost("bulk")]
@@ -472,6 +476,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, text => text.TextPerformers.Count);
         query = FilterHelpers.ApplyMultiId(query, filter.TagsCriterion, text => text.TextTags.Select(link => link.TagId));
         query = FilterHelpers.ApplyMultiId(query, filter.PerformersCriterion, text => text.TextPerformers.Select(link => link.PerformerId));
+        query = ApplyPerformerOccurrenceTagCriterion(query, filter.PerformerTagsCriterion, GetIncludedPerformerIds(filter));
         query = FilterHelpers.ApplyStudioCriterion(query, filter.StudiosCriterion, text => text.StudioId);
         query = FilterHelpers.ApplyMultiId(query, filter.GroupsCriterion, text => db.GroupItems
             .Where(item => item.HostType == "text" && item.HostId == text.Id && item.Kind == GroupItemKind.Text)
@@ -483,7 +488,79 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         return query;
     }
 
-    private TextDocumentDto MapToDto(TextDocument text, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues) => new(
+    private static int[] GetIncludedPerformerIds(TextDocumentFilter filter)
+    {
+        if (filter.PerformersCriterion?.Value is not { Count: > 0 }
+            || filter.PerformersCriterion.Modifier is not (CriterionModifier.Includes or CriterionModifier.IncludesAll))
+        {
+            return [];
+        }
+
+        return filter.PerformersCriterion.Value.Where(id => id > 0).Distinct().ToArray();
+    }
+
+    private IQueryable<TextDocument> ApplyPerformerOccurrenceTagCriterion(IQueryable<TextDocument> query, MultiIdCriterion? criterion, IReadOnlyCollection<int> performerIds)
+    {
+        if (criterion == null)
+            return query;
+
+        var tagIds = criterion.Value.Where(tagId => tagId > 0).Distinct().ToArray();
+        var excludedTagIds = criterion.Excludes?.Where(tagId => tagId > 0).Distinct().ToArray() ?? [];
+        if (tagIds.Length == 0 && excludedTagIds.Length == 0)
+            return query;
+
+        var scopedApplications = db.TagApplications.AsNoTracking()
+            .Where(application => application.HostType == AffinityHostType.Text
+                && application.ContextType == "performer"
+                && application.ContextId != null);
+
+        if (performerIds.Count > 0)
+        {
+            var performerIdArray = performerIds.ToArray();
+            scopedApplications = scopedApplications.Where(application => application.ContextId != null && performerIdArray.Contains(application.ContextId.Value));
+        }
+
+        if (tagIds.Length > 0)
+        {
+            query = criterion.Modifier switch
+            {
+                CriterionModifier.Excludes => query.Where(text => !scopedApplications.Any(application => application.HostId == text.Id && tagIds.Contains(application.TagId))),
+                CriterionModifier.ExcludesAll => ApplyPerformerOccurrenceTagExcludesAll(query, scopedApplications, tagIds),
+                CriterionModifier.IncludesAll => ApplyPerformerOccurrenceTagIncludesAll(query, scopedApplications, tagIds),
+                _ => query.Where(text => scopedApplications.Any(application => application.HostId == text.Id && tagIds.Contains(application.TagId))),
+            };
+        }
+
+        if (excludedTagIds.Length > 0)
+        {
+            query = query.Where(text => !scopedApplications.Any(application => application.HostId == text.Id && excludedTagIds.Contains(application.TagId)));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<TextDocument> ApplyPerformerOccurrenceTagIncludesAll(IQueryable<TextDocument> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    {
+        foreach (var tagId in tagIds)
+        {
+            query = query.Where(text => applications.Any(application => application.HostId == text.Id && application.TagId == tagId));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<TextDocument> ApplyPerformerOccurrenceTagExcludesAll(IQueryable<TextDocument> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    {
+        var matchingAll = query;
+        foreach (var tagId in tagIds)
+        {
+            matchingAll = matchingAll.Where(text => applications.Any(application => application.HostId == text.Id && application.TagId == tagId));
+        }
+
+        return query.Where(text => !matchingAll.Select(match => match.Id).Contains(text.Id));
+    }
+
+    private TextDocumentDto MapToDto(TextDocument text, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues, List<TagApplicationDto>? contextTagApplications = null) => new(
         text.Id,
         text.Title,
         text.Code,
@@ -518,7 +595,23 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         text.FileCount,
         text.MaxWordCount,
         text.MaxPageCount,
-        text.ImageBlobId != null ? EntityImageUrls.Text(ControllerContext.HttpContext, text.Id, text.UpdatedAt) : null);
+        text.ImageBlobId != null ? EntityImageUrls.Text(ControllerContext.HttpContext, text.Id, text.UpdatedAt) : null,
+        contextTagApplications);
+
+    private async Task<List<TagApplicationDto>?> GetContextTagApplicationsAsync(int textId, CancellationToken ct)
+    {
+        var applications = await db.TagApplications.AsNoTracking()
+            .Where(item => item.HostType == AffinityHostType.Text && item.HostId == textId)
+            .Include(item => item.Tag).ThenInclude(tag => tag!.Aliases)
+            .Include(item => item.Tag).ThenInclude(tag => tag!.TagGroup)
+            .AsSplitQuery()
+            .OrderBy(item => item.ContextType)
+            .ThenBy(item => item.ContextId)
+            .ThenBy(item => item.Tag!.Name)
+            .ToListAsync(ct);
+
+        return applications.Count == 0 ? null : applications.Select(TagApplicationsController.Map).ToList();
+    }
 
     private async Task<TextDocument?> GetTextForDtoAsync(int id, CancellationToken ct)
         => await db.TextDocuments.AsNoTracking()

@@ -9,6 +9,7 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { trackInteraction } from "../utils/interactionTracking";
 
@@ -26,6 +27,7 @@ export interface LightboxProps {
   open: boolean;
   onClose: () => void;
   slideshowDelay?: number;
+  autoPlay?: boolean;
 }
 
 export function Lightbox({
@@ -34,13 +36,16 @@ export function Lightbox({
   open,
   onClose,
   slideshowDelay = 5000,
+  autoPlay = false,
 }: LightboxProps) {
   const [index, setIndex] = useState(initialIndex);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
+  const [currentSlideshowDelay, setCurrentSlideshowDelay] = useState(slideshowDelay);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const dragStart = useRef({ x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
@@ -75,11 +80,12 @@ export function Lightbox({
       setIndex(initialIndex);
       setZoom(1);
       setPan({ x: 0, y: 0 });
-      setPlaying(false);
+      setPlaying(autoPlay);
+      setCurrentSlideshowDelay(slideshowDelay);
       trackedOpen.current = false;
       lastTrackedIndex.current = null;
     }
-  }, [open, initialIndex]);
+  }, [autoPlay, open, initialIndex, slideshowDelay]);
 
   useEffect(() => {
     if (!open || !current) {
@@ -111,6 +117,21 @@ export function Lightbox({
     return () => {
       document.body.style.overflow = prev;
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      setFullscreen(false);
+      return;
+    }
+
+    const handleFullscreenChange = () => {
+      setFullscreen(document.fullscreenElement === containerRef.current);
+    };
+
+    handleFullscreenChange();
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, [open]);
 
   const resetView = useCallback(() => {
@@ -162,11 +183,36 @@ export function Lightbox({
     }
   }, [trackCurrentImageInteraction, zoom]);
 
-  const handleFitScreen = useCallback(() => resetView(), [resetView]);
+  const toggleFullscreen = useCallback(async () => {
+    if (document.fullscreenElement === containerRef.current) {
+      await document.exitFullscreen();
+      trackCurrentImageInteraction("fullscreen", { action: "exit" });
+      return;
+    }
+
+    if (containerRef.current) {
+      await containerRef.current.requestFullscreen();
+      trackCurrentImageInteraction("fullscreen", { action: "enter" });
+    }
+  }, [trackCurrentImageInteraction]);
+
+  const changeSlideshowDelay = useCallback((deltaMs: number) => {
+    setCurrentSlideshowDelay((current) => {
+      const next = Math.min(30000, Math.max(1000, current + deltaMs));
+      if (next !== current) {
+        trackCurrentImageInteraction("slideshowDelay", { milliseconds: next });
+      }
+      return next;
+    });
+  }, [trackCurrentImageInteraction]);
 
   const handleClose = useCallback(() => {
     if (open) {
       trackCurrentImageInteraction("closeLightbox", { index: index + 1, count });
+    }
+
+    if (document.fullscreenElement === containerRef.current) {
+      void document.exitFullscreen();
     }
 
     onClose();
@@ -175,12 +221,12 @@ export function Lightbox({
   // Slideshow
   useEffect(() => {
     if (playing && open) {
-      slideshowTimer.current = setInterval(goNext, slideshowDelay);
+      slideshowTimer.current = setInterval(goNext, currentSlideshowDelay);
     }
     return () => {
       if (slideshowTimer.current) clearInterval(slideshowTimer.current);
     };
-  }, [playing, open, goNext, slideshowDelay]);
+  }, [playing, open, goNext, currentSlideshowDelay]);
 
   // Keyboard
   useEffect(() => {
@@ -203,11 +249,16 @@ export function Lightbox({
           e.preventDefault();
           toggleSlideshow();
           break;
+        case "f":
+        case "F":
+          e.preventDefault();
+          void toggleFullscreen();
+          break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [goNext, goPrev, handleClose, open, toggleSlideshow]);
+  }, [goNext, goPrev, handleClose, open, toggleFullscreen, toggleSlideshow]);
 
   // Scroll wheel zoom
   const handleWheel = useCallback(
@@ -280,6 +331,27 @@ export function Lightbox({
           )}
         </span>
         <div className="flex items-center gap-2">
+          {count > 1 ? (
+            <div className="mr-1 flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/80">
+              <button
+                onClick={() => changeSlideshowDelay(-1000)}
+                className="rounded px-1 py-0.5 text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+                aria-label="Decrease slideshow delay"
+                title="Decrease slideshow delay"
+              >
+                -
+              </button>
+              <span className="min-w-[3.5rem] text-center tabular-nums">{(currentSlideshowDelay / 1000).toFixed(0)}s</span>
+              <button
+                onClick={() => changeSlideshowDelay(1000)}
+                className="rounded px-1 py-0.5 text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+                aria-label="Increase slideshow delay"
+                title="Increase slideshow delay"
+              >
+                +
+              </button>
+            </div>
+          ) : null}
           <button
             onClick={handleZoomOut}
             className="p-2 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
@@ -295,11 +367,20 @@ export function Lightbox({
             <ZoomIn size={20} />
           </button>
           <button
-            onClick={handleFitScreen}
+            onClick={() => resetView()}
             className="p-2 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
-            aria-label="Fit to screen"
+            aria-label="Reset zoom"
+            title="Reset zoom"
           >
-            <Maximize2 size={20} />
+            <ZoomOut size={20} />
+          </button>
+          <button
+            onClick={() => void toggleFullscreen()}
+            className="p-2 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+            aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}
+            title={fullscreen ? "Exit full screen" : "Enter full screen"}
+          >
+            {fullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
           </button>
           <button
             onClick={toggleSlideshow}

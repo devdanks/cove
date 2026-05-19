@@ -121,12 +121,28 @@ public sealed class TagApplicationService(CoveContext db)
         if (contextId is not > 0)
             throw new TagApplicationValidationException(StatusCodes.Status400BadRequest, "Context id is required.");
 
+        if (contextType == "performer")
+        {
+            var performerContextExists = hostType switch
+            {
+                AffinityHostType.Scene => await db.Set<ScenePerformer>().AsNoTracking().AnyAsync(item => item.SceneId == hostId && item.PerformerId == contextId.Value, ct),
+                AffinityHostType.Image => await db.Set<ImagePerformer>().AsNoTracking().AnyAsync(item => item.ImageId == hostId && item.PerformerId == contextId.Value, ct),
+                AffinityHostType.Audio => await db.Set<AudioPerformer>().AsNoTracking().AnyAsync(item => item.AudioId == hostId && item.PerformerId == contextId.Value, ct),
+                AffinityHostType.Text => await db.Set<TextPerformer>().AsNoTracking().AnyAsync(item => item.TextDocumentId == hostId && item.PerformerId == contextId.Value, ct),
+                _ => throw new TagApplicationValidationException(StatusCodes.Status400BadRequest, "Contextual performer tag applications are not supported for this host."),
+            };
+
+            if (!performerContextExists)
+                throw new TagApplicationValidationException(StatusCodes.Status400BadRequest, "Context does not belong to the host.");
+
+            return;
+        }
+
         if (hostType != AffinityHostType.Scene)
-            throw new TagApplicationValidationException(StatusCodes.Status400BadRequest, "Contextual tag applications currently require a scene host.");
+            throw new TagApplicationValidationException(StatusCodes.Status400BadRequest, "This context type is only supported for scene hosts.");
 
         var exists = contextType switch
         {
-            "performer" => await db.Set<ScenePerformer>().AsNoTracking().AnyAsync(item => item.SceneId == hostId && item.PerformerId == contextId.Value, ct),
             "detection" => await db.Detections.AsNoTracking().AnyAsync(item => item.Id == contextId.Value && item.HostType == DetectionHostType.Scene && item.HostId == hostId, ct),
             "face" => await db.FaceAppearances.AsNoTracking().AnyAsync(item => item.FaceId == contextId.Value && item.HostType == FaceAppearanceHostType.Scene && item.HostId == hostId, ct),
             "segment" => await db.Segments.AsNoTracking().AnyAsync(item => item.Id == contextId.Value && item.HostType == SegmentHostType.Scene && item.HostId == hostId, ct),
@@ -142,6 +158,8 @@ public sealed class TagApplicationService(CoveContext db)
         {
             AffinityHostType.Scene => db.Scenes.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Image => db.Images.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
+            AffinityHostType.Audio => db.Audios.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
+            AffinityHostType.Text => db.TextDocuments.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Performer => db.Performers.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Face => db.Faces.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Tag => db.Tags.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),

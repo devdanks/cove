@@ -429,6 +429,56 @@ public class FilterCriteriaParityTests
         Assert.Null(filter.PerformerTagsCriterion);
     }
 
+    [Fact]
+    public void AudioFilter_HasPerformerTagsCriterion()
+    {
+        var filter = new AudioFilter();
+        Assert.Null(filter.PerformerTagsCriterion);
+    }
+
+    [Fact]
+    public void TextDocumentFilter_HasPerformerTagsCriterion()
+    {
+        var filter = new TextDocumentFilter();
+        Assert.Null(filter.PerformerTagsCriterion);
+    }
+
+    [Fact]
+    public void AudioFilter_PerformerTagsCriterion_Deserializes()
+    {
+        var json = """
+        {
+            "objectFilter": {
+                "performerTagsCriterion": { "value": [7], "modifier": "includes" }
+            }
+        }
+        """;
+
+        var result = JsonSerializer.Deserialize<FilteredQueryRequest<AudioFilter>>(json, Options);
+
+        Assert.NotNull(result?.ObjectFilter?.PerformerTagsCriterion);
+        Assert.Single(result.ObjectFilter.PerformerTagsCriterion.Value);
+        Assert.Equal(CriterionModifier.Includes, result.ObjectFilter.PerformerTagsCriterion.Modifier);
+    }
+
+    [Fact]
+    public void TextDocumentFilter_PerformerTagsCriterion_Deserializes()
+    {
+        var json = """
+        {
+            "objectFilter": {
+                "performerTagsCriterion": { "value": [9], "modifier": "includes" }
+            }
+        }
+        """;
+
+        var result = JsonSerializer.Deserialize<FilteredQueryRequest<TextDocumentFilter>>(json, Options);
+
+        Assert.NotNull(result?.ObjectFilter?.PerformerTagsCriterion);
+        Assert.Single(result.ObjectFilter.PerformerTagsCriterion.Value);
+        Assert.Equal(CriterionModifier.Includes, result.ObjectFilter.PerformerTagsCriterion.Modifier);
+    }
+
     // ===== GROUP FILTER CRITERIA EXISTENCE =====
 
     [Fact]
@@ -523,7 +573,7 @@ public class FilterCriteriaParityTests
     [Fact]
     public void ImageCreateDto_HasGalleryIds()
     {
-        var dto = new ImageCreateDto("Image", null, null, null, null, false, null, null, null, null, null, [10]);
+        var dto = new ImageCreateDto("Image", null, null, null, null, false, null, null, null, null, null, [10], null);
         Assert.NotNull(dto.GalleryIds);
         Assert.Single(dto.GalleryIds);
     }

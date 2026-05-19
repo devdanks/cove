@@ -497,6 +497,8 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
       ...config.ui,
       playerVideoStartPercent: Math.min(95, Math.max(0, config.ui.playerVideoStartPercent ?? 0)),
       playerVideoStartMinDuration: Math.max(0, config.ui.playerVideoStartMinDuration ?? 0),
+      imageObjectFit: config.ui.imageObjectFit === "contain" ? "contain" : "cover",
+      videoObjectFit: config.ui.videoObjectFit === "contain" ? "contain" : "cover",
       feedVideoSource: config.ui.feedVideoSource === "video" ? "video" : "preview",
       feedVideoSound: config.ui.feedVideoSound ?? false,
       feedVideoStartPercent: Math.min(95, Math.max(0, config.ui.feedVideoStartPercent ?? 0)),
@@ -1682,6 +1684,26 @@ export function SettingsPage() {
                     { value: "image", label: "Static Image" },
                   ]}
                 />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <SelectField
+                    label="Image fit"
+                    value={draft.ui.imageObjectFit ?? "cover"}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, imageObjectFit: value } }))}
+                    options={[
+                      { value: "cover", label: "Cover" },
+                      { value: "contain", label: "Contain" },
+                    ]}
+                  />
+                  <SelectField
+                    label="Video preview fit"
+                    value={draft.ui.videoObjectFit ?? "cover"}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, videoObjectFit: value } }))}
+                    options={[
+                      { value: "cover", label: "Cover" },
+                      { value: "contain", label: "Contain" },
+                    ]}
+                  />
+                </div>
               </div>
             </SectionCard>
 

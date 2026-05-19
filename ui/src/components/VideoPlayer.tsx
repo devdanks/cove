@@ -150,6 +150,8 @@ export function VideoPlayer({
   const maxLoopDuration = config?.ui.maxLoopDuration ?? 0;
   const playerVideoStartPercent = config?.ui.playerVideoStartPercent ?? 0;
   const playerVideoStartMinDuration = config?.ui.playerVideoStartMinDuration ?? 0;
+  const videoObjectFit = config?.ui.videoObjectFit === "contain" ? "contain" : "cover";
+  const videoFitClass = videoObjectFit === "contain" ? "object-contain" : "object-cover";
   const effectiveShowAbLoop = showAbLoop ?? config?.ui.showAbLoopControls ?? true;
   const effectiveResumeTime = config?.ui.alwaysResumeOnPlayback === false ? undefined : resumeTime;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -288,7 +290,9 @@ export function VideoPlayer({
       return;
     }
 
-    const scale = Math.min(containerWidth / intrinsicWidth, containerHeight / intrinsicHeight);
+    const scale = videoObjectFit === "contain"
+      ? Math.min(containerWidth / intrinsicWidth, containerHeight / intrinsicHeight)
+      : Math.max(containerWidth / intrinsicWidth, containerHeight / intrinsicHeight);
     const width = intrinsicWidth * scale;
     const height = intrinsicHeight * scale;
     const left = (containerWidth - width) / 2;
@@ -306,7 +310,7 @@ export function VideoPlayer({
 
       return { left, top, width, height };
     });
-  }, []);
+  }, [videoObjectFit]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -902,7 +906,7 @@ export function VideoPlayer({
     >
       <video
         ref={videoRef}
-        className="w-full h-full object-contain cursor-pointer"
+        className={`w-full h-full ${videoFitClass} cursor-pointer`}
         preload="metadata"
         poster={posterUrl}
         {...({ "x-webkit-airplay": "allow" } as Record<string, string>)}
