@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Cove.Core.Auth;
 using Cove.Core.Entities;
 using Cove.Core.Entities.Auth;
+using Cove.Data.Services;
 using Cove.Plugins;
 using System.Text.Json;
 using System.Linq.Expressions;
@@ -685,8 +686,21 @@ public partial class CoveContext : DbContext
         CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryTag>(), entry => entry.TagId, nameof(GalleryTag.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<StudioTag>(), entry => entry.TagId, nameof(StudioTag.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<GroupTag>(), entry => entry.TagId, nameof(GroupTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<TagApplication>(), entry => entry.TagId, nameof(TagApplication.TagId));
         CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Segment>(), entry => entry.TagId, nameof(Segment.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<SceneMarkerTag>(), entry => entry.TagId, nameof(SceneMarkerTag.TagId));
+
+        foreach (var entry in ChangeTracker.Entries<Tag>())
+        {
+            if (entry.State != EntityState.Modified)
+                continue;
+
+            if (entry.Property<double?>(nameof(Tag.MinOccurrenceSec)).IsModified
+                || entry.Property<double?>(nameof(Tag.MinOccurrencePercent)).IsModified)
+            {
+                AddIfPositive(ids, entry.Entity.Id);
+            }
+        }
 
         foreach (var entry in ChangeTracker.Entries<SceneMarker>())
         {
@@ -891,8 +905,12 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = tags.Keys.ToArray();
-        var sceneCounts = Set<SceneTag>().AsNoTracking().Where(sceneTag => ids.Contains(sceneTag.TagId))
-            .GroupBy(sceneTag => sceneTag.TagId)
+        var sceneCounts = EffectiveHostTagQuery.ForHostType(this, AffinityHostType.Scene)
+            .AsNoTracking()
+            .Where(tag => ids.Contains(tag.TagId))
+            .Select(tag => new { tag.TagId, tag.HostId })
+            .Distinct()
+            .GroupBy(tag => tag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
         var sceneSegmentCounts = Segments.AsNoTracking()
@@ -940,8 +958,12 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = tags.Keys.ToArray();
-        var sceneCounts = await Set<SceneTag>().AsNoTracking().Where(sceneTag => ids.Contains(sceneTag.TagId))
-            .GroupBy(sceneTag => sceneTag.TagId)
+        var sceneCounts = await EffectiveHostTagQuery.ForHostType(this, AffinityHostType.Scene)
+            .AsNoTracking()
+            .Where(tag => ids.Contains(tag.TagId))
+            .Select(tag => new { tag.TagId, tag.HostId })
+            .Distinct()
+            .GroupBy(tag => tag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
         var sceneSegmentCounts = await Segments.AsNoTracking()

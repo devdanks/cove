@@ -128,7 +128,11 @@ public record TagDto(
     string? TagGroupColor = null,
     double? MinOccurrenceSec = null,
     double? MinOccurrencePercent = null,
-    Dictionary<string, object>? CustomFields = null);
+    Dictionary<string, object>? CustomFields = null,
+    bool IsDerived = false,
+    bool CanRemove = true,
+    double? EffectiveDurationSec = null,
+    double? EffectiveDurationPercent = null);
 
 public record TagListDto(
     int Id,

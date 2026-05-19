@@ -342,6 +342,228 @@ public class SceneFilterBehaviorTests
     }
 
     [Fact]
+    public async Task TagsCriterion_UsesThresholdQualifiedDerivedTagApplications()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Action", MinOccurrencePercent = 80 };
+        var qualifyingScene = CreateSceneWithFile("qualifying-derived");
+        var belowThresholdScene = CreateSceneWithFile("below-threshold-derived");
+        var manualScene = CreateSceneWithFile("manual-tagged");
+        manualScene.SceneTags.Add(new SceneTag { Tag = tag });
+
+        context.Tags.Add(tag);
+        context.Scenes.AddRange(qualifyingScene, belowThresholdScene, manualScene);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.AddRange(
+            CreateDurationApplication(qualifyingScene.Id, tag.Id, totalDurationSec: 82, hostDurationSec: 100),
+            CreateDurationApplication(belowThresholdScene.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100),
+            CreateDurationApplication(manualScene.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100));
+        await context.SaveChangesAsync();
+
+        var repository = new SceneRepository(context);
+        var binaryFilter = new SceneFilter
+        {
+            TagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
+        };
+        var explicitDurationFilter = new SceneFilter
+        {
+            TagDurationCriterion = new TagDurationCriterion
+            {
+                TagId = tag.Id,
+                Unit = "percent",
+                Modifier = CriterionModifier.GreaterThan,
+                Value = 70,
+            },
+        };
+
+        var (binaryItems, binaryCount) = await repository.FindAsync(binaryFilter, new FindFilter { Page = 1, PerPage = 50, Sort = "title" });
+        var (durationItems, durationCount) = await repository.FindAsync(explicitDurationFilter, new FindFilter { Page = 1, PerPage = 50, Sort = "title" });
+
+        Assert.Equal(2, binaryCount);
+        Assert.Equal(["manual-tagged", "qualifying-derived"], binaryItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(3, durationCount);
+        Assert.Contains(durationItems, scene => scene.Title == "below-threshold-derived");
+    }
+
+    [Fact]
+    public async Task TagsCriterion_WhenSecondsOrPercentThresholdMatches_TreatsDerivedTagAsEffective()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Running", MinOccurrenceSec = 30, MinOccurrencePercent = 80 };
+        var secondsScene = CreateSceneWithFile("seconds-match");
+        var percentScene = CreateSceneWithFile("percent-match");
+        var neitherScene = CreateSceneWithFile("neither-match");
+
+        context.Tags.Add(tag);
+        context.Scenes.AddRange(secondsScene, percentScene, neitherScene);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.AddRange(
+            CreateDurationApplication(secondsScene.Id, tag.Id, totalDurationSec: 35, hostDurationSec: 100),
+            CreateDurationApplication(percentScene.Id, tag.Id, totalDurationSec: 8, hostDurationSec: 10),
+            CreateDurationApplication(neitherScene.Id, tag.Id, totalDurationSec: 20, hostDurationSec: 100));
+        await context.SaveChangesAsync();
+
+        var repository = new SceneRepository(context);
+        var filter = new SceneFilter
+        {
+            TagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
+        };
+
+        var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50, Sort = "title" });
+
+        Assert.Equal(2, totalCount);
+        Assert.Equal(["percent-match", "seconds-match"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+    }
+
+    [Fact]
+    public async Task ScenesController_GetById_MapsOnlyEffectiveDerivedTagsAsNonRemovable()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Observed", MinOccurrencePercent = 80 };
+        var scene = CreateSceneWithFile("thresholded-scene");
+
+        context.Tags.Add(tag);
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.Add(CreateDurationApplication(scene.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100));
+        await context.SaveChangesAsync();
+
+        var controller = CreateScenesControllerWithRepository(context);
+        var initialResponse = await controller.GetById(scene.Id, CancellationToken.None);
+        var initialOk = Assert.IsType<OkObjectResult>(initialResponse.Result);
+        var initialScene = Assert.IsType<SceneDto>(initialOk.Value);
+        Assert.Empty(initialScene.Tags);
+
+        tag.MinOccurrencePercent = 70;
+        await context.SaveChangesAsync();
+
+        var updatedResponse = await controller.GetById(scene.Id, CancellationToken.None);
+        var updatedOk = Assert.IsType<OkObjectResult>(updatedResponse.Result);
+        var updatedScene = Assert.IsType<SceneDto>(updatedOk.Value);
+        var effectiveTag = Assert.Single(updatedScene.Tags);
+
+        Assert.Equal(tag.Id, effectiveTag.Id);
+        Assert.True(effectiveTag.IsDerived);
+        Assert.False(effectiveTag.CanRemove);
+        Assert.Equal(72, effectiveTag.EffectiveDurationPercent.GetValueOrDefault(), 3);
+    }
+
+    [Fact]
+    public async Task ScenesController_GetById_LocksDirectAiOnlyTagsAsNonRemovable()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "AI Link" };
+        var scene = CreateSceneWithFile("ai-link-scene");
+        scene.SceneTags.Add(new SceneTag { Tag = tag });
+
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.Add(new TagApplication
+        {
+            HostType = AffinityHostType.Scene,
+            HostId = scene.Id,
+            TagId = tag.Id,
+            SourceKey = "ext:ai.tagging",
+            SourceRunId = "run-ai-link",
+            ModelKey = "tagger-v1",
+            Confidence = 0.9f,
+        });
+        await context.SaveChangesAsync();
+
+        var controller = CreateScenesControllerWithRepository(context);
+        var response = await controller.GetById(scene.Id, CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var dto = Assert.IsType<SceneDto>(ok.Value);
+        var effectiveTag = Assert.Single(dto.Tags);
+
+        Assert.Equal(tag.Id, effectiveTag.Id);
+        Assert.True(effectiveTag.IsDerived);
+        Assert.False(effectiveTag.CanRemove);
+    }
+
+    [Fact]
+    public async Task TagSceneCount_RefreshesFromEffectiveDerivedTagsWhenThresholdChanges()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Counted", MinOccurrencePercent = 80 };
+        var scene = CreateSceneWithFile("counted-scene");
+
+        context.Tags.Add(tag);
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.Add(CreateDurationApplication(scene.Id, tag.Id, totalDurationSec: 82, hostDurationSec: 100));
+        await context.SaveChangesAsync();
+
+        await context.Entry(tag).ReloadAsync();
+        Assert.Equal(1, tag.SceneCount);
+
+        tag.MinOccurrencePercent = 90;
+        await context.SaveChangesAsync();
+        await context.Entry(tag).ReloadAsync();
+
+        Assert.Equal(0, tag.SceneCount);
+    }
+
+    [Fact]
+    public async Task AudiosController_FindPost_UsesEffectiveDerivedTagsForAudioFiltersAndDtos()
+    {
+        await using var context = CreateContext();
+        var tag = new Tag { Name = "Audio Cue", MinOccurrenceSec = 5 };
+        var matchingAudio = new Audio { Title = "matching-audio" };
+        var belowThresholdAudio = new Audio { Title = "below-threshold-audio" };
+
+        context.Tags.Add(tag);
+        context.Audios.AddRange(matchingAudio, belowThresholdAudio);
+        await context.SaveChangesAsync();
+
+        context.TagApplications.AddRange(
+            new TagApplication
+            {
+                HostType = AffinityHostType.Audio,
+                HostId = matchingAudio.Id,
+                TagId = tag.Id,
+                TotalDurationSec = 6,
+                HostDurationSec = 60,
+                SourceKey = "test",
+            },
+            new TagApplication
+            {
+                HostType = AffinityHostType.Audio,
+                HostId = belowThresholdAudio.Id,
+                TagId = tag.Id,
+                TotalDurationSec = 4,
+                HostDurationSec = 60,
+                SourceKey = "test",
+            });
+        await context.SaveChangesAsync();
+
+        var controller = new AudiosController(context, new CustomFieldService(context), null!, null!, null!);
+        var response = await controller.FindPost(new FilteredQueryRequest<AudioFilter>
+        {
+            FindFilter = new FindFilter { Page = 1, PerPage = 50, Sort = "title" },
+            ObjectFilter = new AudioFilter
+            {
+                TagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
+            },
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var payload = Assert.IsType<PaginatedResponse<AudioDto>>(ok.Value);
+        var audio = Assert.Single(payload.Items);
+        var effectiveTag = Assert.Single(audio.Tags);
+
+        Assert.Equal("matching-audio", audio.Title);
+        Assert.True(effectiveTag.IsDerived);
+        Assert.False(effectiveTag.CanRemove);
+        Assert.Equal(6, effectiveTag.EffectiveDurationSec.GetValueOrDefault(), 3);
+    }
+
+    [Fact]
     public async Task HashAndChecksumCriteria_FilterSceneFingerprints()
     {
         await using var context = CreateContext();
@@ -727,6 +949,12 @@ public class SceneFilterBehaviorTests
     {
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         return new ScenesController(new CapturingSceneRepository(), context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
+    }
+
+    private static ScenesController CreateScenesControllerWithRepository(CoveContext context)
+    {
+        var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        return new ScenesController(new SceneRepository(context), context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
     }
 
     private static List<List<SceneDto>> GetDuplicateGroups(ActionResult<List<List<SceneDto>>> response)

@@ -69,6 +69,7 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
     {
         var previous = NormalizeTagIds(previousTagIds);
         var current = NormalizeTagIds(currentTagIds);
+        var normalizedSourceKey = NormalizeSourceKey(sourceKey);
 
         var removedTagIds = previous.Except(current).ToArray();
         if (removedTagIds.Length > 0)
@@ -78,6 +79,7 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
                     && application.HostId == hostId
                     && application.ContextType == null
                     && application.ContextId == null
+                    && application.SourceKey == normalizedSourceKey
                     && removedTagIds.Contains(application.TagId))
                 .ToListAsync(cancellationToken);
 
@@ -89,7 +91,7 @@ public sealed class TagProvenanceService(CoveContext db, IServiceScopeFactory? s
 
         foreach (var tagId in current.Except(previous))
         {
-            await RecordAsync(hostType, hostId, tagId, sourceKey, cancellationToken: cancellationToken);
+            await RecordAsync(hostType, hostId, tagId, normalizedSourceKey, cancellationToken: cancellationToken);
         }
     }
 

@@ -17,7 +17,7 @@ namespace Cove.Tests;
 public sealed class TagProvenanceServiceTests
 {
     [Fact]
-    public async Task SyncTagSetAsync_AddsUserRowsForNewTagsAndDeletesRemovedProvenance()
+    public async Task SyncTagSetAsync_AddsUserRowsForNewTagsAndDeletesOnlyMatchingSourceProvenance()
     {
         await using var context = CreateContext();
 
@@ -39,6 +39,13 @@ public sealed class TagProvenanceServiceTests
                 SourceRunId = "run-1",
                 ModelKey = "tagger-v1",
                 Confidence = 0.91f,
+            },
+            new TagApplication
+            {
+                HostType = AffinityHostType.Scene,
+                HostId = scene.Id,
+                TagId = manualTag.Id,
+                SourceKey = "user",
             },
             new TagApplication
             {
@@ -67,7 +74,8 @@ public sealed class TagProvenanceServiceTests
             .ThenBy(application => application.SourceKey)
             .ToListAsync();
 
-        Assert.DoesNotContain(applications, application => application.TagId == manualTag.Id);
+        Assert.Contains(applications, application => application.TagId == manualTag.Id && application.SourceKey == "ext:ai.tagging");
+        Assert.DoesNotContain(applications, application => application.TagId == manualTag.Id && application.SourceKey == "user");
         Assert.Contains(applications, application => application.TagId == keptTag.Id && application.SourceKey == "ext:ai.tagging");
         Assert.Contains(applications, application => application.TagId == addedTag.Id && application.SourceKey == "user");
         Assert.DoesNotContain(applications, application => application.TagId == keptTag.Id && application.SourceKey == "user");

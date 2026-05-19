@@ -665,6 +665,8 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
   const cardTitle = scene.title || file?.basename || "Untitled";
   const [scrubSeconds, setScrubSeconds] = useState<number | null>(null);
   const scrubPercent = duration > 0 && scrubSeconds != null ? Math.min(100, Math.max(0, ((scrubSeconds - (scene.clipStartSec ?? 0)) / duration) * 100)) : 0;
+  const scrubTimestamp = scrubSeconds != null ? formatDuration(scrubSeconds) : null;
+  const scrubTimestampPercent = scrubSeconds != null ? Math.min(88, Math.max(12, scrubPercent)) : 0;
   const scrubImageUrl = scrubSeconds != null ? scenes.screenshotUrl(scene.id, scene.updatedAt, scrubSeconds) : null;
 
   const updateScrubPreview = useCallback((event: MouseEvent<HTMLDivElement>) => {
@@ -757,6 +759,14 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
             }}
             aria-hidden="true"
           >
+            {scrubTimestamp ? (
+              <div
+                className="pointer-events-none absolute bottom-4 -translate-x-1/2 whitespace-nowrap rounded bg-black/80 px-1.5 py-0.5 text-[10px] font-medium text-white shadow"
+                style={{ left: `${scrubTimestampPercent}%` }}
+              >
+                {scrubTimestamp}
+              </div>
+            ) : null}
             <div className={`absolute inset-x-1 bottom-1 h-1 rounded-full bg-black/55 transition-opacity ${scrubSeconds != null ? "opacity-100" : "opacity-0"}`}>
               <div className="h-full rounded-full bg-accent" style={{ width: `${scrubPercent}%` }} />
             </div>

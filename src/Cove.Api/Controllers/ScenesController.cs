@@ -11,6 +11,7 @@ using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data.Repositories;
+using Cove.Data.Services;
 
 namespace Cove.Api.Controllers;
 
@@ -48,9 +49,10 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         };
 
         var (items, totalCount) = await sceneRepo.FindAsync(filter, findFilter, ct);
+        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Scene, items.Select(scene => scene.Id), ct);
         var engagement = await engagementService.GetSceneSnapshotsAsync(items.Select(scene => scene.Id), ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, items.Select(scene => scene.Id), ct);
-        var dtos = items.Select(scene => MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList();
+        var dtos = items.Select(scene => MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement, effectiveTags)).ToList();
         return Ok(new PaginatedResponse<SceneDto>(dtos, totalCount, page, perPage));
     }
 
@@ -83,7 +85,10 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         if (galleryId.HasValue)
             sceneQuery = sceneQuery.Where(scene => scene.SceneGalleries.Any(sceneGallery => sceneGallery.GalleryId == galleryId.Value));
         if (tagIdList.Count > 0)
-            sceneQuery = sceneQuery.Where(scene => scene.SceneTags.Any(sceneTag => tagIdList.Contains(sceneTag.TagId)));
+        {
+            var effectiveSceneTags = EffectiveHostTagQuery.ForHostType(db, AffinityHostType.Scene);
+            sceneQuery = sceneQuery.Where(scene => effectiveSceneTags.Any(tag => tag.HostId == scene.Id && tagIdList.Contains(tag.TagId)));
+        }
         if (performerIdList.Count > 0)
             sceneQuery = sceneQuery.Where(scene => scene.ScenePerformers.Any(scenePerformer => performerIdList.Contains(scenePerformer.PerformerId)));
         if (rating.HasValue)
@@ -199,10 +204,11 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
         var engagement = await engagementService.GetSceneSnapshotsAsync(sceneIds, ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, sceneIds, ct);
+        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Scene, sceneIds, ct);
         var entries = rows.Select(row =>
         {
             if (row.Kind == "scene" && sceneLookup.TryGetValue(row.Id, out var scene))
-                return new SceneListEntryDto("scene", scene.Id, MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement));
+            return new SceneListEntryDto("scene", scene.Id, MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement, effectiveTags));
             if (row.Kind == "compilation" && groupLookup.TryGetValue(row.Id, out var group))
                 return new SceneListEntryDto("compilation", group.Id, Group: MapCompilationGroupToDto(group));
             return null;
@@ -224,9 +230,10 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         var findFilter = req.FindFilter ?? new FindFilter();
         var filter = req.ObjectFilter ?? new SceneFilter();
         var (items, totalCount) = await sceneRepo.FindAsync(filter, findFilter, ct);
+        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Scene, items.Select(scene => scene.Id), ct);
         var engagement = await engagementService.GetSceneSnapshotsAsync(items.Select(scene => scene.Id), ct);
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, items.Select(scene => scene.Id), ct);
-        var dtos = items.Select(scene => MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement)).ToList();
+        var dtos = items.Select(scene => MapListToDto(scene, GetCustomFields(customFieldValues, scene.Id), engagement.GetValueOrDefault(scene.Id), HasUserScopedEngagement, effectiveTags)).ToList();
         var result = new PaginatedResponse<SceneDto>(dtos, totalCount, findFilter.Page, findFilter.PerPage);
 
         memoryCache.Set(cacheKey, result, TimeSpan.FromSeconds(1));
@@ -553,14 +560,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
 
     private async Task<SceneDto> MapToDtoWithProvenanceAsync(Scene scene, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, CancellationToken cancellationToken = default)
     {
-        var tagIds = scene.SceneTags
-            .Where(sceneTag => sceneTag.Tag != null)
-            .Select(sceneTag => sceneTag.Tag!.Id)
-            .Distinct()
-            .ToArray();
-        var provenanceLookup = tagProvenanceService == null
-            ? null
-            : await tagProvenanceService.GetLookupAsync(AffinityHostType.Scene, scene.Id, tagIds, cancellationToken);
+        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Scene, [scene.Id], cancellationToken);
         var contextTagApplications = await LoadContextTagApplicationsAsync(scene.Id, cancellationToken);
         var fieldProvenance = fieldProvenanceService == null
             ? null
@@ -574,7 +574,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             cancellationToken);
 
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Scene, scene.Id, cancellationToken);
-        return MapToDto(scene, customFieldValues, engagement, preferUserSnapshot, provenanceLookup, contextTagApplications, fieldProvenance, performerCounts);
+        return MapToDto(scene, customFieldValues, engagement, preferUserSnapshot, effectiveTags, contextTagApplications, fieldProvenance, performerCounts);
     }
 
     private async Task<IReadOnlyDictionary<int, PerformerSupplementalCounts>> LoadPerformerSupplementalCountsAsync(IReadOnlyCollection<int> performerIds, CancellationToken cancellationToken)
@@ -681,13 +681,13 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             : null;
     }
 
-    private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null, IReadOnlyDictionary<int, PerformerSupplementalCounts>? performerCounts = null) => new(
+    private SceneDto MapToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagDto>>? effectiveTagsBySceneId = null, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null, IReadOnlyDictionary<int, PerformerSupplementalCounts>? performerCounts = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
         s.Organized, s.IsVr, s.StudioId, s.Studio?.Name,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
-        s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!, GetTagProvenance(provenanceLookup, st.Tag!.Id))).ToList(),
+        GetEffectiveTags(s, effectiveTagsBySceneId),
         s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => MapPerformerSummary(sp.Performer!, performerCounts)).ToList(),
         EffectiveFiles(s).Select(f => new VideoFileDto(
             f.Id,
@@ -719,13 +719,13 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         ImagePath: s.ImageBlobId != null ? EntityImageUrls.Scene(ControllerContext.HttpContext, s.Id, s.UpdatedAt, 1280) : null
     );
 
-    private SceneDto MapListToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false) => new(
+    private SceneDto MapListToDto(Scene s, Dictionary<string, object>? customFieldValues = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, IReadOnlyDictionary<int, List<TagDto>>? effectiveTagsBySceneId = null) => new(
         s.Id, s.Title, s.Code, s.Details, s.Director,
         s.Date?.ToString("yyyy-MM-dd"),
         s.Organized, s.IsVr, s.StudioId, s.Studio?.Name,
         s.Captions, s.InteractiveSpeed,
         s.Urls.Select(u => u.Url).ToList(),
-        s.SceneTags.Where(st => st.Tag != null).Select(st => MapTagDto(st.Tag!)).ToList(),
+        GetEffectiveTags(s, effectiveTagsBySceneId),
         s.ScenePerformers.Where(sp => sp.Performer != null).Select(sp => MapPerformerSummary(sp.Performer!, null)).ToList(),
         EffectiveFiles(s).Select(f => new VideoFileDto(
             f.Id,
@@ -754,6 +754,11 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         ChildSceneCount: s.ChildScenes.Count,
         ImagePath: s.ImageBlobId != null ? EntityImageUrls.Scene(ControllerContext.HttpContext, s.Id, s.UpdatedAt, 1280) : null
     );
+
+    private static List<TagDto> GetEffectiveTags(Scene scene, IReadOnlyDictionary<int, List<TagDto>>? effectiveTagsBySceneId)
+        => effectiveTagsBySceneId != null && effectiveTagsBySceneId.TryGetValue(scene.Id, out var tags)
+            ? tags
+            : scene.SceneTags.Where(sceneTag => sceneTag.Tag != null).Select(sceneTag => MapTagDto(sceneTag.Tag!)).ToList();
 
     private PerformerSummaryDto MapPerformerSummary(Performer performer, IReadOnlyDictionary<int, PerformerSupplementalCounts>? supplementalCounts)
     {
@@ -924,9 +929,6 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             tag.TagGroup?.Color,
             tag.MinOccurrenceSec,
             tag.MinOccurrencePercent);
-
-    private static List<TagProvenanceDto> GetTagProvenance(IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup, int tagId)
-        => provenanceLookup != null && provenanceLookup.TryGetValue(tagId, out var provenance) ? provenance : [];
 
     // ===== Activity Tracking =====
 

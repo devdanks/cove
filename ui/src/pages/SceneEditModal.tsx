@@ -8,6 +8,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { StudioSelector } from "../components/StudioSelector";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { EntityReferenceMultiSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
+import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
 
 interface Props {
   scene: Scene;
@@ -30,7 +31,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   const removeUrl = (i: number) => setUrls(urls.filter((_, idx) => idx !== i));
   const updateUrl = (i: number, val: string) => setUrls(urls.map((u, idx) => idx === i ? val : u));
   const [studioId, setStudioId] = useState<number | undefined>(scene.studioId ?? undefined);
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(scene.tags.map((t) => t.id));
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(scene.tags));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(scene.performers.map((p) => p.id));
   const [selectedGalleryIds, setSelectedGalleryIds] = useState<number[]>(scene.galleries.map((g) => g.id));
   const [selectedGroups, setSelectedGroups] = useState<{ groupId: number; sceneIndex: number }[]>(
@@ -50,7 +51,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     setRating(undefined);
     setUrls(scene.urls.length > 0 ? scene.urls : [""]);
     setStudioId(scene.studioId ?? undefined);
-    setSelectedTagIds(scene.tags.map((t) => t.id));
+    setSelectedTagIds(getEditableTagIds(scene.tags));
     setSelectedPerformerIds(scene.performers.map((p) => p.id));
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
@@ -100,6 +101,13 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
 
   const setSelectedGroupIds = (groupIds: number[]) => {
     setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
+  };
+
+  const lockedTagIds = getLockedTagIds(scene.tags);
+  const displayedTagIds = mergeTagIds(lockedTagIds, selectedTagIds);
+  const updateSelectedTagIds = (tagIds: number[]) => {
+    const locked = new Set(lockedTagIds);
+    setSelectedTagIds(tagIds.filter((tagId) => !locked.has(tagId)));
   };
 
   return (
@@ -174,7 +182,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
 
       {/* Tags */}
       <Field label="Tags">
-        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." />
+        <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." />
       </Field>
 
       {/* Performers */}

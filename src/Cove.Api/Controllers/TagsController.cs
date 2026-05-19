@@ -565,10 +565,12 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (ids.Length == 0)
             return [];
 
-        var sceneCounts = await db.Set<SceneTag>()
+        var sceneCounts = await EffectiveHostTagQuery.ForHostType(db, AffinityHostType.Scene)
             .AsNoTracking()
-            .Where(sceneTag => ids.Contains(sceneTag.TagId))
-            .GroupBy(sceneTag => sceneTag.TagId)
+            .Where(tag => ids.Contains(tag.TagId))
+            .Select(tag => new { tag.TagId, tag.HostId })
+            .Distinct()
+            .GroupBy(tag => tag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
         var segmentCounts = await LoadSceneSegmentCountsAsync(ids, ct);
@@ -602,10 +604,12 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             .GroupBy(studioTag => studioTag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
-        var audioCounts = await db.Set<AudioTag>()
+        var audioCounts = await EffectiveHostTagQuery.ForHostType(db, AffinityHostType.Audio)
             .AsNoTracking()
-            .Where(audioTag => ids.Contains(audioTag.TagId))
-            .GroupBy(audioTag => audioTag.TagId)
+            .Where(tag => ids.Contains(tag.TagId))
+            .Select(tag => new { tag.TagId, tag.HostId })
+            .Distinct()
+            .GroupBy(tag => tag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
         var textCounts = await db.Set<TextTag>()

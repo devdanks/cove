@@ -70,12 +70,14 @@ describe("BulkEditDialog", () => {
 
     await user.click(screen.getByRole("checkbox", { name: "Tags" }));
     await user.click(screen.getByRole("button", { name: "Overwrite" }));
+  await user.type(screen.getByPlaceholderText("Search tags..."), "Tag");
     await waitFor(() => expect(screen.getByRole("button", { name: /Tag One/i })).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /Tag One/i }));
 
     await user.click(screen.getByRole("checkbox", { name: "Groups" }));
     const overwriteButtons = screen.getAllByRole("button", { name: "Overwrite" });
     await user.click(overwriteButtons[1]);
+  await user.type(screen.getByPlaceholderText("Search groups..."), "Series");
     await waitFor(() => expect(screen.getByRole("button", { name: /Series One/i })).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /Series One/i }));
 

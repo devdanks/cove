@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import { galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
 import type { CustomFieldType, Gallery, Group, Image, Performer, Scene, Studio, Tag } from "../api/types";
@@ -84,15 +84,29 @@ export function EntityReferenceSelector({
   const [searchText, setSearchText] = useState("");
   const trimmedSearch = searchText.trim();
   const labels = getEntityReferenceLabel(entityType);
+  const queryClient = useQueryClient();
+
+  const cachedOptions = useMemo(
+    () => getCachedEntityReferenceOptions(queryClient, entityType),
+    [entityType, queryClient],
+  );
+  const cachedSearchOptions = useMemo(() => {
+    if (!trimmedSearch || cachedOptions == null) return undefined;
+
+    const needle = trimmedSearch.toLowerCase();
+    return cachedOptions
+      .filter((option) => option.label.toLowerCase().includes(needle))
+      .slice(0, 25);
+  }, [cachedOptions, trimmedSearch]);
 
   const { data: searchResults, isLoading } = useQuery({
     queryKey: ["entity-reference-selector", entityType, trimmedSearch],
     queryFn: () => searchEntityReferences(entityType, trimmedSearch),
-    enabled: !disabled && trimmedSearch.length >= 1,
+    enabled: !disabled && trimmedSearch.length >= 1 && cachedSearchOptions == null,
     staleTime: 60_000,
   });
 
-  const searchOptions = searchResults ?? [];
+  const searchOptions = cachedSearchOptions ?? searchResults ?? [];
   const selectedSearchOption = searchOptions.find((option) => option.id === value);
   const { data: selectedOption, isLoading: selectedLoading } = useQuery({
     queryKey: ["entity-reference-selector", entityType, "selected", value],
@@ -177,6 +191,7 @@ export function EntityReferenceMultiSelector({
   resultsClassName,
   containerClassName,
   excludeIds,
+  lockedIds,
 }: {
   entityType: EntityReferenceType;
   values: number[];
@@ -188,21 +203,37 @@ export function EntityReferenceMultiSelector({
   resultsClassName?: string;
   containerClassName?: string;
   excludeIds?: Iterable<number>;
+  lockedIds?: Iterable<number>;
 }) {
   const [searchText, setSearchText] = useState("");
   const trimmedSearch = searchText.trim();
   const labels = getEntityReferenceLabel(entityType);
+  const queryClient = useQueryClient();
+
+  const cachedOptions = useMemo(
+    () => getCachedEntityReferenceOptions(queryClient, entityType),
+    [entityType, queryClient],
+  );
+  const cachedSearchOptions = useMemo(() => {
+    if (!trimmedSearch || cachedOptions == null) return undefined;
+
+    const needle = trimmedSearch.toLowerCase();
+    return cachedOptions
+      .filter((option) => option.label.toLowerCase().includes(needle))
+      .slice(0, 25);
+  }, [cachedOptions, trimmedSearch]);
 
   const { data: searchResults, isLoading } = useQuery({
     queryKey: ["entity-reference-selector", entityType, trimmedSearch],
     queryFn: () => searchEntityReferences(entityType, trimmedSearch),
-    enabled: !disabled && trimmedSearch.length >= 1,
+    enabled: !disabled && trimmedSearch.length >= 1 && cachedSearchOptions == null,
     staleTime: 60_000,
   });
 
-  const searchOptions = searchResults ?? [];
+  const searchOptions = cachedSearchOptions ?? searchResults ?? [];
   const selectedOptions = useEntityReferenceOptions(entityType, values, searchOptions);
   const excluded = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
+  const locked = useMemo(() => new Set(lockedIds ?? []), [lockedIds]);
   const visibleResults = useMemo(
     () => searchOptions.filter((option) => !values.includes(option.id) && !excluded.has(option.id)),
     [excluded, searchOptions, values],
@@ -214,19 +245,22 @@ export function EntityReferenceMultiSelector({
         <div className="flex flex-wrap gap-1">
           {values.map((id) => {
             const option = selectedOptions.get(id);
+            const lockedValue = locked.has(id);
             return (
-              <span key={id} className="inline-flex items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[10px] text-foreground">
+              <span key={id} className="inline-flex items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[10px] text-foreground" title={lockedValue ? "Derived tag" : undefined}>
                 <span>{option?.label ?? `Loading ${labels.singular}...`}</span>
                 {option?.secondaryLabel ? <span className="text-muted">{option.secondaryLabel}</span> : null}
-                <button
-                  type="button"
-                  onClick={() => onChange(values.filter((value) => value !== id))}
-                  className="hover:text-red-400"
-                  aria-label={`Remove ${option?.label ?? labels.singular}`}
-                  disabled={disabled}
-                >
-                  <X className="h-2.5 w-2.5" />
-                </button>
+                {!lockedValue ? (
+                  <button
+                    type="button"
+                    onClick={() => onChange(values.filter((value) => value !== id))}
+                    className="hover:text-red-400"
+                    aria-label={`Remove ${option?.label ?? labels.singular}`}
+                    disabled={disabled}
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                ) : null}
               </span>
             );
           })}
@@ -315,6 +349,31 @@ function useEntityReferenceOptions(entityType: EntityReferenceType, ids: number[
 
     return optionMap;
   }, [seedOptions, selectedQueries]);
+}
+
+function getCachedEntityReferenceOptions(queryClient: ReturnType<typeof useQueryClient>, entityType: EntityReferenceType): EntityReferenceOption[] | undefined {
+  const queryKey = [getEntityReferenceLabel(entityType).plural, "all"];
+  const cached = queryClient.getQueryData<unknown>(queryKey);
+  if (!Array.isArray(cached)) {
+    return undefined;
+  }
+
+  switch (entityType) {
+    case "tag":
+      return cached.map((item) => toTagOption(item as Tag));
+    case "performer":
+      return cached.map((item) => toPerformerOption(item as Performer));
+    case "studio":
+      return cached.map((item) => toStudioOption(item as Studio));
+    case "scene":
+      return cached.map((item) => toSceneOption(item as Scene));
+    case "gallery":
+      return cached.map((item) => toGalleryOption(item as Gallery));
+    case "image":
+      return cached.map((item) => toImageOption(item as Image));
+    case "group":
+      return cached.map((item) => toGroupOption(item as Group));
+  }
 }
 
 async function searchEntityReferences(entityType: EntityReferenceType, searchText: string): Promise<EntityReferenceOption[]> {

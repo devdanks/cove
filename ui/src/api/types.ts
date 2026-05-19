@@ -213,6 +213,10 @@ export interface Tag {
   tagGroupColor?: string | null;
   minOccurrenceSec?: number | null;
   minOccurrencePercent?: number | null;
+  isDerived?: boolean;
+  canRemove?: boolean;
+  effectiveDurationSec?: number | null;
+  effectiveDurationPercent?: number | null;
   aliases: string[];
   sceneCount?: number;
   segmentCount?: number;

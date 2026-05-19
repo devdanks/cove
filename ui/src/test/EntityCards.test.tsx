@@ -156,6 +156,42 @@ describe("SceneCard navigation", () => {
     expect(screen.getByTitle("Favorite")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Favorite" })).not.toBeInTheDocument();
   });
+
+  it("shows the hovered absolute timestamp above the scene scrub preview bar", () => {
+    const { container } = render(
+      <SceneCard
+        scene={{
+          ...baseScene,
+          clipStartSec: 35,
+          clipEndSec: 95,
+        } as any}
+        onClick={vi.fn()}
+      />
+    );
+
+    const scrubZone = container.querySelector(".cursor-ew-resize") as HTMLDivElement | null;
+    expect(scrubZone).not.toBeNull();
+
+    vi.spyOn(scrubZone!, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 100,
+      bottom: 40,
+      width: 100,
+      height: 40,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.mouseEnter(scrubZone!, { clientX: 50 });
+
+    expect(screen.getByText("1:05")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(scrubZone!);
+
+    expect(screen.queryByText("1:05")).not.toBeInTheDocument();
+  });
 });
 
 describe("FileInfoTab", () => {

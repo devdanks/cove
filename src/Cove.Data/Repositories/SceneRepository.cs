@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using PermissionKeys = Cove.Core.Auth.Permissions;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
+using Cove.Data.Services;
 
 namespace Cove.Data.Repositories;
 
@@ -279,7 +280,7 @@ public class SceneRepository : ISceneRepository
 
             // Tag count criterion
             if (filter.TagCountCriterion != null)
-                query = ApplyIntCriterion(query, filter.TagCountCriterion, s => s.SceneTags.Count);
+                query = ApplyEffectiveTagCountCriterion(query, filter.TagCountCriterion);
 
             // Resume time criterion
             if (filter.ResumeTimeCriterion != null)
@@ -873,11 +874,13 @@ public class SceneRepository : ISceneRepository
         if (criterion == null)
             return query;
 
+        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Scene);
+
         if (criterion.Modifier == CriterionModifier.IsNull)
-            return query.Where(s => !s.SceneTags.Any());
+            return query.Where(scene => !effectiveTags.Any(tag => tag.HostId == scene.Id));
 
         if (criterion.Modifier == CriterionModifier.NotNull)
-            return query.Where(s => s.SceneTags.Any());
+            return query.Where(scene => effectiveTags.Any(tag => tag.HostId == scene.Id));
 
         var groups = valueGroups?.Where(group => group.Length > 0).ToArray()
             ?? criterion.Value.Where(tagId => tagId > 0).Select(tagId => new[] { tagId }).ToArray();
@@ -921,10 +924,8 @@ public class SceneRepository : ISceneRepository
         if (ids.Length == 0)
             return query;
 
-        return query.Where(scene => scene.SceneTags.Any(sceneTag => ids.Contains(sceneTag.TagId))
-            || _db.TagApplications.Any(application => application.HostType == AffinityHostType.Scene
-                && application.HostId == scene.Id
-                && ids.Contains(application.TagId)));
+        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Scene);
+        return query.Where(scene => effectiveTags.Any(tag => tag.HostId == scene.Id && ids.Contains(tag.TagId)));
     }
 
     private IQueryable<Scene> ApplySceneTagNone(IQueryable<Scene> query, IReadOnlyCollection<int> tagIds)
@@ -933,10 +934,18 @@ public class SceneRepository : ISceneRepository
         if (ids.Length == 0)
             return query;
 
-        return query.Where(scene => !scene.SceneTags.Any(sceneTag => ids.Contains(sceneTag.TagId))
-            && !_db.TagApplications.Any(application => application.HostType == AffinityHostType.Scene
-                && application.HostId == scene.Id
-                && ids.Contains(application.TagId)));
+        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Scene);
+        return query.Where(scene => !effectiveTags.Any(tag => tag.HostId == scene.Id && ids.Contains(tag.TagId)));
+    }
+
+    private IQueryable<Scene> ApplyEffectiveTagCountCriterion(IQueryable<Scene> query, IntCriterion criterion)
+    {
+        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Scene);
+        return ApplyIntCriterion(query, criterion, scene => effectiveTags
+            .Where(tag => tag.HostId == scene.Id)
+            .Select(tag => tag.TagId)
+            .Distinct()
+            .Count());
     }
 
     private static int[] GetIncludedPerformerIds(SceneFilter filter)

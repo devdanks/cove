@@ -31,6 +31,7 @@ import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { PerformerTile } from "../components/EntityCards";
 import { trackInteraction } from "../utils/interactionTracking";
+import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
 import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
 import { EntityReferenceMultiSelector, EntityReferenceSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
 
@@ -1361,8 +1362,8 @@ type TimelineOverlayItem = {
   colorSeed?: string;
 };
 
-const SEGMENT_TIMELINE_COLORS = ["#5f6b7a", "#687264", "#766a5f", "#6d6376", "#5e7472", "#746b57", "#676b73", "#61705f"];
-const FACE_TIMELINE_COLORS = ["#566575", "#5d706e", "#65705c", "#706656", "#6c6372", "#5f6970"];
+const SEGMENT_TIMELINE_COLORS = ["#a87a2d", "#4c6faa", "#7963a1", "#a05f7b", "#3f7f6e", "#4b7f8e", "#748a37", "#a35d4e"];
+const FACE_TIMELINE_COLORS = ["#4d8569", "#4a807b", "#5a7ca5", "#7d8842", "#a07a3f", "#93658a"];
 
 function timelineHash(value: string) {
   let hash = 0;
@@ -2268,7 +2269,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(scene.remoteIds?.length ? scene.remoteIds : []);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(scene.customFields ?? {}) });
   const [studioId, setStudioId] = useState<number | undefined>(scene.studioId ?? undefined);
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(scene.tags.map((t) => t.id));
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(scene.tags));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(scene.performers.map((p) => p.id));
   const [selectedGalleryIds, setSelectedGalleryIds] = useState<number[]>(scene.galleries.map((g) => g.id));
   const [selectedGroups, setSelectedGroups] = useState<{ groupId: number; sceneIndex: number }[]>(
@@ -2282,7 +2283,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     setUrls(scene.urls.length > 0 ? scene.urls : [""]); setStudioId(scene.studioId ?? undefined);
     setRemoteIds(scene.remoteIds?.length ? scene.remoteIds : []);
     setCustomFields({ ...(scene.customFields ?? {}) });
-    setSelectedTagIds(scene.tags.map((t) => t.id)); setSelectedPerformerIds(scene.performers.map((p) => p.id));
+    setSelectedTagIds(getEditableTagIds(scene.tags)); setSelectedPerformerIds(scene.performers.map((p) => p.id));
     setSelectedGalleryIds(scene.galleries.map((g) => g.id));
     setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
     setContextTagIdsByPerformer(buildSceneEditPerformerContextTagIds(scene));
@@ -2312,6 +2313,13 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
   };
 
+  const lockedTagIds = getLockedTagIds(scene.tags);
+  const displayedTagIds = mergeTagIds(lockedTagIds, selectedTagIds);
+  const updateSelectedTagIds = (tagIds: number[]) => {
+    const locked = new Set(lockedTagIds);
+    setSelectedTagIds(tagIds.filter((tagId) => !locked.has(tagId)));
+  };
+
   const inputCls = "w-full bg-input border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent";
 
   return (
@@ -2337,7 +2345,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
       {/* Tags */}
       <div className="space-y-1">
         <span className="text-xs text-secondary">Tags</span>
-        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
+        <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
       </div>
 
       {/* Performers */}

@@ -7,6 +7,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { EntityReferenceMultiSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
+import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
 
 interface Props {
   audio: Audio;
@@ -24,7 +25,7 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
   const [studioId, setStudioId] = useState<number | undefined>(audio.studioId ?? undefined);
   const [urls, setUrls] = useState<string[]>(audio.urls.length > 0 ? audio.urls : [""]);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(audio.customFields ?? {}) });
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(audio.tags.map((tag) => tag.id));
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(audio.tags));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(audio.performers.map((performer) => performer.id));
   const [selectedGroups, setSelectedGroups] = useState<SceneGroupInput[]>(audio.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
   useEffect(() => {
@@ -35,7 +36,7 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
     setStudioId(audio.studioId ?? undefined);
     setUrls(audio.urls.length > 0 ? audio.urls : [""]);
     setCustomFields({ ...(audio.customFields ?? {}) });
-    setSelectedTagIds(audio.tags.map((tag) => tag.id));
+    setSelectedTagIds(getEditableTagIds(audio.tags));
     setSelectedPerformerIds(audio.performers.map((performer) => performer.id));
     setSelectedGroups(audio.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
   }, [audio]);
@@ -51,6 +52,13 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
 
   const setSelectedGroupIds = (groupIds: number[]) => {
     setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
+  };
+
+  const lockedTagIds = getLockedTagIds(audio.tags);
+  const displayedTagIds = mergeTagIds(lockedTagIds, selectedTagIds);
+  const updateSelectedTagIds = (tagIds: number[]) => {
+    const locked = new Set(lockedTagIds);
+    setSelectedTagIds(tagIds.filter((tagId) => !locked.has(tagId)));
   };
 
   const handleSave = () => {
@@ -124,7 +132,7 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
 
       <div className="space-y-1">
         <span className="text-xs text-secondary">Tags</span>
-        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
+        <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
       </div>
 
       <div className="space-y-1">
