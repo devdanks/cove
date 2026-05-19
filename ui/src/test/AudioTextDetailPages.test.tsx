@@ -91,6 +91,7 @@ vi.mock("../components/VideoPlayer", () => ({
 
 vi.mock("../components/Rating", () => ({
   InteractiveRating: ({ value }: { value: number }) => <div>Rating {value}</div>,
+  RatingBanner: ({ rating }: { rating?: number }) => <div>Rating Banner {rating ?? ""}</div>,
 }));
 
 vi.mock("../hooks/useBackNavigation", () => ({
@@ -197,7 +198,8 @@ describe("Audio and text detail pages", () => {
     const relatedSection = (await screen.findByText("Related Entities")).closest("section");
     expect(relatedSection).not.toBeNull();
     expect(within(relatedSection!).getByTitle("Groups")).toBeInTheDocument();
-    expect(within(relatedSection!).getByTitle("Performers")).toBeInTheDocument();
+    expect(within(relatedSection!).queryByTitle("Performers")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Performers" })).toBeInTheDocument();
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
     fireEvent.click(within(tabs).getByRole("tab", { name: /tracks/i }));
@@ -238,8 +240,9 @@ describe("Audio and text detail pages", () => {
     fireEvent.click(within(tabs).getByRole("tab", { name: /details/i }));
     const relatedSection = (await screen.findByText("Related Entities")).closest("section");
     expect(relatedSection).not.toBeNull();
-    expect(within(relatedSection!).getByTitle("Performers")).toBeInTheDocument();
     expect(within(relatedSection!).getByTitle("Groups")).toBeInTheDocument();
+    expect(within(relatedSection!).queryByTitle("Performers")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Performers" })).toBeInTheDocument();
 
     view.unmount();
 
