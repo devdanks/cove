@@ -1,6 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HTMLAttributes, ReactNode } from "react";
 import { useOptionalAppConfig } from "../state/AppConfigContext";
+import { createPlaybackTracker, type PlaybackTrackingTarget } from "../utils/interactionTracking";
+
+export interface WallMediaVideoControlsState {
+  currentTime: number;
+  duration: number;
+  progressPercent: number;
+  isPlaying: boolean;
+  seekToPercent: (percent: number) => void;
+  togglePlayback: () => void;
+  toggleFullscreen: () => void;
+  isFullscreen: boolean;
+}
 
 interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   title: string;
@@ -18,6 +30,13 @@ interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   imageClassName?: string;
   videoClassName?: string;
   chromeless?: boolean;
+  videoControls?: (state: WallMediaVideoControlsState) => ReactNode;
+  playbackTracking?: PlaybackTrackingTarget;
+  trackingEnabled?: boolean;
+}
+
+function roundPlaybackTime(value: number) {
+  return Math.round(value * 1000) / 1000;
 }
 
 export function WallMediaCard({
@@ -36,6 +55,9 @@ export function WallMediaCard({
   imageClassName,
   videoClassName,
   chromeless = false,
+  videoControls,
+  playbackTracking,
+  trackingEnabled = true,
   className,
   children,
   ...props
@@ -47,10 +69,46 @@ export function WallMediaCard({
   const [videoAvailable, setVideoAvailable] = useState(false);
   const [shouldLoadVideo, setShouldLoadVideo] = useState(false);
   const [shouldPlayVideo, setShouldPlayVideo] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const playbackTracker = useRef(createPlaybackTracker());
+  const intervalStart = useRef<number | null>(null);
+  const lastSeenTime = useRef(0);
+  const lastKeepaliveSentAt = useRef(0);
+
+  const playbackTrackingTarget = useMemo<PlaybackTrackingTarget | null>(() => {
+    if (!trackingEnabled) {
+      return null;
+    }
+
+    return playbackTracking ?? null;
+  }, [playbackTracking?.groupItemId, playbackTracking?.hostId, playbackTracking?.hostType, playbackTracking?.scopeKey, trackingEnabled]);
 
   useEffect(() => {
     setVideoFailed(false);
+    setCurrentTime(0);
+    setVideoDuration(0);
+    setIsPlaying(false);
+    intervalStart.current = null;
+    lastSeenTime.current = 0;
+    lastKeepaliveSentAt.current = 0;
   }, [videoSrc]);
+
+  useEffect(() => {
+    void playbackTracker.current.setTarget(playbackTrackingTarget);
+  }, [playbackTrackingTarget?.groupItemId, playbackTrackingTarget?.hostId, playbackTrackingTarget?.hostType, playbackTrackingTarget?.scopeKey]);
+
+  useEffect(() => () => {
+    void playbackTracker.current.dispose();
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(document.fullscreenElement === mediaRef.current);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
 
   useEffect(() => {
     if (!useVideo || !videoSrc) {
@@ -121,6 +179,72 @@ export function WallMediaCard({
     }
   };
 
+  const syncVideoMetrics = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    setCurrentTime(nextTime);
+    setVideoDuration(Number.isFinite(video.duration) ? video.duration : 0);
+    lastSeenTime.current = roundPlaybackTime(nextTime);
+  };
+
+  const flushInterval = useCallback((state: string, mode: "default" | "keepalive" = "default") => {
+    const video = videoRef.current;
+    if (!playbackTrackingTarget || !video || intervalStart.current === null) return;
+    const startSec = intervalStart.current;
+    const endSec = roundPlaybackTime(lastSeenTime.current);
+    if (endSec <= startSec) return;
+    const mediaDurationSec = Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : Math.max(videoDuration, endSec, 0);
+    playbackTracker.current.recordInterval({
+      startSec,
+      endSec,
+      mediaDurationSec,
+      currentPositionSec: endSec,
+      state,
+      mode,
+    });
+  }, [playbackTrackingTarget, videoDuration]);
+
+  const startTrackedInterval = useCallback((time: number) => {
+    intervalStart.current = roundPlaybackTime(time);
+    lastSeenTime.current = roundPlaybackTime(time);
+    lastKeepaliveSentAt.current = Date.now();
+  }, []);
+
+  const seekToPercent = (percent: number) => {
+    const video = videoRef.current;
+    const duration = videoDuration || video?.duration || 0;
+    if (!video || duration <= 0 || !Number.isFinite(duration)) return;
+    video.currentTime = Math.min(duration, Math.max(0, duration * Math.min(1, Math.max(0, percent))));
+    syncVideoMetrics();
+  };
+
+  const togglePlayback = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      const playResult = video.play();
+      if (playResult && typeof playResult.catch === "function") {
+        playResult.catch(() => {});
+      }
+      return;
+    }
+
+    video.pause();
+  };
+
+  const toggleFullscreen = () => {
+    const element = mediaRef.current;
+    if (!element) return;
+    if (document.fullscreenElement === element) {
+      void document.exitFullscreen?.();
+      return;
+    }
+    void element.requestFullscreen?.();
+  };
+
   useEffect(() => {
     seekToStartTime();
   }, [videoSrc, videoStartTimeSec, videoAvailable, shouldLoadVideo]);
@@ -138,6 +262,27 @@ export function WallMediaCard({
       video.pause();
     }
   }, [shouldPlayVideo, useVideo, videoSrc, videoAvailable, videoFailed]);
+
+  useEffect(() => {
+    if (!playbackTrackingTarget) {
+      return;
+    }
+
+    const flushPausedKeepalive = () => flushInterval("paused", "keepalive");
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushPausedKeepalive();
+      }
+    };
+
+    window.addEventListener("pagehide", flushPausedKeepalive);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", flushPausedKeepalive);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      flushPausedKeepalive();
+    };
+  }, [flushInterval, playbackTrackingTarget]);
 
   const imageFitClass = appConfig?.config?.ui.imageObjectFit === "contain" ? "object-contain" : "object-cover";
   const videoFitClass = appConfig?.config?.ui.videoObjectFit === "contain" ? "object-contain" : "object-cover";
@@ -165,8 +310,55 @@ export function WallMediaCard({
             playsInline
             loop
             preload={shouldPlayVideo ? "auto" : "metadata"}
-            onLoadedMetadata={seekToStartTime}
-            onError={() => setVideoFailed(true)}
+            onLoadedMetadata={() => { seekToStartTime(); syncVideoMetrics(); }}
+            onDurationChange={syncVideoMetrics}
+            onPlay={() => {
+              const video = videoRef.current;
+              setIsPlaying(true);
+              startTrackedInterval(roundPlaybackTime(video?.currentTime ?? currentTime));
+            }}
+            onPause={() => {
+              setIsPlaying(false);
+              flushInterval("paused");
+              intervalStart.current = null;
+            }}
+            onSeeking={() => {
+              if (intervalStart.current !== null) {
+                flushInterval("active");
+                intervalStart.current = null;
+              }
+            }}
+            onSeeked={() => {
+              const video = videoRef.current;
+              if (video && !video.paused) {
+                startTrackedInterval(roundPlaybackTime(video.currentTime));
+              }
+            }}
+            onTimeUpdate={() => {
+              const video = videoRef.current;
+              const nextTime = roundPlaybackTime(video && Number.isFinite(video.currentTime) ? video.currentTime : 0);
+              const previousTime = lastSeenTime.current;
+              if (intervalStart.current !== null && nextTime + 0.25 < previousTime) {
+                flushInterval("active");
+                intervalStart.current = nextTime;
+                lastKeepaliveSentAt.current = Date.now();
+              }
+              syncVideoMetrics();
+              if (intervalStart.current !== null) {
+                const now = Date.now();
+                if (now - lastKeepaliveSentAt.current >= 10000) {
+                  lastKeepaliveSentAt.current = now;
+                  flushInterval("active");
+                  intervalStart.current = roundPlaybackTime(videoRef.current?.currentTime ?? 0);
+                }
+              }
+            }}
+            onError={() => {
+              flushInterval("paused", "keepalive");
+              intervalStart.current = null;
+              setIsPlaying(false);
+              setVideoFailed(true);
+            }}
           />
         ) : imageSrc ? (
           <img
@@ -181,6 +373,16 @@ export function WallMediaCard({
           </div>
         )}
         {children}
+        {videoControls && useVideo && videoSrc && shouldLoadVideo && videoAvailable && !videoFailed ? videoControls({
+          currentTime,
+          duration: videoDuration,
+          progressPercent: videoDuration > 0 ? Math.min(100, Math.max(0, (currentTime / videoDuration) * 100)) : 0,
+          isPlaying,
+          seekToPercent,
+          togglePlayback,
+          toggleFullscreen,
+          isFullscreen,
+        }) : null}
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, galleries, groups, images, metadata, performers, scenes, studios, texts, entityImages } from "../api/client";
 import type { Audio, AudioFilterCriteria, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, MetadataServer, MetadataServerStudioMatch, Performer, PerformerFilterCriteria, Scene, SceneFilterCriteria, Studio, StudioFilterCriteria, TextDocument, TextFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, ChevronDown, Building2, CloudDownload, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Link as LinkIcon, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ChevronDown, Building2, CloudDownload, FileText, Film, FolderOpen, GitMerge, Headphones, ImageIcon, Layers, Link as LinkIcon, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { StudioEditModal } from "./StudioEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -29,6 +29,7 @@ import { useDetailListSelection } from "../hooks/useDetailListSelection";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 import { withRequiredMultiId, withRequiredSingleId } from "../utils/detailRelationFilters";
+import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 
 const PERFORMER_SORT = PERFORMER_SORT_OPTIONS;
 const IMAGE_SORT = [
@@ -235,19 +236,9 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         aliases={studio.aliases.length > 0 ? studio.aliases.join(", ") : undefined}
         favorite={studioFavorite}
         onFavoriteToggle={canEngageStudio ? () => setStudioFavorite(!studioFavorite) : undefined}
-        titleActions={canWriteStudio ? (
-          <button
-            onClick={() => updateMut.mutate({ organized: !studio.organized })}
-            className={`rounded-full p-2 transition-colors ${studio.organized ? "bg-green-500/15 text-green-500" : "bg-card text-muted hover:text-green-400"}`}
-            title={studio.organized ? "Mark as unorganized" : "Mark as organized"}
-          >
-            <Check className="h-6 w-6" />
-          </button>
-        ) : studio.organized ? (
-          <span className="rounded-full bg-green-500/15 p-2 text-green-500" title="Organized studio">
-            <Check className="h-6 w-6" />
-          </span>
-        ) : null}
+        organized={studio.organized}
+        organizedPending={updateMut.isPending}
+        onOrganizedToggle={canWriteStudio ? () => updateMut.mutate({ organized: !studio.organized }) : undefined}
         counts={[
           { key: "scenes", label: "Scenes", value: studio.sceneCount, icon: <Film className="h-4 w-4" /> },
           { key: "performers", label: "Performers", value: studio.performerCount, icon: <UserRound className="h-4 w-4" /> },
@@ -593,7 +584,7 @@ function StudioScenesPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(scene) => scene.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={320} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(scene) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(scene) => scene.id} minCardWidth={`${getEntityCardMinWidthPx("scenes", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("scenes", zoomLevel)} estimateRowHeight={320} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(scene) => (
         <SceneCard scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
       )} />
       {quickViewId !== null && (
@@ -635,7 +626,7 @@ function StudioGalleriesPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(gallery) => gallery.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(gallery) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(gallery) => gallery.id} minCardWidth={`${getEntityCardMinWidthPx("galleries", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("galleries", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(gallery) => (
         <GalleryTile gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
       )} />
     </>
@@ -675,7 +666,7 @@ function StudioImagesPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(image) => image.id} minCardWidth={`${160 + zoomLevel * 50}px`} virtualMinColumnWidth={160 + zoomLevel * 50} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(image) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(image) => image.id} minCardWidth={`${getEntityCardMinWidthPx("images", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("images", zoomLevel)} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(image) => (
         <ImageTile image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
       )} />
       {quickViewId !== null && (
@@ -714,7 +705,7 @@ function StudioAudiosPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(audio) => audio.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(audio) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(audio) => audio.id} minCardWidth={`${getEntityCardMinWidthPx("audios", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("audios", zoomLevel)} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(audio) => (
         <AudioTile audio={audio} onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })} onNavigate={onNavigate} selected={selectedIds.has(audio.id)} onSelect={() => toggle(audio.id)} selecting={selecting} />
       )} />
     </>
@@ -750,7 +741,7 @@ function StudioTextsPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(text) => text.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(text) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(text) => text.id} minCardWidth={`${getEntityCardMinWidthPx("texts", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("texts", zoomLevel)} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(text) => (
         <TextTile text={text} onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })} onNavigate={onNavigate} selected={selectedIds.has(text.id)} onSelect={() => toggle(text.id)} selecting={selecting} />
       )} />
     </>
@@ -789,7 +780,7 @@ function ChildStudiosPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(childStudio) => childStudio.id} minCardWidth={`${200 + zoomLevel * 50}px`} virtualMinColumnWidth={200 + zoomLevel * 50} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(childStudio) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(childStudio) => childStudio.id} minCardWidth={`${getEntityCardMinWidthPx("studios", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("studios", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(childStudio) => (
         <StudioTile studio={childStudio} onClick={() => selecting ? toggle(childStudio.id) : onNavigate({ page: "studio", id: childStudio.id })} selected={selectedIds.has(childStudio.id)} onSelect={() => toggle(childStudio.id)} selecting={selecting} />
       )} />
     </>
@@ -828,7 +819,7 @@ function StudioPerformersPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(performer) => performer.id} minCardWidth={`${180 + zoomLevel * 50}px`} virtualMinColumnWidth={180 + zoomLevel * 50} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(performer) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(performer) => performer.id} minCardWidth={`${getEntityCardMinWidthPx("performers", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("performers", zoomLevel)} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(performer) => (
         <PerformerTile performer={performer} onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })} selected={selectedIds.has(performer.id)} onSelect={() => toggle(performer.id)} selecting={selecting} />
       )} />
     </>
@@ -867,7 +858,7 @@ function StudioGroupsPanel({ studioId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(group) => group.id} minCardWidth={`${200 + zoomLevel * 50}px`} virtualMinColumnWidth={200 + zoomLevel * 50} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(group) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(group) => group.id} minCardWidth={`${getEntityCardMinWidthPx("groups", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("groups", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(group) => (
         <GroupTile group={group} onClick={() => selecting ? toggle(group.id) : onNavigate({ page: "group", id: group.id })} selected={selectedIds.has(group.id)} onSelect={() => toggle(group.id)} selecting={selecting} />
       )} />
     </>

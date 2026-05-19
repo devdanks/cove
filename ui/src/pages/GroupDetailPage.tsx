@@ -26,6 +26,7 @@ import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { useDetailListSelection } from "../hooks/useDetailListSelection";
 import { withRequiredMultiId } from "../utils/detailRelationFilters";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
+import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 
 interface Props {
   id: number;
@@ -266,7 +267,8 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       <EntityHeroLayout
         title={group.name}
         favorite={groupFavorite}
-        onFavoriteToggle={canEngageGroup && !groupFavoritePending ? () => setGroupFavorite(!groupFavorite) : undefined}
+        favoritePending={groupFavoritePending}
+        onFavoriteToggle={canEngageGroup ? () => setGroupFavorite(!groupFavorite) : undefined}
         aliases={group.aliases || undefined}
         metaRow={
           <div className="flex flex-wrap items-center gap-3 text-sm text-secondary">
@@ -559,8 +561,8 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
       <VirtualizedEntityGrid
         items={items}
         getItemKey={(scene) => scene.id}
-        minCardWidth={`${220 + zoomLevel * 50}px`}
-        virtualMinColumnWidth={220 + zoomLevel * 50}
+        minCardWidth={`${getEntityCardMinWidthPx("scenes", zoomLevel)}px`}
+        virtualMinColumnWidth={getEntityCardMinWidthPx("scenes", zoomLevel)}
         estimateRowHeight={320}
         gap={16}
         gapClassName="gap-4"

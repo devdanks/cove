@@ -17,6 +17,7 @@ namespace Cove.Api.Controllers;
 public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null, CustomFieldService? customFields = null) : ControllerBase
 {
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
+    private sealed record GalleryRelationshipCounts(IReadOnlyDictionary<int, int> ImageCounts, IReadOnlyDictionary<int, int> SceneCounts);
 
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -202,7 +203,13 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             : await tagProvenanceService.GetLookupAsync(AffinityHostType.Gallery, gallery.Id, tagIds, cancellationToken);
 
         var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Gallery, gallery.Id, cancellationToken);
-        return MapToDto(gallery, customFieldValues, null, null, provenanceLookup);
+        var relationshipCounts = await GetRelationshipCountsAsync([gallery.Id], cancellationToken);
+        return MapToDto(
+            gallery,
+            customFieldValues,
+            GetRelationshipCount(relationshipCounts.ImageCounts, gallery.Id),
+            GetRelationshipCount(relationshipCounts.SceneCounts, gallery.Id),
+            provenanceLookup);
     }
 
     private GalleryDto MapToDto(Gallery g, Dictionary<string, object>? customFieldValues = null, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
@@ -242,9 +249,40 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
     private async Task<List<GalleryDto>> MapListToDtos(IReadOnlyList<Gallery> items, CancellationToken ct)
     {
         if (items.Count == 0) return [];
-        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Gallery, items.Select(item => item.Id), ct);
-        return items.Select(g => MapToDto(g, GetCustomFields(customFieldValues, g.Id))).ToList();
+        var ids = items.Select(item => item.Id).ToArray();
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Gallery, ids, ct);
+        var relationshipCounts = await GetRelationshipCountsAsync(ids, ct);
+        return items.Select(g => MapToDto(
+            g,
+            GetCustomFields(customFieldValues, g.Id),
+            GetRelationshipCount(relationshipCounts.ImageCounts, g.Id),
+            GetRelationshipCount(relationshipCounts.SceneCounts, g.Id))).ToList();
     }
+
+    private async Task<GalleryRelationshipCounts> GetRelationshipCountsAsync(IReadOnlyCollection<int> galleryIds, CancellationToken ct)
+    {
+        if (galleryIds.Count == 0)
+            return new GalleryRelationshipCounts(new Dictionary<int, int>(), new Dictionary<int, int>());
+
+        var imageCounts = await db.Set<ImageGallery>()
+            .AsNoTracking()
+            .Where(imageGallery => galleryIds.Contains(imageGallery.GalleryId))
+            .GroupBy(imageGallery => imageGallery.GalleryId)
+            .Select(group => new { GalleryId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.GalleryId, item => item.Count, ct);
+
+        var sceneCounts = await db.Set<SceneGallery>()
+            .AsNoTracking()
+            .Where(sceneGallery => galleryIds.Contains(sceneGallery.GalleryId))
+            .GroupBy(sceneGallery => sceneGallery.GalleryId)
+            .Select(group => new { GalleryId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.GalleryId, item => item.Count, ct);
+
+        return new GalleryRelationshipCounts(imageCounts, sceneCounts);
+    }
+
+    private static int GetRelationshipCount(IReadOnlyDictionary<int, int> counts, int galleryId)
+        => counts.TryGetValue(galleryId, out var count) ? count : 0;
 
     private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
         => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;

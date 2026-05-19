@@ -33,6 +33,7 @@ const DEFAULT_ASPECTS: Partial<Record<AffinityHostType, AspectDefinition[]>> = {
   performer: [
     { key: "face", label: "Face" },
     { key: "body", label: "Body" },
+    { key: "voice", label: "Voice" },
   ],
 };
 

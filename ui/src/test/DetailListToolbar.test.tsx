@@ -44,4 +44,20 @@ describe("DetailListToolbar", () => {
 
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ sort: "random", page: 1, seed: 1073741823 }));
   });
+
+  it("uses the expanded image slider max for image detail lists", () => {
+    render(
+      <DetailListToolbar
+        filter={{ page: 1, perPage: 24 }}
+        onFilterChange={vi.fn()}
+        totalCount={10}
+        sortOptions={[{ value: "title", label: "Title" }]}
+        zoomLevel={1}
+        onZoomChange={vi.fn()}
+        cardSizeEntityType="images"
+      />,
+    );
+
+    expect(screen.getByRole("slider")).toHaveAttribute("max", "8");
+  });
 });

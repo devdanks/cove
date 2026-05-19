@@ -1,4 +1,4 @@
-import { ArrowLeft, Heart } from "lucide-react";
+import { ArrowLeft, Check, Heart } from "lucide-react";
 import type { ReactNode } from "react";
 
 export interface EntityHeroCount {
@@ -29,7 +29,11 @@ export interface EntityHeroLayoutProps {
   counts?: EntityHeroCount[];
   metaRow?: ReactNode;
   favorite?: boolean;
+  favoritePending?: boolean;
   onFavoriteToggle?: () => void;
+  organized?: boolean;
+  organizedPending?: boolean;
+  onOrganizedToggle?: () => void;
   titleActions?: ReactNode;
   heroContent?: ReactNode;
   actions?: ReactNode;
@@ -62,7 +66,11 @@ export function EntityHeroLayout({
   counts = [],
   metaRow,
   favorite,
+  favoritePending = false,
   onFavoriteToggle,
+  organized,
+  organizedPending = false,
+  onOrganizedToggle,
   titleActions,
   heroContent,
   actions,
@@ -76,14 +84,16 @@ export function EntityHeroLayout({
   const resolvedHeroRowClassName = heroRowClassName ?? "flex flex-col gap-6 md:flex-row md:items-start";
   const resolvedContentClassName = contentClassName ?? "w-full px-4 py-6";
   const favoriteTitle = favorite ? "Remove favorite" : "Favorite";
+  const heroActionClassName = "inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60";
   const favoriteAction = typeof favorite === "boolean" ? (
     onFavoriteToggle ? (
       <button
         type="button"
         onClick={onFavoriteToggle}
+        disabled={favoritePending}
         aria-pressed={favorite}
         title={favoriteTitle}
-        className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:border-accent hover:text-foreground ${favorite ? "text-red-400" : "text-accent"}`}
+        className={`${heroActionClassName} ${favorite ? "text-red-400" : "text-accent"}`}
       >
         <Heart className={`h-4 w-4 ${favorite ? "fill-current" : ""}`} />
       </button>
@@ -93,6 +103,26 @@ export function EntityHeroLayout({
       </span>
     )
   ) : null;
+  const organizedTitle = organized ? "Mark unorganized" : "Mark organized";
+  const organizedAction = typeof organized === "boolean" ? (
+    onOrganizedToggle ? (
+      <button
+        type="button"
+        onClick={onOrganizedToggle}
+        disabled={organizedPending}
+        aria-pressed={organized}
+        title={organizedTitle}
+        className={`${heroActionClassName} ${organized ? "text-emerald-400" : "text-secondary"}`}
+      >
+        <Check className="h-4 w-4" />
+      </button>
+    ) : organized ? (
+      <span title="Organized" className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-emerald-400">
+        <Check className="h-4 w-4" />
+      </span>
+    ) : null
+  ) : null;
+  const hasHeaderActions = Boolean(organizedAction || favoriteAction || actions);
 
   return (
     <div className="min-h-screen">
@@ -120,7 +150,7 @@ export function EntityHeroLayout({
             >
               <ArrowLeft className="h-4 w-4" /> {backLabel}
             </button>
-            {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+            {hasHeaderActions ? <div className="flex items-center gap-2">{organizedAction}{favoriteAction}{actions}</div> : null}
           </div>
 
           <div className={resolvedHeroRowClassName}>
@@ -155,7 +185,7 @@ export function EntityHeroLayout({
                   {sortName ? <p className="mt-1 text-sm text-muted">Sort name: {sortName}</p> : null}
                   {aliases ? <p className="mt-1 text-sm text-secondary">Also known as: {aliases}</p> : null}
                 </div>
-                {titleActions || favoriteAction ? <div className="flex items-center gap-2">{titleActions}{favoriteAction}</div> : null}
+                {titleActions ? <div className="flex items-center gap-2">{titleActions}</div> : null}
               </div>
 
               {description ? (

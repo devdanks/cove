@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { aiVisual, entityImages, scenes, tags, performers, galleries } from "../api/client";
+import { aiVisual, entityEngagement, entityImages, scenes, tags, performers, galleries } from "../api/client";
 import type { BoolCriterion, EntityEngagement, FindFilter, Group, Scene, SceneCreate, SceneFilterCriteria, SceneListEntry } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
@@ -15,12 +15,12 @@ import { CustomFieldsEditor, formatDuration, formatFileSize, getResolutionLabel,
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
-import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX, ThumbsUp } from "lucide-react";
+import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX, ThumbsUp, Heart } from "lucide-react";
 import { useSceneQueue } from "../state/SceneQueueContext";
-import { CardFavoriteButton, SceneCard } from "../components/EntityCards";
+import { SceneCard } from "../components/EntityCards";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { useAuth } from "../auth/AuthContext";
-import { canDeleteEntity, canWriteEntity, hasAnyPermission } from "../auth/visibility";
+import { canDeleteEntity, canReadEntity, canWriteEntity, hasAnyPermission } from "../auth/visibility";
 import { StringListEditor } from "../components/StringListEditor";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { useWallColumns } from "../hooks/useWallColumns";
@@ -28,8 +28,8 @@ import { useAppConfig } from "../state/AppConfigContext";
 import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
-import { WallMediaCard } from "../components/WallMediaCard";
-import { FeedCardFrame, FeedChipButton, FeedPortraitMediaFrame, getFeedMediaStyle } from "../components/FeedCardFrame";
+import { WallMediaCard, type WallMediaVideoControlsState } from "../components/WallMediaCard";
+import { FeedActionPill, FeedCardFrame, FeedChipButton, FeedChipOverflowMenu, FeedIdentityBadge, FeedInlineRating, FeedMetadataPill, FeedPortraitMediaFrame, getFeedMediaStyle } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FileBackedCreateSource, type CreateSourceMode } from "../components/FileBackedCreateSource";
@@ -134,6 +134,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const { config } = useAppConfig();
   const canWriteScene = canWriteEntity("scene", hasPermission);
   const canDeleteScene = canDeleteEntity("scene", hasPermission);
+  const canEngageScene = canReadEntity("scene", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
   const canIdentifyScene = hasPermission("library.autotag") && canWriteScene;
   const canDownloadScene = hasPermission("jobs.run") && canWriteScene;
@@ -826,7 +827,7 @@ export function ScenesPage({ onNavigate }: Props) {
         </>
       )}
       {displayMode === "feed" && (
-        <div className="mx-auto max-w-5xl px-2">
+        <div className="mx-auto w-full max-w-[64rem] px-3 sm:px-4">
           <VirtualizedInfiniteList
             items={items}
             getItemKey={(scene) => scene.id}
@@ -838,7 +839,7 @@ export function ScenesPage({ onNavigate }: Props) {
             loadMore={loadMoreScenes}
             onActiveIndexChange={defaultFeedVideoSound ? (idx) => setFeedAudioSceneId(idx == null ? null : items[idx]?.id ?? null) : undefined}
             className={isMobileViewer ? "[overflow-anchor:none]" : undefined}
-            itemClassName="pb-4 [touch-action:pan-y]"
+            itemClassName="pb-5 [touch-action:pan-y]"
             renderItem={({ item: scene }) => (
               <SceneFeedCard
                 scene={scene}
@@ -850,6 +851,7 @@ export function ScenesPage({ onNavigate }: Props) {
                 soundEnabled={feedAudioSceneId === scene.id}
                 onToggleSound={() => setFeedAudioSceneId((current) => current === scene.id ? null : scene.id)}
                 onNavigate={onNavigate}
+                canEngage={canEngageScene}
                 selected={selectedIds.has(scene.id)}
                 selecting={selecting}
                 onSelect={() => toggle(scene.id)}
@@ -1530,7 +1532,7 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
   );
 }
 
-function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, canEngage, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; canEngage: boolean; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
   const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
   const title = scene.title || file?.basename || `Scene ${scene.id}`;
@@ -1541,22 +1543,23 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
   const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
   const visitCount = engagement?.pageVisitCount ?? 0;
   const likeCount = engagement?.likeCount ?? 0;
+  const queryClient = useQueryClient();
+  const ratingMut = useMutation({
+    mutationFn: (value: number | undefined) => entityEngagement.setRating("scene", scene.id, { value: value ?? null, aspect: "overall" }),
+    onSuccess: (nextEngagement) => {
+      queryClient.setQueryData(["engagement", "scene", scene.id], nextEngagement);
+      queryClient.invalidateQueries({ queryKey: ["engagement", "scene", "batch"] });
+    },
+  });
+  const ratingValue = ratingMut.data?.rating ?? engagement?.rating;
+  const visibleTags = scene.tags.slice(0, 4);
+  const hiddenTags = scene.tags.slice(4);
+  const renderVideoControls = (controls: WallMediaVideoControlsState) => (
+    <SceneFeedVideoControls controls={controls} soundEnabled={soundEnabled} onToggleSound={onToggleSound} />
+  );
 
   const mediaOverlay = (
     <>
-      <button
-        type="button"
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onToggleSound();
-        }}
-        className="absolute right-2 top-2 z-20 rounded-full border border-white/15 bg-black/60 p-2 text-white shadow transition-colors hover:bg-black/80"
-        aria-label={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
-        title={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
-      >
-        {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-      </button>
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
       <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={() => onNavigate({ page: "scene", id: scene.id })} label={`Open scene ${title}`} selectionSafeZone />
       {!selecting && (
@@ -1575,30 +1578,30 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
     <FeedCardFrame
       dataAttribute={{ "data-feed-scene-id": scene.id }}
       selected={selected}
+      identity={scene.studioName ? <FeedIdentityBadge>{scene.studioName}</FeedIdentityBadge> : undefined}
       header={(
         <>
-          <span className="font-semibold text-secondary">{scene.studioName || "Cove scenes"}</span>
           {scene.date ? <span>{scene.date}</span> : null}
           {duration > 0 ? <span>{formatDuration(duration)}</span> : null}
-          {file ? <span>{getResolutionLabel(file.width, file.height)}</span> : null}
         </>
       )}
       headerActions={(
         <>
-          <span className="inline-flex min-h-7 items-center rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
-            {engagement?.rating != null ? <RatingBadge rating={engagement.rating} /> : "Unrated"}
-          </span>
-          <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+          <FeedInlineRating value={ratingValue} onChange={(value) => ratingMut.mutate(value)} readOnly={!canEngage} pending={ratingMut.isPending} />
+          <FeedActionPill>
             <ThumbsUp className={["h-3.5 w-3.5", likeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />
             {likeCount}
-          </span>
-          {typeof engagement?.isFavorite === "boolean" ? (
-            <CardFavoriteButton hostType="scene" hostId={scene.id} favorite={engagement.isFavorite} />
+          </FeedActionPill>
+          {engagement?.isFavorite ? (
+            <FeedActionPill>
+              <Heart className="h-3.5 w-3.5 fill-current text-red-400" />
+              Favorite
+            </FeedActionPill>
           ) : null}
-          <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+          <FeedActionPill>
             <Eye className="h-3.5 w-3.5" />
             {visitCount}
-          </span>
+          </FeedActionPill>
         </>
       )}
       media={(
@@ -1617,11 +1620,13 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
                 muted={!soundEnabled}
                 videoStartTimeSec={videoStartTimeSec}
                 videoPlayThreshold={0.65}
+                playbackTracking={{ hostType: "scene", hostId: scene.id, scopeKey: `scene-feed:${scene.id}` }}
                 fillMedia
                 chromeless
                 imageClassName="object-contain"
                 videoClassName="object-contain"
                 className="h-full w-full bg-transparent"
+                videoControls={renderVideoControls}
               />
             )}
           >
@@ -1637,10 +1642,12 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
             muted={!soundEnabled}
             videoStartTimeSec={videoStartTimeSec}
             videoPlayThreshold={0.65}
+            playbackTracking={{ hostType: "scene", hostId: scene.id, scopeKey: `scene-feed:${scene.id}` }}
             aspectRatio={aspectRatio}
             imageClassName="object-cover"
             style={mediaStyle}
-            className="rounded-none border-x-0 border-y border-border/60 hover:border-border/60"
+            className="overflow-hidden rounded-2xl border border-border/70 bg-black/95 shadow-[0_18px_40px_rgba(0,0,0,0.35)] hover:border-border/70"
+            videoControls={renderVideoControls}
           >
             {mediaOverlay}
           </WallMediaCard>
@@ -1655,7 +1662,13 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
           {title}
         </button>
       )}
-      details={scene.details ? <p className="line-clamp-3">{scene.details}</p> : undefined}
+      details={scene.details ? <p className="line-clamp-4">{scene.details}</p> : undefined}
+      metadata={(scene.organized || scene.galleries.length > 0) ? (
+        <>
+          {scene.organized ? <FeedMetadataPill>Organized</FeedMetadataPill> : null}
+          {scene.galleries.length > 0 ? <FeedMetadataPill>{scene.galleries.length} galleries</FeedMetadataPill> : null}
+        </>
+      ) : undefined}
       chips={(
         <>
           {scene.performers.slice(0, 4).map((performer) => (
@@ -1666,7 +1679,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
               {performer.name}
             </FeedChipButton>
           ))}
-          {scene.tags.slice(0, 4).map((tag) => (
+          {visibleTags.map((tag) => (
             <FeedChipButton
               key={tag.id}
               onClick={() => onNavigate({ page: "tag", id: tag.id })}
@@ -1674,9 +1687,87 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
               #{tag.name}
             </FeedChipButton>
           ))}
+          {hiddenTags.length > 0 ? (
+            <FeedChipOverflowMenu>
+              {hiddenTags.map((tag) => (
+                <FeedChipButton
+                  key={tag.id}
+                  onClick={() => onNavigate({ page: "tag", id: tag.id })}
+                >
+                  #{tag.name}
+                </FeedChipButton>
+              ))}
+            </FeedChipOverflowMenu>
+          ) : null}
         </>
       )}
     />
+  );
+}
+
+function SceneFeedVideoControls({ controls, soundEnabled, onToggleSound }: { controls: WallMediaVideoControlsState; soundEnabled: boolean; onToggleSound: () => void }) {
+  const seekValue = Math.round(controls.progressPercent * 10);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleSound();
+        }}
+        className="absolute bottom-14 right-3 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white shadow transition-colors hover:bg-black/70"
+        aria-label={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
+        title={soundEnabled ? "Mute this feed item" : "Unmute this feed item"}
+      >
+        {soundEnabled ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+      </button>
+      <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex items-center gap-2 rounded-full bg-black/45 px-2.5 py-1.5 text-white shadow-lg">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            controls.togglePlayback();
+          }}
+          className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full text-white/90 transition-colors hover:bg-white/15 hover:text-white"
+          aria-label={controls.isPlaying ? "Pause feed video" : "Play feed video"}
+          title={controls.isPlaying ? "Pause" : "Play"}
+        >
+          {controls.isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={1000}
+          step={1}
+          value={seekValue}
+          onChange={(event) => controls.seekToPercent(Number(event.target.value) / 1000)}
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          className="pointer-events-auto h-1 min-w-0 flex-1 cursor-pointer accent-white"
+          aria-label="Seek feed video"
+          title="Seek"
+        />
+        <span className="min-w-[2.4rem] text-right text-[11px] tabular-nums text-white/90">
+          {formatDuration(controls.currentTime || 0)}
+        </span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            controls.toggleFullscreen();
+          }}
+          className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full text-white/90 transition-colors hover:bg-white/15 hover:text-white"
+          aria-label={controls.isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          title={controls.isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+        >
+          {controls.isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -1699,6 +1790,7 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnable
         muted={!soundEnabled}
         videoStartTimeSec={videoStartTimeSec}
         videoPlayThreshold={0.72}
+        playbackTracking={{ hostType: "scene", hostId: scene.id, scopeKey: `scene-vertical:${scene.id}` }}
         aspectRatio="9 / 16"
         imageClassName="object-cover"
         fillMedia={fullscreen}
@@ -1736,7 +1828,6 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnable
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/75">
             {scene.studioName ? <span>{scene.studioName}</span> : null}
             {scene.date ? <span>{scene.date}</span> : null}
-            {file ? <span>{getResolutionLabel(file.width, file.height)}</span> : null}
             <span>{feedVideoSource === "video" ? "Full video" : "Preview clip"}</span>
           </div>
           <p className="mt-1 line-clamp-2 text-base font-semibold leading-tight sm:text-lg">{title}</p>

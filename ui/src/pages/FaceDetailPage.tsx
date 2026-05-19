@@ -20,6 +20,7 @@ import { MetadataPanel } from "../components/MetadataPanel";
 import { formatDate } from "../components/shared";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
+import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 
 interface Props {
   id: number;
@@ -555,6 +556,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
             sortOptions={APPEARANCE_SORT_OPTIONS}
             zoomLevel={appearanceZoomLevel}
             onZoomChange={setAppearanceZoomLevel}
+            cardSizeEntityType="faces"
             showSearch
             allowInfinitePageSize
           />
@@ -590,10 +592,11 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
             sortOptions={SIMILAR_SORT_OPTIONS}
             zoomLevel={similarZoomLevel}
             onZoomChange={setSimilarZoomLevel}
+            cardSizeEntityType="faces"
             showSearch
             allowInfinitePageSize
           />
-          <VirtualizedEntityGrid items={similarFacesPage.items} getItemKey={(candidate) => candidate.id} minCardWidth={`${280 + similarZoomLevel * 50}px`} virtualMinColumnWidth={280 + similarZoomLevel * 50} estimateRowHeight={360} gap={16} gapClassName="gap-4" infinitePageSize={similarInfinitePageSize} hasNextPage={similarInfiniteQuery.hasNextPage} isFetchingNextPage={similarInfiniteQuery.isFetchingNextPage} loadMore={loadMoreSimilar} renderItem={(candidate) => (
+          <VirtualizedEntityGrid items={similarFacesPage.items} getItemKey={(candidate) => candidate.id} minCardWidth={`${getEntityCardMinWidthPx("faces", similarZoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("faces", similarZoomLevel)} estimateRowHeight={360} gap={16} gapClassName="gap-4" infinitePageSize={similarInfinitePageSize} hasNextPage={similarInfiniteQuery.hasNextPage} isFetchingNextPage={similarInfiniteQuery.isFetchingNextPage} loadMore={loadMoreSimilar} renderItem={(candidate) => (
             <SimilarFaceTile face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
           )} />
           {!similarInfinitePageSize ? <FaceTabPager filter={similarFilter} setFilter={setSimilarFilter} totalCount={similarFacesPage.totalCount} /> : null}
@@ -697,7 +700,8 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
           </>
         )}
         favorite={canEngageFace ? faceFavorite : undefined}
-        onFavoriteToggle={canEngageFace && !faceFavoritePending ? () => setFaceFavorite(!faceFavorite) : undefined}
+        favoritePending={faceFavoritePending}
+        onFavoriteToggle={canEngageFace ? () => setFaceFavorite(!faceFavorite) : undefined}
         actions={faceActions}
       >
         <EntityDetailTabs tabs={tabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as FaceTab)} className="mx-auto mb-4 max-w-7xl" />
@@ -912,7 +916,7 @@ function FaceCandidateRow({ face, onSelect, disabled }: { face: Face; onSelect: 
 
 function FaceAppearancesGrid({ appearances, onNavigate, zoomLevel, infinitePageSize, hasNextPage, isFetchingNextPage, loadMore }: { appearances: FaceAppearanceListItem[]; onNavigate: (r: any) => void; zoomLevel: number; infinitePageSize: boolean; hasNextPage?: boolean; isFetchingNextPage?: boolean; loadMore: () => void }) {
   return (
-    <VirtualizedEntityGrid items={appearances} getItemKey={(appearance) => appearance.appearanceId} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={280} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} renderItem={(appearance) => (
+    <VirtualizedEntityGrid items={appearances} getItemKey={(appearance) => appearance.appearanceId} minCardWidth={`${getEntityCardMinWidthPx("faces", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("faces", zoomLevel)} estimateRowHeight={280} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} renderItem={(appearance) => (
       <FaceAppearanceTile appearance={appearance} onClick={() => onNavigate({ page: appearance.hostType, id: appearance.hostId })} />
     )} />
   );

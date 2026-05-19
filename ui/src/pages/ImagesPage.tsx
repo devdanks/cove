@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { aiVisual, images } from "../api/client";
+import { aiVisual, entityEngagement, images } from "../api/client";
 import type { DeleteEntityOptions, EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -8,28 +8,27 @@ import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { useAiVisualAvailability } from "../hooks/useAiVisualAvailability";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { ImageIcon, Trash2, Loader2, Edit, FolderOpen, Play, Search, ThumbsUp, Eye } from "lucide-react";
+import { ImageIcon, Trash2, Loader2, Edit, FolderOpen, Play, Search, ThumbsUp, Eye, Heart } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, IMAGE_BULK_FIELDS } from "../components/BulkEditDialog";
-import { CardFavoriteButton, ImageTile } from "../components/EntityCards";
+import { ImageTile } from "../components/EntityCards";
 import type { LightboxImage } from "../components/Lightbox";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { useAuth } from "../auth/AuthContext";
-import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
+import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard } from "../components/WallMediaCard";
-import { FeedCardFrame, FeedChipButton, FeedMetadataPill, FeedPortraitMediaFrame, getFeedMediaStyle } from "../components/FeedCardFrame";
+import { FeedActionPill, FeedCardFrame, FeedChipButton, FeedChipOverflowMenu, FeedIdentityBadge, FeedInlineRating, FeedMetadataPill, FeedPortraitMediaFrame, getFeedMediaStyle } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
 import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 import { useAppConfig } from "../state/AppConfigContext";
-import { RatingBadge } from "../components/Rating";
 
 const Lightbox = lazy(() => import("../components/Lightbox").then((module) => ({ default: module.Lightbox })));
 const ImageCreateModal = lazy(() => import("./ImageEditModal").then((module) => ({ default: module.ImageCreateModal })));
@@ -94,9 +93,10 @@ export function ImagesPage({ onNavigate }: Props) {
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { config } = useAppConfig();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canWriteImage = canWriteEntity("image", hasPermission);
   const canDeleteImage = canDeleteEntity("image", hasPermission);
+  const canEngageImage = canReadEntity("image", hasPermission) && (user?.kind === "user" || user?.kind === "system");
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const visualSearchActive = aiVisualAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
@@ -341,7 +341,7 @@ export function ImagesPage({ onNavigate }: Props) {
         showDeleteGenerated
       />
       {displayMode === "feed" ? (
-        <div className="mx-auto max-w-5xl px-2">
+        <div className="mx-auto w-full max-w-[64rem] px-3 sm:px-4">
           <VirtualizedInfiniteList
             items={items}
             getItemKey={(image) => image.id}
@@ -350,12 +350,13 @@ export function ImagesPage({ onNavigate }: Props) {
             hasNextPage={Boolean(listData.infiniteQuery.hasNextPage)}
             isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
             loadMore={listData.loadMore}
-            itemClassName="pb-4"
+            itemClassName="pb-5"
             renderItem={({ item: img }) => (
             <ImageFeedCard
               image={img}
               engagement={engagementById.get(img.id)}
               onNavigate={onNavigate}
+              canEngage={canEngageImage}
               selected={selectedIds.has(img.id)}
               onSelect={() => toggle(img.id)}
               selecting={selecting}
@@ -470,7 +471,7 @@ export function ImagesPage({ onNavigate }: Props) {
   );
 }
 
-function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, selecting }: { image: Image; engagement?: EntityEngagement; onNavigate: (route: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+function ImageFeedCard({ image, engagement, onNavigate, canEngage, selected, onSelect, selecting }: { image: Image; engagement?: EntityEngagement; onNavigate: (route: any) => void; canEngage: boolean; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const displayTitle = getImageDisplayTitle(image);
   const file = image.files[0];
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "1 / 1";
@@ -479,6 +480,17 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
   const mediaIsPortrait = Boolean(mediaStyle);
   const likeCount = engagement?.likeCount ?? 0;
   const visitCount = engagement?.pageVisitCount ?? 0;
+  const visibleTags = image.tags.slice(0, 4);
+  const hiddenTags = image.tags.slice(4);
+  const queryClient = useQueryClient();
+  const ratingMut = useMutation({
+    mutationFn: (value: number | undefined) => entityEngagement.setRating("image", image.id, { value: value ?? null, aspect: "overall" }),
+    onSuccess: (nextEngagement) => {
+      queryClient.setQueryData(["engagement", "image", image.id], nextEngagement);
+      queryClient.invalidateQueries({ queryKey: ["engagement", "image", "batch"] });
+    },
+  });
+  const ratingValue = ratingMut.data?.rating ?? engagement?.rating;
   const openOrSelect = () => {
     if (selecting) {
       onSelect?.();
@@ -509,35 +521,35 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
       dataAttribute={{ "data-feed-image-id": image.id }}
       selected={selected}
       onClick={selecting ? openOrSelect : undefined}
+      identity={image.studioName ? <FeedIdentityBadge>{image.studioName}</FeedIdentityBadge> : undefined}
       header={(
         <>
-          <span className="font-semibold text-secondary">{image.studioName || "Cove images"}</span>
           {image.date ? <span>{image.date}</span> : null}
           {image.photographer ? <span>{image.photographer}</span> : null}
-          {file?.width && file.height ? <span>{file.width}x{file.height}</span> : null}
         </>
       )}
       headerActions={(
         <>
-          <span className="inline-flex min-h-7 items-center rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
-            {engagement?.rating != null ? <RatingBadge rating={engagement.rating} /> : "Unrated"}
-          </span>
-          <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+          <FeedInlineRating value={ratingValue} onChange={(value) => ratingMut.mutate(value)} readOnly={!canEngage} pending={ratingMut.isPending} />
+          <FeedActionPill>
             <ThumbsUp className={["h-3.5 w-3.5", likeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />
             {likeCount}
-          </span>
-          {typeof engagement?.isFavorite === "boolean" ? (
-            <CardFavoriteButton hostType="image" hostId={image.id} favorite={engagement.isFavorite} />
+          </FeedActionPill>
+          {engagement?.isFavorite ? (
+            <FeedActionPill>
+              <Heart className="h-3.5 w-3.5 fill-current text-red-400" />
+              Favorite
+            </FeedActionPill>
           ) : null}
-          <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+          <FeedActionPill>
             <Eye className="h-3.5 w-3.5" />
             {visitCount}
-          </span>
+          </FeedActionPill>
           {image.galleryCount > 0 ? (
-            <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-border bg-background/70 px-2.5 text-xs font-medium text-secondary">
+            <FeedActionPill>
               <FolderOpen className="h-3.5 w-3.5" />
               {image.galleryCount}
-            </span>
+            </FeedActionPill>
           ) : null}
         </>
       )}
@@ -566,7 +578,7 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
             imageSrc={imageSrc}
             aspectRatio={aspectRatio}
             style={mediaStyle}
-            className="rounded-none border-x-0 border-y border-border/60 hover:border-border/60"
+            className="overflow-hidden rounded-2xl border border-border/70 bg-black/95 shadow-[0_18px_40px_rgba(0,0,0,0.35)] hover:border-border/70"
           >
             {mediaOverlay}
           </WallMediaCard>
@@ -581,14 +593,13 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
           {displayTitle}
         </button>
       )}
-      details={image.details ? <p className="line-clamp-3">{image.details}</p> : undefined}
-      metadata={(
+      details={image.details ? <p className="line-clamp-4">{image.details}</p> : undefined}
+      metadata={(image.organized || image.galleries.length > 0) ? (
         <>
-          {file ? <FeedMetadataPill>{file.width && file.height ? `${file.width}x${file.height}` : "Image"}</FeedMetadataPill> : null}
           {image.organized ? <FeedMetadataPill>Organized</FeedMetadataPill> : null}
           {image.galleries.length > 0 ? <FeedMetadataPill>{image.galleries.length} galleries</FeedMetadataPill> : null}
         </>
-      )}
+      ) : undefined}
       chips={(
         <>
           {image.performers.slice(0, 4).map((performer) => (
@@ -599,7 +610,7 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
               {performer.name}
             </FeedChipButton>
           ))}
-          {image.tags.slice(0, 4).map((tag) => (
+          {visibleTags.map((tag) => (
             <FeedChipButton
               key={tag.id}
               onClick={() => selecting ? onSelect?.() : onNavigate({ page: "tag", id: tag.id })}
@@ -607,6 +618,18 @@ function ImageFeedCard({ image, engagement, onNavigate, selected, onSelect, sele
               #{tag.name}
             </FeedChipButton>
           ))}
+          {hiddenTags.length > 0 ? (
+            <FeedChipOverflowMenu>
+              {hiddenTags.map((tag) => (
+                <FeedChipButton
+                  key={tag.id}
+                  onClick={() => selecting ? onSelect?.() : onNavigate({ page: "tag", id: tag.id })}
+                >
+                  #{tag.name}
+                </FeedChipButton>
+              ))}
+            </FeedChipOverflowMenu>
+          ) : null}
         </>
       )}
     />

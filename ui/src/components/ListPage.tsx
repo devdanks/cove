@@ -13,7 +13,7 @@ import { useKeySequence } from "../hooks/useKeySequence";
 import { resolveKeybinding } from "../keyboard/keybindings";
 import { useAppConfig } from "../state/AppConfigContext";
 import { useCustomFieldDefinitions } from "../hooks/useCustomFieldDefinitions";
-import { clampCardSizeLevel, useEntityCardSize } from "../hooks/useEntityCardSize";
+import { clampEntityCardSizeLevel, getEntityCardMaxLevel, getEntityCardMinWidthPx, useEntityCardSize } from "../hooks/useEntityCardSize";
 import { reshuffleRandomSort, withSeededRandomSort } from "../utils/seededRandomSort";
 import { trackInteraction } from "../utils/interactionTracking";
 import { LIST_PER_PAGE_OPTIONS, toolbarIconButtonClass, toolbarSegmentClass, toolbarSelectClass } from "./listToolbarStyles";
@@ -624,8 +624,9 @@ export function ListPage({
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [filterDialogPreselect, setFilterDialogPreselect] = useState<string | undefined>();
   const cardSizeEntityType = filterMode ?? pageKey;
-  const [zoomLevel, setZoomLevel] = useEntityCardSize(cardSizeEntityType, pageKey, DEFAULT_ZOOM_LEVEL); // 0-5 range: 0=smallest (240px), 5=largest (540px)
-  const cardMinWidthPx = Math.round(240 + zoomLevel * 60);
+  const [zoomLevel, setZoomLevel] = useEntityCardSize(cardSizeEntityType, pageKey, DEFAULT_ZOOM_LEVEL);
+  const cardSizeMaxLevel = getEntityCardMaxLevel(cardSizeEntityType);
+  const cardMinWidthPx = getEntityCardMinWidthPx(cardSizeEntityType, zoomLevel);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(false);
   const [autoScrollSpeed, setAutoScrollSpeed] = useState(120);
   const [autoScrollControlsAwake, setAutoScrollControlsAwake] = useState(true);
@@ -920,9 +921,9 @@ export function ListPage({
     // Filter dialog
     ...(criteriaDefinitions && onObjectFilterChange ? [{ keys: resolveKeybinding(keybindingOverrides, "list.filters", "f"), action: () => setFilterDialogOpen(true) }] : []),
     // Zoom
-    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.in", "+"), action: () => setZoomLevel((v) => clampCardSizeLevel(v + 0.25)) },
-    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.out", "-"), action: () => setZoomLevel((v) => clampCardSizeLevel(v - 0.25)) },
-  ], [showPagingControls, onDisplayModeChange, availableDisplayModes, onSelectAll, onSelectNone, onInvertSelection, goTo, page, totalPages, criteriaDefinitions, onObjectFilterChange, keybindingOverrides]);
+    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.in", "+"), action: () => setZoomLevel((v) => clampEntityCardSizeLevel(cardSizeEntityType, v + 0.25)) },
+    { keys: resolveKeybinding(keybindingOverrides, "list.zoom.out", "-"), action: () => setZoomLevel((v) => clampEntityCardSizeLevel(cardSizeEntityType, v - 0.25)) },
+  ], [availableDisplayModes, cardSizeEntityType, criteriaDefinitions, goTo, keybindingOverrides, onDisplayModeChange, onInvertSelection, onObjectFilterChange, onSelectAll, onSelectNone, page, setZoomLevel, showPagingControls, totalPages]);
 
   useKeySequence(listBindings);
 
@@ -1154,12 +1155,12 @@ export function ListPage({
               <input
                 type="range"
                 min={0}
-                max={5}
+                max={cardSizeMaxLevel}
                 step={0.25}
                 value={zoomLevel}
-                onChange={(e) => setZoomLevel(clampCardSizeLevel(Number(e.target.value)))}
+                onChange={(e) => setZoomLevel(clampEntityCardSizeLevel(cardSizeEntityType, Number(e.target.value)))}
                 className="w-16 sm:w-20 h-1 accent-accent cursor-pointer"
-                title={`Card size: ${Math.round(240 + zoomLevel * 60)}px`}
+                title={`Card size: ${getEntityCardMinWidthPx(cardSizeEntityType, zoomLevel)}px`}
               />
               <ZoomIn className="w-3 h-3 text-muted" />
             </div>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries } from "../api/client";
 import type { EntityEngagement, FindFilter, Gallery, GalleryCreate, GalleryFilterCriteria } from "../api/types";
@@ -7,7 +7,7 @@ import { InteractiveRatingField, RatingBanner } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { FolderOpen, Image, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
+import { FolderOpen, Images as ImagesIcon, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
 import { GalleryTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent } from "../components/EntityCards";
 import { GALLERY_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GALLERY_BULK_FIELDS } from "../components/BulkEditDialog";
@@ -133,6 +133,14 @@ export function GalleriesPage({ onNavigate }: Props) {
     },
   });
 
+  useEffect(() => {
+    if (displayMode !== "list" || !listData.infinitePageSize || !listData.infiniteQuery.hasNextPage || listData.infiniteQuery.isFetchingNextPage) {
+      return;
+    }
+
+    listData.loadMore();
+  }, [displayMode, listData]);
+
   return (
     <>
     <GalleryCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "gallery", id })} />
@@ -193,7 +201,7 @@ export function GalleriesPage({ onNavigate }: Props) {
         <VirtualizedEntityGrid
           items={items}
           getItemKey={(gallery) => gallery.id}
-          minCardWidth="var(--card-min-width, 200px)"
+          minCardWidth="var(--card-min-width, 140px)"
           estimateRowHeight={260}
           infinitePageSize={listData.infinitePageSize}
           hasNextPage={listData.infiniteQuery.hasNextPage}
@@ -213,7 +221,7 @@ export function GalleriesPage({ onNavigate }: Props) {
           hasNextPage={listData.infiniteQuery.hasNextPage}
           isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
           loadMore={listData.loadMore}
-          estimateItemHeight={220}
+          estimateItemHeight={320}
           gap={8}
           renderItem={(gallery) => (
                 <GalleryWallCard
@@ -249,17 +257,38 @@ export function GalleriesPage({ onNavigate }: Props) {
 
 function GalleryWallCard({ gallery, engagement, onClick, selected, onSelect, selecting }: { gallery: Gallery; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const rating = engagement?.rating;
+  const galleryCoverSrc = gallery.coverPath ?? galleries.coverUrl(gallery.id, gallery.updatedAt, 960);
+  const itemChips = [
+    gallery.imageCount > 0 ? { key: "images", icon: <ImagesIcon className="h-3.5 w-3.5" />, count: gallery.imageCount, label: "Images" } : null,
+    gallery.sceneCount > 0 ? { key: "scenes", icon: <Film className="h-3.5 w-3.5" />, count: gallery.sceneCount, label: "Scenes" } : null,
+    gallery.performers.length > 0 ? { key: "performers", icon: <Users className="h-3.5 w-3.5" />, count: gallery.performers.length, label: "Performers" } : null,
+    gallery.tags.length > 0 ? { key: "tags", icon: <Tag className="h-3.5 w-3.5" />, count: gallery.tags.length, label: "Tags" } : null,
+  ].filter((chip) => chip !== null);
+
   return (
     <WallMediaCard
       onClick={onClick}
       title={gallery.title || "Untitled"}
-      imageSrc={gallery.coverPath}
-      aspectRatio="16 / 9"
+      imageSrc={galleryCoverSrc}
+      aspectRatio="1 / 1"
       fallback={<FolderOpen className="w-10 h-10 text-muted opacity-30" />}
       className={`${selected ? "border-accent ring-2 ring-accent" : ""} group`.trim()}
     >
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
       <RatingBanner rating={rating} />
+      <div className="absolute bottom-1 left-1 flex flex-wrap items-center gap-1">
+        {itemChips.map((chip) => (
+          <span key={chip.key} className="inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] text-white" title={chip.label}>
+            {chip.icon}
+            <span>{chip.count}</span>
+          </span>
+        ))}
+        {gallery.organized ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-green-600/90 px-1.5 py-0.5 text-[10px] text-white" title="Organized">
+            <Box className="h-3.5 w-3.5" />
+          </span>
+        ) : null}
+      </div>
       {gallery.studioName && (
         <div className="absolute top-1 right-1 text-xs bg-black/70 px-1.5 py-0.5 rounded text-white truncate max-w-[80%]">
           {gallery.studioName}

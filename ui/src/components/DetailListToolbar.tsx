@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Grid3X3, List, Search, Shuffle, ZoomIn, ZoomOut } from "lucide-react";
 import type { FindFilter } from "../api/types";
 import { isValidElement, useEffect, useMemo, useState } from "react";
-import { useEntityCardSize } from "../hooks/useEntityCardSize";
+import { clampEntityCardSizeLevel, getEntityCardMaxLevel, getEntityCardMinWidthPx, useEntityCardSize } from "../hooks/useEntityCardSize";
 import { reshuffleRandomSort, withSeededRandomSort } from "../utils/seededRandomSort";
 import { LIST_PER_PAGE_OPTIONS, toolbarIconButtonClass, toolbarSegmentClass, toolbarSelectClass } from "./listToolbarStyles";
 import { FilterButton, FilterDialog, type CriterionDefinition } from "./FilterDialog";
@@ -61,7 +61,8 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
     return selectionActions.props.entityType;
   }, [selectionActions]);
   const inferredCardSizeEntityType = useMemo(() => cardSizeEntityType ?? selectionActionEntityType ?? inferCardSizeEntityType(sortOptions), [cardSizeEntityType, selectionActionEntityType, sortOptions]);
-  const [storedZoomLevel, setStoredZoomLevel] = useEntityCardSize(inferredCardSizeEntityType, undefined, zoomLevel ?? 0);
+  const maxZoomLevel = getEntityCardMaxLevel(inferredCardSizeEntityType);
+  const [storedZoomLevel, setStoredZoomLevel] = useEntityCardSize(inferredCardSizeEntityType);
   const effectiveZoomLevel = inferredCardSizeEntityType ? storedZoomLevel : zoomLevel;
 
   useEffect(() => {
@@ -70,8 +71,9 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
   }, [inferredCardSizeEntityType, onZoomChange, storedZoomLevel, zoomLevel]);
 
   const handleZoomChange = (level: number) => {
-    if (inferredCardSizeEntityType) setStoredZoomLevel(level);
-    onZoomChange?.(level);
+    const nextLevel = clampEntityCardSizeLevel(inferredCardSizeEntityType, level);
+    if (inferredCardSizeEntityType) setStoredZoomLevel(nextLevel);
+    onZoomChange?.(nextLevel);
   };
 
   const goTo = (nextPage: number) => onFilterChange({ ...filter, page: Math.max(1, Math.min(totalPages, nextPage)) });
@@ -169,11 +171,11 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
               <ZoomOut className="w-3 h-3 text-muted" />
               <input
                 type="range"
-                min={0} max={5} step={0.25}
+                min={0} max={maxZoomLevel} step={0.25}
                 value={effectiveZoomLevel}
                 onChange={(e) => handleZoomChange(Number(e.target.value))}
                 className="h-1 w-16 cursor-pointer accent-accent sm:w-20"
-                title={`Card size: ${Math.round(240 + effectiveZoomLevel * 60)}px`}
+                title={`Card size: ${getEntityCardMinWidthPx(inferredCardSizeEntityType, effectiveZoomLevel)}px`}
               />
               <ZoomIn className="w-3 h-3 text-muted" />
             </div>

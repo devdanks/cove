@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, images, scenes, fileOps } from "../api/client";
 import type { FindFilter, Image, ImageFilterCriteria, Scene, SceneFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Download, Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
+import { Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GalleryEditModal } from "./GalleryEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -21,7 +21,6 @@ import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useBackNavigation } from "../hooks/useBackNavigation";
-import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
@@ -29,6 +28,7 @@ import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { useDetailListSelection } from "../hooks/useDetailListSelection";
 import { withRequiredMultiId } from "../utils/detailRelationFilters";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
+import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 
 interface Props {
   id: number;
@@ -72,14 +72,12 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [showAddImages, setShowAddImages] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
-  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "galleries" }, onNavigate);
   const canWriteGallery = canWriteEntity("gallery", hasPermission);
   const canEngageGallery = canReadEntity("gallery", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeleteGallery = canDeleteEntity("gallery", hasPermission);
-  const canDownloadGallery = hasPermission("jobs.run") && canWriteGallery;
   const canReadGalleryImages = canReadEntity("image", hasPermission);
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canReadStudios = canReadEntity("studio", hasPermission);
@@ -245,12 +243,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
 
   return (
     <div className="min-h-screen">
-      <GalleryDownloadDialog
-        open={showDownloadDialog}
-        gallery={gallery}
-        onClose={() => setShowDownloadDialog(false)}
-        onNavigate={onNavigate}
-      />
       <GalleryEditModal gallery={gallery} open={editing} onClose={() => setEditing(false)} />
       <ConfirmDialog
         open={confirmDelete}
@@ -268,7 +260,11 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         imageFallback={<ImageIcon className="h-14 w-14" />}
         title={gallery.title || "Untitled Gallery"}
         favorite={galleryFavorite}
-        onFavoriteToggle={canEngageGallery && !galleryFavoritePending ? () => setGalleryFavorite(!galleryFavorite) : undefined}
+        favoritePending={galleryFavoritePending}
+        onFavoriteToggle={canEngageGallery ? () => setGalleryFavorite(!galleryFavorite) : undefined}
+        organized={gallery.organized}
+        organizedPending={galleryUpdateMut.isPending}
+        onOrganizedToggle={canWriteGallery ? () => galleryUpdateMut.mutate({ organized: !gallery.organized }) : undefined}
         aliases={
           <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             {gallery.date ? <span>{formatDate(gallery.date)}</span> : null}
@@ -292,27 +288,12 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         metaRow={
           <>
             <span title={`Created ${formatDate(gallery.createdAt)}`}>Updated {formatDate(gallery.updatedAt)}</span>
-            {gallery.organized ? (
-              <span className="inline-flex items-center gap-1 rounded bg-green-500/15 px-1.5 py-0.5 text-green-300">
-                <Check className="h-3 w-3" /> Organized
-              </span>
-            ) : null}
             <InteractiveRating value={galleryRating} onChange={(value) => setGalleryRating(value)} readOnly={!canEngageGallery} />
           </>
         }
         actions={
           <>
             <ExtensionSlot slot="gallery-detail-actions" context={{ gallery, onNavigate }} />
-            {canWriteGallery ? (
-              <button
-                type="button"
-                onClick={() => galleryUpdateMut.mutate({ organized: !gallery.organized })}
-                className={`flex items-center gap-1.5 rounded border px-3 py-1.5 text-sm transition-colors ${gallery.organized ? "border-green-500/40 bg-green-600 text-white" : "border-border bg-card text-secondary hover:text-foreground"}`}
-                title={gallery.organized ? "Organized" : "Mark organized"}
-              >
-                <Check className="h-3.5 w-3.5" /> {gallery.organized ? "Organized" : "Organize"}
-              </button>
-            ) : null}
             {canWriteGallery ? (
               <button
                 type="button"
@@ -334,7 +315,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
               </button>
               {showOpsMenu ? (
                 <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded border border-border bg-card py-1 shadow-lg">
-                  {gallery.files.length === 0 && canDownloadGallery ? <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Download className="h-3.5 w-3.5" /> Download Media...</button> : null}
                   <button onClick={() => { setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button>
                   {canDeleteGallery ? <div className="my-1 border-t border-border" /> : null}
                   {canDeleteGallery ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
@@ -442,6 +422,7 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
       ]}
       zoomLevel={zoomLevel}
       onZoomChange={setZoomLevel}
+      cardSizeEntityType="scenes"
       showSearch
       selectedCount={selectedIds.size}
       onSelectAll={selectAll}
@@ -466,8 +447,8 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
       <VirtualizedEntityGrid
         items={items}
         getItemKey={(scene) => scene.id}
-        minCardWidth={`${220 + zoomLevel * 50}px`}
-        virtualMinColumnWidth={220 + zoomLevel * 50}
+        minCardWidth={`${getEntityCardMinWidthPx("scenes", zoomLevel)}px`}
+        virtualMinColumnWidth={getEntityCardMinWidthPx("scenes", zoomLevel)}
         estimateRowHeight={320}
         gap={16}
         gapClassName="gap-4"
@@ -523,6 +504,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
       sortOptions={IMAGE_SORT}
       zoomLevel={imageZoom}
       onZoomChange={setImageZoom}
+      cardSizeEntityType="images"
       showSearch
       selectedCount={selectedIds.size}
       onSelectAll={selectAll}
@@ -561,8 +543,8 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
       <VirtualizedEntityGrid
         items={items}
         getItemKey={(image) => image.id}
-        minCardWidth={`${160 + imageZoom * 50}px`}
-        virtualMinColumnWidth={160 + imageZoom * 50}
+        minCardWidth={`${getEntityCardMinWidthPx("images", imageZoom)}px`}
+        virtualMinColumnWidth={getEntityCardMinWidthPx("images", imageZoom)}
         estimateRowHeight={260}
         infinitePageSize={infinitePageSize}
         hasNextPage={infiniteQuery.hasNextPage}
@@ -571,7 +553,27 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
         renderItem={(image, idx) => (
           <ImageTile
             image={image}
-            onClick={() => selecting ? toggle(image.id) : onLightbox(idx)}
+            onClick={() => {
+              if (selecting) {
+                toggle(image.id);
+                return;
+              }
+              onNavigate({ page: "image", id: image.id });
+            }}
+            onPreview={() => {
+              if (selecting) {
+                toggle(image.id);
+                return;
+              }
+              onLightbox(idx);
+            }}
+            onDetails={() => {
+              if (selecting) {
+                toggle(image.id);
+                return;
+              }
+              onNavigate({ page: "image", id: image.id });
+            }}
             onNavigate={onNavigate}
             onQuickView={() => setQuickViewId(image.id)}
             selected={selectedIds.has(image.id)}

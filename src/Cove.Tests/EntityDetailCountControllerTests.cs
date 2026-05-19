@@ -4,6 +4,7 @@ using Cove.Core.Entities;
 using Cove.Core.Enums;
 using Cove.Data;
 using Cove.Data.Repositories;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -107,6 +108,51 @@ public class EntityDetailCountControllerTests
         Assert.Equal(1, detail.GroupCount);
         Assert.Equal(2, detail.PerformerCount);
         Assert.Equal(1, detail.ChildStudioCount);
+    }
+
+    [Fact]
+    public async Task GalleryListAndDetail_UseLiveUsageCountsInsteadOfStoredCounters()
+    {
+        await using var context = CreateContext();
+
+        var gallery = new Gallery { Title = "Gallery" };
+        var imageA = new Image { Title = "Image A" };
+        var imageB = new Image { Title = "Image B" };
+        var scene = new Scene { Title = "Scene" };
+        context.AddRange(gallery, imageA, imageB, scene);
+        await context.SaveChangesAsync();
+
+        context.AddRange(
+            new ImageGallery { GalleryId = gallery.Id, ImageId = imageA.Id },
+            new ImageGallery { GalleryId = gallery.Id, ImageId = imageB.Id },
+            new SceneGallery { GalleryId = gallery.Id, SceneId = scene.Id });
+        await context.SaveChangesAsync();
+
+        var storedGallery = await context.Galleries.SingleAsync(candidate => candidate.Id == gallery.Id);
+        storedGallery.ImageCount = 0;
+        storedGallery.SceneCount = 0;
+        await context.SaveChangesAsync();
+
+        var controller = new GalleriesController(
+            new GalleryRepository(context),
+            context,
+            null!)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        var listResult = await controller.Find(q: null, page: 1, perPage: 10, sort: "title", direction: "asc", ct: CancellationToken.None);
+        var list = Assert.IsType<PaginatedResponse<GalleryDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var listGallery = Assert.Single(list.Items);
+        Assert.Equal(2, listGallery.ImageCount);
+        Assert.Equal(1, listGallery.SceneCount);
+        Assert.NotNull(listGallery.CoverPath);
+
+        var detailResult = await controller.GetById(gallery.Id, CancellationToken.None);
+        var detail = Assert.IsType<GalleryDto>(Assert.IsType<OkObjectResult>(detailResult.Result).Value);
+        Assert.Equal(2, detail.ImageCount);
+        Assert.Equal(1, detail.SceneCount);
+        Assert.NotNull(detail.CoverPath);
     }
 
     private static CoveContext CreateContext()

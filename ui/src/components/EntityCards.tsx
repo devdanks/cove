@@ -157,6 +157,7 @@ export function GalleryPreviewList({ galleries: galleryItems, onNavigate }: { ga
     <div className="space-y-1">
       {galleryItems.map((gallery) => {
         const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, onNavigate);
+        const galleryCoverSrc = gallery.coverPath ?? galleries.coverUrl(gallery.id);
 
         return (
           <a
@@ -165,8 +166,11 @@ export function GalleryPreviewList({ galleries: galleryItems, onNavigate }: { ga
             className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-card-hover"
           >
             <div className="h-12 w-12 overflow-hidden rounded bg-surface flex-shrink-0">
-              {gallery.coverPath ? (
-                <CoverImage src={gallery.coverPath} alt="" className="h-full w-full" loading="lazy" />
+              {galleryCoverSrc ? (
+                <>
+                  <CoverImage src={galleryCoverSrc} alt="" className="h-full w-full" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+                  <div className="hidden h-full w-full items-center justify-center"><FolderOpen className="w-4 h-4 text-muted" /></div>
+                </>
               ) : (
                 <div className="flex h-full w-full items-center justify-center"><FolderOpen className="w-4 h-4 text-muted" /></div>
               )}
@@ -1203,6 +1207,7 @@ interface GalleryTileProps {
 export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected, onSelect, selecting, bookmarkInitiallySaved }: GalleryTileProps & { engagement?: EntityEngagement }) {
   const hasFooter = gallery.imageCount > 0 || gallery.sceneCount > 0 || gallery.tags.length > 0 || gallery.performers.length > 0 || gallery.organized;
   const title = gallery.title || "Untitled";
+  const galleryCoverSrc = gallery.coverPath ?? galleries.coverUrl(gallery.id, gallery.updatedAt, 960);
 
   return (
     <EntityTileFrame
@@ -1212,11 +1217,13 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
       selected={selected}
       onSelect={onSelect}
       selecting={selecting}
+      mediaClassName="aspect-square bg-surface"
+      bodyClassName="p-2"
       media={(
         <>
-          {gallery.coverPath ? (
+          {galleryCoverSrc ? (
             <>
-              <CoverImage src={gallery.coverPath} alt={title} className="h-full w-full" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
+              <CoverImage src={galleryCoverSrc} alt={title} className="h-full w-full" loading="lazy" onError={(event) => { const image = event.currentTarget; image.style.display = "none"; const fallback = image.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />
               <div className="hidden h-full w-full items-center justify-center"><FolderOpen className="h-10 w-10 text-muted" /></div>
             </>
           ) : (
@@ -1233,13 +1240,15 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
               className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
             />
           ) : null}
+          {(gallery.studioName || gallery.date) ? (
+            <div className="absolute right-1 top-1 z-10 max-w-[80%] truncate rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">
+              {gallery.studioName || gallery.date}
+            </div>
+          ) : null}
         </>
       )}
       body={(
-        <>
-          <p className="card-title line-clamp-2 font-semibold text-foreground group-hover:text-accent">{title}</p>
-          {(gallery.date || gallery.studioName) ? <p className="truncate text-xs text-secondary">{gallery.date || gallery.studioName}</p> : null}
-        </>
+        <p className="card-title line-clamp-2 font-semibold text-foreground group-hover:text-accent">{title}</p>
       )}
       footer={hasFooter ? (
         <>

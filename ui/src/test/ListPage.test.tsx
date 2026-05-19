@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ListPage } from "../components/ListPage";
 import { SCENE_CRITERIA } from "../components/FilterDialog";
+import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 import { customFieldDefinitionsQueryKey } from "../hooks/useCustomFieldDefinitions";
 import { RouteRegistryProvider } from "../router/RouteRegistry";
 
@@ -187,6 +188,79 @@ describe("ListPage active filter chips", () => {
     });
 
     expect(screen.getByRole("slider")).toHaveValue("2");
+  });
+
+  it("allows the global images card-size slider to grow larger than the default max", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouteRegistryProvider>
+          <ListPage
+            title="Images"
+            pageKey="images"
+            filterMode="images"
+            filter={{ page: 1, perPage: 40 }}
+            onFilterChange={vi.fn()}
+            totalCount={0}
+            isLoading={false}
+            displayMode="grid"
+          >
+            <div>content</div>
+          </ListPage>
+        </RouteRegistryProvider>
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByRole("slider")).toHaveAttribute("max", "8");
+  });
+
+  it("keeps gallery card sizes on the same width scale as image cards", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouteRegistryProvider>
+          <ListPage
+            title="Galleries"
+            pageKey="galleries"
+            filterMode="galleries"
+            filter={{ page: 1, perPage: 40 }}
+            onFilterChange={vi.fn()}
+            totalCount={0}
+            isLoading={false}
+            displayMode="grid"
+          >
+            <div>content</div>
+          </ListPage>
+        </RouteRegistryProvider>
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByRole("slider")).toHaveAttribute("max", "8");
+    expect(getEntityCardMinWidthPx("images", 0)).toBe(225);
+    expect(getEntityCardMinWidthPx("galleries", 0)).toBe(225);
+    expect(getEntityCardMinWidthPx("images", 8)).toBe(625);
+    expect(getEntityCardMinWidthPx("galleries", 8)).toBe(625);
+    expect(getEntityCardMinWidthPx("images", 1)).toBe(getEntityCardMinWidthPx("galleries", 1));
+  });
+
+  it("uses the same 225-625 global width scale for other entities", () => {
+    expect(getEntityCardMinWidthPx("scenes", 0)).toBe(225);
+    expect(getEntityCardMinWidthPx("performers", 8)).toBe(625);
+    expect(getEntityCardMinWidthPx("audios", 8)).toBe(625);
   });
 
   it("preserves the random seed when toggling list sort direction", async () => {

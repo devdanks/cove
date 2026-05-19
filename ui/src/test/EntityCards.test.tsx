@@ -7,7 +7,7 @@ vi.mock("../components/Rating", () => ({
   RatingBadge: () => null,
 }));
 
-import { PerformerTile, SceneCard, SceneCardPopovers } from "../components/EntityCards";
+import { GalleryTile, PerformerTile, SceneCard, SceneCardPopovers } from "../components/EntityCards";
 import { DetailsTab, FileInfoTab } from "../pages/SceneDetailPage";
 
 const sceneFile = {
@@ -43,6 +43,29 @@ const baseScene = {
   details: null,
   date: null,
   playCount: 0,
+};
+
+const baseGallery = {
+  id: 7,
+  title: "Sample Gallery",
+  date: null,
+  details: null,
+  photographer: null,
+  organized: false,
+  coverPath: undefined,
+  studioId: null,
+  studioName: null,
+  urls: [],
+  tags: [],
+  performers: [],
+  imageCount: 12,
+  sceneCount: 3,
+  sceneIds: [],
+  folderPath: null,
+  files: [],
+  customFields: undefined,
+  createdAt: "2024-01-11T00:00:00Z",
+  updatedAt: "2024-01-12T00:00:00Z",
 };
 
 function renderWithQueryClient(ui: React.ReactElement) {
@@ -205,6 +228,36 @@ describe("PerformerTile", () => {
 
     expect(screen.getByRole("link", { name: /Open performer No Photo Performer/i })).toHaveAttribute("href", "/performer/7");
     expect(container.querySelector("img")).not.toBeInTheDocument();
+  });
+});
+
+describe("GalleryTile", () => {
+  it("shows image and scene counts once in the footer popovers", () => {
+    const { container } = render(<GalleryTile gallery={baseGallery as any} onClick={vi.fn()} />);
+
+    const imagesButton = screen.getByTitle("Images");
+    const scenesButton = screen.getByTitle("Scenes");
+
+    expect(imagesButton).toHaveTextContent("12");
+    expect(imagesButton.querySelector("svg")).toBeInTheDocument();
+    expect(scenesButton).toHaveTextContent("3");
+    expect(scenesButton.querySelector("svg")).toBeInTheDocument();
+    expect(screen.queryByLabelText("12 images")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("3 scenes")).not.toBeInTheDocument();
+    expect(container.querySelector(".card-body")).not.toHaveTextContent("12 images");
+  });
+
+  it("uses a square media frame so gallery cards match image-card dimensions", () => {
+    const { container } = render(<GalleryTile gallery={baseGallery as any} onClick={vi.fn()} />);
+
+    expect(container.querySelector(".aspect-square")).toBeInTheDocument();
+    expect(container.querySelector(".aspect-video")).not.toBeInTheDocument();
+  });
+
+  it("uses the effective gallery cover endpoint when no explicit cover path is present", () => {
+    const { container } = render(<GalleryTile gallery={baseGallery as any} onClick={vi.fn()} />);
+
+    expect((container.querySelector("img") as HTMLImageElement | null)?.getAttribute("src")).toContain("/api/galleries/7/cover");
   });
 });
 

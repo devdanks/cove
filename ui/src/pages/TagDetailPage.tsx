@@ -28,6 +28,7 @@ import { useDetailListSelection } from "../hooks/useDetailListSelection";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 import { withRequiredMultiId } from "../utils/detailRelationFilters";
+import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 
 const PERFORMER_SORT = PERFORMER_SORT_OPTIONS;
 const IMAGE_SORT = [
@@ -543,8 +544,8 @@ function TagScenesPanel({ tagId, filter, setFilter, onNavigate }: {
       <VirtualizedEntityGrid
         items={items}
         getItemKey={(scene) => scene.id}
-        minCardWidth={`${220 + zoomLevel * 50}px`}
-        virtualMinColumnWidth={220 + zoomLevel * 50}
+        minCardWidth={`${getEntityCardMinWidthPx("scenes", zoomLevel)}px`}
+        virtualMinColumnWidth={getEntityCardMinWidthPx("scenes", zoomLevel)}
         estimateRowHeight={320}
         infinitePageSize={infinitePageSize}
         hasNextPage={infiniteQuery.hasNextPage}
@@ -584,7 +585,7 @@ function TagPerformersPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(performer) => performer.id} minCardWidth={`${180 + zoomLevel * 50}px`} virtualMinColumnWidth={180 + zoomLevel * 50} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(performer) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(performer) => performer.id} minCardWidth={`${getEntityCardMinWidthPx("performers", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("performers", zoomLevel)} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(performer) => (
         <PerformerTile performer={performer} onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })} selected={selectedIds.has(performer.id)} onSelect={() => toggle(performer.id)} selecting={selecting} />
       )} />
     </>
@@ -615,7 +616,7 @@ function TagImagesPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(image) => image.id} minCardWidth={`${160 + zoomLevel * 50}px`} virtualMinColumnWidth={160 + zoomLevel * 50} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(image) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(image) => image.id} minCardWidth={`${getEntityCardMinWidthPx("images", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("images", zoomLevel)} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(image) => (
         <ImageTile image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
       )} />
       {quickViewId !== null && (
@@ -648,7 +649,7 @@ function TagGalleriesPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(gallery) => gallery.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(gallery) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(gallery) => gallery.id} minCardWidth={`${getEntityCardMinWidthPx("galleries", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("galleries", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(gallery) => (
         <GalleryTile gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
       )} />
     </>
@@ -683,7 +684,7 @@ function TagAudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(audio) => audio.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(audio) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(audio) => audio.id} minCardWidth={`${getEntityCardMinWidthPx("audios", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("audios", zoomLevel)} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(audio) => (
         <AudioTile audio={audio} onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })} onNavigate={onNavigate} selected={selectedIds.has(audio.id)} onSelect={() => toggle(audio.id)} selecting={selecting} />
       )} />
     </>
@@ -718,7 +719,7 @@ function TagTextsPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(text) => text.id} minCardWidth={`${220 + zoomLevel * 50}px`} virtualMinColumnWidth={220 + zoomLevel * 50} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(text) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(text) => text.id} minCardWidth={`${getEntityCardMinWidthPx("texts", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("texts", zoomLevel)} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(text) => (
         <TextTile text={text} onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })} onNavigate={onNavigate} selected={selectedIds.has(text.id)} onSelect={() => toggle(text.id)} selecting={selecting} />
       )} />
     </>
@@ -747,7 +748,7 @@ function TagSegmentsPanel({ tagId, filter, setFilter, onNavigate }: { tagId: num
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(segment) => segment.id} minCardWidth="220px" virtualMinColumnWidth={220} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(segment) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(segment) => segment.id} minCardWidth={`${getEntityCardMinWidthPx("segments", 1)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("segments", 1)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(segment) => (
         <SegmentTile segment={segment} onClick={() => onNavigate({ page: "segment", id: segment.id })} />
       )} />
     </>
@@ -777,7 +778,7 @@ function TagStudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(studio) => studio.id} minCardWidth={`${200 + zoomLevel * 50}px`} virtualMinColumnWidth={200 + zoomLevel * 50} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(studio) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(studio) => studio.id} minCardWidth={`${getEntityCardMinWidthPx("studios", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("studios", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(studio) => (
         <StudioTile studio={studio} onClick={() => selecting ? toggle(studio.id) : onNavigate({ page: "studio", id: studio.id })} selected={selectedIds.has(studio.id)} onSelect={() => toggle(studio.id)} selecting={selecting} />
       )} />
     </>
@@ -807,7 +808,7 @@ function TagGroupsPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(group) => group.id} minCardWidth={`${200 + zoomLevel * 50}px`} virtualMinColumnWidth={200 + zoomLevel * 50} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(group) => (
+      <VirtualizedEntityGrid items={items} getItemKey={(group) => group.id} minCardWidth={`${getEntityCardMinWidthPx("groups", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("groups", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(group) => (
         <GroupTile group={group} onClick={() => selecting ? toggle(group.id) : onNavigate({ page: "group", id: group.id })} selected={selectedIds.has(group.id)} onSelect={() => toggle(group.id)} selecting={selecting} />
       )} />
     </>

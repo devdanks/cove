@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WallMediaCard } from "../components/WallMediaCard";
 
@@ -125,5 +125,75 @@ describe("WallMediaCard", () => {
 
     await waitFor(() => expect(container.querySelector("video")).toBeInTheDocument());
     await waitFor(() => expect(play).toHaveBeenCalled());
+  });
+
+  it("renders custom video controls after a feed video is available", async () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private readonly callback: IntersectionObserverCallback;
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          this.callback([{ isIntersecting: true, intersectionRatio: 1, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+        }
+
+        disconnect() {}
+      },
+    );
+
+    render(
+      <WallMediaCard
+        title="Available preview"
+        imageSrc="/image.jpg"
+        videoSrc="/preview.mp4"
+        useVideo
+        videoControls={() => <div>Custom feed controls</div>}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Custom feed controls")).toBeInTheDocument());
+  });
+
+  it("updates custom video controls with playback state", async () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private readonly callback: IntersectionObserverCallback;
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          this.callback([{ isIntersecting: true, intersectionRatio: 1, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+        }
+
+        disconnect() {}
+      },
+    );
+
+    const { container } = render(
+      <WallMediaCard
+        title="Available preview"
+        imageSrc="/image.jpg"
+        videoSrc="/preview.mp4"
+        useVideo
+        videoControls={(controls) => <div>{controls.isPlaying ? "Preview playing" : "Preview paused"}</div>}
+      />,
+    );
+
+    await waitFor(() => expect(container.querySelector("video")).toBeInTheDocument());
+    const video = container.querySelector("video")!;
+    expect(screen.getByText("Preview paused")).toBeInTheDocument();
+
+    fireEvent.play(video);
+    expect(screen.getByText("Preview playing")).toBeInTheDocument();
+
+    fireEvent.pause(video);
+    expect(screen.getByText("Preview paused")).toBeInTheDocument();
   });
 });
