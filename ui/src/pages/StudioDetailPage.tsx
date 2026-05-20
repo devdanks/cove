@@ -263,7 +263,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         onFavoriteToggle={canEngageStudio ? () => setStudioFavorite(!studioFavorite) : undefined}
         organized={studio.organized}
         organizedPending={updateMut.isPending}
-        onOrganizedToggle={canWriteStudio ? () => updateMut.mutate({ organized: !studio.organized }) : undefined}
+        onOrganizedToggle={canWriteStudio ? (organized) => updateMut.mutate({ organized }) : undefined}
         counts={[
           { key: "scenes", label: "Scenes", value: studio.sceneCount, icon: <Film className="h-4 w-4" /> },
           { key: "performers", label: "Performers", value: studio.performerCount, icon: <UserRound className="h-4 w-4" /> },

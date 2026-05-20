@@ -291,7 +291,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         onFavoriteToggle={canEngageGallery ? () => setGalleryFavorite(!galleryFavorite) : undefined}
         organized={gallery.organized}
         organizedPending={galleryUpdateMut.isPending}
-        onOrganizedToggle={canWriteGallery ? () => galleryUpdateMut.mutate({ organized: !gallery.organized }) : undefined}
+        onOrganizedToggle={canWriteGallery ? (organized) => galleryUpdateMut.mutate({ organized }) : undefined}
         aliases={
           <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             {gallery.date ? <span>{formatDate(gallery.date)}</span> : null}

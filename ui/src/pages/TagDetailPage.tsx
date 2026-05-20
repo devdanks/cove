@@ -243,7 +243,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         onFavoriteToggle={canEngageTag ? () => setTagFavorite(!tagFavorite) : undefined}
         organized={tag.organized}
         organizedPending={updateMut.isPending}
-        onOrganizedToggle={canWriteTag ? () => updateMut.mutate({ organized: !tag.organized }) : undefined}
+        onOrganizedToggle={canWriteTag ? (organized) => updateMut.mutate({ organized }) : undefined}
         counts={[
           { key: "scenes", label: "Scenes", value: tag.sceneCount, icon: <Film className="h-4 w-4" /> },
           { key: "performers", label: "Performers", value: tag.performerCount, icon: <UserRound className="h-4 w-4" /> },

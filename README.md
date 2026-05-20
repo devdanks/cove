@@ -30,6 +30,41 @@ Download the latest release from [Releases](../../releases) and run it. On first
 
 Or run from source (see [Development](#development) below).
 
+### Native local instances
+
+Native Cove stores its mutable app data under `%LOCALAPPDATA%\cove` by default. Each instance gets its own config file, generated assets, cache, extensions, FFmpeg install, managed PostgreSQL files, and backups. Relative `GeneratedPath` and `CachePath` values are resolved under that instance data root, not the directory Cove was launched from.
+
+Native release packages include a separate `Cove.InstanceManager` executable. It starts a small token-protected local web UI on a random localhost port by default, keeps its registry outside individual instances, and launches Cove with isolated `COVE_HOME`, app port, and managed PostgreSQL port settings. Docker deployments do not include or need this manager.
+
+```powershell
+# Opens the manager UI on a random localhost port.
+Cove.InstanceManager
+
+# Use a fixed manager port, or bind to the LAN if you deliberately want local-network access.
+Cove.InstanceManager --port 8787
+Cove.InstanceManager --lan
+```
+
+The manager can select, create, start, stop, open, remove, and view logs for local native instances. The default `%LOCALAPPDATA%\cove` instance is auto-registered. New instances get free Cove and managed PostgreSQL ports automatically.
+
+The low-level isolation primitive remains `COVE_HOME`, so developers can still run multiple native instances manually when needed. Each simultaneous instance needs distinct app and PostgreSQL ports.
+
+```powershell
+# Instance A
+$env:COVE_HOME = "C:\Cove\instances\main"
+$env:COVE__Port = "9999"
+$env:COVE__Postgres__Port = "5433"
+dotnet run --project src/Cove.Api
+
+# Instance B, in another terminal
+$env:COVE_HOME = "C:\Cove\instances\sandbox"
+$env:COVE__Port = "10000"
+$env:COVE__Postgres__Port = "5434"
+dotnet run --project src/Cove.Api
+```
+
+Use `COVE__Postgres__ConnectionString` instead of `COVE__Postgres__Port` when pointing an instance at an external PostgreSQL database.
+
 ## Prerequisites (development only)
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
@@ -44,6 +79,7 @@ FFmpeg is auto-downloaded if not on PATH.
 src/                            # .NET backend
 ├── Cove.slnx                   # Solution file
 ├── Cove.Api/                   # ASP.NET Core web API + SignalR
+├── Cove.InstanceManager/       # Native-only local instance manager UI
 ├── Cove.Core/                  # Domain models, interfaces, DTOs
 ├── Cove.Data/                  # EF Core + PostgreSQL, migrations
 ├── Cove.Plugins/               # Extension system
@@ -105,15 +141,18 @@ cd ui && npm ci && npm run build && cd ..
 
 # Windows x64
 dotnet publish src/Cove.Api/Cove.Api.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish/win-x64
+dotnet publish src/Cove.InstanceManager/Cove.InstanceManager.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish/win-x64
 
 # Linux x64
 dotnet publish src/Cove.Api/Cove.Api.csproj -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
+dotnet publish src/Cove.InstanceManager/Cove.InstanceManager.csproj -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 
 # macOS ARM64
 dotnet publish src/Cove.Api/Cove.Api.csproj -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -o publish/osx-arm64
+dotnet publish src/Cove.InstanceManager/Cove.InstanceManager.csproj -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -o publish/osx-arm64
 ```
 
-Each produces a single executable (~50-80MB) with the .NET runtime, backend, and frontend bundled. Users just download and run — no .NET SDK or Node.js required.
+Each API publish produces a single Cove executable with the .NET runtime, backend, and frontend bundled. The native instance manager is a second executable in the same release folder. Users just download and run; no .NET SDK or Node.js required.
 
 ### Docker images
 

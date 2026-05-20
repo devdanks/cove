@@ -57,7 +57,7 @@ export function TagGroupsManager({ title = "Tag Groups", description = "Organize
         {description ? <p className="mt-1 text-sm text-secondary">{description}</p> : null}
       </div>
       {canWrite ? (
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(9rem,1fr)_minmax(13rem,1.6fr)_minmax(7rem,7rem)_minmax(4.75rem,4.75rem)_auto] lg:items-end">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(8rem,1fr)_minmax(12rem,1.5fr)_8.25rem_4.5rem] lg:items-end">
           <TagGroupTextField label="Name" value={draft.name} onChange={(value) => setDraft((current) => ({ ...current, name: value }))} />
           <TagGroupTextField label="Description" value={draft.description} onChange={(value) => setDraft((current) => ({ ...current, description: value }))} />
           <label className="block text-sm">
@@ -67,18 +67,18 @@ export function TagGroupsManager({ title = "Tag Groups", description = "Organize
                 type="color"
                 value={/^#[0-9a-fA-F]{6}$/.test(draft.color) ? draft.color : "#6ee7b7"}
                 onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))}
-                className="h-9 w-10 rounded border border-border bg-card p-1"
+                className="h-9 w-12 flex-none rounded border border-border bg-card p-1"
               />
               <input
                 type="text"
                 value={draft.color}
                 onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))}
-                className="w-[6.5rem] min-w-0 flex-none rounded-lg border border-border bg-card px-2 py-2 text-sm text-foreground outline-none focus:border-accent"
+                className="w-[4.75rem] min-w-0 flex-none rounded-lg border border-border bg-card px-2 py-2 text-sm text-foreground outline-none focus:border-accent"
               />
             </div>
           </label>
           <TagGroupNumberField label="Order" value={draft.sortOrder} onChange={(value) => setDraft((current) => ({ ...current, sortOrder: value }))} />
-          <div className="flex flex-wrap gap-2 sm:col-span-2 lg:col-span-1 lg:flex-nowrap">
+          <div className="flex flex-wrap gap-2 sm:col-span-2 lg:col-span-4 lg:justify-end">
             <button
               type="button"
               onClick={() => saveMutation.mutate()}

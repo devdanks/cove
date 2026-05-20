@@ -81,6 +81,18 @@ jobs:
           -p:DebugSymbols=false
           -o publish/
 
+      - name: Publish native instance manager
+        run: >
+          dotnet publish src/Cove.InstanceManager/Cove.InstanceManager.csproj
+          -c Release
+          -r ${{ matrix.rid }}
+          --self-contained
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          -o publish/
+
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

@@ -35,7 +35,7 @@ export interface EntityHeroLayoutProps {
   onFavoriteToggle?: () => void;
   organized?: boolean;
   organizedPending?: boolean;
-  onOrganizedToggle?: () => void;
+  onOrganizedToggle?: (organized: boolean) => void;
   titleActions?: ReactNode;
   heroContent?: ReactNode;
   actions?: ReactNode;
@@ -122,8 +122,9 @@ export function EntityHeroLayout({
       <button
         type="button"
         onClick={() => {
-          setOptimisticOrganized(!displayedOrganized);
-          onOrganizedToggle();
+          const nextOrganized = !displayedOrganized;
+          setOptimisticOrganized(nextOrganized);
+          onOrganizedToggle(nextOrganized);
         }}
         disabled={organizedPending}
         aria-pressed={displayedOrganized}
