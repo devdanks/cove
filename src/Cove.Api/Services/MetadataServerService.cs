@@ -385,36 +385,64 @@ query Me {
         return results;
     }
 
-    public async Task<bool> MergeStudioAsync(Studio studio, string endpoint, string studioId, CancellationToken ct, bool createParentStudios = true)
+    public Task<bool> MergeStudioAsync(Studio studio, string endpoint, string studioId, CancellationToken ct, bool createParentStudios = true)
+        => MergeStudioAsync(studio, endpoint, studioId, null, ct, createParentStudios);
+
+    public async Task<bool> MergeStudioAsync(Studio studio, string endpoint, string studioId, MetadataServerStudioImportRequestDto? importConfig, CancellationToken ct, bool createParentStudios = true)
     {
         var box = ResolveBox(endpoint);
         var remote = await GetRemoteStudioAsync(box, studioId: studioId, studioName: null, ct);
         if (remote == null)
             return false;
 
-        studio.Name = remote.Name.Trim();
-        MergeAliases(studio, remote.Aliases);
-        MergeUrls(studio, remote.Urls.Select(u => u.Url));
+        var fieldStrategies = importConfig?.FieldStrategies ?? [];
+        var aliasMode = GetImportStrategy(fieldStrategies, "aliases", defaultStrategy: "merge");
+        var urlMode = GetImportStrategy(fieldStrategies, "urls", defaultStrategy: "merge");
+        var parentMode = GetImportStrategy(fieldStrategies, "parent", defaultStrategy: "merge");
+
+        if (!IsIgnoredImportStrategy(GetImportStrategy(fieldStrategies, "name", defaultStrategy: "overwrite")))
+            studio.Name = remote.Name.Trim();
+
+        if (IsReplaceImportStrategy(aliasMode))
+            ReplaceStudioAliases(studio, remote.Aliases);
+        else if (!IsIgnoredImportStrategy(aliasMode))
+            MergeAliases(studio, remote.Aliases);
+
+        var remoteUrls = remote.Urls.Select(u => u.Url).ToList();
+        if (IsReplaceImportStrategy(urlMode))
+            ReplaceStudioUrls(studio, remoteUrls);
+        else if (!IsIgnoredImportStrategy(urlMode))
+            MergeUrls(studio, remoteUrls);
+
         UpsertRemoteId(studio.RemoteIds, box.Endpoint, remote.Id, id => id.Endpoint, id => id.RemoteId, (id, value) => id.RemoteId = value, value => new StudioRemoteId { Endpoint = box.Endpoint, RemoteId = value });
-        await DownloadStudioImageAsync(studio, remote, ct);
+        if (!IsIgnoredImportStrategy(GetImportStrategy(fieldStrategies, "image", defaultStrategy: "overwrite")))
+            await DownloadStudioImageAsync(studio, remote, ct);
 
         // Resolve parent studio
-        if (createParentStudios && remote.Parent != null && studio.ParentId == null)
+        if (createParentStudios && !IsIgnoredImportStrategy(parentMode) && (remote.Parent != null || IsReplaceImportStrategy(parentMode)))
         {
-            var parent = await _db.Studios
-                .Include(s => s.RemoteIds)
-                .FirstOrDefaultAsync(s => s.RemoteIds.Any(id => id.Endpoint == box.Endpoint && id.RemoteId == remote.Parent.Id), ct)
-                ?? await _db.Studios
-                    .Include(s => s.RemoteIds)
-                    .FirstOrDefaultAsync(s => s.Name == remote.Parent.Name, ct);
-
-            if (parent == null)
+            if (remote.Parent == null)
             {
-                parent = new Studio { Name = remote.Parent.Name };
-                parent.RemoteIds.Add(new StudioRemoteId { Endpoint = box.Endpoint, RemoteId = remote.Parent.Id });
-                _db.Studios.Add(parent);
+                studio.ParentId = null;
+                studio.Parent = null;
             }
-            studio.Parent = parent;
+            else if (IsReplaceImportStrategy(parentMode) || studio.ParentId == null)
+            {
+                var parent = await _db.Studios
+                    .Include(s => s.RemoteIds)
+                    .FirstOrDefaultAsync(s => s.RemoteIds.Any(id => id.Endpoint == box.Endpoint && id.RemoteId == remote.Parent.Id), ct)
+                    ?? await _db.Studios
+                        .Include(s => s.RemoteIds)
+                        .FirstOrDefaultAsync(s => s.Name == remote.Parent.Name, ct);
+
+                if (parent == null)
+                {
+                    parent = new Studio { Name = remote.Parent.Name };
+                    parent.RemoteIds.Add(new StudioRemoteId { Endpoint = box.Endpoint, RemoteId = remote.Parent.Id });
+                    _db.Studios.Add(parent);
+                }
+                studio.Parent = parent;
+            }
         }
 
         return true;
@@ -744,6 +772,19 @@ query Me {
             .ToHashSet(StringComparer.OrdinalIgnoreCase)
             ?? [];
     }
+
+    private static string GetImportStrategy(IReadOnlyDictionary<string, string> fieldStrategies, string field, string defaultStrategy)
+    {
+        return fieldStrategies.TryGetValue(field, out var strategy) && !string.IsNullOrWhiteSpace(strategy)
+            ? strategy.Trim().ToLowerInvariant()
+            : defaultStrategy;
+    }
+
+    private static bool IsIgnoredImportStrategy(string strategy)
+        => strategy is "ignore" or "skip" or "keep";
+
+    private static bool IsReplaceImportStrategy(string strategy)
+        => strategy is "replace" or "overwrite";
 
     private static string NormalizeFieldName(string value)
     {

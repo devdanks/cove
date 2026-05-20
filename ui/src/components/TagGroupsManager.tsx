@@ -57,7 +57,7 @@ export function TagGroupsManager({ title = "Tag Groups", description = "Organize
         {description ? <p className="mt-1 text-sm text-secondary">{description}</p> : null}
       </div>
       {canWrite ? (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto_auto_auto] lg:items-end">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(9rem,1fr)_minmax(13rem,1.6fr)_minmax(7rem,7rem)_minmax(4.75rem,4.75rem)_auto] lg:items-end">
           <TagGroupTextField label="Name" value={draft.name} onChange={(value) => setDraft((current) => ({ ...current, name: value }))} />
           <TagGroupTextField label="Description" value={draft.description} onChange={(value) => setDraft((current) => ({ ...current, description: value }))} />
           <label className="block text-sm">
@@ -67,18 +67,18 @@ export function TagGroupsManager({ title = "Tag Groups", description = "Organize
                 type="color"
                 value={/^#[0-9a-fA-F]{6}$/.test(draft.color) ? draft.color : "#6ee7b7"}
                 onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))}
-                className="h-9 w-11 rounded border border-border bg-card p-1"
+                className="h-9 w-10 rounded border border-border bg-card p-1"
               />
               <input
                 type="text"
                 value={draft.color}
                 onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))}
-                className="w-28 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+                className="w-[6.5rem] min-w-0 flex-none rounded-lg border border-border bg-card px-2 py-2 text-sm text-foreground outline-none focus:border-accent"
               />
             </div>
           </label>
-          <TagGroupTextField label="Sort" value={draft.sortOrder?.toString() ?? ""} onChange={(value) => setDraft((current) => ({ ...current, sortOrder: value ? Number(value) : undefined }))} />
-          <div className="flex gap-2">
+          <TagGroupNumberField label="Order" value={draft.sortOrder} onChange={(value) => setDraft((current) => ({ ...current, sortOrder: value }))} />
+          <div className="flex flex-wrap gap-2 sm:col-span-2 lg:col-span-1 lg:flex-nowrap">
             <button
               type="button"
               onClick={() => saveMutation.mutate()}
@@ -142,6 +142,20 @@ function TagGroupTextField({ label, value, onChange }: { label: string; value: s
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        className="w-full min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+      />
+    </label>
+  );
+}
+
+function TagGroupNumberField({ label, value, onChange }: { label: string; value?: number; onChange: (value: number | undefined) => void }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
+      <input
+        type="number"
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))}
         className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
       />
     </label>

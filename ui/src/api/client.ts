@@ -456,6 +456,8 @@ export const segmentLibrary = {
   }) =>
     request<PaginatedResponse<SegmentRecord>>(`/segments${buildQuery(undefined, opts)}`),
   get: (id: number) => requestOptional<SegmentRecord>(`/segments/${id}`),
+  removeTag: (data: { tagId: number; ids: number[] }) =>
+    request<{ count: number }>("/segments/bulk/remove-tag", { method: "POST", body: JSON.stringify(data) }),
   distinctSourceKeys: () => request<{ value: string; count: number }[]>("/segments/source-keys/distinct"),
   distinctKinds: () => request<{ value: string; count: number }[]>("/segments/kinds/distinct"),
 };
@@ -700,8 +702,8 @@ export const galleries = {
   getCoverImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/galleries/${id}/image`, version, max),
   deleteCoverImage: (id: number) => request<void>(`/galleries/${id}/image`, { method: "DELETE" }),
   setCover: (id: number, imageId: number) =>
-    request<void>(`/entity-images/galleries/${id}/cover`, { method: "PUT", body: JSON.stringify({ imageId }) }),
-  resetCover: (id: number) => request<void>(`/entity-images/galleries/${id}/cover`, { method: "DELETE" }),
+    request<void>(`/galleries/${id}/cover`, { method: "PUT", body: JSON.stringify({ imageId }) }),
+  resetCover: (id: number) => request<void>(`/galleries/${id}/cover`, { method: "DELETE" }),
 };
 
 // ===== Images =====
@@ -869,6 +871,8 @@ export const entityImages = {
   performerImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/performers/${id}/image`, version, max),
   uploadPerformerImage: (id: number, file: File) => uploadImage(`/performers/${id}/image`, file),
   deletePerformerImage: (id: number) => deleteImage(`/performers/${id}/image`),
+  setPerformerImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+    request<void>(`/performers/${id}/image/source`, { method: "PUT", body: JSON.stringify(source) }),
 
   audioImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/audios/${id}/image`, version, max),
   uploadAudioImage: (id: number, file: File) => uploadImage(`/audios/${id}/image`, file),
@@ -881,18 +885,27 @@ export const entityImages = {
   studioImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/studios/${id}/image`, version, max),
   uploadStudioImage: (id: number, file: File) => uploadImage(`/studios/${id}/image`, file),
   deleteStudioImage: (id: number) => deleteImage(`/studios/${id}/image`),
+  setStudioImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+    request<void>(`/studios/${id}/image/source`, { method: "PUT", body: JSON.stringify(source) }),
 
   tagImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/tags/${id}/image`, version, max),
   uploadTagImage: (id: number, file: File) => uploadImage(`/tags/${id}/image`, file),
   deleteTagImage: (id: number) => deleteImage(`/tags/${id}/image`),
+  setTagImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+    request<void>(`/tags/${id}/image/source`, { method: "PUT", body: JSON.stringify(source) }),
 
   groupFrontImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/groups/${id}/image/front`, version, max),
   uploadGroupFrontImage: (id: number, file: File) => uploadImage(`/groups/${id}/image/front`, file),
   deleteGroupFrontImage: (id: number) => deleteImage(`/groups/${id}/image/front`),
+  setGroupFrontImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+    request<void>(`/groups/${id}/image/front/source`, { method: "PUT", body: JSON.stringify(source) }),
 
   groupBackImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/groups/${id}/image/back`, version, max),
   uploadGroupBackImage: (id: number, file: File) => uploadImage(`/groups/${id}/image/back`, file),
   deleteGroupBackImage: (id: number) => deleteImage(`/groups/${id}/image/back`),
+
+  setGalleryImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+    request<void>(`/galleries/${id}/image/source`, { method: "PUT", body: JSON.stringify(source) }),
 };
 
 // ===== System =====

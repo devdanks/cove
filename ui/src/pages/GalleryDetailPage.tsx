@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, images, scenes, fileOps } from "../api/client";
-import type { FindFilter, Image, ImageFilterCriteria, Scene, SceneFilterCriteria } from "../api/types";
+import type { FindFilter, Gallery, Image, ImageFilterCriteria, Scene, SceneFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
 import { Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +14,7 @@ import { DetailListToolbar } from "../components/DetailListToolbar";
 import { IMAGE_CRITERIA, SCENE_CRITERIA } from "../components/FilterDialog";
 import { SceneCard, ImageTile, PerformerTile } from "../components/EntityCards";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { QuickViewDialog } from "../components/QuickViewDialog";
@@ -72,6 +73,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [showAddImages, setShowAddImages] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "galleries" }, onNavigate);
@@ -174,6 +176,16 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
 
   const galleryUpdateMut = useMutation({
     mutationFn: (data: { organized?: boolean }) => galleries.update(id, data),
+    onMutate: async (data) => {
+      if (data.organized === undefined) return undefined;
+      await queryClient.cancelQueries({ queryKey: ["gallery", id] });
+      const previous = queryClient.getQueryData<Gallery>(["gallery", id]);
+      queryClient.setQueryData<Gallery>(["gallery", id], (current) => current ? { ...current, organized: data.organized! } : current);
+      return { previous };
+    },
+    onError: (_error, _data, context) => {
+      if (context?.previous) queryClient.setQueryData(["gallery", id], context.previous);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gallery", id] });
       queryClient.invalidateQueries({ queryKey: ["galleries"] });
@@ -244,6 +256,19 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   return (
     <div className="min-h-screen">
       <GalleryEditModal gallery={gallery} open={editing} onClose={() => setEditing(false)} />
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Gallery Cover"
+        currentImageUrl={gallery.coverPath}
+        onUpload={(file) => galleries.uploadCoverImage(gallery.id, file)}
+        onDelete={() => galleries.deleteCoverImage(gallery.id)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["gallery", gallery.id] });
+          queryClient.invalidateQueries({ queryKey: ["galleries"] });
+        }}
+        aspectRatio="2/3"
+      />
       <ConfirmDialog
         open={confirmDelete}
         title="Delete Gallery"
@@ -257,6 +282,8 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         onGoBack={goBack}
         imageUrl={gallery.coverPath}
         imageAlt={gallery.title || "Gallery cover"}
+        imageContainerClassName="relative flex h-96 w-72 max-w-full flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/35 md:h-[34rem] md:w-[25rem]"
+        onImageClick={canWriteGallery ? () => setCoverOpen(true) : undefined}
         imageFallback={<ImageIcon className="h-14 w-14" />}
         title={gallery.title || "Untitled Gallery"}
         favorite={galleryFavorite}
@@ -288,9 +315,15 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         metaRow={
           <>
             <span title={`Created ${formatDate(gallery.createdAt)}`}>Updated {formatDate(gallery.updatedAt)}</span>
-            <InteractiveRating value={galleryRating} onChange={(value) => setGalleryRating(value)} readOnly={!canEngageGallery} />
           </>
         }
+        heroContent={(
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <div className="shrink-0">
+              <InteractiveRating value={galleryRating} onChange={(value) => setGalleryRating(value)} readOnly={!canEngageGallery} />
+            </div>
+          </div>
+        )}
         actions={
           <>
             <ExtensionSlot slot="gallery-detail-actions" context={{ gallery, onNavigate }} />

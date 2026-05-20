@@ -34,9 +34,7 @@ public class FfmpegManagerService(CoveConfiguration config, ILogger<FfmpegManage
     // build and we re-download to get the shared libraries.
     private const string SharedMarker = "_cove_shared";
 
-    private static string ManagedDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "cove", "ffmpeg");
+    private static string ManagedDir => CoveDefaultPaths.GetDataSubdirectory("ffmpeg");
 
     private static string FfmpegExe  => OperatingSystem.IsWindows() ? "ffmpeg.exe"  : "ffmpeg";
     private static string FfprobeExe => OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe";

@@ -5,7 +5,7 @@ import {
   Pencil, Plus, Trash2, Search, Eye, EyeOff, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
   Gauge, Clapperboard, FolderOpen, Layers, Clock, List,
-  RefreshCw, Camera, Image, Merge, Upload, ExternalLink, Download, X,
+  RefreshCw, Camera, Image, Merge, ExternalLink, Download, X,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -29,6 +29,7 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import { PerformerTile } from "../components/EntityCards";
 import { trackInteraction } from "../utils/interactionTracking";
 import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
@@ -185,8 +186,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const canDownloadScene = canRunJobs && canWriteScene;
   const seekRef = useRef<((time: number) => void) | null>(null);
   const opsMenuRef = useRef<HTMLDivElement>(null);
-  const coverFileInputRef = useRef<HTMLInputElement>(null);
   const [videoTime, setVideoTime] = useState(0);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [videoFilters, setVideoFilters] = useState({ brightness: 100, contrast: 100, gamma: 100, saturation: 100, hue: 0 });
   const {
     engagement: sceneEngagement,
@@ -290,32 +291,10 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     onSuccess: invalidateSceneCover,
   });
 
-  const uploadCoverImageMut = useMutation({
-    mutationFn: (file: File) => entityImages.uploadSceneCoverImage(id, file),
-    onSuccess: invalidateSceneCover,
-  });
-
-  const resetCoverImageMut = useMutation({
-    mutationFn: () => entityImages.deleteSceneCoverImage(id),
-    onSuccess: invalidateSceneCover,
-  });
-
-  const coverActionPending = setCoverFromCurrentFrameMut.isPending || uploadCoverImageMut.isPending || resetCoverImageMut.isPending;
+  const coverActionPending = setCoverFromCurrentFrameMut.isPending;
 
   const handleSetCoverFromCurrentFrame = () => {
     setCoverFromCurrentFrameMut.mutate(videoTime);
-  };
-
-  const handleResetCoverToDefault = () => {
-    resetCoverImageMut.mutate();
-  };
-
-  const handleCoverFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      uploadCoverImageMut.mutate(file);
-    }
-    event.target.value = "";
   };
 
   const { data: segments = [], isLoading: segmentsLoading } = useQuery({
@@ -567,9 +546,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             {canGenerateScene || canWriteScene ? <div className="my-1 border-t border-border" /> : null}
             <ExtensionEntityActions entityType="scene" entityId={scene.id} renderMode="menu" onInvoked={() => setShowOpsMenu(false)} />
             {canGenerateScene ? <button onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Clapperboard className="h-3.5 w-3.5" /> Generate…</button> : null}
-            {canWriteScene ? <button onClick={() => { handleSetCoverFromCurrentFrame(); setShowOpsMenu(false); }} disabled={coverActionPending || !file} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Camera className="h-3.5 w-3.5" /> Set Cover from Current Frame</button> : null}
-            {canWriteScene ? <button onClick={() => { coverFileInputRef.current?.click(); setShowOpsMenu(false); }} disabled={coverActionPending} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Upload className="h-3.5 w-3.5" /> Upload Cover Image…</button> : null}
-            {canWriteScene ? <button onClick={() => { handleResetCoverToDefault(); setShowOpsMenu(false); }} disabled={coverActionPending} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Image className="h-3.5 w-3.5" /> Use Default Cover</button> : null}
+            {canWriteScene ? <button onClick={() => { setCoverOpen(true); setShowOpsMenu(false); }} disabled={coverActionPending} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Image className="h-3.5 w-3.5" /> Set Cover…</button> : null}
             {canWriteScene ? <div className="my-1 border-t border-border" /> : null}
             {canWriteScene ? <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Merge className="h-3.5 w-3.5" /> Merge…</button> : null}
             {canDeleteScene ? <div className="my-1 border-t border-border" /> : null}
@@ -687,12 +664,26 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
 
   return (
     <>
-      <input
-        ref={coverFileInputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif"
-        className="hidden"
-        onChange={handleCoverFileChange}
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Scene Cover"
+        currentImageUrl={scenes.screenshotUrl(scene.id, scene.updatedAt)}
+        onUpload={(file) => entityImages.uploadSceneCoverImage(scene.id, file)}
+        onDelete={() => entityImages.deleteSceneCoverImage(scene.id)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={invalidateSceneCover}
+        aspectRatio="16/9"
+        extraActions={file ? (
+          <button
+            type="button"
+            onClick={() => { handleSetCoverFromCurrentFrame(); setCoverOpen(false); }}
+            disabled={coverActionPending}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
+          >
+            {coverActionPending ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-b-2 border-accent" /> : <Camera className="h-3.5 w-3.5" />}
+            From Current Frame
+          </button>
+        ) : null}
       />
       <Suspense fallback={null}>
         {showGenerate ? (

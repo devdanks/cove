@@ -114,10 +114,7 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
         // Remove the on-disk config so the setup wizard reappears on next launch.
         try
         {
-            var configPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "cove",
-                "cove-config.json");
+            var configPath = Path.Combine(CoveDefaultPaths.GetDataRoot(), "cove-config.json");
             if (System.IO.File.Exists(configPath))
                 System.IO.File.Delete(configPath);
         }

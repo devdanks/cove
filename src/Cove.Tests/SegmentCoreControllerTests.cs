@@ -637,6 +637,71 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
+    public async Task SegmentsController_RemoveTagFromSegmentsClearsOnlyMatchingRequestedSegments()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+
+        var scene = new Scene { Title = "Bulk Remove Scene" };
+        var tag = new Tag { Name = "Remove Me" };
+        var otherTag = new Tag { Name = "Keep Me" };
+        context.Scenes.Add(scene);
+        context.Tags.AddRange(tag, otherTag);
+        await context.SaveChangesAsync();
+
+        var targetSegment = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 1,
+            EndSec = 3,
+            TagId = tag.Id,
+            Kind = "highlight",
+            SourceKey = "user",
+        };
+        var unselectedSegment = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 4,
+            EndSec = 6,
+            TagId = tag.Id,
+            Kind = "highlight",
+            SourceKey = "user",
+        };
+        var differentTagSegment = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 7,
+            EndSec = 9,
+            TagId = otherTag.Id,
+            Kind = "highlight",
+            SourceKey = "user",
+        };
+        context.Segments.AddRange(targetSegment, unselectedSegment, differentTagSegment);
+        await context.SaveChangesAsync();
+
+        var controller = new SegmentsController(
+            context,
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>());
+
+        var result = await controller.RemoveTagFromSegments(new SegmentsController.SegmentTagBulkRemoveRequest(tag.Id, [targetSegment.Id, differentTagSegment.Id]), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var count = Assert.IsType<int>(ok.Value?.GetType().GetProperty("count")?.GetValue(ok.Value));
+        Assert.Equal(1, count);
+
+        await context.Entry(targetSegment).ReloadAsync();
+        await context.Entry(unselectedSegment).ReloadAsync();
+        await context.Entry(differentTagSegment).ReloadAsync();
+        Assert.Null(targetSegment.TagId);
+        Assert.Equal(tag.Id, unselectedSegment.TagId);
+        Assert.Equal(otherTag.Id, differentTagSegment.TagId);
+    }
+
+    [Fact]
     public async Task SegmentsController_ListsDistinctSourceKeysAndKinds()
     {
         await using var scope = await CreateContextAsync();

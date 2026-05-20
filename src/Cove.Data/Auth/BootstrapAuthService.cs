@@ -295,7 +295,7 @@ public sealed class BootstrapAuthService : IHostedService
             passwordHash = PasswordHasher.HashPassword(plain);
             try
             {
-                var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "cove");
+                var dataDir = CoveDefaultPaths.GetDataRoot();
                 Directory.CreateDirectory(dataDir);
                 var sentinel = Path.Combine(dataDir, "owner_password.txt");
                 await File.WriteAllTextAsync(sentinel,

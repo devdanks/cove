@@ -11,6 +11,7 @@ interface ImageInputProps {
   className?: string;
   aspectRatio?: string; // e.g. "2/3", "16/9", "1/1"
   objectFit?: "cover" | "contain";
+  deleteLabel?: string;
 }
 
 export function ImageInput({
@@ -22,6 +23,7 @@ export function ImageInput({
   className = "",
   aspectRatio = "2/3",
   objectFit = "cover",
+  deleteLabel = "Remove",
 }: ImageInputProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -197,7 +199,7 @@ export function ImageInput({
             className="flex items-center gap-1 px-2 py-1 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-400 rounded transition-colors disabled:opacity-50 ml-auto"
             title="Remove image"
           >
-            <X className="w-3 h-3" /> Remove
+            <X className="w-3 h-3" /> {deleteLabel}
           </button>
         )}
       </div>

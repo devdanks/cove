@@ -89,7 +89,7 @@ function EntityTileFrame({
           </div>
         </>
       ) : null}
-      {children ? <div className={`relative z-10 border-t border-border/50 ${extensionClassName}`}>{children}</div> : null}
+      {children ? <div className={`relative z-10 ${extensionClassName}`}>{children}</div> : null}
       {dragHandleProps ? (
         <span
           {...dragHandleProps}

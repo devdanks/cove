@@ -1,21 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, galleries, groups, images, metadata, performers, scenes, segmentLibrary, studios, tags, texts, entityImages } from "../api/client";
-import type { Audio, FindFilter, Gallery, Group, Image, MetadataServer, MetadataServerTagMatch, Performer, Scene, SceneFilterCriteria, SegmentRecord, Studio, TagDetail as TagDetailModel, TextDocument } from "../api/types";
+import type { Audio, FindFilter, Gallery, Group, Image, Performer, Scene, SceneFilterCriteria, SegmentRecord, Studio, TagDetail as TagDetailModel, TextDocument } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Building2, ChevronDown, CloudDownload, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Building2, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MoreVertical, Music, Pencil, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { TagEditModal } from "./TagEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailMergeDialog } from "../components/DetailMergeDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { AudioTile, SceneCard, PerformerTile, ImageTile, GalleryTile, StudioTile, GroupTile, SegmentTile, TextTile } from "../components/EntityCards";
 import { QuickViewDialog } from "../components/QuickViewDialog";
-import { useAppConfig } from "../state/AppConfigContext";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { SCENE_CRITERIA } from "../components/FilterDialog";
@@ -83,9 +83,7 @@ interface Props {
 type TabKey = "scenes" | "performers" | "images" | "galleries" | "audios" | "texts" | "segments" | "studios" | "groups" | (string & {});
 
 export function TagDetailPage({ id, onNavigate }: Props) {
-  const { config } = useAppConfig();
   const { hasPermission, user } = useAuth();
-  const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: tag, isLoading } = useQuery({
     queryKey: ["tag", id],
     queryFn: () => tags.get(id),
@@ -93,7 +91,10 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("scenes");
+  const opsMenuRef = useRef<HTMLDivElement | null>(null);
   const { allTabs: tagTabs, renderExtensionTab, extensionCounts } = useExtensionTabs("tag", [
     { key: "scenes", label: "Scenes", count: tag?.sceneCount },
     { key: "performers", label: "Performers", count: tag?.performerCount },
@@ -120,6 +121,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const canEngageTag = canReadEntity("tag", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeleteTag = canDeleteEntity("tag", hasPermission);
   const canAutoTagTag = hasPermission("library.autotag") && canWriteTag;
+  const showTagOpsMenu = canAutoTagTag || canWriteTag || canDeleteTag;
   const visibleTagTabs = filterItemsByPermission(tagTabs, {
     scenes: "scenes.read",
     performers: "performers.read",
@@ -161,11 +163,40 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     }
   }, [activeTab, visibleTagTabs]);
 
+  useEffect(() => {
+    if (!showOpsMenu) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (opsMenuRef.current && !opsMenuRef.current.contains(event.target as Node)) {
+        setShowOpsMenu(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [showOpsMenu]);
+
   const deleteMut = useMutation({
     mutationFn: () => tags.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
       goBack();
+    },
+  });
+
+  const updateMut = useMutation({
+    mutationFn: (data: { organized?: boolean }) => tags.update(id, data),
+    onMutate: async (data) => {
+      if (data.organized === undefined) return undefined;
+      await queryClient.cancelQueries({ queryKey: ["tag", id] });
+      const previous = queryClient.getQueryData<TagDetailModel>(["tag", id]);
+      queryClient.setQueryData<TagDetailModel>(["tag", id], (current) => current ? { ...current, organized: data.organized! } : current);
+      return { previous };
+    },
+    onError: (_error, _data, context) => {
+      if (context?.previous) queryClient.setQueryData(["tag", id], context.previous);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tag", id] });
+      queryClient.invalidateQueries({ queryKey: ["tags"] });
     },
   });
 
@@ -189,6 +220,10 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   }
 
   const tagImageUrl = tag.imagePath || entityImages.tagImageUrl(tag.id, tag.updatedAt);
+  const handleCoverChanged = () => {
+    queryClient.invalidateQueries({ queryKey: ["tag", tag.id] });
+    queryClient.invalidateQueries({ queryKey: ["tags"] });
+  };
 
   return (
     <>
@@ -198,6 +233,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         imageUrl={tagImageUrl}
         imageAlt={tag.name}
         imageClassName="h-full w-full object-contain p-3"
+        onImageClick={canWriteTag ? () => setCoverOpen(true) : undefined}
         imageFallback={<TagIcon className="h-14 w-14 text-accent" />}
         title={tag.name}
         sortName={tag.sortName && tag.sortName !== tag.name ? tag.sortName : undefined}
@@ -205,6 +241,9 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         description={tag.description}
         favorite={tagFavorite}
         onFavoriteToggle={canEngageTag ? () => setTagFavorite(!tagFavorite) : undefined}
+        organized={tag.organized}
+        organizedPending={updateMut.isPending}
+        onOrganizedToggle={canWriteTag ? () => updateMut.mutate({ organized: !tag.organized }) : undefined}
         counts={[
           { key: "scenes", label: "Scenes", value: tag.sceneCount, icon: <Film className="h-4 w-4" /> },
           { key: "performers", label: "Performers", value: tag.performerCount, icon: <UserRound className="h-4 w-4" /> },
@@ -232,16 +271,38 @@ export function TagDetailPage({ id, onNavigate }: Props) {
           <>
             {autoTagMut.isSuccess ? <p className="text-sm text-emerald-300">Auto-tag job queued.</p> : null}
             <CustomFieldsDisplay customFields={tag.customFields} entityType="tag" />
-            <TagMetadataServerPanel tag={tag} metadataServers={metadataServers} onNavigate={onNavigate} />
           </>
         )}
         actions={(
           <>
             <ExtensionSlot slot="tag-detail-actions" context={{ tag, onNavigate }} />
             {canWriteTag ? <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
-            {canAutoTagTag ? <button onClick={() => autoTagMut.mutate()} className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground" disabled={tag.ignoreAutoTag || autoTagMut.isPending}>{autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag</button> : null}
-            {canWriteTag ? <button onClick={() => setMergeOpen(true)} className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground"><GitMerge className="h-3.5 w-3.5" /> Merge...</button> : null}
-            {canDeleteTag ? <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:border-red-500 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
+            {showTagOpsMenu ? (
+              <div className="relative" ref={opsMenuRef}>
+                <button onClick={() => setShowOpsMenu(!showOpsMenu)} className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground" title="Actions">
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+                {showOpsMenu && (
+                  <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded border border-border bg-surface py-1 shadow-xl">
+                    {canAutoTagTag ? (
+                      <button type="button" onClick={() => { setShowOpsMenu(false); autoTagMut.mutate(); }} disabled={tag.ignoreAutoTag || autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary hover:bg-card hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">
+                        {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
+                      </button>
+                    ) : null}
+                    {canWriteTag ? (
+                      <button type="button" onClick={() => { setShowOpsMenu(false); setMergeOpen(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary hover:bg-card hover:text-foreground">
+                        <GitMerge className="h-3.5 w-3.5" /> Merge...
+                      </button>
+                    ) : null}
+                    {canDeleteTag ? (
+                      <button type="button" onClick={() => { setShowOpsMenu(false); setConfirmDelete(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-950/30">
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            ) : null}
           </>
         )}
       >
@@ -284,6 +345,18 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         <ExtensionSlot slot="tag-detail-bottom" context={{ tag, onNavigate }} />
       </EntityHeroLayout>
 
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Tag Cover"
+        currentImageUrl={tagImageUrl}
+        onUpload={(file) => entityImages.uploadTagImage(tag.id, file)}
+        onDelete={() => entityImages.deleteTagImage(tag.id)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={handleCoverChanged}
+        aspectRatio="16/9"
+        objectFit="contain"
+      />
+
       <TagEditModal tag={tag} open={editing} onClose={() => setEditing(false)} />
       <ConfirmDialog
         open={confirmDelete}
@@ -310,162 +383,6 @@ export function TagDetailPage({ id, onNavigate }: Props) {
       />
 
     </>
-  );
-}
-
-function TagMetadataServerPanel({ tag, metadataServers, onNavigate }: { tag: TagDetailModel; metadataServers: MetadataServer[]; onNavigate: (r: any) => void }) {
-  const queryClient = useQueryClient();
-  const [term, setTerm] = useState(tag.name);
-  const [selectedEndpoint, setSelectedEndpoint] = useState("");
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    setTerm(tag.name);
-  }, [tag.id, tag.name]);
-
-  useEffect(() => {
-    if (selectedEndpoint && !metadataServers.some((box) => box.endpoint === selectedEndpoint)) {
-      setSelectedEndpoint("");
-    }
-  }, [selectedEndpoint, metadataServers]);
-
-  const searchMutation = useMutation({
-    mutationFn: (variables: { term?: string; endpoint?: string }) => tags.searchMetadataServer(tag.id, variables.term, variables.endpoint),
-  });
-
-  const importMutation = useMutation({
-    mutationFn: (match: MetadataServerTagMatch) =>
-      tags.importFromMetadataServer(tag.id, { endpoint: match.endpoint, tagId: match.id }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tag", tag.id] });
-      queryClient.invalidateQueries({ queryKey: ["tags"] });
-    },
-  });
-
-  const draftMutation = useMutation({
-    mutationFn: (endpoint: string) => tags.submitMetadataServerDraft(tag.id, endpoint),
-  });
-
-  const draftEndpoint = selectedEndpoint || metadataServers[0]?.endpoint;
-
-  return (
-    <div className="mt-6 rounded-xl border border-border bg-card p-4">
-      <button onClick={() => setExpanded(!expanded)} className="flex w-full items-center justify-between text-left">
-        <h2 className="text-base font-semibold text-foreground">MetadataServer</h2>
-        <ChevronDown className={`h-4 w-4 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
-      </button>
-
-      {expanded && (
-        <div className="mt-4">
-          {metadataServers.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
-              No MetadataServer endpoints are configured yet. Use Settings and open Metadata Providers to add one.
-              <button onClick={() => onNavigate({ page: "settings" })} className="ml-2 text-accent hover:text-accent-hover">
-                Open settings
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
-                <label className="block text-sm">
-                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Search term</span>
-                  <input
-                    value={term}
-                    onChange={(event) => setTerm(event.target.value)}
-                    placeholder={tag.name}
-                    className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">Endpoint</span>
-                  <select
-                    value={selectedEndpoint}
-                    onChange={(event) => setSelectedEndpoint(event.target.value)}
-                    className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-                  >
-                    <option value="">All configured endpoints</option>
-                    {metadataServers.map((box) => (
-                      <option key={box.endpoint} value={box.endpoint}>
-                        {box.name || box.endpoint}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="flex flex-wrap items-end gap-2">
-                  <button
-                    onClick={() => searchMutation.mutate({ term: term.trim() || undefined, endpoint: selectedEndpoint || undefined })}
-                    disabled={searchMutation.isPending}
-                    className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
-                  >
-                    {searchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                    Search MetadataServer
-                  </button>
-                  <button
-                    onClick={() => draftEndpoint && draftMutation.mutate(draftEndpoint)}
-                    disabled={!draftEndpoint || draftMutation.isPending}
-                    className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
-                  >
-                    {draftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
-                    Submit Draft
-                  </button>
-                </div>
-              </div>
-
-              {searchMutation.error && <p className="mt-3 text-sm text-red-300">{searchMutation.error.message}</p>}
-              {draftMutation.error && <p className="mt-3 text-sm text-red-300">{draftMutation.error.message}</p>}
-              {draftMutation.isSuccess && (
-                <p className="mt-3 text-sm text-emerald-300">
-                  Tag draft submitted to MetadataServer{draftMutation.data.draftId ? ` (${draftMutation.data.draftId})` : ""}.
-                </p>
-              )}
-              {importMutation.isSuccess && <p className="mt-3 text-sm text-emerald-300">Tag metadata imported from MetadataServer.</p>}
-
-              {searchMutation.data && (
-                <div className="mt-4 space-y-3">
-                  {searchMutation.data.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
-                      No MetadataServer tag matches were found.
-                    </div>
-                  ) : (
-                    searchMutation.data.map((match) => (
-                      <button
-                        key={`${match.endpoint}:${match.id}`}
-                        onClick={() => importMutation.mutate(match)}
-                        disabled={importMutation.isPending}
-                        className="flex w-full flex-col gap-4 rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:border-accent/60 disabled:opacity-60 md:flex-row md:items-center"
-                      >
-                        <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-card">
-                          <TagIcon className="h-7 w-7 text-accent" />
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-base font-semibold text-foreground">{match.name}</span>
-                            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-secondary">{match.metadataServerName}</span>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-                            <span>ID {match.id}</span>
-                          </div>
-                          {match.description && <p className="mt-2 text-sm text-secondary">{match.description}</p>}
-                          {match.aliases.length > 0 && <p className="mt-2 text-xs text-secondary">Aliases: {match.aliases.join(", ")}</p>}
-                        </div>
-
-                        <div className="flex items-end">
-                          <span className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white">
-                            {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
-                            Import
-                          </span>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -727,7 +644,10 @@ function TagTextsPanel({ tagId, filter, setFilter, onNavigate }: {
 }
 
 function TagSegmentsPanel({ tagId, filter, setFilter, onNavigate }: { tagId: number; filter: FindFilter; setFilter: (filter: FindFilter) => void; onNavigate: (r: any) => void }) {
-  const { data, isLoading, infinitePageSize, infiniteQuery, loadMore } = useDetailListQuery<SegmentRecord>({
+  const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canEditSegments = hasPermission("segments.write");
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<SegmentRecord>({
     queryKey: ["tag-segments", tagId, filter],
     filter,
     queryFn: (nextFilter) => segmentLibrary.list({
@@ -740,7 +660,23 @@ function TagSegmentsPanel({ tagId, filter, setFilter, onNavigate }: { tagId: num
     }),
   });
   const items = data?.items ?? [];
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={SEGMENT_SORT} showSearch allowInfinitePageSize />;
+  const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
+  const selecting = selectedIds.size > 0;
+  const removeTagMut = useMutation({
+    mutationFn: () => segmentLibrary.removeTag({ tagId, ids: [...selectedIds] }),
+    onSuccess: () => {
+      selectNone();
+      queryClient.invalidateQueries({ queryKey: ["tag-segments", tagId] });
+      queryClient.invalidateQueries({ queryKey: ["tag", tagId] });
+      queryClient.invalidateQueries({ queryKey: ["tags"] });
+    },
+  });
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={SEGMENT_SORT} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={canEditSegments ? (
+    <button type="button" onClick={() => removeTagMut.mutate()} disabled={selectedIds.size === 0 || removeTagMut.isPending} className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-red-300 hover:bg-red-900/20 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50">
+      {removeTagMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+      Remove from Tag
+    </button>
+  ) : undefined} allowInfinitePageSize />;
 
   if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading segments..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Layers className="h-12 w-12" />} message="No segments with this tag" /></>;
@@ -749,7 +685,7 @@ function TagSegmentsPanel({ tagId, filter, setFilter, onNavigate }: { tagId: num
     <>
       {toolbar}
       <VirtualizedEntityGrid items={items} getItemKey={(segment) => segment.id} minCardWidth={`${getEntityCardMinWidthPx("segments", 1)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("segments", 1)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(segment) => (
-        <SegmentTile segment={segment} onClick={() => onNavigate({ page: "segment", id: segment.id })} />
+        <SegmentTile segment={segment} onClick={() => selecting ? toggle(segment.id) : onNavigate({ page: "segment", id: segment.id })} selected={selectedIds.has(segment.id)} onSelect={() => toggle(segment.id)} selecting={selecting} />
       )} />
     </>
   );

@@ -1,5 +1,5 @@
 import { ArrowLeft, Check, Heart } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 export interface EntityHeroCount {
   key: string;
@@ -21,6 +21,8 @@ export interface EntityHeroLayoutProps {
   imageClassName?: string;
   imageFallbackClassName?: string;
   imageFallback?: ReactNode;
+  onImageClick?: () => void;
+  imageActionTitle?: string;
   title: ReactNode;
   subtitle?: ReactNode;
   sortName?: ReactNode;
@@ -58,6 +60,8 @@ export function EntityHeroLayout({
   imageClassName,
   imageFallbackClassName,
   imageFallback,
+  onImageClick,
+  imageActionTitle = "Change cover",
   title,
   subtitle,
   sortName,
@@ -83,8 +87,17 @@ export function EntityHeroLayout({
   const resolvedFallbackClassName = imageFallbackClassName ?? "h-full w-full items-center justify-center bg-card text-muted";
   const resolvedHeroRowClassName = heroRowClassName ?? "flex flex-col gap-6 md:flex-row md:items-start";
   const resolvedContentClassName = contentClassName ?? "w-full px-4 py-6";
+  const [optimisticOrganized, setOptimisticOrganized] = useState<boolean | null>(null);
+  const displayedOrganized = typeof organized === "boolean" ? optimisticOrganized ?? organized : organized;
+
+  useEffect(() => {
+    if (optimisticOrganized !== null && organized === optimisticOrganized) {
+      setOptimisticOrganized(null);
+    }
+  }, [optimisticOrganized, organized]);
+
   const favoriteTitle = favorite ? "Remove favorite" : "Favorite";
-  const heroActionClassName = "inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60";
+  const heroActionClassName = "inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:border-accent hover:text-foreground disabled:cursor-not-allowed";
   const favoriteAction = typeof favorite === "boolean" ? (
     onFavoriteToggle ? (
       <button
@@ -103,16 +116,19 @@ export function EntityHeroLayout({
       </span>
     )
   ) : null;
-  const organizedTitle = organized ? "Mark unorganized" : "Mark organized";
+  const organizedTitle = displayedOrganized ? "Mark unorganized" : "Mark organized";
   const organizedAction = typeof organized === "boolean" ? (
     onOrganizedToggle ? (
       <button
         type="button"
-        onClick={onOrganizedToggle}
+        onClick={() => {
+          setOptimisticOrganized(!displayedOrganized);
+          onOrganizedToggle();
+        }}
         disabled={organizedPending}
-        aria-pressed={organized}
+        aria-pressed={displayedOrganized}
         title={organizedTitle}
-        className={`${heroActionClassName} ${organized ? "text-emerald-400" : "text-secondary"}`}
+        className={`${heroActionClassName} ${displayedOrganized ? "text-emerald-400" : "text-secondary"}`}
       >
         <Check className="h-4 w-4" />
       </button>
@@ -123,6 +139,35 @@ export function EntityHeroLayout({
     ) : null
   ) : null;
   const hasHeaderActions = Boolean(organizedAction || favoriteAction || actions);
+  const imageContent = (
+    <>
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={imageAlt ?? ""}
+          className={resolvedImageClassName}
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = "none";
+            const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
+            if (fallback) fallback.style.display = "flex";
+          }}
+        />
+      ) : null}
+      <div
+        className={[
+          resolvedFallbackClassName,
+          imageUrl ? "hidden" : "flex",
+        ].join(" ")}
+      >
+        {imageFallback}
+      </div>
+      {onImageClick ? (
+        <span className="pointer-events-none absolute inset-x-3 bottom-3 rounded-lg bg-black/70 px-3 py-2 text-center text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          {imageActionTitle}
+        </span>
+      ) : null}
+    </>
+  );
 
   return (
     <div className="min-h-screen">
@@ -154,28 +199,13 @@ export function EntityHeroLayout({
           </div>
 
           <div className={resolvedHeroRowClassName}>
-            <div className={resolvedImageContainerClassName}>
-              {imageUrl ? (
-                <img
-                  src={imageUrl}
-                  alt={imageAlt ?? ""}
-                  className={resolvedImageClassName}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                    const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
-                    if (fallback) fallback.style.display = "flex";
-                  }}
-                />
-              ) : null}
-              <div
-                className={[
-                  resolvedFallbackClassName,
-                  imageUrl ? "hidden" : "flex",
-                ].join(" ")}
-              >
-                {imageFallback}
-              </div>
-            </div>
+            {onImageClick ? (
+              <button type="button" onClick={onImageClick} title={imageActionTitle} className={`${resolvedImageContainerClassName} group focus:outline-none focus:ring-2 focus:ring-accent`}>
+                {imageContent}
+              </button>
+            ) : (
+              <div className={resolvedImageContainerClassName}>{imageContent}</div>
+            )}
 
             <div className="min-w-0 flex-1">
               <div className="mb-2 flex items-start gap-4">

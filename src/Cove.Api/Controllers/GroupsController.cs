@@ -289,9 +289,14 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         g.ContainingGroupRelations?.Count ?? 0,
         customFieldValues,
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
-        g.FrontImageBlobId != null ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, g.Id, g.UpdatedAt) : null,
+        ResolveFrontImagePath(g),
         g.BackImageBlobId != null ? EntityImageUrls.GroupBack(ControllerContext.HttpContext, g.Id, g.UpdatedAt) : null
     );
+
+    private string? ResolveFrontImagePath(Group group)
+        => group.FrontImageBlobId != null || group.GroupItems.Any(item => item.ImageId.HasValue || item.SceneId.HasValue)
+            ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt)
+            : null;
 
     private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)
         => lookup.TryGetValue(id, out var values) && values.Count > 0 ? values : null;

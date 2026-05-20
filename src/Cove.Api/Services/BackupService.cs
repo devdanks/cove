@@ -20,9 +20,7 @@ public class BackupService(
         CustomDump,
     }
 
-    private string DataRoot => dataRootOverride ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "cove");
+    private string DataRoot => dataRootOverride ?? CoveDefaultPaths.GetDataRoot();
 
     private string BackupDir => Path.Combine(DataRoot, "backups");
 
@@ -308,8 +306,8 @@ public class BackupService(
             : toolName;
 
         var managedDataPath = string.IsNullOrWhiteSpace(config.Postgres.DataPath)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "cove")
-            : config.Postgres.DataPath;
+            ? CoveDefaultPaths.GetDataRoot()
+            : CoveDefaultPaths.ResolveDataPath(config.Postgres.DataPath);
         var managedCandidate = Path.Combine(managedDataPath, "pgsql", "bin", executableName);
         if (File.Exists(managedCandidate))
             return managedCandidate;

@@ -578,7 +578,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
             link.Performer.Gender?.ToString(),
             link.Performer.Birthdate?.ToString("yyyy-MM-dd"),
             link.Performer.Favorite,
-            link.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, link.Performer.Id, link.Performer.UpdatedAt) : null)).ToList(),
+            EntityImageUrls.PerformerOrNull(ControllerContext.HttpContext, link.Performer!))).ToList(),
         text.Files.OrderBy(file => file.Id).Select(file => new TextFileDto(
             file.Id,
             CanReadFiles ? file.Path : string.Empty,

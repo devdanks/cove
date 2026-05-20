@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bookmark, ChevronLeft, ChevronRight, Clapperboard, ExternalLink, Film, Layers, Pencil, Save, Search, Trash2 } from "lucide-react";
-import { scenes, segmentLibrary, tags } from "../api/client";
+import { Bookmark, Camera, ChevronLeft, ChevronRight, Clapperboard, ExternalLink, Film, Image, Layers, MoreVertical, Pencil, Save, Search, Trash2 } from "lucide-react";
+import { entityImages, scenes, segmentLibrary, tags } from "../api/client";
 import type { Route } from "../router/location";
 import type { Scene, SegmentRecord } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -9,6 +9,7 @@ import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibili
 import { VideoPlayer } from "../components/VideoPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import { formatDate } from "../components/shared";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { SegmentVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
@@ -48,7 +49,11 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
   const [selectedTagId, setSelectedTagId] = useState<number | null>(null);
   const [selectedTagName, setSelectedTagName] = useState("");
   const [activeTab, setActiveTab] = useState<SegmentTab>("overview");
+  const [coverOpen, setCoverOpen] = useState(false);
+  const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [segmentVideoTime, setSegmentVideoTime] = useState(0);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const opsMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!segment) {
@@ -190,6 +195,28 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
     },
   });
 
+  const invalidateSceneCover = () => {
+    if (!segment || segment.hostType !== "scene") {
+      return;
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["scene", segment.hostId] });
+    queryClient.invalidateQueries({ queryKey: ["scenes"] });
+    queryClient.invalidateQueries({ queryKey: ["segment", id] });
+    queryClient.invalidateQueries({ queryKey: ["segments"] });
+  };
+
+  const setCoverFromCurrentFrameMutation = useMutation({
+    mutationFn: async () => {
+      if (!segment || segment.hostType !== "scene") {
+        throw new Error("Segment is not scene-backed");
+      }
+
+      return scenes.setCoverFromFrame(segment.hostId, segmentVideoTime || segment.startSec);
+    },
+    onSuccess: invalidateSceneCover,
+  });
+
   const payloadText = useMemo(() => formatPayload(segment?.payload), [segment?.payload]);
   const displayTitle = segment?.title?.trim() || segment?.kind || segment?.tagName || `Segment #${id}`;
   const orderedSiblingSegments = useMemo(
@@ -320,6 +347,20 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
       document.title = "Cove";
     };
   }, [displayTitle, segment]);
+
+  useEffect(() => {
+    const handler = (event: MouseEvent) => {
+      if (opsMenuRef.current && !opsMenuRef.current.contains(event.target as Node)) {
+        setShowOpsMenu(false);
+      }
+    };
+
+    if (showOpsMenu) {
+      document.addEventListener("mousedown", handler);
+    }
+
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showOpsMenu]);
 
   if (isLoading) {
     return (
@@ -690,6 +731,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
           sceneLoading={playbackSceneLoading}
           canReadScenes={canReadScenes}
           onNavigate={onNavigate}
+          onTimeUpdate={setSegmentVideoTime}
           embedded
         />
       }
@@ -752,9 +794,56 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
               Open Scene
             </button>
           ) : null}
+          {segment.hostType === "scene" && canWriteScenes ? (
+            <div className="relative" ref={opsMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowOpsMenu((current) => !current)}
+                className="inline-flex items-center justify-center rounded-full border border-border p-2 text-secondary transition hover:border-accent hover:text-foreground"
+                title="More actions"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+              {showOpsMenu ? (
+                <div className="absolute right-0 top-full z-50 mt-1 min-w-[190px] rounded border border-border bg-card py-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCoverOpen(true);
+                      setShowOpsMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                  >
+                    <Image className="h-3.5 w-3.5" /> Set Cover...
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </>
       }
     >
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Scene Cover"
+        currentImageUrl={playbackScene ? scenes.screenshotUrl(segment.hostId, playbackScene.updatedAt) : undefined}
+        onUpload={(file) => entityImages.uploadSceneCoverImage(segment.hostId, file)}
+        onDelete={() => entityImages.deleteSceneCoverImage(segment.hostId)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={invalidateSceneCover}
+        aspectRatio="16/9"
+        extraActions={(
+          <button
+            type="button"
+            onClick={() => { setCoverFromCurrentFrameMutation.mutate(); setCoverOpen(false); }}
+            disabled={setCoverFromCurrentFrameMutation.isPending}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
+          >
+            {setCoverFromCurrentFrameMutation.isPending ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-b-2 border-accent" /> : <Camera className="h-3.5 w-3.5" />}
+            From Current Frame
+          </button>
+        )}
+      />
       {/* segments do not support engagement (see ui/src/api/types.ts AffinityHostType) */}
       <MediaDetailLayout.Content>{activeContent}</MediaDetailLayout.Content>
     </MediaDetailLayout>
@@ -881,6 +970,7 @@ function SegmentPlaybackPanel({
   sceneLoading,
   canReadScenes,
   onNavigate,
+  onTimeUpdate,
   embedded = false,
 }: {
   segment: SegmentRecord;
@@ -888,6 +978,7 @@ function SegmentPlaybackPanel({
   sceneLoading: boolean;
   canReadScenes: boolean;
   onNavigate: (r: any) => void;
+  onTimeUpdate?: (time: number) => void;
   embedded?: boolean;
 }) {
   const file = scene?.files[0];
@@ -962,6 +1053,7 @@ function SegmentPlaybackPanel({
               detections={[]}
               captions={file.captions}
               onPlay={() => {}}
+              onTimeUpdate={onTimeUpdate}
               showAbLoop
               trackingEnabled={false}
               clip={{ start: segment.startSec, end: segment.endSec ?? file.duration, loop: true }}

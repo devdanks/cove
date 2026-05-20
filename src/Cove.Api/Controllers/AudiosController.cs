@@ -598,7 +598,7 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
             link.Performer.Gender?.ToString(),
             link.Performer.Birthdate?.ToString("yyyy-MM-dd"),
             link.Performer.Favorite,
-            link.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, link.Performer.Id, link.Performer.UpdatedAt) : null)).ToList(),
+            EntityImageUrls.PerformerOrNull(ControllerContext.HttpContext, link.Performer!))).ToList(),
         audio.Tracks.OrderBy(track => track.OrderIndex).ThenBy(track => track.Id).Select(track => new AudioTrackDto(track.Id, track.OrderIndex, track.Title, track.StartSec, track.EndSec)).ToList(),
         audio.Files.OrderBy(file => file.Id).Select(file => new AudioFileDto(
             file.Id,

@@ -12,6 +12,7 @@ public class Studio : BaseEntity
 
     // Image stored as blob reference
     public string? ImageBlobId { get; set; }
+    public string? ImageOverrideBlobId { get; set; }
 
     // Denormalized relationship counters for hot list/detail reads.
     public int SceneCount { get; set; }

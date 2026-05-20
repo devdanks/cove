@@ -255,9 +255,7 @@ public class PluginsController(
     private List<string> GetPluginDirectories()
     {
         var dirs = new List<string>();
-        var defaultDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "cove", "plugins");
+        var defaultDir = CoveDefaultPaths.GetDataSubdirectory("plugins");
         dirs.Add(defaultDir);
 
         if (config.ExtensionPaths?.Count > 0)

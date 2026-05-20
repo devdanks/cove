@@ -1,33 +1,26 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { studios, entityImages } from "../api/client";
-import type { EntityEngagement, FindFilter, Studio, StudioCreate, StudioFilterCriteria } from "../api/types";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { studios } from "../api/client";
+import type { EntityEngagement, Studio, StudioCreate, StudioFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { RatingBanner, RatingField } from "../components/Rating";
+import { RatingField } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { Building2, Film, Image, LayoutGrid, Trash2, Loader2, Edit, Merge, Heart, Check, Users, Layers, Tag as TagIcon } from "lucide-react";
+import { Building2, Merge } from "lucide-react";
 import { STUDIO_CRITERIA } from "../components/FilterDialog";
-import { BulkEditDialog, STUDIO_BULK_FIELDS } from "../components/BulkEditDialog";
 import { MergeDialog } from "../components/MergeDialog";
 import { StudioTagger } from "../components/StudioTagger";
-import { StudioTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
+import { StudioTile } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { ExtensionSlot } from "../router/RouteRegistry";
-import { useRouteRegistry } from "../router/RouteRegistry";
 import { useAuth } from "../auth/AuthContext";
-import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
-import { createNestedRouteLinkProps } from "../components/cardNavigation";
-import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
-import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
+import { canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
-import { useWallColumns } from "../hooks/useWallColumns";
-import { WallMediaCard } from "../components/WallMediaCard";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
-import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
@@ -62,20 +55,14 @@ export function StudiosPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list", "wall", "tagger"] as const,
+    allowedDisplayModes: ["grid", "list", "tagger"] as const,
     allowInfinitePageSize: true,
   });
-  const [wallColumnCount, setWallColumnCount] = useState(6);
   const [showCreate, setShowCreate] = useState(false);
-  const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
-  const [showMetadataBatch, setShowMetadataBatch] = useState(false);
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
-  const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWriteStudio = canWriteEntity("studio", hasPermission);
-  const canDeleteStudio = canDeleteEntity("studio", hasPermission);
-  const canMetadataBatch = hasPermission("library.autotag") && canWriteStudio;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const listData = useInfiniteListData<Studio>({
@@ -91,7 +78,6 @@ export function StudiosPage({ onNavigate }: Props) {
   const items = listData.items;
   const totalCount = listData.totalCount;
   const isLoading = listData.isLoading;
-  const wallColumns = useWallColumns(items, wallColumnCount);
   const { engagementById } = useEntityEngagementBatch("studio", items.map((item) => item.id));
   const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter }), [listData.infiniteFilterKey, objectFilter]);
   const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
@@ -105,31 +91,9 @@ export function StudiosPage({ onNavigate }: Props) {
     }
   };
 
-  const bulkDeleteMut = useMutation({
-    mutationFn: () => studios.bulkDelete([...selectedIds]),
-    onSuccess: () => { selectNone(); queryClient.invalidateQueries({ queryKey: ["studios"] }); },
-  });
-
-  const bulkEditMut = useMutation({
-    mutationFn: (values: Record<string, unknown>) =>
-      studios.bulkUpdate({ ids: [...selectedIds], ...values } as any),
-    onSuccess: () => {
-      setShowBulkEdit(false);
-      selectNone();
-      queryClient.invalidateQueries({ queryKey: ["studios"] });
-    },
-  });
-
   return (
     <>
       <StudioCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "studio", id })} />
-      <MetadataServerBatchDialog
-        open={showMetadataBatch}
-        entityType="studio"
-        selectedIds={[...selectedIds]}
-        onClose={() => setShowMetadataBatch(false)}
-        onQueued={selectNone}
-      />
       <ListPage
         title="Studios"
         pageKey="studios"
@@ -141,15 +105,13 @@ export function StudiosPage({ onNavigate }: Props) {
         sortOptions={SORT_OPTIONS}
         displayMode={displayMode}
         onDisplayModeChange={setDisplayMode}
-        availableDisplayModes={["grid", "list", "wall", "tagger"]}
+        availableDisplayModes={["grid", "list", "tagger"]}
         allowInfinitePageSize
         showPagingControls={!listData.infinitePageSize}
         selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
         onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
         selectAllMatchingLabel="Select shown"
         infiniteScroll={listData.infiniteScroll}
-        wallColumnCount={wallColumnCount}
-        onWallColumnCountChange={setWallColumnCount}
         criteriaDefinitions={STUDIO_CRITERIA}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
@@ -160,15 +122,6 @@ export function StudiosPage({ onNavigate }: Props) {
         onInvertSelection={invertSelection}
         selectionActions={
           <>
-            {canMetadataBatch && (
-              <button
-                onClick={() => setShowMetadataBatch(true)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
-              >
-                <Building2 className="w-3 h-3" />
-                MetadataServer
-              </button>
-            )}
             {canWriteStudio && selectedIds.size >= 2 && (
               <button
                 onClick={() => setShowMerge(true)}
@@ -184,30 +137,6 @@ export function StudiosPage({ onNavigate }: Props) {
       >
       {displayMode === "tagger" ? (
         <StudioTagger studios={items} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
-      ) : displayMode === "wall" ? (
-        <VirtualizedWallColumns
-          columns={wallColumns}
-          getItemKey={(studio) => studio.id}
-          infinitePageSize={listData.infinitePageSize}
-          hasNextPage={listData.infiniteQuery.hasNextPage}
-          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
-          loadMore={listData.loadMore}
-          estimateItemHeight={260}
-          gap={4}
-          className="flex gap-1 px-2"
-          columnClassName="flex min-w-0 flex-1 flex-col gap-1"
-          renderItem={(studio) => (
-                <EntityWallCard
-                  title={studio.name}
-                  imageSrc={entityImages.studioImageUrl(studio.id, studio.updatedAt)}
-                  route={{ page: "studio", id: studio.id }}
-                  selected={selectedIds.has(studio.id)}
-                  selecting={selecting}
-                  onSelect={() => toggle(studio.id)}
-                  onClick={() => selecting ? toggle(studio.id) : onNavigate({ page: "studio", id: studio.id })}
-                />
-          )}
-        />
       ) : displayMode === "grid" ? (
         <VirtualizedEntityGrid
           items={items}
@@ -242,15 +171,6 @@ export function StudiosPage({ onNavigate }: Props) {
         </div>
       )}
       </ListPage>
-      <BulkEditDialog
-        open={showBulkEdit}
-        onClose={() => setShowBulkEdit(false)}
-        title="Edit Studios"
-        selectedCount={selectedIds.size}
-        fields={STUDIO_BULK_FIELDS}
-        onApply={(values) => bulkEditMut.mutate(values)}
-        isPending={bulkEditMut.isPending}
-      />
       <MergeDialog
         open={showMerge}
         onClose={() => { setShowMerge(false); selectNone(); }}
@@ -260,18 +180,6 @@ export function StudiosPage({ onNavigate }: Props) {
         queryKey="studios"
       />
     </>
-  );
-}
-
-function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect, onClick }: { title: string; imageSrc: string; route: any; selected: boolean; selecting: boolean; onSelect: () => void; onClick: () => void }) {
-  return (
-    <WallMediaCard title={title} imageSrc={imageSrc} aspectRatio="16 / 10" onClick={onClick} className={selected ? "ring-2 ring-accent" : ""}>
-      <RouteCardLinkOverlay route={route} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone />
-      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-      <div className="selection-safe-zone absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 text-xs font-medium text-white">
-        {title}
-      </div>
-    </WallMediaCard>
   );
 }
 

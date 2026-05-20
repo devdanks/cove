@@ -113,6 +113,12 @@ try
 
     // Register a singleton CoveConfiguration instance so all consumers share the same mutable object
     var coveCfgInstance = coveConfig.Get<CoveConfiguration>() ?? new CoveConfiguration();
+    coveCfgInstance.GeneratedPath = CoveDefaultPaths.ResolveDataPath(coveCfgInstance.GeneratedPath);
+    coveCfgInstance.CachePath = CoveDefaultPaths.ResolveDataPath(coveCfgInstance.CachePath);
+    coveCfgInstance.ExtensionPaths = coveCfgInstance.ExtensionPaths
+        .Select(CoveDefaultPaths.ResolveDataPath)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
     builder.Services.AddSingleton(coveCfgInstance);
 
     // Database - EF Core + PostgreSQL
@@ -191,9 +197,7 @@ try
     builder.Services.AddHttpClient<MetadataServerService>();
 
     // Extension system
-    var extensionsDataDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "cove", "extensions");
+    var extensionsDataDir = CoveDefaultPaths.GetDataSubdirectory("extensions");
     Directory.CreateDirectory(extensionsDataDir);
     var coveVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.1";
     var extensionContext = new ExtensionContext

@@ -490,6 +490,12 @@ function TagDetailPanel({
           {node.favorite && <Heart className="h-3.5 w-3.5 fill-red-500 text-red-500" />}
         </div>
         {node.description && <p className="mt-1 text-xs text-secondary">{node.description}</p>}
+        {node.tagGroupName ? (
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border bg-background/70 px-2 py-1 text-[11px] text-secondary">
+            <span className="h-2 w-2 rounded-full border border-border" style={{ backgroundColor: node.tagGroupColor ?? "transparent" }} />
+            {node.tagGroupName}
+          </p>
+        ) : null}
         {clusterName && <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-muted">Cluster: {clusterName}</p>}
       </div>
 
@@ -620,7 +626,7 @@ export function TagGraphView({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [searchText, setSearchText] = useState("");
-  const [showClusterHalos, setShowClusterHalos] = useState(false);
+  const [showClusterHalos, setShowClusterHalos] = useState(true);
   const [focusedClusterId, setFocusedClusterId] = useState<number | null>(null);
   const [isolateFocusedCluster, setIsolateFocusedCluster] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -718,11 +724,35 @@ export function TagGraphView({
     const parentChildLinks = links.filter((link) => nodeMap.has(link.sourceId) && nodeMap.has(link.targetId));
     const maxUsage = Math.max(1, ...sortedNodes.map((node) => node.totalUsageCount));
 
+    const groupMembers = new Map<number, TagGraphNode[]>();
+    for (const node of sortedNodes) {
+      if (node.tagGroupId == null) continue;
+      const members = groupMembers.get(node.tagGroupId) ?? [];
+      members.push(node);
+      groupMembers.set(node.tagGroupId, members);
+    }
+
+    const groupAnchorIdByGroupId = new Map<number, number>();
+    const groupClusterMetaByAnchorId = new Map<number, { name?: string; color?: string }>();
+    groupMembers.forEach((members, groupId) => {
+      const groupMemberIds = new Set(members.map((node) => node.id));
+      const anchor = [...members].sort((left, right) =>
+        right.childIds.filter((childId) => groupMemberIds.has(childId)).length - left.childIds.filter((childId) => groupMemberIds.has(childId)).length ||
+        right.totalUsageCount - left.totalUsageCount ||
+        left.name.localeCompare(right.name)
+      )[0];
+      if (!anchor) return;
+      groupAnchorIdByGroupId.set(groupId, anchor.id);
+      groupClusterMetaByAnchorId.set(anchor.id, { name: anchor.tagGroupName, color: anchor.tagGroupColor });
+    });
+
     const clusterMembers = new Map<number, number[]>();
     const anchorIdByNodeId = new Map<number, number>();
 
     for (const node of sortedNodes) {
-      const anchorId = pickAnchorId(node.id, nodeMap);
+      const anchorId = node.tagGroupId != null
+        ? groupAnchorIdByGroupId.get(node.tagGroupId) ?? pickAnchorId(node.id, nodeMap)
+        : pickAnchorId(node.id, nodeMap);
       anchorIdByNodeId.set(node.id, anchorId);
       const memberIds = clusterMembers.get(anchorId) ?? [];
       memberIds.push(node.id);
@@ -811,11 +841,11 @@ export function TagGraphView({
       const clusterLayoutNode = clusterLayoutNodeMap.get(cluster.anchorId);
       clusterSummaryById.set(cluster.anchorId, {
         anchorId: cluster.anchorId,
-        anchorName: cluster.anchor.name,
+        anchorName: groupClusterMetaByAnchorId.get(cluster.anchorId)?.name ?? cluster.anchor.name,
         memberIds: cluster.memberIds,
         centerX: clusterLayoutNode?.x ?? 0,
         centerY: clusterLayoutNode?.y ?? 0,
-        color: CLUSTER_COLORS[index % CLUSTER_COLORS.length],
+        color: groupClusterMetaByAnchorId.get(cluster.anchorId)?.color || CLUSTER_COLORS[index % CLUSTER_COLORS.length],
       });
     });
 
@@ -924,7 +954,7 @@ export function TagGraphView({
 
         return {
           anchorId: cluster.anchorId,
-          anchorName: cluster.anchor.name,
+          anchorName: clusterSummaryById.get(cluster.anchorId)?.anchorName ?? cluster.anchor.name,
           color: clusterSummaryById.get(cluster.anchorId)?.color ?? CLUSTER_COLORS[0],
           x: haloX,
           y: haloY,
@@ -1485,7 +1515,7 @@ export function TagGraphView({
       <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
         <span className="rounded-full border border-border bg-card px-2 py-1">{nodes.length} nodes</span>
         <span className="rounded-full border border-border bg-card px-2 py-1">{graph.parentChildCount} parent-child links</span>
-        <span className="rounded-full border border-border bg-card px-2 py-1">{graph.clusters.length} clusters</span>
+        <span className="rounded-full border border-border bg-card px-2 py-1">{graph.clusters.length} tag groups / clusters</span>
         {totalCount > nodes.length && (
           <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-1 text-yellow-300">
             Showing first {nodes.length} matching tags in graph view
@@ -1502,7 +1532,6 @@ export function TagGraphView({
             </span>
             <span>Solid arrow: parent to child</span>
           </span>
-          <span className="text-muted">Clusters are now shaped only by the tag hierarchy, so the overview stays stable and cheaper to compute.</span>
         </div>
       </div>
 
@@ -1647,9 +1676,10 @@ export function TagGraphView({
             key={cluster.anchorId}
             type="button"
             onClick={() => focusCluster(cluster.anchorId)}
-            className={`rounded-full border px-3 py-2 transition-colors ${focusedClusterId === cluster.anchorId ? "border-accent/60 bg-accent/10 text-foreground" : "border-border bg-card text-secondary hover:border-accent/40 hover:text-foreground"}`}
-            style={{ boxShadow: focusedClusterId === cluster.anchorId ? `0 0 0 1px ${cluster.color} inset` : undefined }}
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 transition-colors ${focusedClusterId === cluster.anchorId ? "border-accent/60 bg-accent/10 text-foreground" : "border-border bg-card text-secondary hover:border-accent/40 hover:text-foreground"}`}
+            style={{ boxShadow: `0 0 0 1px ${cluster.color}55 inset` }}
           >
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: cluster.color }} />
             {cluster.anchorName} ({cluster.memberIds.length})
           </button>
         ))}
@@ -1764,28 +1794,17 @@ export function TagGraphView({
                   opacity={opacity}
                 >
                   {node.isClusterAnchor && (
-                    <rect
-                      x={-node.radius * 0.95}
-                      y={-node.radius * 0.95}
-                      width={node.radius * 1.9}
-                      height={node.radius * 1.9}
-                      rx={node.radius * 0.45}
-                      fill={node.clusterColor}
-                      fillOpacity={inspected ? 0.34 : 0.17}
-                      transform="rotate(45)"
-                    />
+                    <circle r={node.radius + 6} fill="none" stroke={node.clusterColor} strokeOpacity={inspected ? 0.7 : 0.36} strokeWidth={1.5} />
                   )}
-                  <circle r={node.radius + (inspected ? 7 : queued ? 5 : hovered ? 4 : 2)} fill={node.clusterColor} fillOpacity={inspected ? 0.28 : queued ? 0.18 : 0.08} />
-                  <circle r={node.radius} fill="rgba(17, 25, 35, 0.96)" stroke={queued ? "rgba(250, 204, 21, 0.92)" : node.clusterColor} strokeWidth={inspected ? 3 : queued ? 2.4 : node.isClusterAnchor ? 2 : 1.5} />
-                  <circle r={node.radius * 0.72} fill={node.clusterColor} fillOpacity={0.24 + node.usageIntensity * 0.32} />
-                  <circle cx={-node.radius * 0.28} cy={-node.radius * 0.28} r={Math.max(2.5, node.radius * 0.26)} fill="rgba(255, 255, 255, 0.18)" />
+                  <circle r={node.radius + (inspected ? 5 : queued ? 4 : hovered ? 3 : 0)} fill="none" stroke={queued ? "rgba(250, 204, 21, 0.9)" : node.clusterColor} strokeOpacity={inspected || queued || hovered ? 0.72 : 0} strokeWidth={inspected ? 2.5 : 2} />
+                  <circle r={node.radius} fill={node.clusterColor} fillOpacity={0.18 + node.usageIntensity * 0.34} stroke={queued ? "rgba(250, 204, 21, 0.92)" : node.clusterColor} strokeWidth={inspected ? 2.4 : queued ? 2.2 : node.isClusterAnchor ? 1.8 : 1.3} />
                   {node.favorite && <circle cx={node.radius * 0.42} cy={-node.radius * 0.42} r={Math.max(2.2, node.radius * 0.22)} fill="rgba(239, 68, 68, 0.95)" />}
                 </g>
               );
             })}
           </g>
         </svg>
-        <svg width={canvasSize.width} height={canvasSize.height} className="absolute inset-0" aria-hidden="true">
+        <svg width={canvasSize.width} height={canvasSize.height} className="pointer-events-none absolute inset-0" aria-hidden="true">
           {visibleLabels.map((label) => (
             <g
               key={`label-${label.id}`}
@@ -1793,7 +1812,7 @@ export function TagGraphView({
               opacity={label.opacity}
               onClick={() => selectNode(label.id)}
               onDoubleClick={() => onNavigate({ page: "tag", id: label.id })}
-              style={{ cursor: "pointer" }}
+              style={{ cursor: "pointer", pointerEvents: "auto" }}
             >
               <rect
                 x={label.left}

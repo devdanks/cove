@@ -772,7 +772,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             performer.Gender?.ToString(),
             performer.Birthdate?.ToString("yyyy-MM-dd"),
             performer.Favorite,
-            performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, performer.Id, performer.UpdatedAt) : null,
+            EntityImageUrls.PerformerOrNull(ControllerContext.HttpContext, performer),
             performer.SceneCount,
             performer.ImageCount,
             performer.GalleryCount,

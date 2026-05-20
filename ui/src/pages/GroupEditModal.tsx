@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { groups, entityImages } from "../api/client";
+import { groups } from "../api/client";
 import type { Group, GroupUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, NumberInput, SaveButton } from "../components/EditModal";
-import { ImageInput } from "../components/ImageInput";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
@@ -95,24 +94,6 @@ export function GroupEditModal({ group, open, onClose }: Props) {
 
   return (
     <EditModal title={`Edit Group: ${group.name}`} open={open} onClose={onClose}>
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <ImageInput
-          currentImageUrl={entityImages.groupFrontImageUrl(group.id, group.updatedAt)}
-          onUpload={(file) => entityImages.uploadGroupFrontImage(group.id, file)}
-          onDelete={() => entityImages.deleteGroupFrontImage(group.id)}
-          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["group", group.id] })}
-          label="Front Cover"
-          aspectRatio="2/3"
-        />
-        <ImageInput
-          currentImageUrl={entityImages.groupBackImageUrl(group.id, group.updatedAt)}
-          onUpload={(file) => entityImages.uploadGroupBackImage(group.id, file)}
-          onDelete={() => entityImages.deleteGroupBackImage(group.id)}
-          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["group", group.id] })}
-          label="Back Cover"
-          aspectRatio="2/3"
-        />
-      </div>
       <div className="grid grid-cols-2 gap-4">
         <Field label="Name *">
           <TextInput value={name} onChange={setName} placeholder="Group name" />

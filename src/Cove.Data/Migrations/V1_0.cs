@@ -281,6 +281,7 @@ namespace Cove.Data.Migrations
                     IgnoreAutoTag = table.Column<bool>(type: "boolean", nullable: false),
                     SearchText = table.Column<string>(type: "text", nullable: true),
                     ImageBlobId = table.Column<string>(type: "text", nullable: true),
+                    ImageOverrideBlobId = table.Column<string>(type: "text", nullable: true),
                     SceneCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     ImageCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     GalleryCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
@@ -455,6 +456,7 @@ namespace Cove.Data.Migrations
                     Organized = table.Column<bool>(type: "boolean", nullable: false),
                     SearchText = table.Column<string>(type: "text", nullable: true),
                     ImageBlobId = table.Column<string>(type: "text", nullable: true),
+                    ImageOverrideBlobId = table.Column<string>(type: "text", nullable: true),
                     SceneCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     ImageCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     GalleryCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
@@ -1140,6 +1142,7 @@ namespace Cove.Data.Migrations
                     TagGroupId = table.Column<int>(type: "integer", nullable: true),
                     Favorite = table.Column<bool>(type: "boolean", nullable: false),
                     IgnoreAutoTag = table.Column<bool>(type: "boolean", nullable: false),
+                    Organized = table.Column<bool>(type: "boolean", nullable: false),
                     MinOccurrenceSec = table.Column<double>(type: "double precision", nullable: true),
                     MinOccurrencePercent = table.Column<double>(type: "double precision", nullable: true),
                     ShowAsSegment = table.Column<bool>(type: "boolean", nullable: true),
@@ -1147,6 +1150,7 @@ namespace Cove.Data.Migrations
                     SegmentLaneOverride = table.Column<int>(type: "integer", nullable: true),
                     SearchText = table.Column<string>(type: "text", nullable: true),
                     ImageBlobId = table.Column<string>(type: "text", nullable: true),
+                    ImageOverrideBlobId = table.Column<string>(type: "text", nullable: true),
                     SceneCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     SceneMarkerCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     ImageCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
@@ -3658,6 +3662,11 @@ namespace Cove.Data.Migrations
                 name: "IX_tags_Favorite",
                 table: "tags",
                 column: "Favorite");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_tags_Organized",
+                table: "tags",
+                column: "Organized");
 
             migrationBuilder.CreateIndex(
                 name: "IX_tags_GalleryCount",

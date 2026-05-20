@@ -29,9 +29,7 @@ public class ConfigService
         _config = config;
         _logger = logger;
 
-        // Store config next to the working directory (not the binary output dir)
-        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var coveDir = Path.Combine(baseDir, "cove");
+        var coveDir = CoveDefaultPaths.GetDataRoot();
         Directory.CreateDirectory(coveDir);
         _configPath = Path.Combine(coveDir, "cove-config.json");
     }
@@ -271,9 +269,9 @@ public class ConfigService
         }).ToList();
 
         if (!string.IsNullOrEmpty(dto.GeneratedPath))
-            cfg.GeneratedPath = dto.GeneratedPath;
+            cfg.GeneratedPath = CoveDefaultPaths.ResolveDataPath(dto.GeneratedPath);
         if (!string.IsNullOrEmpty(dto.CachePath))
-            cfg.CachePath = dto.CachePath;
+            cfg.CachePath = CoveDefaultPaths.ResolveDataPath(dto.CachePath);
         if (dto.Host != null)
             cfg.Host = dto.Host;
         cfg.Port = dto.Port;

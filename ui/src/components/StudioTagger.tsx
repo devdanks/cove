@@ -3,10 +3,18 @@ import { useMutation } from "@tanstack/react-query";
 import { studios } from "../api/client";
 import type { Studio, MetadataServerStudioMatch, MetadataServerStudioImportRequest } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
-import { DEFAULT_TAGGER_BLACKLIST, TaggerSettingsPanel, TaggerToolbar, cleanTaggerQueryString } from "./TaggerShared";
+import { DEFAULT_COLLECTION_MODES, type CollectionMode } from "./sceneScrapeUtils";
 import {
-  Search, Loader2, Check, X, AlertCircle,
-  CloudDownload, Fingerprint, Eye, EyeOff,
+  CompactCollectionDecision,
+  CompactListValue,
+  CompactScalarDecision,
+  DEFAULT_TAGGER_BLACKLIST,
+  TaggerSettingsPanel,
+  TaggerToolbar,
+  cleanTaggerQueryString,
+} from "./TaggerShared";
+import {
+  Search, Loader2, Check, AlertCircle, Fingerprint,
 } from "lucide-react";
 
 interface StudioTaggerProps {
@@ -28,7 +36,11 @@ interface StudioSearchState {
   error?: string;
   selectedIndex?: number;
   saved?: boolean;
+  fieldStrategies?: Record<string, StudioFieldStrategy>;
+  collectionModes?: Record<string, CollectionMode>;
 }
+
+type StudioFieldStrategy = "ignore" | "merge" | "overwrite";
 
 const CONCURRENCY_LIMIT = 5;
 async function runWithConcurrency<T>(items: T[], fn: (item: T) => Promise<void>, limit: number, signal?: AbortSignal): Promise<void> {
@@ -41,6 +53,77 @@ async function runWithConcurrency<T>(items: T[], fn: (item: T) => Promise<void>,
     }
   });
   await Promise.all(workers);
+}
+
+const studioScalarFields = [
+  { key: "name", label: "Name" },
+  { key: "parent", label: "Parent" },
+  { key: "image", label: "Image" },
+];
+
+function normalizeDecisionValue(value?: string | number | null) {
+  return value == null ? "" : String(value).trim().toLowerCase();
+}
+
+function getStudioCurrentValue(studio: Studio, field: string) {
+  switch (field) {
+    case "name": return studio.name;
+    case "parent": return studio.parentName;
+    case "image": return studio.imagePath ? "Current logo" : undefined;
+    default: return undefined;
+  }
+}
+
+function getStudioScrapedValue(result: MetadataServerStudioMatch, field: string) {
+  switch (field) {
+    case "name": return result.name;
+    case "parent": return result.parentName;
+    case "image": return result.imageUrl ? "MetadataServer logo" : undefined;
+    default: return undefined;
+  }
+}
+
+function buildDefaultStudioFieldStrategies(studio: Studio, result: MetadataServerStudioMatch): Record<string, StudioFieldStrategy> {
+  const strategies: Record<string, StudioFieldStrategy> = {};
+  for (const field of studioScalarFields) {
+    const scraped = getStudioScrapedValue(result, field.key);
+    if (scraped === undefined || scraped === null || scraped === "") continue;
+    const current = getStudioCurrentValue(studio, field.key);
+    strategies[field.key] = normalizeDecisionValue(current) === normalizeDecisionValue(scraped) ? "ignore" : "overwrite";
+  }
+  return strategies;
+}
+
+function getStudioFieldStrategies(studio: Studio, result: MetadataServerStudioMatch, state?: StudioSearchState) {
+  return { ...buildDefaultStudioFieldStrategies(studio, result), ...(state?.fieldStrategies ?? {}) };
+}
+
+function buildDefaultStudioCollectionModes(result: MetadataServerStudioMatch): Record<string, CollectionMode> {
+  return {
+    ...DEFAULT_COLLECTION_MODES,
+    urls: result.urls.length > 0 ? "merge" : "skip",
+    aliases: result.aliases.length > 0 ? "merge" : "skip",
+  };
+}
+
+function getStudioCollectionModes(result: MetadataServerStudioMatch, state?: StudioSearchState) {
+  return { ...buildDefaultStudioCollectionModes(result), ...(state?.collectionModes ?? {}) };
+}
+
+function collectionModeToStudioStrategy(mode: CollectionMode): StudioFieldStrategy {
+  if (mode === "replace") return "overwrite";
+  if (mode === "merge") return "merge";
+  return "ignore";
+}
+
+function buildStudioFieldStrategies(studio: Studio, result: MetadataServerStudioMatch, state?: StudioSearchState) {
+  const scalarStrategies = getStudioFieldStrategies(studio, result, state);
+  const collectionModes = getStudioCollectionModes(result, state);
+  return {
+    ...scalarStrategies,
+    urls: collectionModeToStudioStrategy(collectionModes.urls),
+    aliases: collectionModeToStudioStrategy(collectionModes.aliases),
+  };
 }
 
 export function StudioTagger({ studios: studioList, selectedIds, selecting = false, onSelect }: StudioTaggerProps) {
@@ -204,6 +287,7 @@ function StudioTaggerRow({
       const importReq: MetadataServerStudioImportRequest = {
         endpoint,
         studioId: selectedResult.id,
+        fieldStrategies: buildStudioFieldStrategies(studio, selectedResult, state),
       };
       return studios.importFromMetadataServer(studio.id, importReq);
     },
@@ -284,9 +368,14 @@ function StudioTaggerRow({
               {state.results.map((result, i) => (
                 <StudioResultRow
                   key={`${result.endpoint}-${result.id}`}
+                  studio={studio}
                   result={result}
                   isSelected={i === (state.selectedIndex ?? 0)}
-                  onClick={() => onUpdateState({ selectedIndex: i })}
+                  fieldStrategies={getStudioFieldStrategies(studio, result, state)}
+                  collectionModes={getStudioCollectionModes(result, state)}
+                  onFieldStrategyChange={(field, strategy) => onUpdateState({ fieldStrategies: { ...getStudioFieldStrategies(studio, result, state), [field]: strategy } })}
+                  onCollectionModeChange={(field, mode) => onUpdateState({ collectionModes: { ...getStudioCollectionModes(result, state), [field]: mode } })}
+                  onClick={() => onUpdateState(i === (state.selectedIndex ?? 0) ? { selectedIndex: i } : { selectedIndex: i, fieldStrategies: undefined, collectionModes: undefined })}
                   onSave={i === (state.selectedIndex ?? 0) ? () => importMut.mutate() : undefined}
                   saving={i === (state.selectedIndex ?? 0) ? importMut.isPending : false}
                   saved={state.saved}
@@ -307,20 +396,38 @@ function StudioTaggerRow({
 }
 
 function StudioResultRow({
+  studio,
   result,
   isSelected,
+  fieldStrategies,
+  collectionModes,
+  onFieldStrategyChange,
+  onCollectionModeChange,
   onClick,
   onSave,
   saving,
   saved,
 }: {
+  studio: Studio;
   result: MetadataServerStudioMatch;
   isSelected: boolean;
+  fieldStrategies: Record<string, StudioFieldStrategy>;
+  collectionModes: Record<string, CollectionMode>;
+  onFieldStrategyChange: (field: string, strategy: StudioFieldStrategy) => void;
+  onCollectionModeChange: (field: string, mode: CollectionMode) => void;
   onClick: () => void;
   onSave?: () => void;
   saving?: boolean;
   saved?: boolean;
 }) {
+  const scalarRows = studioScalarFields
+    .map((field) => ({
+      ...field,
+      current: getStudioCurrentValue(studio, field.key),
+      scraped: getStudioScrapedValue(result, field.key),
+    }))
+    .filter((field) => field.scraped !== undefined && field.scraped !== null && field.scraped !== "");
+
   return (
     <div
       onClick={onClick}
@@ -342,12 +449,37 @@ function StudioResultRow({
       </div>
 
       {isSelected && (
-        <div className="border-t border-border p-3">
-          <div className="space-y-1 text-xs mb-3">
-            {result.parentName && <FieldRow label="Parent" value={result.parentName} />}
-            {result.aliases && result.aliases.length > 0 && <FieldRow label="Aliases" value={result.aliases.join(", ")} />}
-            {result.urls && result.urls.length > 0 && <FieldRow label="URLs" value={result.urls.join(", ")} />}
-          </div>
+        <div className="border-t border-border px-3 py-3 space-y-3">
+          {scalarRows.map((row) => (
+            <CompactScalarDecision
+              key={row.key}
+              label={row.label}
+              current={row.current}
+              scraped={row.scraped}
+              replacing={fieldStrategies[row.key] === "overwrite"}
+              onChange={(shouldReplace) => onFieldStrategyChange(row.key, shouldReplace ? "overwrite" : "ignore")}
+            />
+          ))}
+
+          {result.urls.length > 0 && (
+            <CompactCollectionDecision
+              label="URLs"
+              current={studio.urls}
+              mode={collectionModes.urls}
+              onModeChange={(mode) => onCollectionModeChange("urls", mode)}
+              scraped={<CompactListValue values={result.urls} breakAll />}
+            />
+          )}
+
+          {result.aliases.length > 0 && (
+            <CompactCollectionDecision
+              label="Aliases"
+              current={studio.aliases}
+              mode={collectionModes.aliases}
+              onModeChange={(mode) => onCollectionModeChange("aliases", mode)}
+              scraped={<CompactListValue values={result.aliases} />}
+            />
+          )}
 
           {onSave && !saved && (
             <div className="flex justify-end">
@@ -363,15 +495,6 @@ function StudioResultRow({
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-function FieldRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-2">
-      <span className="text-muted w-16 flex-shrink-0 text-right">{label}:</span>
-      <span className="text-foreground truncate">{value}</span>
     </div>
   );
 }

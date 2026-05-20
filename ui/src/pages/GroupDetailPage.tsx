@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { groups, scenes } from "../api/client";
+import { entityImages, groups, scenes } from "../api/client";
 import type { FindFilter, Group, GroupItem, Scene, SceneFilterCriteria, SegmentDerivedQueryDescriptor, SegmentSpanDerivedQuery } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
 import { Clapperboard, ExternalLink, Film, GripVertical, Layers, Link as LinkIcon, Pencil, Play, Plus, Trash2, X } from "lucide-react";
@@ -14,6 +14,7 @@ import { QuickViewDialog } from "../components/QuickViewDialog";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
@@ -43,6 +44,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const { hasPermission, user } = useAuth();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("items");
   const { allTabs: groupTabs, renderExtensionTab } = useExtensionTabs("group", [
     { key: "items", label: "Items" },
@@ -256,6 +258,19 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   return (
     <div>
       <GroupEditModal group={group} open={editing} onClose={() => setEditing(false)} />
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Group Cover"
+        currentImageUrl={group.frontImagePath}
+        onUpload={(file) => entityImages.uploadGroupFrontImage(group.id, file)}
+        onDelete={() => entityImages.deleteGroupFrontImage(group.id)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["group", group.id] });
+          queryClient.invalidateQueries({ queryKey: ["groups"] });
+        }}
+        aspectRatio="2/3"
+      />
       <ConfirmDialog
         open={confirmDelete}
         title="Delete Group"
@@ -290,6 +305,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         onGoBack={goBack}
         imageUrl={group.frontImagePath}
         imageAlt={group.name}
+        onImageClick={canWriteGroup ? () => setCoverOpen(true) : undefined}
         imageFallback={<Layers className="h-14 w-14" />}
         counts={[
           { key: "scenes", label: "Scenes", value: group.sceneCount, icon: <Film className="h-4 w-4" /> },

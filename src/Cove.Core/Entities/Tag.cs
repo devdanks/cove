@@ -9,6 +9,7 @@ public class Tag : BaseEntity
     public int? TagGroupId { get; set; }
     public bool Favorite { get; set; }
     public bool IgnoreAutoTag { get; set; }
+    public bool Organized { get; set; }
     public double? MinOccurrenceSec { get; set; }
     public double? MinOccurrencePercent { get; set; }
     public bool? ShowAsSegment { get; set; }
@@ -18,6 +19,7 @@ public class Tag : BaseEntity
 
     // Image stored as blob reference
     public string? ImageBlobId { get; set; }
+    public string? ImageOverrideBlobId { get; set; }
 
     // Denormalized usage counters for hot list/detail reads.
     public int SceneCount { get; set; }

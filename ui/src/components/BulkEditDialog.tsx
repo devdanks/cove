@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { InteractiveRating } from "./Rating";
 import type { BulkUpdateMode } from "../api/types";
+import { tagGroups } from "../api/client";
 import { StudioSelector } from "./StudioSelector";
 import { EntityReferenceMultiSelector, type EntityReferenceType } from "./EntityReferenceSelector";
 
@@ -11,7 +13,7 @@ interface BulkEditField {
   key: string;
   label: string;
   type: "rating" | "number" | "bool" | "string" | "date" | "select" | "multiId";
-  entityType?: "tags" | "performers" | "studios" | "groups" | "galleries";
+  entityType?: "tags" | "performers" | "studios" | "groups" | "galleries" | "tagGroups";
   options?: { label: string; value: string | number }[];
   modeKey?: string;
   nullable?: boolean;
@@ -215,7 +217,10 @@ function BulkFieldEditor({
               )}
             </div>
           )}
-          {field.type === "select" && field.entityType !== "studios" && (
+          {field.type === "select" && field.entityType === "tagGroups" && (
+            <TagGroupBulkSelect value={value as number | undefined} nullable={field.nullable} onValueChange={onValueChange} />
+          )}
+          {field.type === "select" && field.entityType !== "studios" && field.entityType !== "tagGroups" && (
             <select
               value={String(value ?? "")}
               onChange={(e) => {
@@ -235,7 +240,7 @@ function BulkFieldEditor({
               ))}
             </select>
           )}
-          {field.type === "multiId" && field.entityType && (
+          {field.type === "multiId" && isMultiIdEntityType(field.entityType) && (
             <MultiIdBulkEditor
               entityType={field.entityType}
               value={(value as number[]) ?? []}
@@ -245,6 +250,35 @@ function BulkFieldEditor({
             />
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+function TagGroupBulkSelect({ value, nullable, onValueChange }: { value?: number; nullable?: boolean; onValueChange: (v: unknown) => void }) {
+  const { data: groups = [], isLoading } = useQuery({ queryKey: ["tag-groups"], queryFn: tagGroups.list });
+
+  return (
+    <div className="space-y-2">
+      <select
+        value={String(value ?? "")}
+        onChange={(event) => onValueChange(event.target.value ? Number(event.target.value) : undefined)}
+        className="w-full bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
+      >
+        <option value="">{isLoading ? "Loading tag groups..." : "Select tag group..."}</option>
+        {groups.map((group) => (
+          <option key={group.id} value={group.id}>{group.name}</option>
+        ))}
+      </select>
+      {nullable && (
+        <button
+          type="button"
+          onClick={() => onValueChange(undefined)}
+          className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-xs ${value == null ? "border-accent bg-accent/10 text-accent" : "border-border text-secondary hover:text-foreground"}`}
+        >
+          <X className="h-3 w-3" />
+          Clear value
+        </button>
       )}
     </div>
   );
@@ -300,6 +334,10 @@ function toReferenceEntityType(entityType: "tags" | "performers" | "studios" | "
     case "groups": return "group";
     case "galleries": return "gallery";
   }
+}
+
+function isMultiIdEntityType(entityType: BulkEditField["entityType"]): entityType is "tags" | "performers" | "studios" | "groups" | "galleries" {
+  return entityType === "tags" || entityType === "performers" || entityType === "studios" || entityType === "groups" || entityType === "galleries";
 }
 
 const BULK_MODE_LABELS: Record<BulkUpdateMode, string> = {
@@ -412,9 +450,10 @@ export const TEXT_BULK_FIELDS: BulkEditField[] = [
 export const TAG_BULK_FIELDS: BulkEditField[] = [
   { key: "description", label: "Description", type: "string" },
   { key: "color", label: "Badge Color", type: "string" },
-  { key: "tagGroupId", label: "Tag Group ID", type: "number" },
+  { key: "tagGroupId", label: "Tag Group", type: "select", entityType: "tagGroups", nullable: true },
   { key: "minOccurrenceSec", label: "Min Seconds", type: "number" },
   { key: "minOccurrencePercent", label: "Min Percent", type: "number" },
+  { key: "organized", label: "Organized", type: "bool" },
   { key: "favorite", label: "Favorite", type: "bool" },
   { key: "ignoreAutoTag", label: "Ignore Auto-Tag", type: "bool" },
   { key: "parentIds", label: "Parent Tags", type: "multiId", entityType: "tags", modeKey: "parentMode" },

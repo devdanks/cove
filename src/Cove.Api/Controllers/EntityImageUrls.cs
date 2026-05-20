@@ -1,4 +1,5 @@
 using System.Globalization;
+using Cove.Core.Entities;
 using Microsoft.AspNetCore.Http;
 
 namespace Cove.Api.Controllers;
@@ -36,6 +37,11 @@ internal static class EntityImageUrls
     public static string Performer(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(context, $"/api/performers/{id}/image", updatedAt, maxDimension);
 
+    public static string? PerformerOrNull(HttpContext? context, Performer performer, int maxDimension = DefaultEntityImageMaxDimension)
+        => performer.ImageOverrideBlobId != null || performer.ImageBlobId != null
+            ? Performer(context, performer.Id, performer.UpdatedAt, maxDimension)
+            : null;
+
     public static string Audio(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(null, $"/api/audios/{id}/image", updatedAt, maxDimension);
 
@@ -60,11 +66,21 @@ internal static class EntityImageUrls
     public static string Studio(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(context, $"/api/studios/{id}/image", updatedAt, maxDimension);
 
+    public static string? StudioOrNull(HttpContext? context, Studio studio, int maxDimension = DefaultEntityImageMaxDimension)
+        => studio.ImageOverrideBlobId != null || studio.ImageBlobId != null
+            ? Studio(context, studio.Id, studio.UpdatedAt, maxDimension)
+            : null;
+
     public static string Tag(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(null, $"/api/tags/{id}/image", updatedAt, maxDimension);
 
     public static string Tag(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(context, $"/api/tags/{id}/image", updatedAt, maxDimension);
+
+    public static string? TagOrNull(HttpContext? context, Tag tag, int maxDimension = DefaultEntityImageMaxDimension)
+        => tag.ImageOverrideBlobId != null || tag.ImageBlobId != null
+            ? Tag(context, tag.Id, tag.UpdatedAt, maxDimension)
+            : null;
 
     public static string GroupFront(int id, DateTime updatedAt, int maxDimension = DefaultEntityImageMaxDimension)
         => Build(null, $"/api/groups/{id}/image/front", updatedAt, maxDimension);

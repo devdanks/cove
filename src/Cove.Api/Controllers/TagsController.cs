@@ -133,7 +133,10 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                     tag.Name,
                     tag.Favorite,
                     tag.Description,
-                    tag.ImageBlobId != null ? EntityImageUrls.Tag(ControllerContext.HttpContext, tag.Id, tag.UpdatedAt) : null,
+                    EntityImageUrls.TagOrNull(ControllerContext.HttpContext, tag),
+                    tag.TagGroupId,
+                    tag.TagGroup?.Name,
+                    tag.TagGroup?.Color,
                     parentIdsByTagId[tag.Id],
                     childIdsByTagId[tag.Id],
                     usageCounts.TotalUsageCount,
@@ -219,6 +222,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             TagGroupId = NormalizeOptionalId(dto.TagGroupId),
             Favorite = dto.Favorite,
             IgnoreAutoTag = dto.IgnoreAutoTag,
+            Organized = dto.Organized,
             MinOccurrenceSec = NormalizeOptionalPositive(dto.MinOccurrenceSec),
             MinOccurrencePercent = NormalizeOptionalPercent(dto.MinOccurrencePercent),
             ShowAsSegment = dto.ShowAsSegment,
@@ -265,6 +269,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         tag.TagGroupId = NormalizeOptionalId(dto.TagGroupId);
         if (dto.Favorite.HasValue) tag.Favorite = dto.Favorite.Value;
         if (dto.IgnoreAutoTag.HasValue) tag.IgnoreAutoTag = dto.IgnoreAutoTag.Value;
+        if (dto.Organized.HasValue) tag.Organized = dto.Organized.Value;
         tag.MinOccurrenceSec = NormalizeOptionalPositive(dto.MinOccurrenceSec);
         tag.MinOccurrencePercent = NormalizeOptionalPercent(dto.MinOccurrencePercent);
         tag.ShowAsSegment = dto.ShowAsSegment;
@@ -517,7 +522,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 t.TagGroup?.Color,
                 t.MinOccurrenceSec,
                 t.MinOccurrencePercent,
-                t.RemoteIds.Select(remoteId => new TagRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList());
+                t.RemoteIds.Select(remoteId => new TagRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
+                t.Organized);
     }
 
     private List<TagListDto> MapTagListDtos(IReadOnlyList<Tag> items, IReadOnlyDictionary<int, TagUsageCounts> usageCountsByTagId)
@@ -542,7 +548,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 usageCounts.GroupCount,
                 usageCounts.PerformerCount,
                 usageCounts.StudioCount,
-                t.ImageBlobId != null ? EntityImageUrls.Tag(ControllerContext.HttpContext, t.Id, t.UpdatedAt) : null,
+                EntityImageUrls.TagOrNull(ControllerContext.HttpContext, t),
                 t.ShowAsSegment,
                 t.SegmentColorOverride,
                 t.SegmentLaneOverride,
@@ -551,7 +557,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 t.TagGroup?.Name,
                 t.TagGroup?.Color,
                 t.MinOccurrenceSec,
-                t.MinOccurrencePercent);
+                t.MinOccurrencePercent,
+                t.Organized);
         }).ToList();
     }
 
@@ -650,7 +657,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             tag.TagGroup?.Name,
             tag.TagGroup?.Color,
             tag.MinOccurrenceSec,
-            tag.MinOccurrencePercent);
+            tag.MinOccurrencePercent,
+            Organized: tag.Organized);
 
     private static string? NormalizeOptionalText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -730,9 +738,11 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         {
             if (dto.Description != null) tag.Description = dto.Description;
             if (dto.Color != null) tag.Color = string.IsNullOrWhiteSpace(dto.Color) ? null : dto.Color.Trim();
-            if (dto.TagGroupId.HasValue) tag.TagGroupId = dto.TagGroupId;
+            if (dto.ClearFields?.Contains("tagGroupId", StringComparer.OrdinalIgnoreCase) == true) tag.TagGroupId = null;
+            else if (dto.TagGroupId.HasValue) tag.TagGroupId = NormalizeOptionalId(dto.TagGroupId);
             if (dto.MinOccurrenceSec.HasValue) tag.MinOccurrenceSec = dto.MinOccurrenceSec;
             if (dto.MinOccurrencePercent.HasValue) tag.MinOccurrencePercent = dto.MinOccurrencePercent;
+            if (dto.Organized.HasValue) tag.Organized = dto.Organized.Value;
             if (dto.Favorite.HasValue) tag.Favorite = dto.Favorite.Value;
             if (dto.IgnoreAutoTag.HasValue) tag.IgnoreAutoTag = dto.IgnoreAutoTag.Value;
 

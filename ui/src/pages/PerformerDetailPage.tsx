@@ -19,6 +19,7 @@ import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { AUDIO_CRITERIA, GALLERY_CRITERIA, GROUP_CRITERIA, IMAGE_CRITERIA, SCENE_CRITERIA, TEXT_CRITERIA } from "../components/FilterDialog";
@@ -104,6 +105,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     { key: "similar", label: "Similar" },
   ], id);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "performers" }, onNavigate);
@@ -231,16 +233,32 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const age = performer.birthdate
     ? Math.floor((Date.now() - new Date(performer.birthdate).getTime()) / 31557600000)
     : null;
+  const performerImageUrl = performer.imagePath || entityImages.performerImageUrl(performer.id, performer.updatedAt, 1200);
+  const handleCoverChanged = () => {
+    queryClient.invalidateQueries({ queryKey: ["performer", performer.id] });
+    queryClient.invalidateQueries({ queryKey: ["performers"] });
+  };
 
   return (
     <>
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Performer Cover"
+        currentImageUrl={performerImageUrl}
+        onUpload={(file) => entityImages.uploadPerformerImage(performer.id, file)}
+        onDelete={() => entityImages.deletePerformerImage(performer.id)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={handleCoverChanged}
+        aspectRatio="2/3"
+      />
       <EntityHeroLayout
         backLabel={backLabel}
         onGoBack={goBack}
         backgroundImageUrl={entityImages.performerImageUrl(performer.id, performer.updatedAt, 1600)}
-        imageUrl={performer.imagePath || entityImages.performerImageUrl(performer.id, performer.updatedAt, 1200)}
+        imageUrl={performerImageUrl}
         imageAlt={performer.name}
         imageContainerClassName="relative flex h-96 w-72 max-w-full flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/35 md:h-[34rem] md:w-[25rem]"
+        onImageClick={canWritePerformer ? () => setCoverOpen(true) : undefined}
         imageFallbackClassName="flex h-full w-full items-center justify-center bg-gradient-to-b from-card to-surface"
         imageFallback={<UserRound className="h-20 w-20 text-muted/50" />}
         title={performer.name}

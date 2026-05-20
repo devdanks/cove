@@ -545,7 +545,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         customFieldValues,
         group.CreatedAt.ToString("o"),
         group.UpdatedAt.ToString("o"),
-        group.FrontImageBlobId != null ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt) : null,
+        ResolveGroupFrontImagePath(group),
         group.BackImageBlobId != null ? EntityImageUrls.GroupBack(ControllerContext.HttpContext, group.Id, group.UpdatedAt) : null,
         group.Kind,
         group.QuerySourceKey,
@@ -555,6 +555,11 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         group.CacheTtlSec,
         group.ShowInSceneLists,
         group.AllowedHostTypes);
+
+    private string? ResolveGroupFrontImagePath(Group group)
+        => group.FrontImageBlobId != null || group.GroupItems.Any(item => item.ImageId.HasValue || item.SceneId.HasValue)
+            ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt)
+            : null;
 
     private PerformerDto MapToDto(Performer p, PerformerUsageCounts? usageCounts = null, Dictionary<string, object>? customFieldValues = null) => new(
         p.Id, p.Name, p.Disambiguation, p.Gender?.ToString(),
@@ -573,7 +578,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         usageCounts?.GroupCount ?? 0,
         usageCounts?.AudioCount ?? 0,
         usageCounts?.TextCount ?? 0,
-        p.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, p.Id, p.UpdatedAt) : null,
+        EntityImageUrls.PerformerOrNull(ControllerContext.HttpContext, p),
         customFieldValues,
         p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o")
     );

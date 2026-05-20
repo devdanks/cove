@@ -14,6 +14,7 @@ export function TagBadge({ name, tag, color, groupColor, onClick, provenance }: 
   const badgeLabel = getTagProvenanceBadgeLabel(visibleProvenance);
   const tooltip = provenance?.length ? buildTagProvenanceTooltip(provenance) : undefined;
   const interactive = Boolean(onClick);
+  const resolvedGroupColor = normalizeTagColor(groupColor ?? tag?.tagGroupColor);
   const resolvedColor = normalizeTagColor(color ?? tag?.color ?? groupColor ?? tag?.tagGroupColor);
   const colorStyle = resolvedColor ? getTagColorStyle(resolvedColor) : undefined;
 
@@ -47,6 +48,11 @@ export function TagBadge({ name, tag, color, groupColor, onClick, provenance }: 
 
   const badgeContent = (
     <>
+      {resolvedGroupColor ? (
+        <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-current/30" title="Tag group">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: resolvedGroupColor }} />
+        </span>
+      ) : null}
       <span>{name}</span>
       {badgeLabel ? (
         <span className="rounded-full border border-emerald-400/40 bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">

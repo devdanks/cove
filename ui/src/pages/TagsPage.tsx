@@ -1,36 +1,29 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tags, tagGroups } from "../api/client";
-import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import type { EntityEngagement, FindFilter, Tag, TagCreate, TagFilterCriteria } from "../api/types";
+import type { Tag, TagCreate, TagFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { CreateModalActions, EditModal, Field, NumberInput, SelectInput, TextInput, TextArea } from "../components/EditModal";
-import { Tag as TagIcon, Film, Trash2, Loader2, Edit, Merge, Heart, Image, LayoutGrid, Layers, Users, Building2 } from "lucide-react";
+import { Merge, Layers, Tag as TagIcon } from "lucide-react";
 import { MergeDialog } from "../components/MergeDialog";
-import { TagTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent, PerformersPopoverContent, GalleriesPopoverContent, GroupsPopoverContent, StudiosPopoverContent } from "../components/EntityCards";
+import { TagTile } from "../components/EntityCards";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { TAG_CRITERIA } from "../components/FilterDialog";
-import { BulkEditDialog, TAG_BULK_FIELDS } from "../components/BulkEditDialog";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
 import { ExtensionSlot } from "../router/RouteRegistry";
-import { useRouteRegistry } from "../router/RouteRegistry";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
-import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { StringListEditor } from "../components/StringListEditor";
 import { TagGraphView } from "../components/TagGraphView";
-import { MetadataServerBatchDialog } from "../components/MetadataServerBatchDialog";
 import { TagGroupsManager } from "../components/TagGroupsManager";
 import { TagTagger } from "../components/TagTagger";
-import { useWallColumns } from "../hooks/useWallColumns";
-import { WallMediaCard } from "../components/WallMediaCard";
 import { CustomFieldsEditor } from "../components/shared";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
+import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 const GRAPH_VIEW_LIMIT = 5000;
 
@@ -68,22 +61,18 @@ export function TagsPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list", "wall", "graph", "tagger"] as const,
+    allowedDisplayModes: ["grid", "list", "graph", "tagger"] as const,
     allowInfinitePageSize: true,
   });
-  const [wallColumnCount, setWallColumnCount] = useState(6);
   const [showCreate, setShowCreate] = useState(false);
   const [showTagGroups, setShowTagGroups] = useState(false);
-  const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
-  const [showMetadataBatch, setShowMetadataBatch] = useState(false);
   const [graphDeleteTarget, setGraphDeleteTarget] = useState<{ id: number; name: string } | null>(null);
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canWriteTag = canWriteEntity("tag", hasPermission);
   const canDeleteTag = canDeleteEntity("tag", hasPermission);
-  const canMetadataBatch = hasPermission("library.autotag") && canWriteTag;
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
   const graphFindFilter = useMemo(
@@ -109,7 +98,6 @@ export function TagsPage({ onNavigate }: Props) {
   const items = listData.items;
   const totalCount = displayMode === "graph" ? graphData?.totalCount ?? 0 : listData.totalCount;
   const isLoading = displayMode === "graph" ? isGraphLoading : listData.isLoading;
-  const wallColumns = useWallColumns(items, wallColumnCount);
   const { engagementById } = useEntityEngagementBatch("tag", items.map((item) => item.id));
   const selectionItems: Array<Pick<Tag, "id" | "name" | "imagePath">> = displayMode === "graph" ? graphData?.items ?? [] : items;
   const selectionResetKey = useMemo(() => JSON.stringify({ filter: listData.infiniteFilterKey, objectFilter, displayMode }), [displayMode, listData.infiniteFilterKey, objectFilter]);
@@ -124,11 +112,6 @@ export function TagsPage({ onNavigate }: Props) {
     }
   };
 
-  const bulkDeleteMut = useMutation({
-    mutationFn: () => tags.bulkDelete([...selectedIds]),
-    onSuccess: () => { selectNone(); queryClient.invalidateQueries({ queryKey: ["tags"] }); },
-  });
-
   const deleteTagMut = useMutation({
     mutationFn: (id: number) => tags.delete(id),
     onSuccess: (_result, id) => {
@@ -139,27 +122,10 @@ export function TagsPage({ onNavigate }: Props) {
     },
   });
 
-  const bulkEditMut = useMutation({
-    mutationFn: (values: Record<string, unknown>) =>
-      tags.bulkUpdate({ ids: [...selectedIds], ...values } as any),
-    onSuccess: () => {
-      setShowBulkEdit(false);
-      selectNone();
-      queryClient.invalidateQueries({ queryKey: ["tags"] });
-    },
-  });
-
   return (
     <>
       <TagCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "tag", id })} />
       <TagGroupManagerDialog open={showTagGroups} onClose={() => setShowTagGroups(false)} />
-      <MetadataServerBatchDialog
-        open={showMetadataBatch}
-        entityType="tag"
-        selectedIds={[...selectedIds]}
-        onClose={() => setShowMetadataBatch(false)}
-        onQueued={selectNone}
-      />
       <ListPage
       title="Tags"
       pageKey="tags"
@@ -171,15 +137,13 @@ export function TagsPage({ onNavigate }: Props) {
       sortOptions={SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
-      availableDisplayModes={["grid", "list", "wall", "graph", "tagger"]}
+      availableDisplayModes={["grid", "list", "graph", "tagger"]}
       allowInfinitePageSize
       showPagingControls={displayMode === "graph" || !listData.infinitePageSize}
       selectAllPending={displayMode !== "graph" && listData.infinitePageSize ? selectAllMatchingPending : false}
       onSelectAllMatching={displayMode !== "graph" && listData.infinitePageSize ? selectAll : undefined}
       selectAllMatchingLabel="Select shown"
       infiniteScroll={displayMode !== "graph" ? listData.infiniteScroll : undefined}
-      wallColumnCount={wallColumnCount}
-      onWallColumnCountChange={setWallColumnCount}
       criteriaDefinitions={TAG_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
@@ -200,15 +164,6 @@ export function TagsPage({ onNavigate }: Props) {
       onInvertSelection={invertSelection}
       selectionActions={(
         <>
-          {canMetadataBatch && (
-            <button
-              onClick={() => setShowMetadataBatch(true)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
-            >
-              <TagIcon className="w-3 h-3" />
-              MetadataServer
-            </button>
-          )}
           {canWriteTag && selectedIds.size >= 2 && (
             <button
               onClick={() => setShowMerge(true)}
@@ -237,30 +192,6 @@ export function TagsPage({ onNavigate }: Props) {
             const tagName = selectionItems.find((item) => item.id === id)?.name ?? `#${id}`;
             setGraphDeleteTarget({ id, name: tagName });
           } : undefined}
-        />
-      ) : displayMode === "wall" ? (
-        <VirtualizedWallColumns
-          columns={wallColumns}
-          getItemKey={(tag) => tag.id}
-          infinitePageSize={listData.infinitePageSize}
-          hasNextPage={listData.infiniteQuery.hasNextPage}
-          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
-          loadMore={listData.loadMore}
-          estimateItemHeight={260}
-          gap={4}
-          className="flex gap-1 px-2"
-          columnClassName="flex min-w-0 flex-1 flex-col gap-1"
-          renderItem={(tag) => (
-                <EntityWallCard
-                  title={tag.name}
-                  imageSrc={tag.imagePath}
-                  route={{ page: "tag", id: tag.id }}
-                  selected={selectedIds.has(tag.id)}
-                  selecting={selecting}
-                  onSelect={() => toggle(tag.id)}
-                  onClick={() => selecting ? toggle(tag.id) : onNavigate({ page: "tag", id: tag.id })}
-                />
-          )}
         />
       ) : displayMode === "grid" ? (
         <VirtualizedEntityGrid
@@ -296,15 +227,6 @@ export function TagsPage({ onNavigate }: Props) {
         </div>
       )}
       </ListPage>
-      <BulkEditDialog
-        open={showBulkEdit}
-        onClose={() => setShowBulkEdit(false)}
-        title="Edit Tags"
-        selectedCount={selectedIds.size}
-        fields={TAG_BULK_FIELDS}
-        onApply={(values) => bulkEditMut.mutate(values)}
-        isPending={bulkEditMut.isPending}
-      />
       <ConfirmDialog
         open={graphDeleteTarget != null}
         title="Delete Tag"
@@ -420,18 +342,6 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
           customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
         })} />
     </EditModal>
-  );
-}
-
-function EntityWallCard({ title, imageSrc, route, selected, selecting, onSelect, onClick }: { title: string; imageSrc?: string | null; route: any; selected: boolean; selecting: boolean; onSelect: () => void; onClick: () => void }) {
-  return (
-    <WallMediaCard title={title} imageSrc={imageSrc} aspectRatio="1 / 1" onClick={onClick} className={selected ? "ring-2 ring-accent" : ""}>
-      <RouteCardLinkOverlay route={route} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone />
-      <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-      <div className="selection-safe-zone absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 text-xs font-medium text-white">
-        {title}
-      </div>
-    </WallMediaCard>
   );
 }
 

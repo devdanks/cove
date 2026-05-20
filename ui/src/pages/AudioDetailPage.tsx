@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, ExternalLink, Eye, FileAudio, Files, FolderOpen, Link2, Mic2, MoreVertical, Rows3, Trash2 } from "lucide-react";
-import { audios, fileOps } from "../api/client";
+import { Check, Download, ExternalLink, Eye, FileAudio, Files, FolderOpen, Image, Link2, Mic2, MoreVertical, Rows3, Trash2 } from "lucide-react";
+import { audios, entityImages, fileOps } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { AudioPlayer } from "../components/AudioPlayer";
@@ -10,6 +10,7 @@ import { BookmarkButton } from "../components/BookmarkButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
 import { InteractiveRating } from "../components/Rating";
 import { CustomFieldsDisplay, formatDate, formatDuration, formatFileSize } from "../components/shared";
@@ -47,6 +48,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   const [activeTab, setActiveTab] = useState<AudioTab>("details");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [showScrapeDialog, setShowScrapeDialog] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
@@ -135,6 +137,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   const headerImage = audio?.imagePath ? (
     <img src={audio.imagePath} alt={`${displayTitle} cover`} className="h-20 w-20 rounded-2xl border border-border object-cover shadow-lg shadow-black/20" />
   ) : undefined;
+  const audioCoverUrl = audio?.imagePath ?? undefined;
   const tabs = useMemo(() => {
     const nextTabs: MediaDetailTab[] = [{ key: "details", label: "Details" }];
     if ((audio?.tracks.length ?? 0) > 0) {
@@ -239,6 +242,21 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
 
   return (
     <>
+    {audio ? (
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Audio Cover"
+        currentImageUrl={audioCoverUrl}
+        onUpload={(file) => entityImages.uploadAudioImage(audio.id, file)}
+        onDelete={() => entityImages.deleteAudioImage(audio.id)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["audio", audio.id] });
+          queryClient.invalidateQueries({ queryKey: ["audios"] });
+        }}
+        aspectRatio="1/1"
+      />
+    ) : null}
     <MediaDetailLayout
       title={displayTitle}
       subtitle={detailSubtitle}
@@ -319,6 +337,18 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
                     >
                       <Download className="h-3.5 w-3.5" /> Download Media...
+                    </button>
+                  ) : null}
+                  {canWriteAudio ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoverOpen(true);
+                        setShowOpsMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                    >
+                      <Image className="h-3.5 w-3.5" /> Set Cover...
                     </button>
                   ) : null}
                   {canDeleteAudio ? (

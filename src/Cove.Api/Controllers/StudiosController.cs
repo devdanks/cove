@@ -223,7 +223,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         usageCounts?.ChildStudioCount ?? s.ChildStudioCount,
         usageCounts?.AudioCount ?? 0,
         usageCounts?.TextCount ?? 0,
-        s.ImageBlobId != null ? EntityImageUrls.Studio(ControllerContext.HttpContext, s.Id, s.UpdatedAt) : null,
+        EntityImageUrls.StudioOrNull(ControllerContext.HttpContext, s),
         customFieldValues,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
     );
@@ -428,7 +428,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             .FirstOrDefaultAsync(s => s.Id == id, ct);
         if (studio == null) return NotFound();
 
-        var imported = await metadataServerService.MergeStudioAsync(studio, dto.Endpoint, dto.StudioId, ct);
+        var imported = await metadataServerService.MergeStudioAsync(studio, dto.Endpoint, dto.StudioId, dto, ct);
         if (!imported) return NotFound();
 
         await db.SaveChangesAsync(ct);
@@ -441,6 +441,9 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosWrite)]
     public async Task<IActionResult> SubmitStudioDraft(int id, [FromBody] MetadataServerEndpointDto dto, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(dto.Endpoint))
+            return BadRequest(new { message = "Endpoint is required" });
+
         var studio = await db.Studios
             .Include(s => s.RemoteIds)
             .Include(s => s.Aliases)
@@ -449,8 +452,19 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             .FirstOrDefaultAsync(s => s.Id == id, ct);
         if (studio == null) return NotFound();
 
-        var draftId = await metadataServerService.SubmitStudioDraftAsync(studio, dto.Endpoint, ct);
-        return Ok(new { draftId });
+        try
+        {
+            var draftId = await metadataServerService.SubmitStudioDraftAsync(studio, dto.Endpoint, ct);
+            return Ok(new { draftId });
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("StudioDraftInput", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("submitStudioDraft", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "This MetadataServer does not support studio draft submission. Use Studio Tagger search/import instead." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("metadata-server/batch-tag")]

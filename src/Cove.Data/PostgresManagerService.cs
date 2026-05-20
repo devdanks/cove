@@ -34,8 +34,9 @@ public class PostgresManagerService : IHostedService
     }
 
     /// <summary>Root directory for all managed postgres files (binaries + data).</summary>
-    private string CoveDir => _config.DataPath ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "cove");
+    private string CoveDir => string.IsNullOrWhiteSpace(_config.DataPath)
+        ? CoveDefaultPaths.GetDataRoot()
+        : CoveDefaultPaths.ResolveDataPath(_config.DataPath);
 
     private string BinDir => Path.Combine(CoveDir, "pgsql", "bin");
     private string DataDir => Path.Combine(CoveDir, "pgdata");

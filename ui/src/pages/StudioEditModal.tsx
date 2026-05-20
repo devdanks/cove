@@ -1,10 +1,8 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { studios, entityImages } from "../api/client";
+import { studios } from "../api/client";
 import type { Studio, StudioUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
-import { ImageInput } from "../components/ImageInput";
-import { InteractiveRatingField } from "../components/Rating";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
@@ -21,7 +19,6 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
 
   const [name, setName] = useState(studio.name);
   const [details, setDetails] = useState(studio.details ?? "");
-  const [rating, setRating] = useState<number | undefined>(undefined);
   const [ignoreAutoTag, setIgnoreAutoTag] = useState(studio.ignoreAutoTag);
   const [urls, setUrls] = useState(studio.urls.length > 0 ? studio.urls : [""]);
   const [aliases, setAliases] = useState(studio.aliases.length > 0 ? studio.aliases : [""]);
@@ -34,7 +31,6 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
   useEffect(() => {
     setName(studio.name);
     setDetails(studio.details ?? "");
-    setRating(undefined);
     setIgnoreAutoTag(studio.ignoreAutoTag);
     setUrls(studio.urls.length > 0 ? studio.urls : [""]);
     setAliases(studio.aliases.length > 0 ? studio.aliases : [""]);
@@ -59,7 +55,6 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
     mutation.mutate({
       name,
       details: details || undefined,
-      rating,
       ignoreAutoTag,
       parentId,
       urls: urlList,
@@ -72,18 +67,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
 
   return (
     <EditModal title={`Edit Studio: ${studio.name}`} open={open} onClose={onClose}>
-      <div className="flex gap-6 mb-4">
-        <ImageInput
-          currentImageUrl={entityImages.studioImageUrl(studio.id, studio.updatedAt)}
-          onUpload={(file) => entityImages.uploadStudioImage(studio.id, file)}
-          onDelete={() => entityImages.deleteStudioImage(studio.id)}
-          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["studio", studio.id] })}
-          label="Logo"
-          aspectRatio="1/1"
-          className="w-40"
-          objectFit="contain"
-        />
-        <div className="flex-1 space-y-4">
+      <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <Field label="Name *">
           <TextInput value={name} onChange={setName} placeholder="Studio name" />
@@ -97,14 +81,11 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
         <TextArea value={details} onChange={setDetails} placeholder="Studio description" rows={3} />
       </Field>
 
-      <div className="grid grid-cols-2 gap-4">
-        <InteractiveRatingField label="Rating" value={rating} onChange={setRating} />
-        <div className="flex items-end gap-4 pb-4">
+      <div className="flex items-end gap-4 pb-4">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={ignoreAutoTag} onChange={(e) => setIgnoreAutoTag(e.target.checked)} className="rounded bg-card border-border" />
             Ignore Auto Tag
           </label>
-        </div>
       </div>
 
       <Field label="URLs">
@@ -127,8 +108,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="studio" />
       </Field>
-
-      </div></div>
+  </div>
       <div className="flex justify-end gap-3 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm text-secondary hover:text-white">Cancel</button>
         <SaveButton loading={mutation.isPending} onClick={handleSave} />

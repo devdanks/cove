@@ -110,7 +110,7 @@ public sealed class OutsideIpFailsafeMiddleware
 
     private static async Task WriteSetupTokenFileAsync(SetupTokenDto token, CancellationToken ct)
     {
-        var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "cove");
+        var dataDir = CoveDefaultPaths.GetDataRoot();
         Directory.CreateDirectory(dataDir);
         var tokenPath = Path.Combine(dataDir, "setup_token.txt");
         await File.WriteAllTextAsync(tokenPath,

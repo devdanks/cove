@@ -132,7 +132,8 @@ public record TagDto(
     bool IsDerived = false,
     bool CanRemove = true,
     double? EffectiveDurationSec = null,
-    double? EffectiveDurationPercent = null);
+    double? EffectiveDurationPercent = null,
+    bool Organized = false);
 
 public record TagListDto(
     int Id,
@@ -157,7 +158,8 @@ public record TagListDto(
     string? TagGroupName = null,
     string? TagGroupColor = null,
     double? MinOccurrenceSec = null,
-    double? MinOccurrencePercent = null);
+    double? MinOccurrencePercent = null,
+    bool Organized = false);
 
 public record TagDetailDto(
     int Id, string Name, string? SortName, string? Description, bool Favorite, bool IgnoreAutoTag,
@@ -167,7 +169,8 @@ public record TagDetailDto(
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     bool? ShowAsSegment = null, string? SegmentColorOverride = null, int? SegmentLaneOverride = null,
     string? Color = null, int? TagGroupId = null, string? TagGroupName = null, string? TagGroupColor = null,
-    double? MinOccurrenceSec = null, double? MinOccurrencePercent = null, List<TagRemoteIdDto>? RemoteIds = null);
+    double? MinOccurrenceSec = null, double? MinOccurrencePercent = null, List<TagRemoteIdDto>? RemoteIds = null,
+    bool Organized = false);
 
 public record TagRemoteIdDto(string Endpoint, string RemoteId);
 
@@ -188,6 +191,9 @@ public record TagGraphNodeDto(
     bool Favorite,
     string? Description,
     string? ImagePath,
+    int? TagGroupId,
+    string? TagGroupName,
+    string? TagGroupColor,
     List<int> ParentIds,
     List<int> ChildIds,
     int TotalUsageCount,
@@ -250,7 +256,8 @@ public record TagCreateDto(
     double? MinOccurrenceSec = null,
     double? MinOccurrencePercent = null,
     Dictionary<string, object>? CustomFields = null,
-    List<TagRemoteIdDto>? RemoteIds = null);
+    List<TagRemoteIdDto>? RemoteIds = null,
+    bool Organized = false);
 public record TagUpdateDto(
     string? Name,
     string? SortName,
@@ -268,7 +275,8 @@ public record TagUpdateDto(
     int? TagGroupId = null,
     double? MinOccurrenceSec = null,
     double? MinOccurrencePercent = null,
-    List<TagRemoteIdDto>? RemoteIds = null);
+    List<TagRemoteIdDto>? RemoteIds = null,
+    bool? Organized = null);
 
 // ===== STUDIO DTOs =====
 public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
@@ -1329,7 +1337,12 @@ public record MetadataServerStudioMatchDto(
     string? ParentName
 );
 
-public record MetadataServerStudioImportRequestDto(string Endpoint, string StudioId);
+public record MetadataServerStudioImportRequestDto
+{
+    public string Endpoint { get; init; } = string.Empty;
+    public string StudioId { get; init; } = string.Empty;
+    public Dictionary<string, string>? FieldStrategies { get; init; }
+}
 
 public record MetadataServerTagMatchDto(
     string Endpoint,
@@ -1818,11 +1831,13 @@ public record BulkStudioUpdateDto
 public record BulkTagUpdateDto
 {
     public List<int> Ids { get; init; } = [];
+    public List<string>? ClearFields { get; init; }
     public string? Description { get; init; }
     public string? Color { get; init; }
     public int? TagGroupId { get; init; }
     public double? MinOccurrenceSec { get; init; }
     public double? MinOccurrencePercent { get; init; }
+    public bool? Organized { get; init; }
     public bool? Favorite { get; init; }
     public bool? IgnoreAutoTag { get; init; }
     public List<int>? ParentIds { get; init; }
@@ -1864,6 +1879,7 @@ public record FileSetFingerprintsDto(int FileId, List<FingerprintEntryDto> Finge
 public record FingerprintEntryDto(string Type, string Value);
 public record SceneAssignFileDto(int FileId);
 public record GallerySetCoverDto(int ImageId);
+public record EntityImageCoverSourceDto(int? ImageId = null, int? SceneId = null);
 
 // ===== GALLERY ADVANCED DTOs =====
 public record GalleryAddImagesDto(List<int> ImageIds);

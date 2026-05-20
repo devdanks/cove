@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { performers, tags as tagsApi, entityImages } from "../api/client";
-import { ImageInput } from "../components/ImageInput";
+import { performers, tags as tagsApi } from "../api/client";
 import type { Performer, PerformerUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, NumberInput, SaveButton } from "../components/EditModal";
 import { InteractiveRatingField } from "../components/Rating";
@@ -165,16 +164,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
 
   return (
     <EditModal title="Edit Performer" open={open} onClose={onClose}>
-      <div className="grid grid-cols-[200px_1fr] gap-6">
-        <ImageInput
-          currentImageUrl={entityImages.performerImageUrl(performer.id, performer.updatedAt)}
-          onUpload={(file) => entityImages.uploadPerformerImage(performer.id, file)}
-          onDelete={() => entityImages.deletePerformerImage(performer.id)}
-          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["performer", performer.id] })}
-          label="Photo"
-          aspectRatio="2/3"
-        />
-        <div className="space-y-4">
+      <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <Field label="Name *">
           <TextInput value={name} onChange={setName} placeholder="Performer name" />
@@ -342,8 +332,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="performer" />
       </Field>
-        </div>{/* end right column */}
-      </div>{/* end grid */}
+      </div>
 
       {mutation.error && (
         <div className="bg-red-900/50 border border-red-700 text-red-300 rounded p-2 mb-4 text-sm">

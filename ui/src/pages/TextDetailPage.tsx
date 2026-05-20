@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpenText, Check, Download, ExternalLink, FileText, Files, FolderOpen, Link2, MoreVertical, Rows3, Trash2 } from "lucide-react";
-import { fileOps, playback, texts } from "../api/client";
+import { BookOpenText, Check, Download, ExternalLink, FileText, Files, FolderOpen, Image, Link2, MoreVertical, Rows3, Trash2 } from "lucide-react";
+import { entityImages, fileOps, playback, texts } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
@@ -9,6 +9,7 @@ import { BookmarkButton } from "../components/BookmarkButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
 import { InteractiveRating } from "../components/Rating";
 import { TextViewer } from "../components/TextViewer";
@@ -47,6 +48,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
   const [activeTab, setActiveTab] = useState<TextTab>("read");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [showScrapeDialog, setShowScrapeDialog] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
@@ -164,6 +166,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
   const headerImage = text?.imagePath ? (
     <img src={text.imagePath} alt={`${displayTitle} cover`} className="h-24 w-20 rounded-2xl border border-border object-cover shadow-lg shadow-black/20" />
   ) : undefined;
+  const textCoverUrl = text?.imagePath ?? undefined;
   const tabs = useMemo(() => {
     const nextTabs: MediaDetailTab[] = [{ key: "read", label: "Read" }, { key: "details", label: "Details" }];
     if (canReadFiles && (text?.files.length ?? 0) > 0) {
@@ -206,6 +209,21 @@ export function TextDetailPage({ id, onNavigate }: Props) {
 
   return (
     <>
+    {text ? (
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Text Cover"
+        currentImageUrl={textCoverUrl}
+        onUpload={(file) => entityImages.uploadTextImage(text.id, file)}
+        onDelete={() => entityImages.deleteTextImage(text.id)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["text", text.id] });
+          queryClient.invalidateQueries({ queryKey: ["texts"] });
+        }}
+        aspectRatio="2/3"
+      />
+    ) : null}
     <MediaDetailLayout
       title={displayTitle}
       subtitle={detailSubtitle}
@@ -287,6 +305,18 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
                     >
                       <Download className="h-3.5 w-3.5" /> Download Media...
+                    </button>
+                  ) : null}
+                  {canWriteText ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoverOpen(true);
+                        setShowOpsMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                    >
+                      <Image className="h-3.5 w-3.5" /> Set Cover...
                     </button>
                   ) : null}
                   {canDeleteText ? (

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, galleries, groups, images, metadata, performers, scenes, studios, texts, entityImages } from "../api/client";
 import type { Audio, AudioFilterCriteria, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, MetadataServer, MetadataServerStudioMatch, Performer, PerformerFilterCriteria, Scene, SceneFilterCriteria, Studio, StudioFilterCriteria, TextDocument, TextFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { ChevronDown, Building2, CloudDownload, FileText, Film, FolderOpen, GitMerge, Headphones, ImageIcon, Layers, Link as LinkIcon, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ChevronDown, Building2, CloudDownload, CloudUpload, FileText, Film, FolderOpen, GitMerge, Headphones, ImageIcon, Layers, Link as LinkIcon, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { StudioEditModal } from "./StudioEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -17,6 +17,7 @@ import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { AUDIO_CRITERIA, GALLERY_CRITERIA, GROUP_CRITERIA, IMAGE_CRITERIA, PERFORMER_CRITERIA, SCENE_CRITERIA, STUDIO_CRITERIA, TEXT_CRITERIA } from "../components/FilterDialog";
@@ -74,6 +75,14 @@ const TEXT_SORT = [
   { value: "pages", label: "Page Count" },
 ];
 
+function formatUrlHost(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return url;
+  }
+}
+
 interface Props {
   id: number;
   onNavigate: (r: any) => void;
@@ -93,6 +102,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("scenes");
   const { allTabs: studioTabs, renderExtensionTab, extensionCounts } = useExtensionTabs("studio", [
@@ -188,6 +198,16 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
 
   const updateMut = useMutation({
     mutationFn: (data: { organized?: boolean }) => studios.update(id, data),
+    onMutate: async (data) => {
+      if (data.organized === undefined) return undefined;
+      await queryClient.cancelQueries({ queryKey: ["studio", id] });
+      const previous = queryClient.getQueryData<Studio>(["studio", id]);
+      queryClient.setQueryData<Studio>(["studio", id], (current) => current ? { ...current, organized: data.organized! } : current);
+      return { previous };
+    },
+    onError: (_error, _data, context) => {
+      if (context?.previous) queryClient.setQueryData(["studio", id], context.previous);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["studio", id] });
       queryClient.invalidateQueries({ queryKey: ["studios"] });
@@ -214,6 +234,10 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   }
 
   const studioImageUrl = studio.imagePath || entityImages.studioImageUrl(studio.id, studio.updatedAt);
+  const handleCoverChanged = () => {
+    queryClient.invalidateQueries({ queryKey: ["studio", studio.id] });
+    queryClient.invalidateQueries({ queryKey: ["studios"] });
+  };
 
   return (
     <>
@@ -224,6 +248,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         imageUrl={studioImageUrl}
         imageAlt={studio.name}
         imageClassName="h-full w-full object-contain p-3"
+        onImageClick={canWriteStudio ? () => setCoverOpen(true) : undefined}
         imageFallback={<Building2 className="h-14 w-14 text-accent" />}
         title={studio.name}
         subtitle={studio.parentName && studio.parentId ? (
@@ -263,7 +288,11 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         )}
         heroContent={(
           <>
-            <InteractiveRating value={studioRating} onChange={(value) => setStudioRating(value)} readOnly={!canEngageStudio} />
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <div className="shrink-0">
+                <InteractiveRating value={studioRating} onChange={(value) => setStudioRating(value)} readOnly={!canEngageStudio} />
+              </div>
+            </div>
             {studio.details ? <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{studio.details}</p> : null}
             {canReadTags && studio.tags.length > 0 ? (
               <div className="mt-4 flex flex-wrap gap-1.5">
@@ -273,10 +302,11 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
               </div>
             ) : null}
             {studio.urls.length > 0 ? (
-              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <div className="mt-3 flex flex-wrap gap-2">
                 {studio.urls.map((url, index) => (
-                  <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="flex max-w-xs items-center gap-1 truncate text-accent hover:underline">
-                    <LinkIcon className="h-3.5 w-3.5 flex-shrink-0" />{new URL(url).hostname}
+                  <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-xs items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
+                    <LinkIcon className="h-3 w-3 flex-shrink-0" />
+                    <span className="truncate">{formatUrlHost(url)}</span>
                   </a>
                 ))}
               </div>
@@ -357,6 +387,18 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         <ExtensionSlot slot="studio-detail-bottom" context={{ studio, onNavigate }} />
       </EntityHeroLayout>
 
+      <CoverImageDialog
+        open={coverOpen}
+        title="Set Studio Cover"
+        currentImageUrl={studioImageUrl}
+        onUpload={(file) => entityImages.uploadStudioImage(studio.id, file)}
+        onDelete={() => entityImages.deleteStudioImage(studio.id)}
+        onClose={() => setCoverOpen(false)}
+        onSuccess={handleCoverChanged}
+        aspectRatio="1/1"
+        objectFit="contain"
+      />
+
       <StudioEditModal studio={studio} open={editing} onClose={() => setEditing(false)} />
       <ConfirmDialog
         open={confirmDelete}
@@ -407,6 +449,12 @@ function StudioMetadataServerPanel({ studio, metadataServers, onNavigate }: { st
     mutationFn: (variables: { term?: string; endpoint?: string }) => studios.searchMetadataServer(studio.id, variables.term, variables.endpoint),
   });
 
+  const submitEndpoint = selectedEndpoint || (metadataServers.length === 1 ? metadataServers[0].endpoint : "");
+
+  const submitMutation = useMutation({
+    mutationFn: (endpoint: string) => studios.submitMetadataServerDraft(studio.id, endpoint),
+  });
+
   const importMutation = useMutation({
     mutationFn: (match: MetadataServerStudioMatch) =>
       studios.importFromMetadataServer(studio.id, { endpoint: match.endpoint, studioId: match.id }),
@@ -416,11 +464,6 @@ function StudioMetadataServerPanel({ studio, metadataServers, onNavigate }: { st
     },
   });
 
-  const draftMutation = useMutation({
-    mutationFn: (endpoint: string) => studios.submitMetadataServerDraft(studio.id, endpoint),
-  });
-
-  const draftEndpoint = selectedEndpoint || metadataServers[0]?.endpoint;
   return (
     <div className="mt-6 rounded-xl border border-border bg-card p-4">
       <button onClick={() => setExpanded(!expanded)} className="flex w-full items-center justify-between text-left">
@@ -476,24 +519,21 @@ function StudioMetadataServerPanel({ studio, metadataServers, onNavigate }: { st
                     Search MetadataServer
                   </button>
                   <button
-                    onClick={() => draftEndpoint && draftMutation.mutate(draftEndpoint)}
-                    disabled={!draftEndpoint || draftMutation.isPending}
+                    onClick={() => submitMutation.mutate(submitEndpoint)}
+                    disabled={submitMutation.isPending || !submitEndpoint}
+                    title={!submitEndpoint ? "Choose a single MetadataServer endpoint before submitting a draft" : "Submit this studio as a MetadataServer draft"}
                     className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-foreground hover:border-accent hover:text-accent disabled:opacity-60"
                   >
-                    {draftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                    {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
                     Submit Draft
                   </button>
                 </div>
               </div>
 
               {searchMutation.error && <p className="mt-3 text-sm text-red-300">{searchMutation.error.message}</p>}
-              {draftMutation.error && <p className="mt-3 text-sm text-red-300">{draftMutation.error.message}</p>}
-              {draftMutation.isSuccess && (
-                <p className="mt-3 text-sm text-emerald-300">
-                  Studio draft submitted to MetadataServer{draftMutation.data.draftId ? ` (${draftMutation.data.draftId})` : ""}.
-                </p>
-              )}
+              {submitMutation.error && <p className="mt-3 text-sm text-red-300">{submitMutation.error.message}</p>}
               {importMutation.isSuccess && <p className="mt-3 text-sm text-emerald-300">Studio metadata imported from MetadataServer.</p>}
+              {submitMutation.isSuccess && <p className="mt-3 text-sm text-emerald-300">Studio draft submitted to MetadataServer.</p>}
 
               {searchMutation.data && (
                 <div className="mt-4 space-y-3">

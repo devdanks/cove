@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { tags, entityImages, tagGroups } from "../api/client";
+import { tags, tagGroups } from "../api/client";
 import type { TagDetail, TagUpdate, Tag } from "../api/types";
 import { EditModal, Field, NumberInput, SaveButton, SelectInput, TextArea, TextInput } from "../components/EditModal";
-import { ImageInput } from "../components/ImageInput";
 import { CustomFieldsEditor } from "../components/shared";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { StringListEditor } from "../components/StringListEditor";
@@ -95,14 +94,6 @@ export function TagEditModal({ tag, open, onClose }: Props) {
 
   return (
     <EditModal title={`Edit Tag: ${tag.name}`} open={open} onClose={onClose}>
-      <ImageInput
-        currentImageUrl={entityImages.tagImageUrl(tag.id, tag.updatedAt)}
-        onUpload={(file) => entityImages.uploadTagImage(tag.id, file)}
-        onDelete={() => entityImages.deleteTagImage(tag.id)}
-        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["tag", tag.id] })}
-        label="Image"
-        aspectRatio="16/9"
-      />
       <Field label="Name *">
         <TextInput value={name} onChange={setName} placeholder="Tag name" />
       </Field>

@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { entityImages, texts } from "../api/client";
+import { texts } from "../api/client";
 import type { SceneGroupInput, TextDocument, TextUpdate } from "../api/types";
-import { ImageInput } from "../components/ImageInput";
 import { PerformerContextTagEditor, buildPerformerContextTagIds, syncPerformerContextTags } from "../components/PerformerContextTags";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
@@ -77,48 +76,31 @@ export function TextEditPanel({ text, onSaved }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <ImageInput
-          currentImageUrl={text.imagePath ?? undefined}
-          onUpload={(file) => entityImages.uploadTextImage(text.id, file)}
-          onDelete={() => entityImages.deleteTextImage(text.id)}
-          onSuccess={() => {
-            queryClient.invalidateQueries({ queryKey: ["text", text.id] });
-            queryClient.invalidateQueries({ queryKey: ["texts"] });
-          }}
-          label="Cover"
-          aspectRatio="3/4"
-          objectFit="contain"
-        />
-
-        <div className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-1">
-              <span className="text-xs text-secondary">Title</span>
-              <input value={title} onChange={(event) => setTitle(event.target.value)} className={inputCls} />
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs text-secondary">Date</span>
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className={inputCls} />
-            </label>
-          </div>
-
-          <label className="space-y-1">
-            <span className="text-xs text-secondary">Code</span>
-            <input value={code} onChange={(event) => setCode(event.target.value)} className={inputCls} />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs text-secondary">Description</span>
-            <textarea value={details} onChange={(event) => setDetails(event.target.value)} rows={4} className={inputCls} />
-          </label>
-
-          <label className="block space-y-1">
-            <span className="text-xs text-secondary">Studio</span>
-            <StudioSelector value={studioId} onChange={setStudioId} placeholder="Search studios..." />
-          </label>
-        </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1">
+          <span className="text-xs text-secondary">Title</span>
+          <input value={title} onChange={(event) => setTitle(event.target.value)} className={inputCls} />
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs text-secondary">Date</span>
+          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className={inputCls} />
+        </label>
       </div>
+
+      <label className="space-y-1">
+        <span className="text-xs text-secondary">Code</span>
+        <input value={code} onChange={(event) => setCode(event.target.value)} className={inputCls} />
+      </label>
+
+      <label className="space-y-1">
+        <span className="text-xs text-secondary">Description</span>
+        <textarea value={details} onChange={(event) => setDetails(event.target.value)} rows={4} className={inputCls} />
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-secondary">Studio</span>
+        <StudioSelector value={studioId} onChange={setStudioId} placeholder="Search studios..." />
+      </label>
 
       <div className="space-y-1">
         <span className="text-xs text-secondary">URLs</span>

@@ -393,6 +393,7 @@ public class TagConfiguration : IEntityTypeConfiguration<Tag>
         builder.HasIndex(t => t.Name).IsUnique();
     builder.HasIndex(t => t.TagGroupId);
         builder.HasIndex(t => t.Favorite);
+        builder.HasIndex(t => t.Organized);
         builder.HasIndex(t => t.SceneCount);
         builder.HasIndex(t => t.SceneMarkerCount);
         builder.HasIndex(t => t.ImageCount);

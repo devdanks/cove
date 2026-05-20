@@ -276,12 +276,33 @@ public class MetadataServerInstance
 
 public static class CoveDefaultPaths
 {
-    public static string GetDataSubdirectory(string name)
+    public const string DataRootEnvironmentVariable = "COVE_HOME";
+
+    public static string GetDataRoot()
     {
+        var configured = Environment.GetEnvironmentVariable(DataRootEnvironmentVariable);
+        if (!string.IsNullOrWhiteSpace(configured))
+            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured.Trim()));
+
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "cove",
-            name
+            "cove"
         );
+    }
+
+    public static string GetDataSubdirectory(string name)
+    {
+        return Path.Combine(GetDataRoot(), name);
+    }
+
+    public static string ResolveDataPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return GetDataRoot();
+
+        var expanded = Environment.ExpandEnvironmentVariables(path.Trim());
+        return Path.IsPathRooted(expanded)
+            ? Path.GetFullPath(expanded)
+            : Path.GetFullPath(Path.Combine(GetDataRoot(), expanded));
     }
 }

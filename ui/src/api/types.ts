@@ -204,6 +204,7 @@ export interface Tag {
   imagePath?: string;
   favorite: boolean;
   ignoreAutoTag: boolean;
+  organized: boolean;
   showAsSegment?: boolean | null;
   segmentColorOverride?: string | null;
   segmentLaneOverride?: number | null;
@@ -320,6 +321,9 @@ export interface TagGraphNode {
   favorite: boolean;
   description?: string;
   imagePath?: string;
+  tagGroupId?: number;
+  tagGroupName?: string;
+  tagGroupColor?: string;
   parentIds: number[];
   childIds: number[];
   totalUsageCount: number;
@@ -349,6 +353,7 @@ export interface TagCreate {
   description?: string;
   favorite?: boolean;
   ignoreAutoTag?: boolean;
+  organized?: boolean;
   color?: string | null;
   tagGroupId?: number | null;
   minOccurrenceSec?: number | null;
@@ -2157,6 +2162,7 @@ export interface MetadataServerStudioMatch {
 export interface MetadataServerStudioImportRequest {
   endpoint: string;
   studioId: string;
+  fieldStrategies?: Record<string, string>;
 }
 
 export interface MetadataServerStudioBatchTagRequest {
@@ -2699,11 +2705,13 @@ export interface BulkPerformerUpdate {
 
 export interface BulkTagUpdate {
   ids: number[];
+  clearFields?: string[];
   description?: string;
   color?: string;
   tagGroupId?: number | null;
   minOccurrenceSec?: number;
   minOccurrencePercent?: number;
+  organized?: boolean;
   favorite?: boolean;
   ignoreAutoTag?: boolean;
   parentIds?: number[];

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Download, Edit, Loader2, Trash2, Search, Play, Unlink } from "lucide-react";
-import { scenes as scenesApi, images, galleries, performers, groups, studios, tags, audios, texts } from "../api/client";
+import { Download, Edit, Image as ImageIcon, Loader2, Trash2, Search, Play, Unlink } from "lucide-react";
+import { scenes as scenesApi, images, galleries, performers, groups, studios, tags, audios, texts, entityImages } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import type { Audio, DeleteEntityOptions, Scene } from "../api/types";
@@ -64,6 +64,12 @@ type RemoveFromParentAction = {
   parentLabel: string;
   permissionTarget: "child" | "parent";
   run: (ids: number[]) => Promise<unknown>;
+};
+
+type CoverFromSelectionAction = {
+  label: string;
+  parentType: "tag" | "performer" | "group" | "gallery";
+  run: (id: number) => Promise<unknown>;
 };
 
 function getEntityLabel(entityType: BulkSelectionEntityType, count: number) {
@@ -155,6 +161,27 @@ function getRemoveFromParentAction(entityType: BulkSelectionEntityType, parent?:
   return null;
 }
 
+function getCoverFromSelectionAction(entityType: BulkSelectionEntityType, parent?: NestedListParent): CoverFromSelectionAction | null {
+  if (!parent || (entityType !== "images" && entityType !== "scenes")) return null;
+  if (parent.type !== "tag" && parent.type !== "performer" && parent.type !== "group" && parent.type !== "gallery") return null;
+
+  const sourceLabel = entityType === "images" ? "Image" : "Scene";
+  const parentLabel = parent.type.charAt(0).toUpperCase() + parent.type.slice(1);
+  const sourceFor = (id: number) => entityType === "images" ? { imageId: id } : { sceneId: id };
+  const run = (id: number) => {
+    switch (parent.type) {
+      case "gallery":
+        return entityImages.setGalleryImageFromSource(parent.id, sourceFor(id));
+      case "performer": return entityImages.setPerformerImageFromSource(parent.id, sourceFor(id));
+      case "tag": return entityImages.setTagImageFromSource(parent.id, sourceFor(id));
+      case "group": return entityImages.setGroupFrontImageFromSource(parent.id, sourceFor(id));
+      default: return Promise.reject(new Error("This cover action is not supported."));
+    }
+  };
+
+  return { label: `Use ${sourceLabel} for ${parentLabel} Cover`, parentType: parent.type, run };
+}
+
 function getMutationErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : error ? String(error) : null;
 }
@@ -192,10 +219,18 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
     () => getRemoveFromParentAction(entityType, removeFromParent),
     [entityType, removeFromParent?.id, removeFromParent?.label, removeFromParent?.type],
   );
+  const coverFromSelectionAction = useMemo(
+    () => getCoverFromSelectionAction(entityType, removeFromParent),
+    [entityType, removeFromParent?.id, removeFromParent?.label, removeFromParent?.type],
+  );
   const canRemoveFromParent = !!removeFromParentAction
     && (removeFromParentAction.permissionTarget === "parent"
       ? canWriteEntity(removeFromParent!.type, hasPermission)
       : canWrite);
+  const selectedSourceId = selectedIds.size === 1 ? [...selectedIds][0] : undefined;
+  const canSetParentCover = !!coverFromSelectionAction
+    && selectedSourceId != null
+    && canWriteEntity(coverFromSelectionAction.parentType, hasPermission);
   const supportsDeleteOptions = entityType === "scenes" || entityType === "images" || entityType === "audios" || entityType === "texts";
 
   const bulkDeleteMut = useMutation<void, Error, DeleteEntityOptions | undefined>({
@@ -220,6 +255,17 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
     onSuccess: () => {
       queryClient.invalidateQueries();
       setShowRemoveFromParentConfirm(false);
+      onDone();
+    },
+  });
+
+  const setParentCoverMut = useMutation<void, Error>({
+    mutationFn: async () => {
+      if (!coverFromSelectionAction || selectedSourceId == null) return;
+      await coverFromSelectionAction.run(selectedSourceId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
       onDone();
     },
   });
@@ -355,6 +401,16 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
         >
           <Play className="w-3 h-3" />
           Play
+        </button>
+      )}
+      {canSetParentCover && coverFromSelectionAction && (
+        <button
+          onClick={() => setParentCoverMut.mutate()}
+          disabled={setParentCoverMut.isPending}
+          className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10 disabled:opacity-60"
+        >
+          {setParentCoverMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImageIcon className="w-3 h-3" />}
+          {coverFromSelectionAction.label}
         </button>
       )}
       {canRemoveFromParent && removeFromParentAction && (

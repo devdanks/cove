@@ -87,8 +87,17 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             .Select(ig => (int?)ig.ImageId)
             .FirstOrDefaultAsync(ct);
 
-        return firstImageId.HasValue
-            ? Redirect(WithQuery($"/api/stream/image/{firstImageId.Value}/thumbnail", max, v))
+        if (firstImageId.HasValue)
+            return Redirect(WithQuery($"/api/stream/image/{firstImageId.Value}/thumbnail", max, v));
+
+        var firstSceneId = await db.Set<SceneGallery>()
+            .Where(sg => sg.GalleryId == id)
+            .OrderBy(sg => sg.SceneId)
+            .Select(sg => (int?)sg.SceneId)
+            .FirstOrDefaultAsync(ct);
+
+        return firstSceneId.HasValue
+            ? Redirect(WithQuery($"/api/stream/scene/{firstSceneId.Value}/screenshot", null, v))
             : NotFound();
     }
 
@@ -217,7 +226,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         g.Organized, g.StudioId, g.Studio?.Name,
         g.Urls.Select(u => u.Url).ToList(),
         g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => TagDtoMapping.MapTagDto(gt.Tag!, GetTagProvenance(provenanceLookup, gt.Tag!.Id))).ToList(),
-        g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => new PerformerSummaryDto(gp.Performer!.Id, gp.Performer.Name, gp.Performer.Disambiguation, gp.Performer.Gender?.ToString(), gp.Performer.Birthdate?.ToString("yyyy-MM-dd"), gp.Performer.Favorite, gp.Performer.ImageBlobId != null ? EntityImageUrls.Performer(ControllerContext.HttpContext, gp.Performer.Id, gp.Performer.UpdatedAt) : null)).ToList(),
+        g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => new PerformerSummaryDto(gp.Performer!.Id, gp.Performer.Name, gp.Performer.Disambiguation, gp.Performer.Gender?.ToString(), gp.Performer.Birthdate?.ToString("yyyy-MM-dd"), gp.Performer.Favorite, EntityImageUrls.PerformerOrNull(ControllerContext.HttpContext, gp.Performer!))).ToList(),
         imageCount ?? g.ImageCount,
         sceneCount ?? g.SceneCount,
         g.SceneGalleries?.Select(sg => sg.SceneId).ToList() ?? [],
@@ -226,15 +235,16 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             f.Fingerprints?.Select(fp => new FingerprintDto(fp.Type, fp.Value)).ToList() ?? [])).ToList() ?? [],
         customFieldValues,
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
-        ResolveCoverPath(g, imageCount),
+        ResolveCoverPath(g, imageCount, sceneCount),
         g.CoverImageId
     );
 
     /// <summary>Resolve cover image URL through the unified gallery cover endpoint.</summary>
-    private string? ResolveCoverPath(Gallery g, int? imageCount = null)
+    private string? ResolveCoverPath(Gallery g, int? imageCount = null, int? sceneCount = null)
     {
         var resolvedImageCount = imageCount ?? g.ImageCount;
-        if (g.ImageBlobId != null || g.CoverImageId != null || resolvedImageCount > 0) return EntityImageUrls.GalleryCover(ControllerContext.HttpContext, g.Id, g.UpdatedAt);
+        var resolvedSceneCount = sceneCount ?? g.SceneCount;
+        if (g.ImageBlobId != null || g.CoverImageId != null || resolvedImageCount > 0 || resolvedSceneCount > 0) return EntityImageUrls.GalleryCover(ControllerContext.HttpContext, g.Id, g.UpdatedAt);
         return null;
     }
 

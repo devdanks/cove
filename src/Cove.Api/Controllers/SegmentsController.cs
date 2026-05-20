@@ -145,6 +145,42 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         return item is null ? NotFound() : Ok(MapToDto(item));
     }
 
+    [HttpPost("bulk/remove-tag")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    public async Task<ActionResult<object>> RemoveTagFromSegments([FromBody] SegmentTagBulkRemoveRequest request, CancellationToken cancellationToken)
+    {
+        if (request.TagId <= 0)
+            return BadRequest("A valid tag id is required.");
+
+        var ids = request.Ids?.Where(id => id > 0).Distinct().ToArray() ?? [];
+        if (ids.Length == 0)
+            return BadRequest("At least one segment id is required.");
+
+        var segments = await db.Segments
+            .Where(segment => ids.Contains(segment.Id) && segment.TagId == request.TagId)
+            .ToListAsync(cancellationToken);
+
+        var sceneIds = segments
+            .Where(segment => segment.HostType == SegmentHostType.Scene)
+            .Select(segment => segment.HostId)
+            .Distinct()
+            .ToArray();
+
+        var now = DateTime.UtcNow;
+        foreach (var segment in segments)
+        {
+            segment.TagId = null;
+            segment.UpdatedAt = now;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        foreach (var sceneId in sceneIds)
+            spanResolver.EvictScene(sceneId);
+
+        return Ok(new { count = segments.Count });
+    }
+
     [HttpGet("source-keys/distinct")]
     public async Task<ActionResult<IReadOnlyList<SegmentDistinctValueDto>>> DistinctSourceKeys(CancellationToken cancellationToken)
     {
@@ -267,6 +303,8 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         public string? SceneTitle { get; init; }
         public string? TagName { get; init; }
     }
+
+    public sealed record SegmentTagBulkRemoveRequest(int TagId, IReadOnlyList<int>? Ids);
 
     // ===== Span Search =====
 

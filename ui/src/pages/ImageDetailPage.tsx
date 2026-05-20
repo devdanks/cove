@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, images, playback, fileOps } from "../api/client";
+import { entityImages, faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Eye, FolderOpen, ImageOff, Layers, Link as LinkIcon, Maximize, MoreVertical, RefreshCw, Search, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, FolderOpen, Image as ImageIcon, ImageOff, Layers, Link as LinkIcon, Maximize, MoreVertical, RefreshCw, Search, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -11,6 +11,7 @@ import { InteractiveRating } from "../components/Rating";
 import { createRouteLinkProps } from "../components/cardNavigation";
 import { ExtensionEntityActions } from "../components/ExtensionEntityActions";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { CoverImageDialog } from "../components/CoverImageDialog";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
@@ -32,6 +33,13 @@ interface Props {
 
 type ImageTab = "details" | "file-info" | "similar" | "detections" | "edit";
 
+type ImageCoverTarget = {
+  key: string;
+  label: string;
+  subtitle: string;
+  run: () => Promise<unknown>;
+};
+
 export function ImageDetailPage({ id, onNavigate }: Props) {
   const { data: image, isLoading } = useQuery({
     queryKey: ["image", id],
@@ -43,6 +51,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [showScrapeDialog, setShowScrapeDialog] = useState(false);
+  const [showCoverTargetDialog, setShowCoverTargetDialog] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<ImageTab>("details");
   const queryClient = useQueryClient();
@@ -60,6 +69,11 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const canReadTags = canReadEntity("tag", hasPermission);
   const canReadGalleries = canReadEntity("gallery", hasPermission);
   const canReadGroups = canReadEntity("group", hasPermission);
+  const canWriteStudios = canWriteEntity("studio", hasPermission);
+  const canWritePerformers = canWriteEntity("performer", hasPermission);
+  const canWriteTags = canWriteEntity("tag", hasPermission);
+  const canWriteGalleries = canWriteEntity("gallery", hasPermission);
+  const canWriteGroups = canWriteEntity("group", hasPermission);
   const trackingEnabled = user?.uiPreferences?.tracking?.enabled ?? true;
   const trackImageActivity = canEngageImage && trackingEnabled;
   const {
@@ -94,6 +108,13 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   });
   const revealFileMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
   const rescanMut = useMutation({ mutationFn: () => images.rescan(id) });
+  const setImageAsCoverMut = useMutation({
+    mutationFn: async (target: ImageCoverTarget) => target.run(),
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+      setShowCoverTargetDialog(false);
+    },
+  });
   const canRevealFiles = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
   const imageLikeCount = imageEngagement?.likeCount ?? 0;
   const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
@@ -258,6 +279,38 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   if (!image) return <div className="text-center text-secondary py-16">Image not found</div>;
 
   const currentImage = image;
+  const imageCoverTargets: ImageCoverTarget[] = [
+    ...(canWriteStudios && currentImage.studioId ? [{
+      key: `studio:${currentImage.studioId}`,
+      label: currentImage.studioName || `Studio ${currentImage.studioId}`,
+      subtitle: "Studio cover",
+      run: () => entityImages.setStudioImageFromSource(currentImage.studioId!, { imageId: currentImage.id }),
+    }] : []),
+    ...(canWritePerformers ? currentImage.performers.map((performer) => ({
+      key: `performer:${performer.id}`,
+      label: performer.name,
+      subtitle: "Performer cover",
+      run: () => entityImages.setPerformerImageFromSource(performer.id, { imageId: currentImage.id }),
+    })) : []),
+    ...(canWriteTags ? currentImage.tags.map((tag) => ({
+      key: `tag:${tag.id}`,
+      label: tag.name,
+      subtitle: "Tag cover",
+      run: () => entityImages.setTagImageFromSource(tag.id, { imageId: currentImage.id }),
+    })) : []),
+    ...(canWriteGalleries ? currentImage.galleries.map((gallery) => ({
+      key: `gallery:${gallery.id}`,
+      label: gallery.title || `Gallery ${gallery.id}`,
+      subtitle: "Gallery cover",
+      run: () => entityImages.setGalleryImageFromSource(gallery.id, { imageId: currentImage.id }),
+    })) : []),
+    ...(canWriteGroups ? (currentImage.groups ?? []).map((group) => ({
+      key: `group:${group.id}`,
+      label: group.name,
+      subtitle: "Group cover",
+      run: () => entityImages.setGroupFrontImageFromSource(group.id, { imageId: currentImage.id }),
+    })) : []),
+  ];
 
   function renderRelatedContent() {
     return (
@@ -517,6 +570,22 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             }}
           />
         ) : null}
+        <CoverImageDialog
+          open={showCoverTargetDialog}
+          title="Set Cover"
+          currentImageUrl={images.imageUrl(id)}
+          objectFit="contain"
+          aspectRatio="4/3"
+          onClose={() => { setImageAsCoverMut.reset(); setShowCoverTargetDialog(false); }}
+          extraActions={(
+            <ImageCoverTargetActions
+              targets={imageCoverTargets}
+              pending={setImageAsCoverMut.isPending}
+              error={setImageAsCoverMut.error}
+              onSelect={(target) => setImageAsCoverMut.mutate(target)}
+            />
+          )}
+        />
       </Suspense>
       <ConfirmDialog open={confirmDelete} title="Delete Image" message={`Delete "${displayTitle}"? This cannot be undone.`} onConfirm={() => deleteMut.mutate()} onCancel={() => setConfirmDelete(false)} />
 
@@ -651,6 +720,15 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
                       <Search className="h-3.5 w-3.5" /> Scrape...
                     </button>
                   ) : null}
+                  {imageCoverTargets.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => { setShowCoverTargetDialog(true); setShowOpsMenu(false); }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                    >
+                      <ImageIcon className="h-3.5 w-3.5" /> Set Cover...
+                    </button>
+                  ) : null}
                   {image.files.length > 0 && canLibraryScan ? (
                     <button
                       type="button"
@@ -693,6 +771,31 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         </MediaDetailLayout.Content>
       </MediaDetailLayout>
     </>
+  );
+}
+
+function ImageCoverTargetActions({ targets, pending, error, onSelect }: { targets: ImageCoverTarget[]; pending: boolean; error: Error | null; onSelect: (target: ImageCoverTarget) => void }) {
+  return (
+    <div className="space-y-2">
+      <div className="max-h-[32vh] space-y-2 overflow-y-auto pr-1">
+        {targets.map((target) => (
+          <button
+            key={target.key}
+            type="button"
+            onClick={() => onSelect(target)}
+            disabled={pending}
+            className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left transition-colors hover:border-accent disabled:opacity-60"
+          >
+            <ImageIcon className="h-4 w-4 shrink-0 text-accent" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-foreground">{target.label}</span>
+              <span className="block text-xs text-secondary">{target.subtitle}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+      {error ? <p className="text-sm text-red-300">{error.message}</p> : null}
+    </div>
   );
 }
 

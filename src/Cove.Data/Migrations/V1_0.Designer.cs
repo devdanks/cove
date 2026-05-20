@@ -2417,6 +2417,9 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
+
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -3454,6 +3457,9 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
+
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -3649,6 +3655,9 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
+
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -3664,6 +3673,9 @@ namespace Cove.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("Organized")
+                        .HasColumnType("boolean");
 
                     b.Property<int>("PerformerCount")
                         .ValueGeneratedOnAdd()
@@ -3714,6 +3726,8 @@ namespace Cove.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Favorite");
+
+                    b.HasIndex("Organized");
 
                     b.HasIndex("GalleryCount");
 
