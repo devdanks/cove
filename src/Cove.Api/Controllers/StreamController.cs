@@ -2,8 +2,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cove.Api.Services;
 using Cove.Core.Auth;
+using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
+
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace Cove.Api.Controllers;
 
@@ -160,6 +166,62 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         }
 
         return File(stream, contentType);
+    }
+
+    [HttpGet("detection/{detectionId:int}/crop")]
+    public async Task<IActionResult> GetDetectionCrop(int detectionId, [FromQuery] int? max, CancellationToken ct)
+    {
+        var detection = await db.Detections
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == detectionId, ct);
+        if (detection is null) return NotFound();
+
+        if (detection.HostType == DetectionHostType.Scene)
+        {
+            if (max.GetValueOrDefault(640) > 640)
+            {
+                await EnsureHighResolutionDetectionFrameAsync(detection, ct);
+            }
+
+            var result = await streamService.GetSceneScreenshot(detection.HostId, detection.ObservedAtSec, ct);
+            if (result is null) return NotFound();
+
+            await using var stream = result.Value.stream;
+            return await BuildDetectionCropResultAsync(detection, stream, max, ct);
+        }
+
+        if (detection.HostType == DetectionHostType.Image)
+        {
+            var result = await thumbnailService.GetImageStreamAsync(detection.HostId, ct);
+            if (result is null) return NotFound();
+
+            await using var stream = result.Value.stream;
+            return await BuildDetectionCropResultAsync(detection, stream, max, ct);
+        }
+
+        return NotFound();
+    }
+
+    private async Task EnsureHighResolutionDetectionFrameAsync(Detection detection, CancellationToken ct)
+    {
+        if (!detection.ObservedAtSec.HasValue)
+        {
+            return;
+        }
+
+        var sourceSceneId = await ResolveSourceSceneIdAsync(detection.HostId, ct);
+        if (!sourceSceneId.HasValue)
+        {
+            return;
+        }
+
+        var framePath = thumbnailService.GetTimestampedThumbnailPath(sourceSceneId.Value, detection.ObservedAtSec.Value);
+        if (System.IO.File.Exists(framePath))
+        {
+            return;
+        }
+
+        await thumbnailService.GenerateSceneThumbnailAsync(sourceSceneId.Value, detection.ObservedAtSec.Value, ct);
     }
 
     [HttpGet("scene/{sceneId:int}/caption/{captionId:int}")]
@@ -321,6 +383,98 @@ public class StreamController(IStreamService streamService, IThumbnailService th
 
         return scene?.ParentSceneId ?? scene?.Id;
     }
+
+    private async Task<IActionResult> BuildDetectionCropResultAsync(Detection detection, Stream sourceStream, int? max, CancellationToken ct)
+    {
+        try
+        {
+            using var image = await SixLabors.ImageSharp.Image.LoadAsync<Rgba32>(sourceStream, ct);
+            image.Mutate(static context => context.AutoOrient());
+
+            var cropRect = BuildDetectionCropRectangle(image.Width, image.Height, detection);
+            if (cropRect is null)
+            {
+                return NotFound();
+            }
+
+            image.Mutate(context => context.Crop(cropRect.Value));
+
+            var maxDimension = Math.Clamp(max.GetValueOrDefault(640), 64, 2048);
+            if (Math.Max(image.Width, image.Height) > maxDimension)
+            {
+                image.Mutate(context => context.Resize(new ResizeOptions
+                {
+                    Mode = ResizeMode.Max,
+                    Size = new Size(maxDimension, maxDimension),
+                }));
+            }
+
+            var output = new MemoryStream();
+            await image.SaveAsJpegAsync(output, new JpegEncoder { Quality = 88 }, ct);
+            output.Position = 0;
+
+            Response.Headers["Cache-Control"] = "public, max-age=86400";
+            return File(output, "image/jpeg");
+        }
+        catch when (!ct.IsCancellationRequested)
+        {
+            return NotFound();
+        }
+    }
+
+    private static Rectangle? BuildDetectionCropRectangle(int imageWidth, int imageHeight, Detection detection)
+    {
+        if (imageWidth <= 0 || imageHeight <= 0 || detection.W <= 0 || detection.H <= 0)
+        {
+            return null;
+        }
+
+        var normalized = detection.X >= 0
+            && detection.Y >= 0
+            && detection.X <= 1.000001f
+            && detection.Y <= 1.000001f
+            && detection.W <= 1.000001f
+            && detection.H <= 1.000001f;
+
+        var x = (double)detection.X;
+        var y = (double)detection.Y;
+        var width = (double)detection.W;
+        var height = (double)detection.H;
+
+        if (normalized)
+        {
+            x *= imageWidth;
+            width *= imageWidth;
+            y *= imageHeight;
+            height *= imageHeight;
+        }
+        else if (detection.FrameWidth > 0 && detection.FrameHeight > 0)
+        {
+            x = x / detection.FrameWidth * imageWidth;
+            width = width / detection.FrameWidth * imageWidth;
+            y = y / detection.FrameHeight * imageHeight;
+            height = height / detection.FrameHeight * imageHeight;
+        }
+
+        var left = Clamp((int)Math.Floor(x), 0, imageWidth - 1);
+        var top = Clamp((int)Math.Floor(y), 0, imageHeight - 1);
+        var right = Clamp((int)Math.Ceiling(x + width), left + 1, imageWidth);
+        var bottom = Clamp((int)Math.Ceiling(y + height), top + 1, imageHeight);
+        var boxWidth = Math.Max(1, right - left);
+        var boxHeight = Math.Max(1, bottom - top);
+        var side = (int)Math.Ceiling(Math.Max(boxWidth, boxHeight) * 1.8);
+        side = Math.Clamp(side, 1, Math.Min(imageWidth, imageHeight));
+
+        var centerX = left + boxWidth / 2.0;
+        var centerY = top + boxHeight / 2.0 - boxHeight * 0.1;
+        var cropLeft = Clamp((int)Math.Round(centerX - side / 2.0), 0, Math.Max(0, imageWidth - side));
+        var cropTop = Clamp((int)Math.Round(centerY - side / 2.0), 0, Math.Max(0, imageHeight - side));
+
+        return new Rectangle(cropLeft, cropTop, side, side);
+    }
+
+    private static int Clamp(int value, int min, int max)
+        => value < min ? min : value > max ? max : value;
 
     private static string GetResForLabel(string label) => label switch
     {

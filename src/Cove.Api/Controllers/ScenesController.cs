@@ -63,7 +63,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         [FromQuery] string? sort = null, [FromQuery] string? direction = null,
         [FromQuery] int? seed = null,
         [FromQuery] string? title = null, [FromQuery] int? rating = null,
-        [FromQuery] bool? organized = null, [FromQuery] int? studioId = null,
+        [FromQuery] bool? organized = null, [FromQuery] bool? isVr = null, [FromQuery] int? studioId = null,
         [FromQuery] int? groupId = null, [FromQuery] int? galleryId = null, [FromQuery] string? tagIds = null, [FromQuery] string? performerIds = null,
         CancellationToken ct = default)
     {
@@ -78,6 +78,8 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             sceneQuery = sceneQuery.Where(scene => scene.Title != null && EF.Functions.ILike(scene.Title, $"%{title.Trim()}%"));
         if (organized.HasValue)
             sceneQuery = sceneQuery.Where(scene => scene.Organized == organized.Value);
+        if (isVr.HasValue)
+            sceneQuery = sceneQuery.Where(scene => scene.IsVr == isVr.Value);
         if (studioId.HasValue)
             sceneQuery = sceneQuery.Where(scene => scene.StudioId == studioId.Value);
         if (groupId.HasValue)
@@ -100,7 +102,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         }
 
         var compilationQuery = db.Groups.AsNoTracking()
-            .Where(group => group.Kind != GroupKind.Dynamic && group.ShowInSceneLists && group.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange));
+            .Where(group => group.ShowInSceneLists && (group.Kind == GroupKind.Dynamic || group.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange || item.Kind == GroupItemKind.Scene || item.Kind == GroupItemKind.Image || item.Kind == GroupItemKind.Audio || item.Kind == GroupItemKind.Text || item.Kind == GroupItemKind.Segment)));
         if (!string.IsNullOrWhiteSpace(title))
             compilationQuery = compilationQuery.Where(group => EF.Functions.ILike(group.Name, $"%{title.Trim()}%"));
         if (studioId.HasValue)
@@ -644,7 +646,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
     }
 
     private GroupDto MapCompilationGroupToDto(Group group) => new(
-        group.Id, group.Name, group.Aliases, group.Duration, group.Date?.ToString("yyyy-MM-dd"),
+        group.Id, group.Name, group.Aliases, group.Date?.ToString("yyyy-MM-dd"),
         group.StudioId, group.Studio?.Name, group.Director, group.Synopsis,
         group.Urls.Select(url => url.Url).ToList(),
         group.GroupTags.Where(groupTag => groupTag.Tag != null).Select(groupTag => TagDtoMapping.MapTagDto(groupTag.Tag!)).ToList(),
@@ -662,7 +664,6 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
         group.QueryJson,
         group.LastResolvedAt?.ToString("o"),
         group.CachedItemCount,
-        group.CacheTtlSec,
         group.ShowInSceneLists,
         group.AllowedHostTypes,
         group.SortOrder

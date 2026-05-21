@@ -96,8 +96,42 @@ export function buildRouteUrl(route: Route): string {
   if (route.profileId != null && Number.isInteger(route.profileId) && route.profileId > 0) {
     params.set("profile", String(route.profileId));
   }
+  if (route.derivedQueryDescriptor) {
+    const encoded = encodeDerivedQueryDescriptor(route.derivedQueryDescriptor);
+    if (encoded) {
+      params.set("dq", encoded);
+    }
+  }
 
   return buildCurrentUrl(buildRoutePath(route), params);
+}
+
+function encodeDerivedQueryDescriptor(descriptor: SegmentDerivedQueryDescriptor): string | undefined {
+  try {
+    const json = JSON.stringify(descriptor);
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+    return window.btoa(unescape(encodeURIComponent(json)));
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeDerivedQueryDescriptor(encoded: string): SegmentDerivedQueryDescriptor | undefined {
+  try {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+    const json = decodeURIComponent(escape(window.atob(encoded)));
+    const parsed = JSON.parse(json);
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.operands)) {
+      return undefined;
+    }
+    return parsed as SegmentDerivedQueryDescriptor;
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildCurrentUrl(pathname: string, search?: URLSearchParams | string | null): string {
@@ -246,6 +280,17 @@ function applyRouteSearch(route: Route, search?: string): Route {
       nextRoute = {
         ...nextRoute,
         profileId,
+      };
+    }
+  }
+
+  const dqParam = params.get("dq");
+  if (dqParam) {
+    const descriptor = decodeDerivedQueryDescriptor(dqParam);
+    if (descriptor) {
+      nextRoute = {
+        ...nextRoute,
+        derivedQueryDescriptor: descriptor,
       };
     }
   }

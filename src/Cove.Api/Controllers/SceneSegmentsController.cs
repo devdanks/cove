@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Interfaces;
 using Cove.Data;
 using Cove.Data.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/scenes/{sceneId:int}/segments")]
 [RequiresPermission(Permissions.SegmentsRead)]
-public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanResolver) : ControllerBase
+public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IBlobService blobService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<SegmentDto>>> GetByScene(int sceneId, CancellationToken ct)
@@ -167,6 +168,9 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
         var segment = await db.Segments
             .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Scene && item.HostId == sceneId, ct);
         if (segment is null) return NotFound();
+
+        if (!string.IsNullOrWhiteSpace(segment.ImageBlobId))
+            await blobService.DeleteBlobAsync(segment.ImageBlobId, ct);
 
         db.Segments.Remove(segment);
         await db.SaveChangesAsync(ct);

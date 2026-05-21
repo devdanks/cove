@@ -4,7 +4,6 @@ import { groups } from "../api/client";
 import type { EntityEngagement, FindFilter, Group, GroupCreate, GroupFilterCriteria, PaginatedResponse } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { SortableList } from "../components/SortableList";
-import { RatingField } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
@@ -293,18 +292,16 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     name: "",
     date: "",
     director: "",
-    synopsis: "",
-    rating: undefined as number | undefined,
+    description: "",
     kind: "static" as "static" | "dynamic",
     querySourceKey: FILTER_DYNAMIC_SOURCE_KEY,
     queryJson: defaultDynamicGroupFilterQueryJson(),
-    cacheTtlSec: 60,
   });
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [createAnother, setCreateAnother] = useState(false);
 
   const resetForm = () => {
-    setForm({ name: "", date: "", director: "", synopsis: "", rating: undefined, kind: "static", querySourceKey: defaultDynamicSourceKey, queryJson: defaultDynamicGroupFilterQueryJson(), cacheTtlSec: 60 });
+    setForm({ name: "", date: "", director: "", description: "", kind: "static", querySourceKey: defaultDynamicSourceKey, queryJson: defaultDynamicGroupFilterQueryJson() });
     setCustomFields({});
   };
 
@@ -326,13 +323,11 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
       name,
       date: form.date || undefined,
       director: form.director || undefined,
-      synopsis: form.synopsis || undefined,
-      rating: form.rating,
+      description: form.description || undefined,
       customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
       kind: form.kind,
       querySourceKey: form.kind === "dynamic" ? form.querySourceKey : undefined,
       queryJson: form.kind === "dynamic" && form.querySourceKey === FILTER_DYNAMIC_SOURCE_KEY ? form.queryJson : undefined,
-      cacheTtlSec: form.kind === "dynamic" ? form.cacheTtlSec : undefined,
     });
   };
 
@@ -356,7 +351,7 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         </div>
       </Field>
       {form.kind === "dynamic" ? (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4">
           <Field label="Source">
             <select
               value={form.querySourceKey}
@@ -367,15 +362,6 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
                 <option key={source.key} value={source.key}>{source.displayName}</option>
               ))}
             </select>
-          </Field>
-          <Field label="Cache TTL (seconds)">
-            <input
-              type="number"
-              min={0}
-              value={form.cacheTtlSec}
-              onChange={(event) => setForm({ ...form, cacheTtlSec: Math.max(0, Number(event.target.value) || 0) })}
-              className="w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-            />
           </Field>
         </div>
       ) : null}
@@ -388,10 +374,9 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
       <Field label="Director">
         <TextInput value={form.director} onChange={(v) => setForm({ ...form, director: v })} />
       </Field>
-      <Field label="Synopsis">
-        <TextArea value={form.synopsis} onChange={(v) => setForm({ ...form, synopsis: v })} rows={3} />
+      <Field label="Description">
+        <TextArea value={form.description} onChange={(v) => setForm({ ...form, description: v })} rows={3} />
       </Field>
-      <RatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} />
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="group" />
       </Field>

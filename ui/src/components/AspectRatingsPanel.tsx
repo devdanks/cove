@@ -30,6 +30,10 @@ const DEFAULT_ASPECTS: Partial<Record<AffinityHostType, AspectDefinition[]>> = {
     { key: "performers", label: "Performers" },
     { key: "quality", label: "Quality" },
   ],
+  audio: [
+    { key: "audio", label: "Audio" },
+    { key: "content", label: "Content" },
+  ],
   performer: [
     { key: "face", label: "Face" },
     { key: "body", label: "Body" },

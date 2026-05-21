@@ -7,12 +7,11 @@ import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
 import { useAiVisualAvailability } from "../hooks/useAiVisualAvailability";
-import { RatingField } from "../components/Rating";
 import { SceneTagger } from "../components/SceneTagger";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { CustomFieldsEditor, formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from "../components/shared";
-import { SCENE_CRITERIA } from "../components/FilterDialog";
+import { SCENE_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
 import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX, ThumbsUp, Heart } from "lucide-react";
@@ -67,6 +66,10 @@ const INCLUDE_COMPILATIONS_FILTER_KEY = "includeCompilationGroups";
 const IS_VR_FILTER_KEY = "isVrCriterion";
 const VERTICAL_PORTRAIT_FILTER_KEY = "orientationCriterion";
 const MOBILE_VIEWER_MEDIA_QUERY = "(max-width: 767px), (hover: none) and (pointer: coarse)";
+const SCENE_FILTER_CRITERIA: CriterionDefinition[] = [
+  ...SCENE_CRITERIA,
+  { id: "includeCompilations", label: "Include Compilations", type: "bool", filterKey: INCLUDE_COMPILATIONS_FILTER_KEY },
+];
 
 function isMobileViewerViewport() {
   return typeof window !== "undefined"
@@ -74,12 +77,17 @@ function isMobileViewerViewport() {
     && window.matchMedia(MOBILE_VIEWER_MEDIA_QUERY).matches;
 }
 
-function isIncludeCompilationGroupsEnabled(value: unknown) {
+function getBoolCriterionValue(value: unknown) {
   if (typeof value === "boolean") {
     return value;
   }
 
-  return (value as BoolCriterion | undefined)?.value === true;
+  const criterionValue = (value as BoolCriterion | undefined)?.value;
+  return typeof criterionValue === "boolean" ? criterionValue : undefined;
+}
+
+function isIncludeCompilationGroupsEnabled(value: unknown) {
+  return getBoolCriterionValue(value) === true;
 }
 
 interface Props {
@@ -277,6 +285,12 @@ export function ScenesPage({ onNavigate }: Props) {
     Object.entries(effectiveObjectFilter).filter(([key]) => key !== INCLUDE_COMPILATIONS_FILTER_KEY),
   ), [effectiveObjectFilter]);
   const hasObjectFilter = Object.keys(backendObjectFilter).length > 0;
+  const compilationBlockingObjectFilter = useMemo(() => Object.fromEntries(
+    Object.entries(backendObjectFilter).filter(([key, value]) => key !== IS_VR_FILTER_KEY || getBoolCriterionValue(value) !== false),
+  ), [backendObjectFilter]);
+  const hasCompilationBlockingObjectFilter = Object.keys(compilationBlockingObjectFilter).length > 0;
+  const sceneVrFilterValue = getBoolCriterionValue(backendObjectFilter[IS_VR_FILTER_KEY]);
+  const compilationQueryExtra = useMemo(() => sceneVrFilterValue === false ? { isVr: false } : undefined, [sceneVrFilterValue]);
   const visualSearchActive = aiVisualAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
   const infinitePageSize = filter.perPage === 0 || infiniteOnlyDisplayMode;
   const defaultInfiniteChunkSize = defaultState.filter.perPage && defaultState.filter.perPage > 0 ? defaultState.filter.perPage : 40;
@@ -345,7 +359,7 @@ export function ScenesPage({ onNavigate }: Props) {
   }, [filter, objectFilter, setDisplayMode, setFilter, setObjectFilter]);
 
   const includeCompilationGroups = isIncludeCompilationGroupsEnabled(normalizedObjectFilter[INCLUDE_COMPILATIONS_FILTER_KEY]);
-  const canShowCompilationGroups = !infinitePageSize && includeCompilationGroups && searchMode === "text" && !hasObjectFilter && (displayMode === "grid" || displayMode === "list");
+  const canShowCompilationGroups = !infinitePageSize && includeCompilationGroups && searchMode === "text" && !hasCompilationBlockingObjectFilter && (displayMode === "grid" || displayMode === "list");
 
   const { data, isLoading } = useQuery({
     queryKey: ["scenes", filter, backendObjectFilter, searchMode],
@@ -365,8 +379,8 @@ export function ScenesPage({ onNavigate }: Props) {
   });
 
   const { data: unifiedData, isLoading: unifiedLoading } = useQuery({
-    queryKey: ["scenes", "with-compilations", filter],
-    queryFn: () => scenes.findWithCompilations(filter),
+    queryKey: ["scenes", "with-compilations", filter, compilationQueryExtra],
+    queryFn: () => scenes.findWithCompilations(filter, compilationQueryExtra),
     enabled: !infinitePageSize && canShowCompilationGroups,
   });
 
@@ -617,7 +631,7 @@ export function ScenesPage({ onNavigate }: Props) {
       availableDisplayModes={["grid", "list", "wall", "tagger", "feed", "vertical"]}
       allowInfinitePageSize
       infinitePageSizeOnly={infiniteOnlyDisplayMode}
-      criteriaDefinitions={SCENE_CRITERIA}
+      criteriaDefinitions={SCENE_FILTER_CRITERIA}
       objectFilter={normalizedObjectFilter}
       onObjectFilterChange={setObjectFilter}
       wallColumnCount={wallColumnCount}
@@ -987,7 +1001,6 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   const [date, setDate] = useState("");
   const [details, setDetails] = useState("");
   const [director, setDirector] = useState("");
-  const [rating, setRating] = useState<number | undefined>(undefined);
   const [organized, setOrganized] = useState(false);
   const [isVr, setIsVr] = useState(false);
   const [urls, setUrls] = useState<string[]>([""]);
@@ -1031,7 +1044,6 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     setDate("");
     setDetails("");
     setDirector("");
-    setRating(undefined);
     setOrganized(false);
     setIsVr(false);
     setUrls([""]);
@@ -1096,7 +1108,6 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     date: date || undefined,
     details: details || undefined,
     director: director || undefined,
-    rating,
     organized,
     isVr,
     studioId,
@@ -1190,12 +1201,9 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         <TextArea value={details} onChange={setDetails} placeholder="Scene description" rows={3} />
       </Field>
 
-      <div className="grid grid-cols-2 gap-4">
-        <RatingField value={rating} onChange={setRating} />
-        <Field label="Studio">
-          <StudioSelector value={studioId} onChange={setStudioId} />
-        </Field>
-      </div>
+      <Field label="Studio">
+        <StudioSelector value={studioId} onChange={setStudioId} />
+      </Field>
 
       <Field label="URLs">
         <StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" />
@@ -1437,7 +1445,7 @@ function SceneListTable({ entries, engagementById, onNavigate, selectedIds, onTo
                   </td>
                   <td className="py-1.5 px-2 text-muted">{group.date || ""}</td>
                   <td className="py-1.5 px-2 text-muted">Compilation</td>
-                  <td className="py-1.5 px-2 text-muted">{group.duration ? formatDuration(group.duration) : ""}</td>
+                  <td className="py-1.5 px-2 text-muted"></td>
                   <td className="py-1.5 px-2 text-muted"></td>
                   <td className="py-1.5 px-2 text-muted">{group.sceneCount} scenes</td>
                   <td className="py-1.5 px-2 text-right text-muted"></td>

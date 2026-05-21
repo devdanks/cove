@@ -5,7 +5,7 @@ import {
   Pencil, Plus, Trash2, Search, Eye, EyeOff, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
   Gauge, Clapperboard, FolderOpen, Layers, Clock, List,
-  RefreshCw, Camera, Image, Merge, ExternalLink, Download, X,
+  RefreshCw, Camera, Image, Merge, ExternalLink, Download, X, Sparkles,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -329,8 +329,14 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       }
     }
 
+    for (const segment of segments) {
+      if (segment.refId != null && isFaceTimelineSegment(segment)) {
+        ids.add(Number(segment.refId));
+      }
+    }
+
     return Array.from(ids);
-  }, [detections]);
+  }, [detections, segments]);
 
   const sceneFaceQueries = useQueries({
     queries: sceneFaceIds.map((faceId) => ({
@@ -366,7 +372,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const tabs = filterItemsByPermission([
     { key: "details", label: "Details" },
     { key: "segments", label: `Segments${segments.length ? ` (${segments.length})` : ""}` },
-    { key: "similar", label: "Similar" },
+    { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
     { key: "filters", label: "Filters" },
     { key: "file-info", label: `File Info${scene?.files.length && scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },
     { key: "history", label: "History" },
@@ -617,6 +623,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             resumeTime={effectiveResumeTime}
             sceneId={id}
             detections={detections}
+            segments={segments}
+            faces={sceneFaces.map(({ face }) => face)}
             captions={file.captions}
             onSeekRegister={(fn) => { seekRef.current = fn; }}
             onTimeUpdate={setVideoTime}
@@ -1499,8 +1507,9 @@ function SceneScrubber({
   const thumbHeight = spriteData?.entries[0] ? Math.round(thumbWidth * (spriteData.entries[0].h / spriteData.entries[0].w)) : 0;
   const rawSegmentsById = useMemo(() => new Map(rawSegments.map((segment) => [segment.id, segment])), [rawSegments]);
   const performersById = useMemo(() => new Map((performers ?? []).map((performer) => [performer.id, performer])), [performers]);
+  const nonFaceSpans = useMemo(() => spans.filter((span) => !isFaceResolvedSpan(span, rawSegmentsById)), [rawSegmentsById, spans]);
   const segmentLanes = useMemo(() => buildTimelineLanes<TimelineOverlayItem>(
-    spans.map((span) => ({
+    nonFaceSpans.map((span) => ({
       key: span.spanKey,
       startSec: span.startSec,
       endSec: span.endSec,
@@ -1508,38 +1517,40 @@ function SceneScrubber({
       colorHint: span.colorHint,
       colorSeed: `${span.kind ?? "span"}:${span.tagName ?? ""}:${span.sourceKey ?? ""}`,
     })),
-  ), [performersById, rawSegmentsById, spans]);
+  ), [nonFaceSpans, performersById, rawSegmentsById]);
   const faceLanes = useMemo(() => {
     if (!facesEnabled) return [] as ReturnType<typeof buildTimelineLanes<TimelineOverlayItem>>;
     const facesById = new Map<number, Pick<Face, "id" | "label" | "performerName" | "performerId">>();
     for (const face of faces ?? []) facesById.set(face.id, face);
 
-    // Group detection observations per face id and merge close detections into
-    // continuous appearance windows.
+    const items: TimelineOverlayItem[] = [];
+    const segmentFaceIds = new Set<number>();
+
+    for (const segment of rawSegments) {
+      if (!isFaceTimelineSegment(segment)) continue;
+      const faceId = segment.refId != null ? Number(segment.refId) : -Math.abs(segment.id);
+      if (faceId > 0) segmentFaceIds.add(faceId);
+      const face = facesById.get(faceId);
+      const label = face?.performerName?.trim() || face?.label?.trim() || segment.title?.trim() || (faceId > 0 ? `Face #${faceId}` : "Face");
+      items.push({
+        key: `face-segment-${segment.id}`,
+        startSec: segment.startSec,
+        endSec: Math.max(segment.endSec ?? segment.startSec, segment.startSec + 0.4),
+        label,
+        colorSeed: String(faceId),
+      });
+    }
+
     const buckets = new Map<number, number[]>();
     for (const det of detections) {
-      if (det.refId == null || det.refKind?.toLowerCase() !== "face") continue;
+      if (det.refId == null || det.refKind?.toLowerCase() !== "face" || segmentFaceIds.has(det.refId)) continue;
       if (det.observedAtSec == null) continue;
       const arr = buckets.get(det.refId) ?? [];
       arr.push(det.observedAtSec);
       buckets.set(det.refId, arr);
     }
 
-    // Fallback to face-tagged raw segments when no detections are available
-    // for that face id (e.g. legacy data).
-    if (buckets.size === 0) {
-      for (const segment of rawSegments) {
-        if (!isFaceTimelineSegment(segment)) continue;
-        const fakeId = -Math.abs(segment.id);
-        const arr = buckets.get(fakeId) ?? [];
-        arr.push(segment.startSec);
-        if (segment.endSec != null) arr.push(segment.endSec);
-        buckets.set(fakeId, arr);
-      }
-    }
-
     const MERGE_GAP_SEC = 2.5;
-    const items: TimelineOverlayItem[] = [];
     for (const [faceId, times] of buckets.entries()) {
       times.sort((left, right) => left - right);
       let windowStart = times[0];
@@ -1617,7 +1628,7 @@ function SceneScrubber({
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-[#20222a] px-2 py-1.5 pr-8 text-[10px] text-white/65">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <span className="font-semibold uppercase tracking-[0.16em] text-white/70">Timeline overlays</span>
-              {spans.length > 0 ? <span className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5">{spans.length} segment{spans.length === 1 ? "" : "s"}</span> : null}
+              {nonFaceSpans.length > 0 ? <span className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5">{nonFaceSpans.length} segment{nonFaceSpans.length === 1 ? "" : "s"}</span> : null}
               {hasFaceDetections ? <span className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5">face detections</span> : null}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-1">
@@ -1662,7 +1673,7 @@ function SceneScrubber({
             </div>
           </div>
           {!overlaysCollapsed ? <div className="space-y-2 px-2 py-2">
-            {spans.length > 0 ? (
+            {nonFaceSpans.length > 0 ? (
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-white/45">
                   <span>Segments{profileName ? ` · ${profileName}` : ""}</span>
@@ -1825,6 +1836,21 @@ function isFaceTimelineSegment(segment: Pick<Segment, "title" | "kind" | "source
   const normalizedSource = segment.sourceKey?.trim().toLowerCase() ?? "";
   const normalizedTitle = segment.title?.trim().toLowerCase() ?? "";
   return normalizedKind === "face" || normalizedSource.includes("face") || normalizedTitle.startsWith("face-");
+}
+
+function isFaceResolvedSpan(
+  span: Pick<ResolvedSpan, "kind" | "sourceKey" | "tagName" | "segmentIds">,
+  rawSegmentsById: Map<number, Pick<Segment, "id" | "title" | "kind" | "sourceKey" | "refId">>,
+) {
+  if (isFaceTimelineSegment({ title: span.tagName ?? undefined, kind: span.kind, sourceKey: span.sourceKey ?? "" })) {
+    return true;
+  }
+
+  const segmentIds = span.segmentIds ?? [];
+  return segmentIds.length > 0 && segmentIds.every((segmentId) => {
+    const segment = rawSegmentsById.get(segmentId);
+    return segment ? isFaceTimelineSegment(segment) : false;
+  });
 }
 
 function parseVttTime(timeStr: string): number {

@@ -7,7 +7,7 @@ vi.mock("../components/Rating", () => ({
   RatingBadge: () => null,
 }));
 
-import { GalleryTile, PerformerTile, SceneCard, SceneCardPopovers } from "../components/EntityCards";
+import { GalleryTile, GroupTile, PerformerTile, SceneCard, SceneCardPopovers } from "../components/EntityCards";
 import { DetailsTab, FileInfoTab } from "../pages/SceneDetailPage";
 
 const sceneFile = {
@@ -87,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("SceneCard navigation", () => {
@@ -258,6 +259,57 @@ describe("GalleryTile", () => {
     const { container } = render(<GalleryTile gallery={baseGallery as any} onClick={vi.fn()} />);
 
     expect((container.querySelector("img") as HTMLImageElement | null)?.getAttribute("src")).toContain("/api/galleries/7/cover");
+  });
+});
+
+describe("GroupTile", () => {
+  it("uses hover popovers for dynamic mixed group counts", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      items: [
+        { id: -1, groupId: 4, orderIndex: 0, kind: "scene", sceneId: 10, sceneTitle: "Dynamic Scene", hostType: "scene", hostId: 10, title: "Dynamic Scene", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+        { id: -2, groupId: 4, orderIndex: 1, kind: "image", imageId: 20, imageTitle: "Group Image", hostType: "image", hostId: 20, title: "Group Image", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+        { id: -3, groupId: 4, orderIndex: 2, kind: "audio", hostType: "audio", hostId: 30, title: "Group Audio", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+        { id: -4, groupId: 4, orderIndex: 3, kind: "text", hostType: "text", hostId: 40, title: "Group Text", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+        { id: -5, groupId: 4, orderIndex: 4, kind: "segment", hostType: "segment", hostId: 50, title: "Group Segment", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+      ],
+      totalCount: 5,
+      page: 1,
+      perPage: 0,
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithQueryClient(
+      <GroupTile
+        group={{
+          id: 4,
+          name: "Mixed Dynamic Group",
+          kind: "dynamic",
+          frontImagePath: null,
+          tags: [],
+          sceneCount: 1,
+          imageCount: 1,
+          audioCount: 1,
+          textCount: 1,
+          segmentCount: 1,
+          subGroupCount: 0,
+          itemCount: 5,
+          createdAt: "2026-05-01T00:00:00Z",
+          updatedAt: "2026-05-01T00:00:00Z",
+        } as any}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTitle("Scenes").tagName).toBe("BUTTON");
+    expect(screen.getByTitle("Images").tagName).toBe("BUTTON");
+    expect(screen.getByTitle("Audios").tagName).toBe("BUTTON");
+    expect(screen.getByTitle("Texts").tagName).toBe("BUTTON");
+    expect(screen.getByTitle("Segments").tagName).toBe("BUTTON");
+
+    fireEvent.mouseEnter(screen.getByTitle("Scenes"));
+
+    expect(await screen.findByText("Dynamic Scene")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/groups/4/items/page?page=1&perPage=0&sort=order&direction=asc", expect.any(Object));
   });
 });
 

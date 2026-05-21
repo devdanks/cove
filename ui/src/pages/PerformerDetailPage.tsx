@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { audios, faces, galleries, groups, images, metadata, performers, scenes, texts, entityImages } from "../api/client";
 import type { Audio, AudioFilterCriteria, Face, FaceSimilar, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, Performer as PerformerModel, PerformerFilterCriteria, Scene, SceneFilterCriteria, MetadataServer, MetadataServerPerformerMatch, TextDocument, TextFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MapPin, MoreHorizontal, MoreVertical, Music, Pencil, Ruler, Scale, Search, Trash2, Users, UserRound, Wand2 } from "lucide-react";
+import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MapPin, MoreHorizontal, MoreVertical, Music, Pencil, Ruler, Scale, Search, Sparkles, Trash2, Users, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PerformerEditModal } from "./PerformerEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -102,7 +102,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     { key: "texts", label: "Texts", count: performer?.textCount },
     { key: "groups", label: "Groups", count: performer?.groupCount },
     { key: "appearsWith", label: "Appears With" },
-    { key: "similar", label: "Similar" },
+    { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
   ], id);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);

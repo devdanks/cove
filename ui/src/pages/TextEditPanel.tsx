@@ -108,11 +108,6 @@ export function TextEditPanel({ text, onSaved }: Props) {
       </div>
 
       <div className="space-y-1">
-        <span className="text-xs text-secondary">Custom Fields</span>
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="text" />
-      </div>
-
-      <div className="space-y-1">
         <span className="text-xs text-secondary">Tags</span>
         <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
       </div>
@@ -147,6 +142,11 @@ export function TextEditPanel({ text, onSaved }: Props) {
           ))}
         </div>
         <EntityReferenceMultiSelector entityType="group" values={selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." inputClassName={inputCls} />
+      </div>
+
+      <div className="space-y-1">
+        <span className="text-xs text-secondary">Custom Fields</span>
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="text" />
       </div>
 
       {mutation.error ? <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{(mutation.error as Error).message}</div> : null}

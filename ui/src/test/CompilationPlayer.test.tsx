@@ -16,7 +16,14 @@ vi.mock("../api/client", () => ({
     get: vi.fn(),
     streamUrl: vi.fn((id: number) => `/audio-${id}.mp3`),
   },
+  images: {
+    imageUrl: vi.fn((id: number) => `/image-${id}.jpg`),
+  },
   scenes: mockScenes,
+  texts: {
+    content: vi.fn(),
+    fileUrl: vi.fn((id: number) => `/text-${id}`),
+  },
 }));
 
 vi.mock("../components/VideoPlayer", () => ({

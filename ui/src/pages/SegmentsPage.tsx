@@ -20,12 +20,15 @@ import {
   isDerivedSpanQueryFilterActive,
   readDerivedSpanQueryFilter,
 } from "./segments/derivedQueryCriterion";
+import { readRawSegmentFilter } from "./segments/rawSegmentFilter";
 import {
   readRawSegmentIdsFromUrl,
+  readMultiIdCriterionIds,
+  readNumberCriterion,
   readSceneSelectionCriterion,
   readSegmentsPageContentView,
   readStringCriterion,
-  SEGMENT_CRITERIA,
+  createSegmentCriteria,
 } from "./segments/segmentCriteriaDefinitions";
 import { buildSpanTitle } from "./segments/segmentDisplayUtils";
 import { SegmentsPageList } from "./segments/SegmentsPageList";
@@ -63,6 +66,8 @@ const RAW_SEGMENT_SORT_OPTIONS = [
   { value: "kind", label: "Kind" },
   { value: "source_key", label: "Source" },
   { value: "tag_name", label: "Tag" },
+  { value: "performer", label: "Performer" },
+  { value: "ref", label: "Face/Reference" },
 ];
 
 function dedupeSegmentDisplayProfiles(profiles: SegmentDisplayProfile[]): SegmentDisplayProfile[] {
@@ -134,6 +139,29 @@ export function SegmentsPage({ onNavigate }: Props) {
     () => readDerivedSpanQueryFilter(objectFilter.derivedSpanQuery),
     [objectFilter.derivedSpanQuery],
   );
+  const rawSegmentFilter = useMemo(
+    () => readRawSegmentFilter(objectFilter.rawSegmentFilters),
+    [objectFilter.rawSegmentFilters],
+  );
+  const rawTagIds = useMemo(() => readMultiIdCriterionIds(objectFilter.rawTagsCriterion), [objectFilter.rawTagsCriterion]);
+  const rawPerformerIds = useMemo(() => readMultiIdCriterionIds(objectFilter.rawPerformersCriterion), [objectFilter.rawPerformersCriterion]);
+  const rawFaceIds = useMemo(() => readMultiIdCriterionIds(objectFilter.rawFacesCriterion), [objectFilter.rawFacesCriterion]);
+  const rawKind = readStringCriterion(objectFilter.rawKindCriterion);
+  const rawSourceKey = readStringCriterion(objectFilter.rawSourceCriterion);
+  const rawConfidence = readNumberCriterion(objectFilter.rawConfidenceCriterion);
+  const rawDuration = readNumberCriterion(objectFilter.rawDurationCriterion);
+  const combinedRawSegmentFilter = useMemo(() => ({
+    ...rawSegmentFilter,
+    tagIds: Array.from(new Set([...rawSegmentFilter.tagIds, ...rawTagIds])),
+    performerIds: Array.from(new Set([...rawSegmentFilter.performerIds, ...rawPerformerIds])),
+    faceIds: Array.from(new Set([...rawSegmentFilter.faceIds, ...rawFaceIds])),
+    kind: rawSegmentFilter.kind ?? (rawKind || undefined),
+    sourceKey: rawSegmentFilter.sourceKey ?? (rawSourceKey || undefined),
+    confidenceCriterion: rawConfidence ?? rawSegmentFilter.confidenceCriterion,
+    durationCriterion: rawDuration ?? rawSegmentFilter.durationCriterion,
+    minConfidence: rawSegmentFilter.minConfidence,
+    minDurationSec: rawSegmentFilter.minDurationSec,
+  }), [rawConfidence, rawDuration, rawFaceIds, rawKind, rawPerformerIds, rawSegmentFilter, rawSourceKey, rawTagIds]);
   const derivedSpanQueryActive = isDerivedSpanQueryFilterActive(objectFilter.derivedSpanQuery);
   const q = filter.q?.trim() ?? "";
   const infinitePageSize = filter.perPage === 0;
@@ -144,6 +172,29 @@ export function SegmentsPage({ onNavigate }: Props) {
   const direction = filter.direction ?? "desc";
   const isRawView = contentView === "raw";
   const sortOptions = isRawView ? RAW_SEGMENT_SORT_OPTIONS : DERIVED_SPAN_SORT_OPTIONS;
+
+  const sourceOptionsQuery = useQuery({
+    queryKey: ["segments-page", "filter", "source-keys"],
+    queryFn: () => segmentLibrary.distinctSourceKeys(),
+    staleTime: 60_000,
+  });
+  const kindOptionsQuery = useQuery({
+    queryKey: ["segments-page", "filter", "kinds"],
+    queryFn: () => segmentLibrary.distinctKinds(),
+    staleTime: 60_000,
+  });
+  const segmentCriteria = useMemo(() => createSegmentCriteria({
+    sourceOptions: [
+      { value: "derived", label: "Derived" },
+      ...(sourceOptionsQuery.data ?? []).map((option) => ({ value: option.value, label: `${option.value} (${option.count})` })),
+    ],
+    kindOptions: [
+      { value: "union", label: "Union" },
+      { value: "intersection", label: "Intersection" },
+      { value: "difference", label: "Difference" },
+      ...(kindOptionsQuery.data ?? []).map((option) => ({ value: option.value, label: `${option.value} (${option.count})` })),
+    ],
+  }), [kindOptionsQuery.data, sourceOptionsQuery.data]);
 
   useEffect(() => {
     const syncContentView = () => {
@@ -274,6 +325,17 @@ export function SegmentsPage({ onNavigate }: Props) {
       sceneTitle: sceneTitle || undefined,
       sceneIds: sceneSelection.includeIds.length > 0 ? sceneSelection.includeIds : undefined,
       excludeSceneIds: sceneSelection.excludeIds.length > 0 ? sceneSelection.excludeIds : undefined,
+      tagIds: combinedRawSegmentFilter.tagIds.length > 0 ? combinedRawSegmentFilter.tagIds : undefined,
+      kind: combinedRawSegmentFilter.kind,
+      sourceKey: combinedRawSegmentFilter.sourceKey,
+      refIds: combinedRawSegmentFilter.faceIds.length > 0 ? combinedRawSegmentFilter.faceIds : undefined,
+      performerIds: combinedRawSegmentFilter.performerIds.length > 0 ? combinedRawSegmentFilter.performerIds : undefined,
+      confidence: combinedRawSegmentFilter.confidenceCriterion?.value,
+      confidence2: combinedRawSegmentFilter.confidenceCriterion?.value2,
+      confidenceModifier: combinedRawSegmentFilter.confidenceCriterion?.modifier,
+      durationSec: combinedRawSegmentFilter.durationCriterion?.value,
+      durationSec2: combinedRawSegmentFilter.durationCriterion?.value2,
+      durationModifier: combinedRawSegmentFilter.durationCriterion?.modifier,
     });
 
     return {
@@ -298,7 +360,7 @@ export function SegmentsPage({ onNavigate }: Props) {
       page: response.page,
       perPage: response.perPage,
     };
-  }, [activeProfileId, appliedQuery, derivedQueryDescriptor, direction, q, sceneSelection.excludeIds, sceneSelection.includeIds, sceneTitle, sort]);
+  }, [activeProfileId, appliedQuery, combinedRawSegmentFilter, derivedQueryDescriptor, direction, q, sceneSelection.excludeIds, sceneSelection.includeIds, sceneTitle, sort]);
 
   const queryRawSegmentsPage = useCallback(async (page: number, pageSize: number) => {
     const response = await segmentLibrary.list({
@@ -307,6 +369,20 @@ export function SegmentsPage({ onNavigate }: Props) {
       sceneIds: sceneSelection.includeIds.length > 0 ? sceneSelection.includeIds.join(",") : undefined,
       excludeSceneIds: sceneSelection.excludeIds.length > 0 ? sceneSelection.excludeIds.join(",") : undefined,
       sceneTitle: sceneTitle || undefined,
+      tagIds: combinedRawSegmentFilter.tagIds.length > 0 ? combinedRawSegmentFilter.tagIds.join(",") : undefined,
+      kind: combinedRawSegmentFilter.kind,
+      sourceKey: combinedRawSegmentFilter.sourceKey,
+      sourceCategory: combinedRawSegmentFilter.sourceCategory,
+      refIds: combinedRawSegmentFilter.faceIds.length > 0 ? combinedRawSegmentFilter.faceIds.join(",") : undefined,
+      performerIds: combinedRawSegmentFilter.performerIds.length > 0 ? combinedRawSegmentFilter.performerIds.join(",") : undefined,
+      minConfidence: combinedRawSegmentFilter.minConfidence,
+      minDurationSec: combinedRawSegmentFilter.minDurationSec,
+      confidence: combinedRawSegmentFilter.confidenceCriterion?.value,
+      confidence2: combinedRawSegmentFilter.confidenceCriterion?.value2,
+      confidenceModifier: combinedRawSegmentFilter.confidenceCriterion?.modifier,
+      durationSec: combinedRawSegmentFilter.durationCriterion?.value,
+      durationSec2: combinedRawSegmentFilter.durationCriterion?.value2,
+      durationModifier: combinedRawSegmentFilter.durationCriterion?.modifier,
       sort,
       direction,
       page,
@@ -324,7 +400,7 @@ export function SegmentsPage({ onNavigate }: Props) {
       page: response.page,
       perPage: response.perPage,
     };
-  }, [direction, q, rawSegmentIds, sceneSelection.excludeIds, sceneSelection.includeIds, sceneTitle, sort]);
+  }, [combinedRawSegmentFilter, direction, q, rawSegmentIds, sceneSelection.excludeIds, sceneSelection.includeIds, sceneTitle, sort]);
 
   const segmentsWindowQuery = useDerivedSpansQuery({
     activeProfileId,
@@ -338,6 +414,7 @@ export function SegmentsPage({ onNavigate }: Props) {
     excludeSceneIds: sceneSelection.excludeIds,
     appliedQuery,
     derivedQueryDescriptor: appliedQuery != null ? derivedQueryDescriptor : undefined,
+    rawFilter: combinedRawSegmentFilter,
     enabled: derivedQueryEnabled && !infinitePageSize,
   });
 
@@ -351,6 +428,7 @@ export function SegmentsPage({ onNavigate }: Props) {
     includeSceneIds: sceneSelection.includeIds,
     excludeSceneIds: sceneSelection.excludeIds,
     rawSegmentIds,
+    rawFilter: combinedRawSegmentFilter,
     enabled: rawQueryEnabled && !infinitePageSize,
   });
 
@@ -362,7 +440,7 @@ export function SegmentsPage({ onNavigate }: Props) {
   });
 
   const rawInfiniteQuery = usePaginatedInfiniteQuery<RawSegmentItem>({
-    queryKey: ["segments-page", "raw", "infinite", q, sceneTitle, sort, direction, sceneSelection.includeIds.join(","), sceneSelection.excludeIds.join(","), rawSegmentIds.join(",")],
+    queryKey: ["segments-page", "raw", "infinite", q, sceneTitle, sort, direction, sceneSelection.includeIds.join(","), sceneSelection.excludeIds.join(","), rawSegmentIds.join(","), combinedRawSegmentFilter],
     queryFn: queryRawSegmentsPage,
     enabled: rawQueryEnabled && infinitePageSize,
     chunkSize: defaultPerPage,
@@ -518,17 +596,11 @@ export function SegmentsPage({ onNavigate }: Props) {
           loadedCount: isRawView ? rawInfiniteQuery.loadedThroughCount : derivedInfiniteQuery.loadedThroughCount,
           totalCount,
         } : undefined}
-        criteriaDefinitions={SEGMENT_CRITERIA}
+        criteriaDefinitions={segmentCriteria}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
         customFilterSections={customFilterSections}
-        metadataByline={(
-          <span className="hidden text-xs text-muted lg:inline">
-            {isRawView
-              ? "Browse persisted raw Segment rows. Profiles and derived-query filters are disabled in raw view."
-              : "Browse resolved spans from the active profile. Use Filters to build derived intersections, unions, and differences before snapshotting clips into a compilation."}
-          </span>
-        )}
+        metadataByline={null}
         renderOperations={() => (
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex rounded-lg border border-border bg-card/70 p-1 text-xs">

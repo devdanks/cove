@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups } from "../api/client";
 import type { Group, GroupUpdate } from "../api/types";
-import { EditModal, Field, TextInput, TextArea, NumberInput, SaveButton } from "../components/EditModal";
-import { RatingField } from "../components/Rating";
+import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { CustomFieldsEditor } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
@@ -20,19 +19,16 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const queryClient = useQueryClient();
 
   const [name, setName] = useState(group.name);
-  const [aliases, setAliases] = useState(group.aliases ?? "");
+  const [aliases, setAliases] = useState<string[]>(() => splitAliases(group.aliases));
   const [director, setDirector] = useState(group.director ?? "");
   const [date, setDate] = useState(group.date ?? "");
-  const [duration, setDuration] = useState<number | undefined>(group.duration ?? undefined);
-  const [rating, setRating] = useState<number | undefined>(undefined);
   const [studioId, setStudioId] = useState<number | undefined>(group.studioId ?? undefined);
-  const [synopsis, setSynopsis] = useState(group.synopsis ?? "");
+  const [description, setDescription] = useState(group.description ?? "");
   const [urls, setUrls] = useState(group.urls.length > 0 ? group.urls : [""]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(group.tags.map((t) => t.id));
   const [kind, setKind] = useState<"static" | "dynamic">(group.kind ?? "static");
   const [querySourceKey, setQuerySourceKey] = useState(group.querySourceKey ?? FILTER_DYNAMIC_SOURCE_KEY);
   const [queryJson, setQueryJson] = useState(group.queryJson ?? defaultDynamicGroupFilterQueryJson());
-  const [cacheTtlSec, setCacheTtlSec] = useState(group.cacheTtlSec ?? 60);
   const [showInSceneLists, setShowInSceneLists] = useState(group.showInSceneLists ?? false);
 
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(group.customFields ?? {}) });
@@ -44,20 +40,17 @@ export function GroupEditModal({ group, open, onClose }: Props) {
 
   useEffect(() => {
     setName(group.name);
-    setAliases(group.aliases ?? "");
+    setAliases(splitAliases(group.aliases));
     setDirector(group.director ?? "");
     setDate(group.date ?? "");
-    setDuration(group.duration ?? undefined);
-    setRating(undefined);
     setStudioId(group.studioId ?? undefined);
-    setSynopsis(group.synopsis ?? "");
+    setDescription(group.description ?? "");
     setUrls(group.urls.length > 0 ? group.urls : [""]);
     setSelectedTagIds(group.tags.map((t) => t.id));
     setCustomFields({ ...(group.customFields ?? {}) });
     setKind(group.kind ?? "static");
     setQuerySourceKey(group.querySourceKey ?? dynamicSources.find((source) => source.key === FILTER_DYNAMIC_SOURCE_KEY)?.key ?? dynamicSources[0]?.key ?? FILTER_DYNAMIC_SOURCE_KEY);
     setQueryJson(group.queryJson ?? defaultDynamicGroupFilterQueryJson());
-    setCacheTtlSec(group.cacheTtlSec ?? 60);
     setShowInSceneLists(group.showInSceneLists ?? false);
   }, [dynamicSources, group]);
 
@@ -74,20 +67,17 @@ export function GroupEditModal({ group, open, onClose }: Props) {
     const urlList = urls.map((url) => url.trim()).filter(Boolean);
     mutation.mutate({
       name,
-      aliases: aliases || undefined,
+      aliases: joinAliases(aliases) || undefined,
       director: director || undefined,
       date: date || undefined,
-      duration,
-      rating,
       studioId,
-      synopsis: synopsis || undefined,
+      description: description || undefined,
       urls: urlList,
       tagIds: selectedTagIds,
       customFields,
       kind,
       querySourceKey: kind === "dynamic" ? querySourceKey : undefined,
       queryJson: kind === "dynamic" && querySourceKey === FILTER_DYNAMIC_SOURCE_KEY ? queryJson : undefined,
-      cacheTtlSec: kind === "dynamic" ? cacheTtlSec : undefined,
       showInSceneLists,
     });
   };
@@ -98,8 +88,8 @@ export function GroupEditModal({ group, open, onClose }: Props) {
         <Field label="Name *">
           <TextInput value={name} onChange={setName} placeholder="Group name" />
         </Field>
-        <Field label="Aliases">
-          <TextInput value={aliases} onChange={setAliases} placeholder="Alternative names" />
+        <Field label="Studio">
+          <StudioSelector value={studioId} onChange={setStudioId} />
         </Field>
       </div>
 
@@ -118,16 +108,16 @@ export function GroupEditModal({ group, open, onClose }: Props) {
             ))}
           </div>
         </Field>
-        <Field label="Scene browsing">
-          <label className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground">
+        <div className="flex items-end pb-1">
+          <label className="inline-flex items-center gap-2 text-sm text-foreground">
             <input type="checkbox" checked={showInSceneLists} onChange={(event) => setShowInSceneLists(event.target.checked)} className="h-4 w-4 accent-accent" />
             Show in scene browsing
           </label>
-        </Field>
+        </div>
       </div>
 
       {kind === "dynamic" ? (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4">
           <Field label="Dynamic source">
             <select
               value={querySourceKey}
@@ -143,15 +133,6 @@ export function GroupEditModal({ group, open, onClose }: Props) {
                 <option key={source.key} value={source.key}>{source.displayName}</option>
               ))}
             </select>
-          </Field>
-          <Field label="Cache TTL (seconds)">
-            <input
-              type="number"
-              min={0}
-              value={cacheTtlSec}
-              onChange={(event) => setCacheTtlSec(Math.max(0, Number(event.target.value) || 0))}
-              className="w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-            />
           </Field>
         </div>
       ) : null}
@@ -174,18 +155,12 @@ export function GroupEditModal({ group, open, onClose }: Props) {
         </Field>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <Field label="Duration (seconds)">
-          <NumberInput value={duration} onChange={setDuration} min={0} />
-        </Field>
-        <RatingField value={rating} onChange={setRating} />
-        <Field label="Studio">
-          <StudioSelector value={studioId} onChange={setStudioId} />
-        </Field>
-      </div>
+      <Field label="Description">
+        <TextArea value={description} onChange={setDescription} placeholder="Group description" rows={4} />
+      </Field>
 
-      <Field label="Synopsis">
-        <TextArea value={synopsis} onChange={setSynopsis} placeholder="Group synopsis / description" rows={4} />
+      <Field label="Aliases">
+        <StringListEditor values={aliases} onChange={setAliases} placeholder="Alias" addLabel="Add Alias" />
       </Field>
 
       <Field label="URLs">
@@ -207,4 +182,15 @@ export function GroupEditModal({ group, open, onClose }: Props) {
       </div>
     </EditModal>
   );
+}
+
+function splitAliases(value?: string) {
+  return value
+    ?.split(/[\r\n,]+/)
+    .map((alias) => alias.trim())
+    .filter(Boolean) ?? [];
+}
+
+function joinAliases(values: string[]) {
+  return values.map((alias) => alias.trim()).filter(Boolean).join(", ");
 }

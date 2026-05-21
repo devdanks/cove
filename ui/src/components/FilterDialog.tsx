@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { X, ChevronDown, ChevronRight, Search, Pin, PinOff, Plus, Minus, Star } from "lucide-react";
-import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi, scenes as scenesApi, tagGroups as tagGroupsApi } from "../api/client";
+import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi, scenes as scenesApi, tagGroups as tagGroupsApi, faces as facesApi } from "../api/client";
 import { GroupedTagOptionList } from "./TagSelector";
 import { EntityReferenceSelector } from "./EntityReferenceSelector";
 import {
@@ -34,11 +34,12 @@ import type {
   GroupFilterCriteria,
 } from "../api/types";
 import { RESOLUTION_FILTER_OPTIONS } from "../utils/resolutionBuckets";
+import { rankByLabel } from "../utils/searchRanking";
 
 // ===== Criterion definitions =====
 
 export type CriterionType = "string" | "number" | "bool" | "date" | "timestamp" | "duration" | "tagDuration" | "careerLength" | "rating" | "resolution" | "multiId" | "enum" | "hash";
-export type EntityType = "tags" | "tagGroups" | "performers" | "studios" | "groups" | "galleries" | "scenes";
+export type EntityType = "tags" | "tagGroups" | "performers" | "studios" | "groups" | "galleries" | "scenes" | "faces";
 
 export interface CriterionDefinition<TFilterKey extends string = string> {
   id: string;
@@ -484,9 +485,10 @@ export const TEXT_CRITERIA: CriteriaDefinitionList<TextFilterCriteria> = [
 
 export const GROUP_CRITERIA: CriteriaDefinitionList<GroupFilterCriteria> = [
   { id: "name", label: "Name", type: "string", filterKey: "nameCriterion" },
+  { id: "kind", label: "Kind", type: "enum", filterKey: "kindCriterion", modifiers: VALUE_ONLY_ENUM_MODIFIERS, options: [{ value: "static", label: "Static" }, { value: "dynamic", label: "Dynamic" }] },
   { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "director", label: "Director", type: "string", filterKey: "directorCriterion" },
-  { id: "synopsis", label: "Synopsis", type: "string", filterKey: "synopsisCriterion" },
+  { id: "description", label: "Description", type: "string", filterKey: "synopsisCriterion" },
   { id: "duration", label: "Duration", type: "duration", filterKey: "durationCriterion" },
   { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
   { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
@@ -509,6 +511,7 @@ interface FilterDialogProps {
   onApply: (filter: Record<string, unknown>) => void;
   preselectCriterion?: string;
   customSections?: FilterDialogCustomSection[];
+  showCustomSectionDivider?: boolean;
 }
 
 export interface FilterDialogCustomSection {
@@ -523,7 +526,7 @@ export interface FilterDialogCustomSection {
   summarize?: (value: unknown) => string;
 }
 
-export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, preselectCriterion, customSections }: FilterDialogProps) {
+export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, preselectCriterion, customSections, showCustomSectionDivider = true }: FilterDialogProps) {
   const [editFilter, setEditFilter] = useState<Record<string, unknown>>({ ...activeFilter });
   const backdropPointerDownRef = useRef(false);
   const [search, setSearch] = useState("");
@@ -810,7 +813,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
             );
           })}
 
-          {customSections && customSections.length > 0 ? <div className="border-t border-border my-1" /> : null}
+          {showCustomSectionDivider && customSections && customSections.length > 0 ? <div className="border-t border-border my-1" /> : null}
 
           {/* Pinned divider */}
           {filteredCriteria.some((c) => pinnedIds.has(c.id)) && filteredCriteria.some((c) => !pinnedIds.has(c.id)) && (
@@ -1036,7 +1039,7 @@ function BoolEditor({ value, onChange }: { value?: BoolCriterion; onChange: (v: 
 
 // ===== Number Editor =====
 
-function NumberEditor({
+export function NumberEditor({
   value,
   onChange,
   type,
@@ -1708,18 +1711,35 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
         case "groups": return (await groupsApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "name", direction: "asc" })).items;
         case "galleries": return (await galleriesApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "title", direction: "asc" })).items;
         case "scenes": return (await scenesApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "title", direction: "asc" })).items;
+        case "faces": return (await facesApi.list({ q: trimmedSearchText || undefined, merged: false, page: 1, perPage: 50 })).items;
         default: return [];
       }
     },
     staleTime: 60000,
   });
 
+  const selectedIds = useMemo(() => Array.from(new Set([...includedIds, ...excludedIds])), [excludedIds, includedIds]);
+  const missingSelectedIds = useMemo(() => {
+    const availableIds = new Set((entities as any[] | undefined)?.map((entity) => entity.id) ?? []);
+    return selectedIds.filter((id) => !existingNames[String(id)] && !availableIds.has(id));
+  }, [entities, existingNames, selectedIds]);
+  const selectedEntityQueries = useQueries({
+    queries: missingSelectedIds.map((id) => ({
+      queryKey: ["multi-id-selector", entityType, "selected", id],
+      queryFn: () => getMultiIdEntityLabel(entityType, id),
+      staleTime: 60000,
+    })),
+  });
+
   // Build a name lookup from available entities
   const nameMap = useMemo(() => {
     const map: Record<string, string> = { ...existingNames };
-    if (entities) for (const e of entities as any[]) map[String(e.id)] = e.name || e.title || `#${e.id}`;
+    if (entities) for (const e of entities as any[]) map[String(e.id)] = e.name || e.title || getMultiIdEntityLabels(entityType).singular;
+    for (const query of selectedEntityQueries) {
+      if (query.data) map[String(query.data.id)] = query.data.label;
+    }
     return map;
-  }, [entities, existingNames]);
+  }, [entities, existingNames, selectedEntityQueries]);
 
   const buildCriterion = (inc: number[], exc: number[], mod: string, includeChildren: boolean) => {
     // Include _names so filter chips can display entity names without waiting for queries
@@ -1738,9 +1758,11 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
 
   const filteredEntities = useMemo(() => {
     if (!entities) return [];
-    if (entityType !== "tagGroups") return entities;
-    const q = searchText.toLowerCase();
-    return q ? entities.filter((e: any) => (e.name || e.title || "").toLowerCase().includes(q)) : entities;
+    const q = searchText.trim().toLowerCase();
+    const available = entityType === "tagGroups" && q
+      ? entities.filter((entity: any) => (entity.name || entity.title || "").toLowerCase().includes(q))
+      : entities;
+    return q ? rankByLabel(available as any[], searchText, (entity) => entity.name || entity.title || entity.label || entity.performerName || "") : available;
   }, [entities, entityType, searchText]);
 
   const addInclude = (id: number) => {
@@ -1761,7 +1783,16 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
     onChange(buildCriterion(nextInc, nextExc, modifier, includeHierarchy));
   };
 
-  const getName = (e: any) => e.name || e.title || `#${e.id}`;
+  const labels = getMultiIdEntityLabels(entityType);
+  const getName = (e: any) => e.name || e.title || e.label || e.performerName || labels.singular;
+  const getSelectedName = (id: number, entity?: any) => {
+    if (entity) return getName(entity);
+    const hydratedName = nameMap[String(id)];
+    if (hydratedName) return hydratedName;
+    const missingIndex = missingSelectedIds.indexOf(id);
+    if (missingIndex >= 0 && selectedEntityQueries[missingIndex]?.isError) return `Unavailable ${labels.singular}`;
+    return `Loading ${labels.singular}...`;
+  };
 
   return (
     <div className="space-y-2">
@@ -1821,7 +1852,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
             const entity = entities?.find((e: any) => e.id === id);
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-green-900/50 text-green-300 border border-green-700">
-                {entity ? getName(entity) : `#${id}`}
+                {getSelectedName(id, entity)}
                 <button onClick={() => removeId(id)} className="hover:text-red-400">
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -1837,7 +1868,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
             const entity = entities?.find((e: any) => e.id === id);
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-red-900/50 text-red-300 border border-red-700">
-                {entity ? getName(entity) : `#${id}`}
+                {getSelectedName(id, entity)}
                 <button onClick={() => removeId(id)} className="hover:text-red-400">
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -1862,6 +1893,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
             tags={filteredEntities as any[]}
             maxItems={50}
             className="border-0 bg-transparent"
+            preserveOrder={Boolean(searchText.trim())}
             renderTag={(entity: any) => {
               const isIncluded = includedIds.includes(entity.id);
               const isExcluded = excludedIds.includes(entity.id);
@@ -1920,6 +1952,58 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
       )}
     </div>
   );
+}
+
+const MULTI_ID_ENTITY_LABELS: Record<EntityType, { singular: string; plural: string }> = {
+  tags: { singular: "tag", plural: "tags" },
+  tagGroups: { singular: "tag group", plural: "tag groups" },
+  performers: { singular: "performer", plural: "performers" },
+  studios: { singular: "studio", plural: "studios" },
+  groups: { singular: "group", plural: "groups" },
+  galleries: { singular: "gallery", plural: "galleries" },
+  scenes: { singular: "scene", plural: "scenes" },
+  faces: { singular: "face", plural: "faces" },
+};
+
+function getMultiIdEntityLabels(entityType: EntityType) {
+  return MULTI_ID_ENTITY_LABELS[entityType];
+}
+
+async function getMultiIdEntityLabel(entityType: EntityType, id: number): Promise<{ id: number; label: string }> {
+  switch (entityType) {
+    case "tags": {
+      const tag = await tagsApi.get(id);
+      return { id, label: tag.name };
+    }
+    case "tagGroups": {
+      const tagGroup = await tagGroupsApi.get(id);
+      return { id, label: tagGroup.name };
+    }
+    case "performers": {
+      const performer = await performersApi.get(id);
+      return { id, label: performer.name };
+    }
+    case "studios": {
+      const studio = await studiosApi.get(id);
+      return { id, label: studio.name };
+    }
+    case "groups": {
+      const group = await groupsApi.get(id);
+      return { id, label: group.name };
+    }
+    case "galleries": {
+      const gallery = await galleriesApi.get(id);
+      return { id, label: gallery.title?.trim() || "Untitled gallery" };
+    }
+    case "scenes": {
+      const scene = await scenesApi.get(id);
+      return { id, label: scene.title?.trim() || scene.code?.trim() || scene.files?.[0]?.basename || "Untitled scene" };
+    }
+    case "faces": {
+      const face = await facesApi.get(id);
+      return { id, label: face.label?.trim() || face.performerName?.trim() || `Face #${id}` };
+    }
+  }
 }
 
 // ===== Shared Components =====

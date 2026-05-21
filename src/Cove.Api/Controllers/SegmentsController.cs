@@ -27,9 +27,18 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         [FromQuery] string? tagIds,
         [FromQuery] string? kind,
         [FromQuery] string? sourceKey,
+        [FromQuery] string? sourceCategory,
+        [FromQuery] string? refIds,
+        [FromQuery] string? performerIds,
         [FromQuery] bool? tagged,
         [FromQuery] float? minConfidence,
         [FromQuery] double? minDurationSec,
+        [FromQuery] float? confidence,
+        [FromQuery] float? confidence2,
+        [FromQuery] string? confidenceModifier,
+        [FromQuery] double? durationSec,
+        [FromQuery] double? durationSec2,
+        [FromQuery] string? durationModifier,
         [FromQuery] string? sort,
         [FromQuery] string? direction,
         [FromQuery] string? excludeSceneIds = null,
@@ -47,12 +56,24 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             join scene in db.Scenes.AsNoTracking() on segment.HostId equals scene.Id
             join tag in db.Tags.AsNoTracking() on segment.TagId equals tag.Id into tagJoin
             from tag in tagJoin.DefaultIfEmpty()
+            join face in db.Faces.AsNoTracking() on segment.RefId equals (long?)face.Id into faceJoin
+            from face in faceJoin.DefaultIfEmpty()
+            join facePerformer in db.Performers.AsNoTracking() on face!.PerformerId equals (int?)facePerformer.Id into facePerformerJoin
+            from facePerformer in facePerformerJoin.DefaultIfEmpty()
+            join directPerformer in db.Performers.AsNoTracking() on segment.RefId equals (long?)directPerformer.Id into directPerformerJoin
+            from directPerformer in directPerformerJoin.DefaultIfEmpty()
             where segment.HostType == SegmentHostType.Scene
             select new SegmentLibraryRow
             {
                 Segment = segment,
                 SceneTitle = scene.Title,
                 TagName = tag != null ? tag.Name : null,
+                RefLabel = face != null ? face.Label : segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : null,
+                FaceId = face != null ? face!.Id : null,
+                FacePerformerId = facePerformer != null ? facePerformer!.Id : null,
+                DirectPerformerId = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Id : null,
+                PerformerId = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Id : facePerformer != null ? facePerformer!.Id : null,
+                PerformerName = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : facePerformer != null ? facePerformer!.Name : null,
             };
 
         var parsedIds = ParseIdList(ids);
@@ -71,8 +92,8 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
 
         if (!string.IsNullOrWhiteSpace(sceneTitle))
         {
-            var normalizedSceneTitle = sceneTitle.Trim();
-            query = query.Where(item => item.SceneTitle != null && item.SceneTitle.Contains(normalizedSceneTitle));
+            var normalizedSceneTitle = sceneTitle.Trim().ToLowerInvariant();
+            query = query.Where(item => item.SceneTitle != null && item.SceneTitle.ToLower().Contains(normalizedSceneTitle));
         }
 
         var parsedTagIds = ParseIdList(tagIds);
@@ -83,15 +104,39 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
 
         if (!string.IsNullOrWhiteSpace(kind))
         {
-            var normalizedKind = kind.Trim();
-            query = query.Where(item => item.Segment.Kind != null && item.Segment.Kind.Contains(normalizedKind));
+            var normalizedKind = kind.Trim().ToLowerInvariant();
+            query = query.Where(item => item.Segment.Kind != null && item.Segment.Kind.ToLower().Contains(normalizedKind));
         }
 
         if (!string.IsNullOrWhiteSpace(sourceKey))
         {
-            var normalizedSourceKey = sourceKey.Trim();
-            query = query.Where(item => item.Segment.SourceKey.Contains(normalizedSourceKey));
+            var normalizedSourceKey = sourceKey.Trim().ToLowerInvariant();
+            query = query.Where(item => item.Segment.SourceKey.ToLower().Contains(normalizedSourceKey));
         }
+
+        if (!string.IsNullOrWhiteSpace(sourceCategory))
+        {
+            var normalizedSourceCategory = sourceCategory.Trim().ToLowerInvariant();
+            query = normalizedSourceCategory switch
+            {
+                "extensions" => query.Where(item => item.Segment.SourceKey.StartsWith("ext:")),
+                "user" => query.Where(item => item.Segment.SourceKey == "user"),
+                _ => query,
+            };
+        }
+
+        var parsedRefIds = ParseLongIdList(refIds);
+        if (parsedRefIds.Count > 0)
+            query = query.Where(item => item.Segment.RefId.HasValue
+                && parsedRefIds.Contains(item.Segment.RefId.Value)
+                && item.Segment.Kind != null
+                && item.Segment.Kind.ToLower() == "face");
+
+        var parsedPerformerIds = ParseIdList(performerIds);
+        if (parsedPerformerIds.Count > 0)
+            query = query.Where(item =>
+                (item.DirectPerformerId.HasValue && parsedPerformerIds.Contains(item.DirectPerformerId.Value)) ||
+                (item.FacePerformerId.HasValue && parsedPerformerIds.Contains(item.FacePerformerId.Value)));
 
         if (tagged.HasValue)
             query = tagged.Value
@@ -101,18 +146,30 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         if (minConfidence.HasValue)
             query = query.Where(item => item.Segment.Confidence.HasValue && item.Segment.Confidence.Value >= minConfidence.Value);
 
+        if (confidence.HasValue)
+            query = ApplyConfidenceCriterion(query, confidence.Value, confidence2, confidenceModifier);
+
         if (minDurationSec.HasValue)
             query = query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) >= minDurationSec.Value);
+
+        if (durationSec.HasValue)
+            query = ApplyDurationCriterion(query, durationSec.Value, durationSec2, durationModifier);
 
         if (!string.IsNullOrWhiteSpace(q))
         {
             var term = q.Trim();
+            var normalizedTerm = term.ToLowerInvariant();
             query = query.Where(item =>
-                (item.Segment.Title != null && item.Segment.Title.Contains(term)) ||
-                (item.Segment.Kind != null && item.Segment.Kind.Contains(term)) ||
-                (item.TagName != null && item.TagName.Contains(term)) ||
-                (item.SceneTitle != null && item.SceneTitle.Contains(term)) ||
-                item.Segment.SourceKey.Contains(term));
+                (item.Segment.Title != null && item.Segment.Title.ToLower().Contains(normalizedTerm)) ||
+                (item.Segment.Kind != null && item.Segment.Kind.ToLower().Contains(normalizedTerm)) ||
+                (item.TagName != null && item.TagName.ToLower().Contains(normalizedTerm)) ||
+                (item.Segment.TagId.HasValue && db.Set<TagAlias>().Any(alias => alias.TagId == item.Segment.TagId.Value && alias.Alias.ToLower().Contains(normalizedTerm))) ||
+                (item.RefLabel != null && item.RefLabel.ToLower().Contains(normalizedTerm)) ||
+                (item.PerformerName != null && item.PerformerName.ToLower().Contains(normalizedTerm)) ||
+                (item.FacePerformerId.HasValue && db.Set<PerformerAlias>().Any(alias => alias.PerformerId == item.FacePerformerId.Value && alias.Alias.ToLower().Contains(normalizedTerm))) ||
+                (item.DirectPerformerId.HasValue && db.Set<PerformerAlias>().Any(alias => alias.PerformerId == item.DirectPerformerId.Value && alias.Alias.ToLower().Contains(normalizedTerm))) ||
+                (item.SceneTitle != null && item.SceneTitle.ToLower().Contains(normalizedTerm)) ||
+                item.Segment.SourceKey.ToLower().Contains(normalizedTerm));
         }
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -133,12 +190,24 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             join scene in db.Scenes.AsNoTracking() on segment.HostId equals scene.Id
             join tag in db.Tags.AsNoTracking() on segment.TagId equals tag.Id into tagJoin
             from tag in tagJoin.DefaultIfEmpty()
+            join face in db.Faces.AsNoTracking() on segment.RefId equals (long?)face.Id into faceJoin
+            from face in faceJoin.DefaultIfEmpty()
+            join facePerformer in db.Performers.AsNoTracking() on face!.PerformerId equals (int?)facePerformer.Id into facePerformerJoin
+            from facePerformer in facePerformerJoin.DefaultIfEmpty()
+            join directPerformer in db.Performers.AsNoTracking() on segment.RefId equals (long?)directPerformer.Id into directPerformerJoin
+            from directPerformer in directPerformerJoin.DefaultIfEmpty()
             where segment.HostType == SegmentHostType.Scene && segment.Id == id
             select new SegmentLibraryRow
             {
                 Segment = segment,
                 SceneTitle = scene.Title,
                 TagName = tag != null ? tag.Name : null,
+                RefLabel = face != null ? face.Label : segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : null,
+                FaceId = face != null ? face!.Id : null,
+                FacePerformerId = facePerformer != null ? facePerformer!.Id : null,
+                DirectPerformerId = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Id : null,
+                PerformerId = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Id : facePerformer != null ? facePerformer!.Id : null,
+                PerformerName = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : facePerformer != null ? facePerformer!.Name : null,
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -238,6 +307,9 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         item.TagName,
         item.Segment.Kind,
         item.Segment.RefId,
+        item.RefLabel,
+        item.PerformerId,
+        item.PerformerName,
         item.Segment.Payload != null ? item.Segment.Payload.RootElement.Clone() : (JsonElement?)null,
         item.Segment.SourceKey,
         item.Segment.SourceRunId,
@@ -255,6 +327,35 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         return sort.Trim().ToLowerInvariant();
     }
 
+    private static IQueryable<SegmentLibraryRow> ApplyConfidenceCriterion(IQueryable<SegmentLibraryRow> query, float value, float? value2, string? modifier)
+    {
+        return NormalizeCriterionModifier(modifier) switch
+        {
+            "NOT_EQUALS" => query.Where(item => !item.Segment.Confidence.HasValue || item.Segment.Confidence.Value != value),
+            "LESS_THAN" => query.Where(item => item.Segment.Confidence.HasValue && item.Segment.Confidence.Value < value),
+            "BETWEEN" when value2.HasValue => query.Where(item => item.Segment.Confidence.HasValue && item.Segment.Confidence.Value >= Math.Min(value, value2.Value) && item.Segment.Confidence.Value <= Math.Max(value, value2.Value)),
+            "NOT_BETWEEN" when value2.HasValue => query.Where(item => !item.Segment.Confidence.HasValue || item.Segment.Confidence.Value < Math.Min(value, value2.Value) || item.Segment.Confidence.Value > Math.Max(value, value2.Value)),
+            "EQUALS" => query.Where(item => item.Segment.Confidence.HasValue && item.Segment.Confidence.Value == value),
+            _ => query.Where(item => item.Segment.Confidence.HasValue && item.Segment.Confidence.Value > value),
+        };
+    }
+
+    private static IQueryable<SegmentLibraryRow> ApplyDurationCriterion(IQueryable<SegmentLibraryRow> query, double value, double? value2, string? modifier)
+    {
+        return NormalizeCriterionModifier(modifier) switch
+        {
+            "NOT_EQUALS" => query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) != value),
+            "LESS_THAN" => query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) < value),
+            "BETWEEN" when value2.HasValue => query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) >= Math.Min(value, value2.Value) && ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) <= Math.Max(value, value2.Value)),
+            "NOT_BETWEEN" when value2.HasValue => query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) < Math.Min(value, value2.Value) || ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) > Math.Max(value, value2.Value)),
+            "EQUALS" => query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) == value),
+            _ => query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) > value),
+        };
+    }
+
+    private static string NormalizeCriterionModifier(string? modifier)
+        => string.IsNullOrWhiteSpace(modifier) ? "GREATER_THAN" : modifier.Trim().ToUpperInvariant();
+
     private static List<int> ParseIdList(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -263,6 +364,20 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         return raw
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(value => int.TryParse(value, out var parsed) ? parsed : (int?)null)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .Distinct()
+            .ToList();
+    }
+
+    private static List<long> ParseLongIdList(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return [];
+
+        return raw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => long.TryParse(value, out var parsed) ? parsed : (long?)null)
             .Where(value => value.HasValue)
             .Select(value => value!.Value)
             .Distinct()
@@ -283,6 +398,8 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             "kind" => OrderBy(query, item => item.Segment.Kind ?? string.Empty, descending),
             "source_key" => OrderBy(query, item => item.Segment.SourceKey, descending),
             "tag_name" => OrderBy(query, item => item.TagName ?? string.Empty, descending),
+            "performer" => OrderBy(query, item => item.PerformerName ?? string.Empty, descending),
+            "ref" => OrderBy(query, item => item.RefLabel ?? item.PerformerName ?? string.Empty, descending),
             _ => OrderBy(query, item => item.Segment.UpdatedAt, descending),
         };
     }
@@ -302,6 +419,12 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         public required Segment Segment { get; init; }
         public string? SceneTitle { get; init; }
         public string? TagName { get; init; }
+        public string? RefLabel { get; init; }
+        public int? FaceId { get; init; }
+        public int? FacePerformerId { get; init; }
+        public int? DirectPerformerId { get; init; }
+        public int? PerformerId { get; init; }
+        public string? PerformerName { get; init; }
     }
 
     public sealed record SegmentTagBulkRemoveRequest(int TagId, IReadOnlyList<int>? Ids);
@@ -336,14 +459,6 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             var excludeSet = request.ExcludeSceneIds?.ToHashSet() ?? [];
             var sceneQuery = db.Scenes.AsNoTracking()
                 .Where(s => !excludeSet.Contains(s.Id));
-
-            if (!string.IsNullOrWhiteSpace(request.Q))
-            {
-                var term = request.Q.Trim();
-                sceneQuery = sceneQuery.Where(s =>
-                    (s.Title != null && s.Title.Contains(term)) ||
-                    (s.Code != null && s.Code.Contains(term)));
-            }
 
             if (!string.IsNullOrWhiteSpace(request.SceneTitle))
             {
@@ -413,10 +528,169 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             }
         }
 
+        if (allItems.Count > 0 && NeedsSegmentRows(request))
+        {
+            var segmentRows = await LoadSpanSegmentRowsAsync(allItems.SelectMany(item => item.Span.SegmentIds), ct);
+            allItems = allItems
+                .Where(item => MatchesSpanSearchRequest(item, request, segmentRows))
+                .ToList();
+        }
+
         var totalCount = allItems.Count;
         var offset = (page - 1) * perPage;
         var pageItems = allItems.Skip(offset).Take(perPage).ToList();
 
         return Ok(new SegmentSpanSearchResponseDto(pageItems, totalCount, page, perPage));
+    }
+
+    private static bool NeedsSegmentRows(SegmentSpanSearchRequestDto request)
+        => !string.IsNullOrWhiteSpace(request.Q)
+            || !string.IsNullOrWhiteSpace(request.Kind)
+            || !string.IsNullOrWhiteSpace(request.SourceKey)
+            || request.TagIds is { Length: > 0 }
+            || request.RefIds is { Length: > 0 }
+            || request.PerformerIds is { Length: > 0 }
+            || request.Confidence.HasValue
+            || request.DurationSec.HasValue;
+
+    private async Task<Dictionary<int, SegmentSearchRow>> LoadSpanSegmentRowsAsync(IEnumerable<int> segmentIds, CancellationToken ct)
+    {
+        var ids = segmentIds.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length == 0)
+            return [];
+
+        var rows = await (
+            from segment in db.Segments.AsNoTracking()
+            join tag in db.Tags.AsNoTracking() on segment.TagId equals tag.Id into tagJoin
+            from tag in tagJoin.DefaultIfEmpty()
+            join face in db.Faces.AsNoTracking() on segment.RefId equals (long?)face.Id into faceJoin
+            from face in faceJoin.DefaultIfEmpty()
+            join facePerformer in db.Performers.AsNoTracking() on face!.PerformerId equals (int?)facePerformer.Id into facePerformerJoin
+            from facePerformer in facePerformerJoin.DefaultIfEmpty()
+            join directPerformer in db.Performers.AsNoTracking() on segment.RefId equals (long?)directPerformer.Id into directPerformerJoin
+            from directPerformer in directPerformerJoin.DefaultIfEmpty()
+            where ids.Contains(segment.Id)
+            select new SegmentSearchRow
+            {
+                Id = segment.Id,
+                Title = segment.Title,
+                SourceKey = segment.SourceKey,
+                Kind = segment.Kind,
+                TagId = segment.TagId,
+                TagName = tag != null ? tag.Name : null,
+                RefId = segment.RefId,
+                RefLabel = face != null ? face.Label : segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : null,
+                FacePerformerId = facePerformer != null ? facePerformer!.Id : null,
+                DirectPerformerId = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Id : null,
+                PerformerName = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : facePerformer != null ? facePerformer!.Name : null,
+                Confidence = segment.Confidence,
+            })
+            .ToListAsync(ct);
+
+        return rows.ToDictionary(row => row.Id);
+    }
+
+    private static bool MatchesSpanSearchRequest(SegmentSpanSearchResultItemDto item, SegmentSpanSearchRequestDto request, IReadOnlyDictionary<int, SegmentSearchRow> segmentRows)
+    {
+        var rows = item.Span.SegmentIds
+            .Select(id => segmentRows.TryGetValue(id, out var row) ? row : null)
+            .Where(row => row is not null)
+            .Select(row => row!)
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(request.Kind))
+        {
+            var kind = request.Kind.Trim();
+            if (!EqualsIgnoreCase(item.Span.Kind, kind) && !rows.Any(row => EqualsIgnoreCase(row.Kind, kind)))
+                return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.SourceKey))
+        {
+            var sourceKey = request.SourceKey.Trim();
+            if (!EqualsIgnoreCase(item.Span.SourceKey, sourceKey) && !rows.Any(row => EqualsIgnoreCase(row.SourceKey, sourceKey)))
+                return false;
+        }
+
+        if (request.TagIds is { Length: > 0 })
+        {
+            var tagIds = request.TagIds.ToHashSet();
+            if (!(item.Span.TagId.HasValue && tagIds.Contains(item.Span.TagId.Value)) && !rows.Any(row => row.TagId.HasValue && tagIds.Contains(row.TagId.Value)))
+                return false;
+        }
+
+        if (request.RefIds is { Length: > 0 })
+        {
+            var refIds = request.RefIds.ToHashSet();
+            if (!rows.Any(row => row.RefId.HasValue && refIds.Contains(row.RefId.Value)))
+                return false;
+        }
+
+        if (request.PerformerIds is { Length: > 0 })
+        {
+            var performerIds = request.PerformerIds.ToHashSet();
+            if (!rows.Any(row => (row.DirectPerformerId.HasValue && performerIds.Contains(row.DirectPerformerId.Value)) || (row.FacePerformerId.HasValue && performerIds.Contains(row.FacePerformerId.Value))))
+                return false;
+        }
+
+        if (request.Confidence.HasValue && !rows.Any(row => row.Confidence.HasValue && MatchesNumberCriterion(row.Confidence.Value, request.Confidence.Value, request.Confidence2, request.ConfidenceModifier)))
+            return false;
+
+        if (request.DurationSec.HasValue && !MatchesNumberCriterion(item.Span.EndSec - item.Span.StartSec, request.DurationSec.Value, request.DurationSec2, request.DurationModifier))
+            return false;
+
+        if (!string.IsNullOrWhiteSpace(request.Q))
+        {
+            var term = request.Q.Trim();
+            if (!ContainsIgnoreCase(item.SceneTitle, term)
+                && !ContainsIgnoreCase(item.Span.SpanKey, term)
+                && !ContainsIgnoreCase(item.Span.SourceKey, term)
+                && !ContainsIgnoreCase(item.Span.Kind, term)
+                && !ContainsIgnoreCase(item.Span.TagName, term)
+                && !rows.Any(row => ContainsIgnoreCase(row.Title, term)
+                    || ContainsIgnoreCase(row.SourceKey, term)
+                    || ContainsIgnoreCase(row.Kind, term)
+                    || ContainsIgnoreCase(row.TagName, term)
+                    || ContainsIgnoreCase(row.RefLabel, term)
+                    || ContainsIgnoreCase(row.PerformerName, term)))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool MatchesNumberCriterion(double actual, double value, double? value2, string? modifier)
+    {
+        return NormalizeCriterionModifier(modifier) switch
+        {
+            "NOT_EQUALS" => actual != value,
+            "LESS_THAN" => actual < value,
+            "BETWEEN" when value2.HasValue => actual >= Math.Min(value, value2.Value) && actual <= Math.Max(value, value2.Value),
+            "NOT_BETWEEN" when value2.HasValue => actual < Math.Min(value, value2.Value) || actual > Math.Max(value, value2.Value),
+            "EQUALS" => actual == value,
+            _ => actual > value,
+        };
+    }
+
+    private static bool EqualsIgnoreCase(string? actual, string expected)
+        => string.Equals(actual?.Trim(), expected, StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsIgnoreCase(string? actual, string expected)
+        => !string.IsNullOrWhiteSpace(actual) && actual.Contains(expected, StringComparison.OrdinalIgnoreCase);
+
+    private sealed class SegmentSearchRow
+    {
+        public int Id { get; init; }
+        public string? Title { get; init; }
+        public string? SourceKey { get; init; }
+        public string? Kind { get; init; }
+        public int? TagId { get; init; }
+        public string? TagName { get; init; }
+        public long? RefId { get; init; }
+        public string? RefLabel { get; init; }
+        public int? FacePerformerId { get; init; }
+        public int? DirectPerformerId { get; init; }
+        public string? PerformerName { get; init; }
+        public float? Confidence { get; init; }
     }
 }

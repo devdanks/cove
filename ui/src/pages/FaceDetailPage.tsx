@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Fingerprint, Link2, Merge, Pencil, Save, Search, Trash2, UserPlus } from "lucide-react";
+import { Eye, Film, Fingerprint, Images, Link2, Merge, MoreVertical, Pencil, Save, Search, Sparkles, Trash2, UserPlus } from "lucide-react";
 import { faces, performers } from "../api/client";
-import type { Face, FaceAppearance, FaceDeleteImpact, FaceSimilar, FaceSuggestion, FindFilter, PaginatedResponse, Performer } from "../api/types";
+import type { Detection, Face, FaceAppearance, FaceDeleteImpact, FaceSimilar, FaceSuggestion, FindFilter, PaginatedResponse, Performer } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -16,7 +16,6 @@ import { EditModal } from "../components/EditModal";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { FaceAppearanceTile, FaceTile } from "../components/EntityCards";
-import { MetadataPanel } from "../components/MetadataPanel";
 import { formatDate } from "../components/shared";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
@@ -61,6 +60,54 @@ function canPromptForPerformerImage(face: Face, suggestion: FaceSuggestion) {
     && suggestion.localPerformerIsLocalOnly === true;
 }
 
+function isPlausibleFaceDetection(detection: Detection) {
+  if (detection.w <= 0 || detection.h <= 0 || detection.score < 0.5) {
+    return false;
+  }
+
+  const aspectRatio = detection.w / detection.h;
+  if (!Number.isFinite(aspectRatio) || aspectRatio < 0.45 || aspectRatio > 1.8) {
+    return false;
+  }
+
+  const frameWidth = (detection as any).frameWidth;
+  const frameHeight = (detection as any).frameHeight;
+  if (typeof frameWidth === "number" && typeof frameHeight === "number" && frameWidth > 0 && frameHeight > 0) {
+    const area = (detection.w * detection.h) / (frameWidth * frameHeight);
+    if (Number.isFinite(area) && area < 0.005) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function extractDetectionRole(detection: Detection): string | undefined {
+  const extra = (detection as { extra?: unknown }).extra;
+  if (extra && typeof extra === "object") {
+    const role = (extra as Record<string, unknown>).role;
+    return typeof role === "string" ? role : undefined;
+  }
+  return undefined;
+}
+
+function extractCoverQualityScore(detection: Detection): number {
+  const extra = (detection as { extra?: unknown }).extra;
+  if (extra && typeof extra === "object") {
+    const value = (extra as Record<string, unknown>).coverQualityScore;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return 0;
+}
+
 export function FaceDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { hasPermission, user } = useAuth();
@@ -73,6 +120,8 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   const [similarFilter, setSimilarFilter] = useState<FindFilter>({ page: 1, perPage: 18, sort: "distance", direction: "asc" });
   const [appearanceZoomLevel, setAppearanceZoomLevel] = useState(0);
   const [similarZoomLevel, setSimilarZoomLevel] = useState(0);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const { data: face, isLoading } = useQuery({
     queryKey: ["face", id],
@@ -119,13 +168,13 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     queryFn: () => faces.suggestions(id),
     enabled: canWriteFace && face != null && face.performerId == null,
   });
-  const { data: faceNavigationPage } = useQuery({
-    queryKey: ["faces", "navigation"],
-    queryFn: () => faces.list({ page: 1, perPage: 500, merged: false }),
+  const { data: faceDetections = [] } = useQuery({
+    queryKey: ["face", id, "detections"],
+    queryFn: () => faces.detections(id),
+    enabled: face != null,
   });
 
   const [label, setLabel] = useState("");
-  const [primarySourceKey, setPrimarySourceKey] = useState("");
   const [performerSearch, setPerformerSearch] = useState("");
   const [mergeSearch, setMergeSearch] = useState("");
   const [activeTab, setActiveTab] = useState<FaceTab>("overview");
@@ -153,7 +202,6 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     }
 
     setLabel(face.label ?? "");
-    setPrimarySourceKey(face.primarySourceKey ?? "");
   }, [face]);
 
   useEffect(() => {
@@ -179,6 +227,21 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
 
     setNewPerformerName((current) => current.trim() || face?.label?.trim() || "");
   }, [face?.label, isCreatePerformerModalOpen]);
+
+  useEffect(() => {
+    if (!showActionsMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!actionsMenuRef.current?.contains(event.target as Node)) {
+        setShowActionsMenu(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [showActionsMenu]);
 
   const performerSearchTerm = performerSearch.trim();
   const mergeSearchTerm = mergeSearch.trim();
@@ -211,11 +274,11 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   };
 
   const updateMutation = useMutation({
-    mutationFn: (data: { label?: string; primarySourceKey?: string }) =>
+    mutationFn: (data: { label?: string }) =>
       faces.update(id, {
         label: data.label,
         performerId: face?.performerId,
-        primarySourceKey: data.primarySourceKey,
+        primarySourceKey: face?.primarySourceKey,
         ignored: face?.ignored ?? false,
       }),
     onSuccess: (updated) => {
@@ -273,84 +336,49 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   });
 
   const normalizedLabel = label.trim() || undefined;
-  const normalizedPrimarySourceKey = primarySourceKey.trim() || undefined;
   const hasMetadataChanges = useMemo(() => {
     if (!face) {
       return false;
     }
 
-    return (face.label ?? "") !== (normalizedLabel ?? "") || (face.primarySourceKey ?? "") !== (normalizedPrimarySourceKey ?? "");
-  }, [face, normalizedLabel, normalizedPrimarySourceKey]);
+    return (face.label ?? "") !== (normalizedLabel ?? "");
+  }, [face, normalizedLabel]);
 
   const mergeCandidates = (mergeMatchesQuery.data?.items ?? []).filter((candidate) => candidate.id !== id);
   const performerMatches = performerMatchesQuery.data?.items ?? [];
-  const orderedNavigationFaces = useMemo(
-    () => [...(faceNavigationPage?.items ?? [])].sort((left, right) => left.id - right.id),
-    [faceNavigationPage?.items],
+  const sampleDetections = useMemo(
+    () => [...faceDetections]
+      .filter(isPlausibleFaceDetection)
+      .sort((left, right) => {
+        const roleLeft = extractDetectionRole(left) === "best" ? 1 : 0;
+        const roleRight = extractDetectionRole(right) === "best" ? 1 : 0;
+        if (roleLeft !== roleRight) return roleRight - roleLeft;
+        const qualityDelta = extractCoverQualityScore(right) - extractCoverQualityScore(left);
+        if (qualityDelta !== 0) return qualityDelta;
+        return (right.score ?? 0) - (left.score ?? 0);
+      })
+      .filter((detection, index, ordered) => ordered.findIndex((candidate) => candidate.hostType === detection.hostType && candidate.hostId === detection.hostId && candidate.observedAtSec === detection.observedAtSec) === index)
+      .slice(0, 3),
+    [faceDetections],
   );
-  const navigationIndex = orderedNavigationFaces.findIndex((candidate) => candidate.id === id);
-  const previousFace = navigationIndex > 0 ? orderedNavigationFaces[navigationIndex - 1] : undefined;
-  const nextFace = navigationIndex >= 0 ? orderedNavigationFaces[navigationIndex + 1] : undefined;
+  const carouselSampleImageUrls = useMemo(
+    () => (face?.coverImageUrl
+      ? sampleDetections.slice(1)
+      : sampleDetections)
+      .map((detection) => faces.detectionCropUrl(detection.id, 2048)),
+    [face?.coverImageUrl, sampleDetections],
+  );
+  const heroImageUrls = useMemo(
+    () => Array.from(new Set([face?.coverImageUrl, ...carouselSampleImageUrls].filter((url): url is string => typeof url === "string" && url.trim().length > 0))).slice(0, 3),
+    [carouselSampleImageUrls, face?.coverImageUrl],
+  );
+  const [heroImageIndex, setHeroImageIndex] = useState(0);
   const title = face?.label?.trim() || face?.performerName || `Face #${id}`;
   const tabs = useMemo(() => [
     { key: "overview", label: "Overview" },
     { key: "appearances", label: "Appears In", count: face?.appearanceCount || faceAppearancesPage.totalCount },
-    { key: "similar", label: "Similar Faces", count: similarFacesPage.totalCount },
+    { key: "similar", label: "Similar Faces", icon: <Sparkles className="h-4 w-4" />, count: similarFacesPage.totalCount },
   ], [face?.appearanceCount, faceAppearancesPage.totalCount, similarFacesPage.totalCount]);
-
-  const faceKeyboardShortcuts = useMemo(() => [
-    {
-      key: "e",
-      description: "Edit face metadata",
-      handler: () => {
-        if (!canWriteFace) {
-          return;
-        }
-
-        setIsEditModalOpen(true);
-      },
-    },
-    {
-      key: "m",
-      description: "Open merge face dialog",
-      handler: () => {
-        if (!canWriteFace) {
-          return;
-        }
-
-        setIsMergeModalOpen(true);
-      },
-    },
-    {
-      key: "o",
-      description: "Toggle favorite",
-      handler: () => {
-        if (!canEngageFace) {
-          return;
-        }
-
-        setFaceFavorite(!faceFavorite);
-      },
-    },
-    {
-      key: "[",
-      description: "Open previous face",
-      handler: () => {
-        if (previousFace) {
-          onNavigate({ page: "face", id: previousFace.id });
-        }
-      },
-    },
-    {
-      key: "]",
-      description: "Open next face",
-      handler: () => {
-        if (nextFace) {
-          onNavigate({ page: "face", id: nextFace.id });
-        }
-      },
-    },
-  ], [canEngageFace, canWriteFace, faceFavorite, nextFace, onNavigate, previousFace, setFaceFavorite]);
 
   useEffect(() => {
     if (!face) {
@@ -362,6 +390,10 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
       document.title = "Cove";
     };
   }, [face, title]);
+
+  useEffect(() => {
+    setHeroImageIndex((current) => Math.min(current, Math.max(0, heroImageUrls.length - 1)));
+  }, [heroImageUrls.length]);
 
   if (isLoading) {
     return (
@@ -383,150 +415,118 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
 
   const overviewContent = (
     <div className="space-y-6">
-      {face.mergedIntoFaceId != null ? (
+      <section className="space-y-6">
         <section className="rounded-2xl border border-border bg-card/70 p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Merged State</h2>
-          <p className="mt-2 text-sm text-secondary">This face has already been merged into another primary face cluster.</p>
-          <button
-            type="button"
-            onClick={() => onNavigate({ page: "face", id: face.mergedIntoFaceId })}
-            className="mt-3 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-          >
-            Open face #{face.mergedIntoFaceId}
-          </button>
-        </section>
-      ) : null}
-
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr),minmax(18rem,0.85fr)]">
-        <div className="space-y-6">
-          <section className="rounded-2xl border border-border bg-card/70 p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Linked Performer</h2>
-                <p className="mt-1 text-sm text-secondary">Keep the cluster linked to a performer and review the best candidate matches here.</p>
-              </div>
-              {face.performerId ? <StatusPill icon={<Link2 className="h-3 w-3" />} label="Linked" tone="accent" /> : null}
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Linked Performer</h2>
+              <p className="mt-1 text-sm text-secondary">Keep the cluster linked to a performer and review the best candidate matches here.</p>
             </div>
+            {face.performerId ? <StatusPill icon={<Link2 className="h-3 w-3" />} label="Linked" tone="accent" /> : null}
+          </div>
 
-            {face.performerId ? (
-              <div className="mt-4 space-y-3">
+          {face.performerId ? (
+            <div className="mt-4 space-y-3">
+              <button
+                type="button"
+                onClick={() => canReadPerformers && onNavigate({ page: "performer", id: face.performerId })}
+                className={`text-left text-base font-medium ${canReadPerformers ? "text-accent hover:underline" : "text-foreground"}`}
+              >
+                {face.performerName || `Performer #${face.performerId}`}
+              </button>
+              {canWriteFace ? (
                 <button
                   type="button"
-                  onClick={() => canReadPerformers && onNavigate({ page: "performer", id: face.performerId })}
-                  className={`text-left text-base font-medium ${canReadPerformers ? "text-accent hover:underline" : "text-foreground"}`}
+                  onClick={() => linkMutation.mutate(undefined)}
+                  disabled={linkMutation.isPending}
+                  className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {face.performerName || `Performer #${face.performerId}`}
+                  {linkMutation.isPending ? "Saving..." : "Unlink performer"}
                 </button>
-                {canWriteFace ? (
-                  <button
-                    type="button"
-                    onClick={() => linkMutation.mutate(undefined)}
-                    disabled={linkMutation.isPending}
-                    className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {linkMutation.isPending ? "Saving..." : "Unlink performer"}
-                  </button>
-                ) : null}
-              </div>
-            ) : (
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <p className="text-sm text-secondary">No performer is linked to this face cluster yet.</p>
-                {canWriteFace ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsCreatePerformerModalOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
-                  >
-                    <UserPlus className="h-4 w-4" />
-                    Create Performer
-                  </button>
-                ) : null}
-              </div>
-            )}
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <p className="text-sm text-secondary">No performer is linked to this face cluster yet.</p>
+              {canWriteFace ? (
+                <button
+                  type="button"
+                  onClick={() => setIsCreatePerformerModalOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Create Performer
+                </button>
+              ) : null}
+            </div>
+          )}
 
-            {canWriteFace ? (
-              <div className="mt-5 space-y-3 border-t border-border pt-4">
-                <label className="block text-xs font-semibold uppercase tracking-wide text-muted">Link to performer</label>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                  <input
-                    type="text"
-                    value={performerSearch}
-                    onChange={(event) => setPerformerSearch(event.target.value)}
-                    placeholder="Search performers"
-                    className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-accent"
-                  />
-                </div>
-                {performerSearchTerm.length < 2 ? (
-                  <p className="text-xs text-secondary">Type at least two characters to search performers.</p>
-                ) : performerMatchesQuery.isLoading ? (
-                  <p className="text-xs text-secondary">Searching performers...</p>
-                ) : performerMatches.length === 0 ? (
-                  <p className="text-xs text-secondary">No performers matched that search.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {performerMatches.map((performer) => (
-                      <PerformerCandidateRow
-                        key={performer.id}
-                        performer={performer}
-                        onSelect={() => linkMutation.mutate(performer.id)}
-                        disabled={linkMutation.isPending}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </section>
-
-          {!face.performerId && canWriteFace ? (
-            <section className="space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Suggested Matches</h2>
-                  <p className="mt-1 text-sm text-secondary">Review suggested performer links before accepting or rejecting them.</p>
-                </div>
-                <StatusPill icon={<Link2 className="h-3 w-3" />} label={`${faceSuggestions.length} candidates`} tone="muted" />
-              </div>
-              <div>
-                <FaceSuggestionsPanel
-                  face={face}
-                  suggestions={faceSuggestions}
-                  isLoading={suggestionsLoading}
-                  disabled={suggestionDecisionMutation.isPending}
-                  canReadPerformers={canReadPerformers}
-                  onAccept={(value) => {
-                    if (canPromptForPerformerImage(face, value)) {
-                      setComparingSuggestion(value);
-                      return;
-                    }
-
-                    suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "accept" });
-                  }}
-                  onReject={(value) => suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "reject" })}
-                  onCompare={(value) => setComparingSuggestion(value)}
-                  onNavigate={onNavigate}
+          {canWriteFace ? (
+            <div className="mt-5 space-y-3 border-t border-border pt-4">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-muted">Link to performer</label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                <input
+                  type="text"
+                  value={performerSearch}
+                  onChange={(event) => setPerformerSearch(event.target.value)}
+                  placeholder="Search performers"
+                  className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-accent"
                 />
               </div>
-            </section>
+              {performerSearchTerm.length < 2 ? (
+                <p className="text-xs text-secondary">Type at least two characters to search performers.</p>
+              ) : performerMatchesQuery.isLoading ? (
+                <p className="text-xs text-secondary">Searching performers...</p>
+              ) : performerMatches.length === 0 ? (
+                <p className="text-xs text-secondary">No performers matched that search.</p>
+              ) : (
+                <div className="space-y-2">
+                  {performerMatches.map((performer) => (
+                    <PerformerCandidateRow
+                      key={performer.id}
+                      performer={performer}
+                      onSelect={() => linkMutation.mutate(performer.id)}
+                      disabled={linkMutation.isPending}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           ) : null}
-        </div>
+        </section>
 
-        <div className="space-y-6">
-          <MetadataPanel
-            title="Cluster Details"
-            items={[
-              { label: "Face ID", value: `#${face.id}` },
-              { label: "Primary source", value: face.primarySourceKey || "Unknown" },
-              { label: "Created", value: formatDate(face.createdAt) },
-              { label: "Updated", value: formatDate(face.updatedAt) },
-              { label: "Appearances", value: face.appearanceCount || faceAppearancesPage.totalCount },
-              { label: "Scenes", value: face.sceneCount },
-              { label: "Images", value: face.imageCount },
-              { label: "Performer", value: face.performerName || "Unlinked" },
-            ]}
-          />
-        </div>
+        {!face.performerId && canWriteFace ? (
+          <section className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Suggested Matches</h2>
+                <p className="mt-1 text-sm text-secondary">Review suggested performer links before accepting or rejecting them.</p>
+              </div>
+              <StatusPill icon={<Link2 className="h-3 w-3" />} label={`${faceSuggestions.length} candidates`} tone="muted" />
+            </div>
+            <div>
+              <FaceSuggestionsPanel
+                face={face}
+                suggestions={faceSuggestions}
+                isLoading={suggestionsLoading}
+                disabled={suggestionDecisionMutation.isPending}
+                canReadPerformers={canReadPerformers}
+                onAccept={(value) => {
+                  if (canPromptForPerformerImage(face, value)) {
+                    setComparingSuggestion(value);
+                    return;
+                  }
+
+                  suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "accept" });
+                }}
+                onReject={(value) => suggestionDecisionMutation.mutate({ performerId: readSuggestionPerformerId(value), decision: "reject" })}
+                onCompare={(value) => setComparingSuggestion(value)}
+                onNavigate={onNavigate}
+              />
+            </div>
+          </section>
+        ) : null}
       </section>
     </div>
   );
@@ -613,66 +613,71 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
 
   const faceActions = (
     <>
-      {previousFace ? (
-        <button
-          type="button"
-          onClick={() => onNavigate({ page: "face", id: previousFace.id })}
-          className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Prev Face
-        </button>
-      ) : null}
-      {nextFace ? (
-        <button
-          type="button"
-          onClick={() => onNavigate({ page: "face", id: nextFace.id })}
-          className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
-        >
-          Next Face
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      ) : null}
       {canWriteFace ? (
-        <>
-          <button
-            type="button"
-            onClick={() => setIsEditModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
-          >
-            <Pencil className="h-4 w-4" />
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsMergeModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
-          >
-            <Merge className="h-4 w-4" />
-            Merge
-          </button>
-          {!face.performerId ? (
-            <button
-              type="button"
-              onClick={() => setIsCreatePerformerModalOpen(true)}
-              className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 text-xs font-medium text-secondary transition hover:border-accent hover:text-foreground"
-            >
-              <UserPlus className="h-4 w-4" />
-              Create Performer
-            </button>
-          ) : null}
-        </>
-      ) : null}
-      {canDeleteFace ? (
         <button
           type="button"
-          onClick={() => setIsDeleteDialogOpen(true)}
-          disabled={deleteMutation.isPending}
-          className="inline-flex items-center gap-2 rounded-full border border-red-500/40 px-3 py-2 text-xs font-medium text-red-200 transition hover:border-red-400 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => setIsEditModalOpen(true)}
+          className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
+          title="Edit face"
         >
-          <Trash2 className="h-4 w-4" />
-          {deleteMutation.isPending ? "Deleting..." : "Delete"}
+          <Pencil className="h-3.5 w-3.5" /> Edit
         </button>
+      ) : null}
+      {(canWriteFace || canDeleteFace) ? (
+        <div className="relative" ref={actionsMenuRef}>
+          <button
+            type="button"
+            onClick={() => setShowActionsMenu((current) => !current)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-secondary transition hover:border-accent hover:text-foreground"
+            title="More actions"
+          >
+            <MoreVertical className="h-4 w-4" />
+          </button>
+          {showActionsMenu ? (
+            <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded border border-border bg-card py-1 shadow-lg">
+              {canWriteFace ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMergeModalOpen(true);
+                    setShowActionsMenu(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                >
+                  <Merge className="h-3.5 w-3.5" />
+                  Merge
+                </button>
+              ) : null}
+              {canWriteFace && !face.performerId ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreatePerformerModalOpen(true);
+                    setShowActionsMenu(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Create performer
+                </button>
+              ) : null}
+              {canDeleteFace ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDeleteDialogOpen(true);
+                    setShowActionsMenu(false);
+                  }}
+                  disabled={deleteMutation.isPending}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deleteMutation.isPending ? "Deleting..." : "Delete face"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </>
   );
@@ -683,20 +688,22 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         backLabel={backLabel}
         onGoBack={goBack}
         imageUrl={face.coverImageUrl}
+        imageCarouselUrls={heroImageUrls}
+        imageCarouselIndex={heroImageIndex}
+        onImageCarouselIndexChange={setHeroImageIndex}
         imageAlt={title}
         imageFallback={<Fingerprint className="h-14 w-14" />}
         title={title}
         counts={[
-          { key: "appearances", label: "Appearances", value: face.appearanceCount || faceAppearancesPage.totalCount },
-          { key: "scenes", label: "Scenes", value: face.sceneCount },
-          { key: "images", label: "Images", value: face.imageCount },
+          { key: "appearances", label: "Appearances", value: face.appearanceCount || faceAppearancesPage.totalCount, icon: <Eye className="h-4 w-4" /> },
+          { key: "scenes", label: "Scenes", value: face.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "images", label: "Images", value: face.imageCount, icon: <Images className="h-4 w-4" /> },
         ]}
         metaRow={(
           <>
-            <span>Face cluster #{face.id}</span>
-            <span>Primary source {face.primarySourceKey || "Unknown"}</span>
             <span>Created {formatDate(face.createdAt)}</span>
             <span>Updated {formatDate(face.updatedAt)}</span>
+            <span>{face.performerName || "Unlinked"}</span>
           </>
         )}
         favorite={canEngageFace ? faceFavorite : undefined}
@@ -711,35 +718,25 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
       <EditModal open={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title={`Edit ${title}`}>
         <div className="space-y-4 py-5">
           <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
-            Label
+            Title
             <input
               ref={labelInputRef}
               type="text"
               value={label}
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="Optional face label"
-              className="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
-            />
-          </label>
-          <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
-            Primary source key
-            <input
-              type="text"
-              value={primarySourceKey}
-              onChange={(event) => setPrimarySourceKey(event.target.value)}
-              placeholder="detector.source"
+              placeholder="Optional face title"
               className="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
             />
           </label>
           <div className="flex justify-end">
             <button
               type="button"
-              onClick={() => updateMutation.mutate({ label: normalizedLabel, primarySourceKey: normalizedPrimarySourceKey })}
+              onClick={() => updateMutation.mutate({ label: normalizedLabel })}
               disabled={!hasMetadataChanges || updateMutation.isPending}
               className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
-              {updateMutation.isPending ? "Saving..." : "Save metadata"}
+              {updateMutation.isPending ? "Saving..." : "Save title"}
             </button>
           </div>
         </div>
@@ -835,6 +832,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         open={comparingSuggestion != null}
         face={face ?? null}
         suggestion={comparingSuggestion}
+        faceImageUrls={carouselSampleImageUrls}
         disabled={suggestionDecisionMutation.isPending}
         canReadPerformers={canReadPerformers}
         onClose={() => setComparingSuggestion(null)}
@@ -924,13 +922,7 @@ function FaceAppearancesGrid({ appearances, onNavigate, zoomLevel, infinitePageS
 
 function describeFaceDeleteImpact(deleteImpact: FaceDeleteImpact) {
   const coverImageSummary = deleteImpact.hasCoverImage ? "1 cover image" : "no cover image";
-  const summary = `Deletes ${formatCount(deleteImpact.detectionCount, "detection")}, ${formatCount(deleteImpact.embeddingCount, "embedding")}, ${formatCount(deleteImpact.segmentCount, "timeline segment")}, and ${coverImageSummary}.`;
-
-  if (deleteImpact.releasedMergedFaceCount === 0) {
-    return summary;
-  }
-
-  return `${summary} Reopens ${formatCount(deleteImpact.releasedMergedFaceCount, "merged face", "merged faces")} as standalone ${deleteImpact.releasedMergedFaceCount === 1 ? "cluster" : "clusters"}.`;
+  return `Deletes ${formatCount(deleteImpact.detectionCount, "detection")}, ${formatCount(deleteImpact.embeddingCount, "embedding")}, ${formatCount(deleteImpact.segmentCount, "timeline segment")}, and ${coverImageSummary}.`;
 }
 
 function formatCount(count: number, singular: string, plural = `${singular}s`) {
@@ -972,7 +964,7 @@ function FaceTabPager({ filter, setFilter, totalCount }: { filter: FindFilter; s
 function SimilarFaceTile({ face, onNavigate, canReadPerformers }: { face: FaceSimilar; onNavigate: (r: any) => void; canReadPerformers: boolean }) {
   return (
     <FaceTile face={face} onClick={() => onNavigate({ page: "face", id: face.id })}>
-      <div className="rounded-xl border border-border bg-surface/50 p-3">
+      <div className="space-y-1 text-xs text-secondary">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Closest match</div>
           <div className="mt-1 text-sm font-medium text-foreground">Distance {face.distance.toFixed(3)}</div>
           {face.performerId ? (

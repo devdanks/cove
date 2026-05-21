@@ -1,10 +1,11 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useExtensions } from "../extensions/ExtensionLoader";
 import { ExtensionErrorBoundary } from "./ExtensionErrorBoundary";
 
 interface Tab {
   key: string;
   label: string;
+  icon?: ReactNode;
   count?: number;
   order?: number;
 }

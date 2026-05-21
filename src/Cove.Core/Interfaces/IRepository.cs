@@ -446,6 +446,7 @@ public class GroupFilter
     public BoolCriterion? IsMissingCriterion { get; set; }
     public StringCriterion? DirectorCriterion { get; set; }
     public StringCriterion? SynopsisCriterion { get; set; }
+    public StringCriterion? KindCriterion { get; set; }
     public MultiIdCriterion? PerformersCriterion { get; set; }
     public IntCriterion? SceneCountCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }

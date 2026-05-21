@@ -379,8 +379,8 @@ public record TextDocumentUpdateDto(
     List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
 
 // ===== GROUP DTOs =====
-public record GroupDto(int Id, string Name, string? Aliases, int? Duration, string? Date,
-    int? StudioId, string? StudioName, string? Director, string? Synopsis,
+public record GroupDto(int Id, string Name, string? Aliases, string? Date,
+    int? StudioId, string? StudioName, string? Director, string? Description,
     List<string> Urls, List<TagDto> Tags, int SceneCount, int ItemCount, bool IsCompilation, int SubGroupCount, int ContainingGroupCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     string? FrontImagePath, string? BackImagePath,
@@ -389,10 +389,18 @@ public record GroupDto(int Id, string Name, string? Aliases, int? Duration, stri
     string? QueryJson = null,
     string? LastResolvedAt = null,
     int? CachedItemCount = null,
-    int CacheTtlSec = 30,
     bool ShowInSceneLists = false,
     List<string>? AllowedHostTypes = null,
-    int SortOrder = 0);
+    int SortOrder = 0,
+    int ImageCount = 0,
+    int AudioCount = 0,
+    int TextCount = 0,
+    int GalleryCount = 0,
+    int PerformerCount = 0,
+    int StudioCount = 0,
+    int TagItemCount = 0,
+    int FaceCount = 0,
+    int SegmentCount = 0);
 
 public record GroupSummaryDto(int Id, string Name, int SceneIndex);
 
@@ -463,11 +471,15 @@ public record GroupPlaybackManifestItemDto(
     int HostId,
     int? SceneId,
     int? AudioId,
+    int? ImageId,
+    int? TextId,
+    int? SegmentId,
     string? SceneTitle,
     string Src,
     double StartSec,
     double? EndSec,
     double? DurationSec,
+    double? DisplayDurationSec,
     string? PosterPath,
     string? Title,
     string? Format = null,
@@ -475,13 +487,27 @@ public record GroupPlaybackManifestItemDto(
 
 public record GroupPlaybackManifestDto(List<GroupPlaybackManifestItemDto> Items);
 
-public record GroupCreateDto(string Name, string? Aliases, int? Duration, string? Date,
-    int? Rating, int? StudioId, string? Director, string? Synopsis,
-    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields = null);
+public record GroupCreateDto(string Name, string? Aliases, string? Date,
+    int? Rating, int? StudioId, string? Director, string? Description,
+    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields = null,
+    GroupKind? Kind = null,
+    string? QuerySourceKey = null,
+    string? QueryJson = null,
+    bool? ShowInSceneLists = null,
+    List<string>? AllowedHostTypes = null,
+    int? SortOrder = null);
 
-public record GroupUpdateDto(string? Name, string? Aliases, int? Duration, string? Date,
-    int? Rating, int? StudioId, string? Director, string? Synopsis,
-    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields);
+public record GroupUpdateDto(string? Name, string? Aliases, string? Date,
+    int? Rating, int? StudioId, string? Director, string? Description,
+    List<string>? Urls, List<int>? TagIds, Dictionary<string, object>? CustomFields,
+    GroupKind? Kind = null,
+    string? QuerySourceKey = null,
+    string? QueryJson = null,
+    bool? ShowInSceneLists = null,
+    List<string>? AllowedHostTypes = null,
+    int? SortOrder = null);
+
+public record GroupQueryUpdateDto(string QuerySourceKey, string? QueryJson = null, int? CacheTtlSec = null);
 
 // ===== SHARED DTOs =====
 public record VideoFileDto(int Id, string Path, string Basename, string Format,
@@ -589,7 +615,18 @@ public record SegmentSpanSearchRequestDto(
     string? Q,
     string? SceneTitle,
     int[]? SceneIds,
-    int[]? ExcludeSceneIds);
+    int[]? ExcludeSceneIds,
+    int[]? TagIds = null,
+    string? Kind = null,
+    string? SourceKey = null,
+    long[]? RefIds = null,
+    int[]? PerformerIds = null,
+    float? Confidence = null,
+    float? Confidence2 = null,
+    string? ConfidenceModifier = null,
+    double? DurationSec = null,
+    double? DurationSec2 = null,
+    string? DurationModifier = null);
 
 public record SegmentSpanSearchResultItemDto(
     ResolvedSpan Span,
@@ -677,6 +714,9 @@ public record SegmentRecordDto(
     string? TagName,
     string? Kind,
     long? RefId,
+    string? RefLabel,
+    int? PerformerId,
+    string? PerformerName,
     JsonElement? Payload,
     string SourceKey,
     string? SourceRunId,
@@ -1854,7 +1894,7 @@ public record BulkGroupUpdateDto
     public int? StudioId { get; init; }
     public string? Date { get; init; }
     public string? Director { get; init; }
-    public string? Synopsis { get; init; }
+    public string? Description { get; init; }
     public List<int>? TagIds { get; init; }
     public BulkUpdateMode TagMode { get; init; } = BulkUpdateMode.Add;
 }

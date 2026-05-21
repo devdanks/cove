@@ -313,7 +313,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
             ) : filteredTags.length === 0 ? (
               <div className="px-3 py-1.5 text-sm text-secondary">No tags found</div>
             ) : (
-              <GroupedTagOptionList tags={filteredTags} maxItems={20} className="border-0 bg-transparent" onSelect={addTag} />
+              <GroupedTagOptionList tags={filteredTags} maxItems={20} className="border-0 bg-transparent" onSelect={addTag} preserveOrder />
             )}
           </div>
         )}

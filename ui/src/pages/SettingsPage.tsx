@@ -149,7 +149,7 @@ const tabDescriptions: Record<SettingsTab, string> = {
   "keyboard-shortcuts": "Shortcut overrides and the full keyboard reference.",
   "user-settings": "Preferences that follow the current user or shared profile.",
   "display-profiles": "Manage resolved-span display profiles and the rules attached to each profile.",
-  "ai-data": "Inspect and safely purge AI-produced embeddings, detections, segments, tag provenance, and face-owned data.",
+  "ai-data": "Inspect and safely purge AI-produced embeddings, detections, segments, tag sources, and face-owned data.",
   security: "Authentication requirements and anonymous share-link access.",
   users: "Manage local user accounts and their role assignments.",
   roles: "Define roles and the permissions they grant. Built-in roles are read-only.",

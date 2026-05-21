@@ -136,6 +136,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
     if (!open) return;
     setForm(cloneFormState(initialState));
   }, [initialState, open, resetSignal]);
+  const showRating = Boolean(image);
 
   const buildPayload = (): ImageCreate => {
     const urlList = form.urls.map((url) => url.trim()).filter(Boolean);
@@ -145,7 +146,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       details: form.details.trim() || undefined,
       photographer: form.photographer.trim() || undefined,
       date: form.date || undefined,
-      rating: form.rating,
+      ...(showRating ? { rating: form.rating } : {}),
       studioId: form.studioId,
       urls: urlList,
       tagIds: form.selectedTagIds,
@@ -239,7 +240,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
         <TextArea value={form.details} onChange={(value) => setForm({ ...form, details: value })} placeholder="Image description" />
       </Field>
 
-      {renderMode === "panel" ? (
+      {renderMode === "panel" || !showRating ? (
         <Field label="Studio">
           <StudioSelector value={form.studioId} onChange={(studioId) => setForm({ ...form, studioId })} />
         </Field>

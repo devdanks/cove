@@ -2405,8 +2405,21 @@ public class GroupRepository : IGroupRepository
                 query = query.Where(g => g.GroupTags.Any(gt => filter.TagIds.Contains(gt.TagId)));
 
             // Advanced criteria
-            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Gallery, filter.RatingCriterion);
+            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Group, filter.RatingCriterion);
             query = FilterHelpers.ApplyInt(query, filter.DurationCriterion, g => g.Duration ?? 0);
+
+            if (filter.KindCriterion != null)
+            {
+                var kind = ParseGroupKind(filter.KindCriterion.Value);
+                if (kind.HasValue)
+                {
+                    query = filter.KindCriterion.Modifier switch
+                    {
+                        CriterionModifier.NotEquals or CriterionModifier.Excludes => query.Where(g => g.Kind != kind.Value),
+                        _ => query.Where(g => g.Kind == kind.Value),
+                    };
+                }
+            }
 
             // Multi-ID criteria
             query = FilterHelpers.ApplyMultiId(query, filter.TagsCriterion, g => g.GroupTags.Select(gt => gt.TagId));
@@ -2517,6 +2530,17 @@ public class GroupRepository : IGroupRepository
         var orderMap = pagedIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
         items = items.OrderBy(group => orderMap.GetValueOrDefault(group.Id, int.MaxValue)).ToList();
         return (items, totalCount);
+    }
+
+    private static GroupKind? ParseGroupKind(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "static" => GroupKind.Static,
+            "dynamic" => GroupKind.Dynamic,
+            _ => Enum.TryParse<GroupKind>(value, ignoreCase: true, out var parsed) ? parsed : null,
+        };
     }
 }
 

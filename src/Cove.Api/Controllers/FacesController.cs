@@ -30,9 +30,15 @@ public class FacesController(
     public async Task<ActionResult<PaginatedResponse<FaceDto>>> List(
         [FromQuery] string? q,
         [FromQuery] int? performerId,
+        [FromQuery] string? performerIds,
         [FromQuery] bool? linked,
         [FromQuery] bool? ignored,
         [FromQuery] bool? merged,
+        [FromQuery] float? minSuggestionConfidence,
+        [FromQuery] float? suggestionConfidence,
+        [FromQuery] float? suggestionConfidence2,
+        [FromQuery] string? suggestionConfidenceModifier,
+        [FromQuery] string? topSuggestionPerformerIds,
         [FromQuery] string? sort,
         [FromQuery] int page = 1,
         [FromQuery] int perPage = 50,
@@ -55,6 +61,10 @@ public class FacesController(
         if (performerId.HasValue)
             query = query.Where(face => face.PerformerId == performerId.Value);
 
+        var parsedPerformerIds = ParseIntList(performerIds);
+        if (parsedPerformerIds.Count > 0)
+            query = query.Where(face => face.PerformerId.HasValue && parsedPerformerIds.Contains(face.PerformerId.Value));
+
         if (linked.HasValue)
             query = linked.Value
                 ? query.Where(face => face.PerformerId != null)
@@ -68,10 +78,62 @@ public class FacesController(
                 ? query.Where(face => face.MergedIntoFaceId != null)
                 : query.Where(face => face.MergedIntoFaceId == null);
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var sortedQuery = FullTextSearchHelpers.IsActive(db, q)
             ? FullTextSearchHelpers.OrderByRelevance(db, query, q)
             : ApplyFaceSort(query, sort);
+
+        var parsedTopSuggestionPerformerIds = ParseIntList(topSuggestionPerformerIds);
+        var hasTopSuggestionFilter = minSuggestionConfidence.HasValue || suggestionConfidence.HasValue || parsedTopSuggestionPerformerIds.Count > 0;
+        if (hasTopSuggestionFilter)
+        {
+            var normalizedMinSuggestionConfidence = minSuggestionConfidence.HasValue
+                ? NormalizeConfidenceThreshold(minSuggestionConfidence.Value)
+                : (float?)null;
+            var normalizedSuggestionConfidence = suggestionConfidence.HasValue
+                ? NormalizeConfidenceThreshold(suggestionConfidence.Value)
+                : (float?)null;
+            var normalizedSuggestionConfidence2 = suggestionConfidence2.HasValue
+                ? NormalizeConfidenceThreshold(suggestionConfidence2.Value)
+                : (float?)null;
+            var normalizedSuggestionConfidenceModifier = NormalizeCriterionModifier(suggestionConfidenceModifier)
+                ?? (minSuggestionConfidence.HasValue ? "GREATER_THAN" : null);
+            var candidates = await sortedQuery.ToListAsync(cancellationToken);
+            var candidateTopSuggestions = await BuildTopSuggestionsAsync(candidates, cancellationToken);
+            var filtered = candidates
+                .Where(face =>
+                    candidateTopSuggestions.TryGetValue(face.Id, out var suggestion)
+                    && (!normalizedMinSuggestionConfidence.HasValue || NormalizeConfidenceThreshold(suggestion.Confidence) >= normalizedMinSuggestionConfidence.Value)
+                    && MatchesConfidenceCriterion(NormalizeConfidenceThreshold(suggestion.Confidence), normalizedSuggestionConfidenceModifier, normalizedSuggestionConfidence, normalizedSuggestionConfidence2)
+                    && (parsedTopSuggestionPerformerIds.Count == 0 || parsedTopSuggestionPerformerIds.Contains(suggestion.LocalPerformerId ?? suggestion.PerformerId)))
+                .ToList();
+
+            if (IsSuggestionConfidenceSort(sort))
+            {
+                filtered = filtered
+                    .OrderByDescending(face => candidateTopSuggestions.TryGetValue(face.Id, out var suggestion) ? suggestion.Confidence : -1f)
+                    .ThenByDescending(face => face.UpdatedAt)
+                    .ThenBy(face => face.Id)
+                    .ToList();
+            }
+
+            var totalFilteredCount = filtered.Count;
+            var filteredPage = filtered
+                .Skip((page - 1) * perPage)
+                .Take(perPage)
+                .ToList();
+            var filteredComputedCounts = await LoadComputedCountsAsync(filteredPage.Select(face => face.Id).ToArray(), cancellationToken);
+
+            return Ok(new PaginatedResponse<FaceDto>(
+                filteredPage.Select(face => MapToDto(
+                    face,
+                    filteredComputedCounts.TryGetValue(face.Id, out var counts) ? counts : null,
+                    candidateTopSuggestions.GetValueOrDefault(face.Id))).ToList(),
+                totalFilteredCount,
+                page,
+                perPage));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await sortedQuery
             .Skip((page - 1) * perPage)
@@ -97,6 +159,44 @@ public class FacesController(
             totalCount,
             page,
             perPage));
+    }
+
+    private static List<int> ParseIntList(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(static part => int.TryParse(part, out var parsed) ? parsed : 0)
+                .Where(static id => id > 0)
+                .Distinct()
+                .ToList();
+
+    private static string? NormalizeCriterionModifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var normalized = value.Trim().ToUpperInvariant();
+        return normalized is "EQUALS" or "NOT_EQUALS" or "GREATER_THAN" or "LESS_THAN" or "BETWEEN" or "NOT_BETWEEN" or "IS_NULL" or "NOT_NULL"
+            ? normalized
+            : null;
+    }
+
+    private static bool MatchesConfidenceCriterion(float confidence, string? modifier, float? value, float? value2)
+    {
+        if (modifier is null && !value.HasValue)
+            return true;
+
+        return modifier switch
+        {
+            "IS_NULL" => false,
+            "NOT_NULL" => true,
+            "NOT_EQUALS" => value.HasValue && Math.Abs(confidence - value.Value) > 0.0001f,
+            "LESS_THAN" => value.HasValue && confidence < value.Value,
+            "BETWEEN" => value.HasValue && value2.HasValue && confidence >= Math.Min(value.Value, value2.Value) && confidence <= Math.Max(value.Value, value2.Value),
+            "NOT_BETWEEN" => value.HasValue && value2.HasValue && (confidence < Math.Min(value.Value, value2.Value) || confidence > Math.Max(value.Value, value2.Value)),
+            "EQUALS" => value.HasValue && Math.Abs(confidence - value.Value) <= 0.0001f,
+            _ => value.HasValue && confidence >= value.Value,
+        };
     }
 
     [HttpGet("{id:int}")]

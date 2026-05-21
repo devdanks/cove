@@ -1,6 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Tag } from "../api/types";
+import { rankByLabel } from "../utils/searchRanking";
 
 export type SelectableTag = Pick<Tag, "id" | "name" | "color" | "tagGroupId" | "tagGroupName" | "tagGroupColor">;
 
@@ -35,7 +36,7 @@ export function filterTagsForSelector<TTag extends SelectableTag>(tags: TTag[], 
   const excluded = excludedIds ? new Set(excludedIds) : undefined;
   const q = search.trim().toLowerCase();
 
-  return tags.filter((tag) => {
+  const matched = tags.filter((tag) => {
     if (excluded?.has(tag.id)) {
       return false;
     }
@@ -46,6 +47,8 @@ export function filterTagsForSelector<TTag extends SelectableTag>(tags: TTag[], 
 
     return tag.name.toLowerCase().includes(q) || (tag.tagGroupName?.toLowerCase().includes(q) ?? false);
   });
+
+  return q ? rankByLabel(matched, search, (tag) => tag.name) : matched;
 }
 
 export function SelectedTagChips({ tags, onRemove, emptyText, className }: { tags: SelectableTag[]; onRemove?: (tag: SelectableTag) => void; emptyText?: string; className?: string }) {
@@ -85,6 +88,7 @@ export function GroupedTagOptionList<TTag extends SelectableTag>({
   className,
   emptyText = "No tags found",
   renderTag,
+  preserveOrder = false,
 }: {
   tags: TTag[];
   onSelect?: (tag: TTag) => void;
@@ -93,11 +97,32 @@ export function GroupedTagOptionList<TTag extends SelectableTag>({
   className?: string;
   emptyText?: string;
   renderTag?: (tag: TTag) => ReactNode;
+  preserveOrder?: boolean;
 }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const selected = selectedIds ? new Set(selectedIds) : undefined;
   const visibleTags = tags.filter((tag) => !selected?.has(tag.id)).slice(0, maxItems);
   const groupedTags = groupTagsForSelector(visibleTags);
+
+  if (preserveOrder) {
+    return (
+      <div className={className ?? "max-h-40 overflow-y-auto rounded border border-border bg-surface shadow-xl"}>
+        {visibleTags.length === 0 ? <div className="px-2 py-2 text-center text-xs text-muted">{emptyText}</div> : null}
+        {visibleTags.map((tag) => renderTag ? (
+          <div key={tag.id}>{renderTag(tag)}</div>
+        ) : (
+          <button
+            key={tag.id}
+            type="button"
+            onClick={() => onSelect?.(tag)}
+            className="block w-full px-2 py-1.5 text-left text-xs text-foreground hover:bg-card"
+          >
+            {tag.name}
+          </button>
+        ))}
+      </div>
+    );
+  }
 
   const toggleGroup = (groupKey: string) => {
     setCollapsedGroups((current) => {

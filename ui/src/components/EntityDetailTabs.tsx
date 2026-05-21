@@ -1,6 +1,9 @@
+import type { ReactNode } from "react";
+
 export interface EntityDetailTab {
   key: string;
   label: string;
+  icon?: ReactNode;
   count?: number;
   disabled?: boolean;
 }
@@ -40,6 +43,7 @@ export function EntityDetailTabs({ tabs, activeTab, onTabChange, className = "" 
                   tab.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
                 ].join(" ")}
               >
+                {tab.icon ? <span className="shrink-0 text-current">{tab.icon}</span> : null}
                 <span>{tab.label}</span>
                 {typeof tab.count === "number" ? (
                   <span className="rounded-full bg-card px-2 py-0.5 text-xs text-muted">{tab.count}</span>

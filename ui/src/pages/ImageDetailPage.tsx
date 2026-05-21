@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { entityImages, faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
-import { Check, Download, Eye, FolderOpen, Image as ImageIcon, ImageOff, Layers, Link as LinkIcon, Maximize, MoreVertical, RefreshCw, Search, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, FolderOpen, Image as ImageIcon, ImageOff, Layers, Link as LinkIcon, Maximize, MoreVertical, RefreshCw, Search, Sparkles, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
@@ -123,7 +123,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     const nextTabs = [
       { key: "details", label: "Details" },
       ...(canReadFiles ? [{ key: "file-info", label: "File Info", count: image?.files.length ?? 0 }] : []),
-      { key: "similar", label: "Similar" },
+      { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
       ...(imageFaces.length > 0 ? [{ key: "detections", label: "Faces", count: imageFaces.length }] : []),
       ...(canWriteImage ? [{ key: "edit", label: "Edit" }] : []),
     ];

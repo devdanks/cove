@@ -3253,6 +3253,9 @@ namespace Cove.Data.Migrations
                     b.Property<int>("HostType")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ImageBlobId")
+                        .HasColumnType("text");
+
                     b.Property<string>("Kind")
                         .HasColumnType("text");
 

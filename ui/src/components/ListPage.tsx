@@ -71,6 +71,7 @@ interface ListPageProps {
   showPagingControls?: boolean;
   customFilterSections?: FilterDialogCustomSection[];
   showClearAllObjectFilters?: boolean;
+  showCustomFilterDivider?: boolean;
 }
 
 const PER_PAGE_OPTIONS = LIST_PER_PAGE_OPTIONS;
@@ -619,6 +620,7 @@ export function ListPage({
   showPagingControls = true,
   customFilterSections,
   showClearAllObjectFilters = true,
+  showCustomFilterDivider = true,
 }: ListPageProps) {
   const [searchText, setSearchText] = useState(filter.q ?? "");
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -1368,6 +1370,7 @@ export function ListPage({
           criteria={criteriaDefinitions}
           activeFilter={objectFilter ?? {}}
           customSections={mergedCustomFilterSections}
+          showCustomSectionDivider={showCustomFilterDivider}
           onApply={(f) => {
             if (pageKey) {
               trackInteraction({

@@ -529,7 +529,6 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         group.Id,
         group.Name,
         group.Aliases,
-        group.Duration,
         group.Date?.ToString("yyyy-MM-dd"),
         group.StudioId,
         group.Studio?.Name,
@@ -552,7 +551,6 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         group.QueryJson,
         group.LastResolvedAt?.ToString("o"),
         group.CachedItemCount,
-        group.CacheTtlSec,
         group.ShowInSceneLists,
         group.AllowedHostTypes);
 

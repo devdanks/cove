@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { segmentLibrary } from "../../api/client";
 import type { RawSegmentItem } from "./types";
+import type { RawSegmentFilterValue } from "./rawSegmentFilter";
 
 interface UseRawSegmentsQueryOptions {
   pageNumber: number;
@@ -12,6 +13,7 @@ interface UseRawSegmentsQueryOptions {
   includeSceneIds: number[];
   excludeSceneIds: number[];
   rawSegmentIds: number[];
+  rawFilter: RawSegmentFilterValue;
   enabled: boolean;
 }
 
@@ -25,6 +27,7 @@ export function useRawSegmentsQuery({
   includeSceneIds,
   excludeSceneIds,
   rawSegmentIds,
+  rawFilter,
   enabled,
 }: UseRawSegmentsQueryOptions) {
   return useQuery({
@@ -40,6 +43,7 @@ export function useRawSegmentsQuery({
       includeSceneIds.join(","),
       excludeSceneIds.join(","),
       rawSegmentIds.join(","),
+      rawFilter,
     ],
     queryFn: async (): Promise<{ items: RawSegmentItem[]; totalCount: number }> => {
       const response = await segmentLibrary.list({
@@ -48,6 +52,20 @@ export function useRawSegmentsQuery({
         sceneIds: includeSceneIds.length > 0 ? includeSceneIds.join(",") : undefined,
         excludeSceneIds: excludeSceneIds.length > 0 ? excludeSceneIds.join(",") : undefined,
         sceneTitle: sceneTitle || undefined,
+        tagIds: rawFilter.tagIds.length > 0 ? rawFilter.tagIds.join(",") : undefined,
+        kind: rawFilter.kind,
+        sourceKey: rawFilter.sourceKey,
+        sourceCategory: rawFilter.sourceCategory,
+        refIds: rawFilter.faceIds.length > 0 ? rawFilter.faceIds.join(",") : undefined,
+        performerIds: rawFilter.performerIds.length > 0 ? rawFilter.performerIds.join(",") : undefined,
+        minConfidence: rawFilter.minConfidence,
+        minDurationSec: rawFilter.minDurationSec,
+        confidence: rawFilter.confidenceCriterion?.value,
+        confidence2: rawFilter.confidenceCriterion?.value2,
+        confidenceModifier: rawFilter.confidenceCriterion?.modifier,
+        durationSec: rawFilter.durationCriterion?.value,
+        durationSec2: rawFilter.durationCriterion?.value2,
+        durationModifier: rawFilter.durationCriterion?.modifier,
         sort,
         direction,
         page: pageNumber,

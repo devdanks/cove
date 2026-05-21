@@ -14,6 +14,98 @@ namespace Cove.Api.Controllers;
 [Route("api")]
 public class EntityImageController(CoveContext db, IBlobService blobService, IThumbnailService thumbnailService, IStreamService streamService) : ControllerBase
 {
+    // ── Segments ────────────────────────────────────────────────
+
+    [HttpPost("segments/{id:int}/image")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    public async Task<IActionResult> UploadSegmentImage(int id, IFormFile file, CancellationToken ct)
+    {
+        if (!IsImage(file)) return BadRequest("File must be an image.");
+
+        var entity = await db.Segments.FirstOrDefaultAsync(segment => segment.Id == id, ct);
+        if (entity == null) return NotFound();
+
+        if (entity.ImageBlobId != null)
+            await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
+
+        await using var stream = file.OpenReadStream();
+        entity.ImageBlobId = await blobService.StoreBlobAsync(stream, file.ContentType, ct);
+        entity.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        return Ok(new { blobId = entity.ImageBlobId });
+    }
+
+    [HttpGet("segments/{id:int}/image")]
+    [RequiresPermission(Permissions.SegmentsRead)]
+    public async Task<IActionResult> GetSegmentImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
+    {
+        var entity = await db.Segments.FirstOrDefaultAsync(segment => segment.Id == id, ct);
+        if (entity == null) return NotFound();
+
+        if (entity.ImageBlobId == null)
+        {
+            if (entity.HostType != SegmentHostType.Scene)
+                return NotFound();
+
+            var screenshot = await streamService.GetSceneScreenshot(entity.HostId, entity.StartSec, ct);
+            if (screenshot == null) return NotFound();
+
+            Response.Headers.CacheControl = !string.IsNullOrWhiteSpace(v)
+                ? "public, max-age=31536000, immutable"
+                : screenshot.Value.useLongCache
+                    ? "public, max-age=86400"
+                    : "no-store, no-cache, max-age=0, must-revalidate";
+            return File(screenshot.Value.stream, screenshot.Value.contentType);
+        }
+
+        return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
+    }
+
+    [HttpDelete("segments/{id:int}/image")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    public async Task<IActionResult> DeleteSegmentImage(int id, CancellationToken ct)
+    {
+        var entity = await db.Segments.FirstOrDefaultAsync(segment => segment.Id == id, ct);
+        if (entity?.ImageBlobId == null) return NotFound();
+
+        await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
+        entity.ImageBlobId = null;
+        entity.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        return NoContent();
+    }
+
+    [HttpPost("segments/{id:int}/image/from-frame")]
+    [RequiresPermission(Permissions.SegmentsWrite)]
+    public async Task<IActionResult> SetSegmentImageFromFrame(int id, [FromBody] GenerateScreenshotDto? dto, CancellationToken ct)
+    {
+        var entity = await db.Segments.FirstOrDefaultAsync(segment => segment.Id == id, ct);
+        if (entity == null) return NotFound();
+        if (entity.HostType != SegmentHostType.Scene) return BadRequest("Frame covers are only available for scene-backed segments.");
+
+        var atSeconds = dto?.AtSeconds ?? entity.StartSec;
+        if (entity.EndSec.HasValue)
+            atSeconds = Math.Clamp(atSeconds, entity.StartSec, entity.EndSec.Value);
+        else
+            atSeconds = Math.Max(entity.StartSec, atSeconds);
+
+        await thumbnailService.GenerateSceneThumbnailAsync(entity.HostId, atSeconds, ct);
+        var screenshot = await streamService.GetSceneScreenshot(entity.HostId, atSeconds, ct);
+        if (screenshot == null) return NotFound();
+
+        if (!string.IsNullOrWhiteSpace(entity.ImageBlobId))
+            await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
+
+        await using var screenshotStream = screenshot.Value.stream;
+        entity.ImageBlobId = await blobService.StoreBlobAsync(screenshotStream, screenshot.Value.contentType, ct);
+        entity.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        return Ok(new { success = true });
+    }
+
     // ── Scenes ──────────────────────────────────────────────────
 
     [HttpPost("scenes/{id:int}/image")]

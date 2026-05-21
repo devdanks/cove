@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { scenes, images, performers, galleries, studios, groups, audios, texts, entityImages } from "../api/client";
-import type { AffinityHostType, Audio, EntityEngagement, Face, FaceAppearance, Gallery, Group, GroupSummary, Image, PerformerSummary, Scene, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
+import { scenes, images, performers, galleries, studios, groups, audios, texts, entityImages, faces as facesApi } from "../api/client";
+import type { AffinityHostType, Audio, EntityEngagement, Face, FaceAppearance, Gallery, Group, GroupItem, GroupSummary, Image, PerformerSummary, Scene, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
 import { BookOpenText, Building2, FileText, Fingerprint, FolderOpen, GripVertical, Headphones, Layers, Link2, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp, Mic2, MonitorPlay, PlayCircle, Merge } from "lucide-react";
@@ -12,6 +12,7 @@ import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { getAudioDisplayTitle, getTextDisplayTitle, pickPrimaryTextFile } from "../utils/audioTextDisplay";
 import { BookmarkButton } from "./BookmarkButton";
 import { useOptionalAppConfig } from "../state/AppConfigContext";
+import { SegmentPreviewMedia } from "./SegmentPreviewMedia";
 
 function CoverImage({ className = "", ...props }: ImgHTMLAttributes<HTMLImageElement>) {
   const appConfig = useOptionalAppConfig();
@@ -45,13 +46,14 @@ interface EntityTileFrameProps {
   mediaClassName?: string;
   bodyClassName?: string;
   extensionClassName?: string;
+  extensionBeforeFooter?: boolean;
   className?: string;
   dragHandleProps?: EntityTileDragHandleProps;
   isDragging?: boolean;
   isOver?: boolean;
 }
 
-function EntityTileFrame({
+export function EntityTileFrame({
   route,
   label,
   onClick,
@@ -65,6 +67,7 @@ function EntityTileFrame({
   mediaClassName = "aspect-video bg-gradient-to-br from-surface to-card",
   bodyClassName = "p-2.5",
   extensionClassName = "px-2 py-1.5",
+  extensionBeforeFooter = false,
   className = "",
   dragHandleProps,
   isDragging,
@@ -81,6 +84,7 @@ function EntityTileFrame({
         {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
       </div>
       <div className={`card-body flex flex-1 flex-col gap-1 border-t border-border/50 ${bodyClassName}`}>{body}</div>
+      {children && extensionBeforeFooter ? <div className={`relative z-10 ${extensionClassName}`}>{children}</div> : null}
       {footer ? (
         <>
           <hr className="border-border/50 my-0" />
@@ -89,7 +93,7 @@ function EntityTileFrame({
           </div>
         </>
       ) : null}
-      {children ? <div className={`relative z-10 ${extensionClassName}`}>{children}</div> : null}
+      {children && !extensionBeforeFooter ? <div className={`relative z-10 ${extensionClassName}`}>{children}</div> : null}
       {dragHandleProps ? (
         <span
           {...dragHandleProps}
@@ -1279,6 +1283,124 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
   );
 }
 
+type GroupPreviewKind = "scene" | "image" | "audio" | "text" | "segment";
+
+const GROUP_ITEMS_POPOVER_LIMIT = 10;
+
+const GROUP_PREVIEW_EMPTY_LABELS: Record<GroupPreviewKind, string> = {
+  scene: "No scenes",
+  image: "No images",
+  audio: "No audio",
+  text: "No texts",
+  segment: "No segments",
+};
+
+function groupItemMatchesPreviewKind(item: GroupItem, kind: GroupPreviewKind) {
+  if (kind === "scene") {
+    return item.kind === "scene" || item.kind === "sceneRange" || item.hostType === "scene";
+  }
+
+  return item.kind === kind || item.hostType === kind;
+}
+
+function getGroupItemPreviewId(item: GroupItem, kind: GroupPreviewKind) {
+  switch (kind) {
+    case "scene":
+      return item.sceneId ?? (item.hostType === "scene" ? item.hostId : undefined);
+    case "image":
+      return item.imageId ?? (item.hostType === "image" ? item.hostId : undefined);
+    case "audio":
+      return item.hostType === "audio" ? item.hostId : undefined;
+    case "text":
+      return item.hostType === "text" ? item.hostId : undefined;
+    case "segment":
+      return item.hostType === "segment" ? item.hostId : undefined;
+  }
+}
+
+function getGroupItemPreviewTitle(item: GroupItem, kind: GroupPreviewKind) {
+  const explicitTitle = item.title?.trim() || item.sceneTitle?.trim() || item.imageTitle?.trim() || item.childGroupName?.trim();
+  if (explicitTitle) return explicitTitle;
+
+  const id = getGroupItemPreviewId(item, kind);
+  const label = kind === "audio" ? "Audio" : kind[0].toUpperCase() + kind.slice(1);
+  return id ? `${label} ${id}` : `${label} ${item.orderIndex + 1}`;
+}
+
+function getGroupItemPreviewRoute(item: GroupItem, kind: GroupPreviewKind) {
+  const id = getGroupItemPreviewId(item, kind);
+  if (!id) return null;
+  return { page: kind, id };
+}
+
+function GroupItemPreviewMedia({ item, kind }: { item: GroupItem; kind: GroupPreviewKind }) {
+  const previewId = getGroupItemPreviewId(item, kind);
+  if (kind === "scene" && previewId) {
+    return <img src={scenes.screenshotUrl(previewId, item.updatedAt)} alt="" className="h-9 w-14 flex-shrink-0 rounded bg-surface object-cover" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />;
+  }
+
+  if (kind === "image" && previewId) {
+    return <CoverImage src={images.thumbnailUrl(previewId)} alt="" className="h-10 w-10 flex-shrink-0 rounded bg-surface" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />;
+  }
+
+  const iconClassName = "h-4 w-4 flex-shrink-0 text-muted";
+  if (kind === "audio") return <Headphones className={iconClassName} />;
+  if (kind === "text") return <FileText className={iconClassName} />;
+  if (kind === "segment") return <Merge className={iconClassName} />;
+  return <Film className={iconClassName} />;
+}
+
+function GroupItemPreviewRow({ item, kind, onNavigate }: { item: GroupItem; kind: GroupPreviewKind; onNavigate?: (route: any) => void }) {
+  const route = getGroupItemPreviewRoute(item, kind);
+  const title = getGroupItemPreviewTitle(item, kind);
+  const rangeLabel = typeof item.startSec === "number"
+    ? `${formatDuration(item.startSec)}${typeof item.endSec === "number" ? ` - ${formatDuration(item.endSec)}` : ""}`
+    : null;
+  const content = (
+    <>
+      <GroupItemPreviewMedia item={item} kind={kind} />
+      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{title}</span>
+      {rangeLabel ? <span className="shrink-0 text-[10px] text-muted">{rangeLabel}</span> : null}
+    </>
+  );
+
+  if (route) {
+    const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>(route, onNavigate);
+    return (
+      <a {...navigationHandlers} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-card-hover">
+        {content}
+      </a>
+    );
+  }
+
+  return <div className="flex items-center gap-2 rounded px-1.5 py-1">{content}</div>;
+}
+
+export function GroupItemsPopoverContent({ groupId, kind, totalCount, onNavigate }: { groupId: number; kind: GroupPreviewKind; totalCount?: number; onNavigate?: (route: any) => void }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["group-items-popover", groupId, kind],
+    queryFn: () => groups.items.page(groupId, { page: 1, perPage: 0, sort: "order", direction: "asc" }),
+    staleTime: 30_000,
+  });
+
+  if (isLoading) return <p className="px-1 text-[11px] text-muted">Loading...</p>;
+  if (isError) return <p className="px-1 text-[11px] text-muted">Could not load preview</p>;
+
+  const matchingItems = (data?.items ?? []).filter((item) => groupItemMatchesPreviewKind(item, kind));
+  if (matchingItems.length === 0) return <p className="px-1 text-[11px] text-muted">{GROUP_PREVIEW_EMPTY_LABELS[kind]}</p>;
+
+  const previewItems = matchingItems.slice(0, GROUP_ITEMS_POPOVER_LIMIT);
+  const resolvedTotal = Math.max(totalCount ?? 0, matchingItems.length);
+  const moreCount = Math.max(0, resolvedTotal - previewItems.length);
+
+  return (
+    <div className="space-y-1">
+      {previewItems.map((item) => <GroupItemPreviewRow key={`${item.kind}-${item.id}-${item.orderIndex}`} item={item} kind={kind} onNavigate={onNavigate} />)}
+      {moreCount > 0 ? <p className="px-1 pt-0.5 text-[10px] text-muted">+ {moreCount} more</p> : null}
+    </div>
+  );
+}
+
 // ===== GroupTile =====
 
 interface GroupTileProps {
@@ -1295,7 +1417,22 @@ interface GroupTileProps {
 }
 
 export function GroupTile({ group, engagement, onClick, onNavigate, selected, onSelect, selecting, bookmarkInitiallySaved, dragHandleProps, isDragging, isOver }: GroupTileProps & { engagement?: EntityEngagement }) {
-  const hasFooter = (group.tags?.length ?? 0) > 0 || group.sceneCount > 0;
+  const previewCountItems: Array<{ key: string; kind: GroupPreviewKind; title: string; count: number; icon: ReactNode }> = [
+    { key: "image", kind: "image" as const, title: "Images", count: group.imageCount ?? 0, icon: <ImagesIcon className="w-3.5 h-3.5" /> },
+    { key: "audio", kind: "audio" as const, title: "Audios", count: group.audioCount ?? 0, icon: <Headphones className="w-3.5 h-3.5" /> },
+    { key: "text", kind: "text" as const, title: "Texts", count: group.textCount ?? 0, icon: <FileText className="w-3.5 h-3.5" /> },
+    { key: "segments", kind: "segment" as const, title: "Segments", count: group.segmentCount ?? 0, icon: <Merge className="w-3.5 h-3.5" /> },
+  ].filter((item) => item.count > 0);
+  const countItems = [
+    { key: "gallery", title: "Galleries", count: group.galleryCount ?? 0, icon: <FolderOpen className="w-3.5 h-3.5" /> },
+    { key: "subgroups", title: "Subgroups", count: group.subGroupCount ?? 0, icon: <Layers className="w-3.5 h-3.5" /> },
+    { key: "performer", title: "Performers", count: group.performerCount ?? 0, icon: <User className="w-3.5 h-3.5" /> },
+    { key: "studio", title: "Studios", count: group.studioCount ?? 0, icon: <Building2 className="w-3.5 h-3.5" /> },
+    { key: "tagItems", title: "Tag Items", count: group.tagItemCount ?? 0, icon: <Tag className="w-3.5 h-3.5" /> },
+    { key: "faces", title: "Faces", count: group.faceCount ?? 0, icon: <Fingerprint className="w-3.5 h-3.5" /> },
+  ].filter((item) => item.count > 0);
+  const hasUncategorizedItems = group.kind === "dynamic" && (group.itemCount ?? 0) > 0 && group.sceneCount === 0 && previewCountItems.length === 0 && countItems.length === 0;
+  const hasFooter = (group.tags?.length ?? 0) > 0 || group.sceneCount > 0 || previewCountItems.length > 0 || countItems.length > 0 || hasUncategorizedItems;
 
   return (
     <EntityTileFrame
@@ -1341,10 +1478,23 @@ export function GroupTile({ group, engagement, onClick, onNavigate, selected, on
       footer={hasFooter ? (
         <>
             {group.sceneCount > 0 ? (
-              <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={group.sceneCount} title="Scenes" wide preferBelow>
-                <ScenesPopoverContent filter={{ groupId: group.id }} />
-              </PopoverButton>
+              group.kind === "dynamic" ? (
+                <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={group.sceneCount} title="Scenes" wide preferBelow>
+                  <GroupItemsPopoverContent groupId={group.id} kind="scene" totalCount={group.sceneCount} onNavigate={onNavigate} />
+                </PopoverButton>
+              ) : (
+                <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={group.sceneCount} title="Scenes" wide preferBelow>
+                  <ScenesPopoverContent filter={{ groupId: group.id }} />
+                </PopoverButton>
+              )
             ) : null}
+            {previewCountItems.map((item) => (
+              <PopoverButton key={item.key} icon={item.icon} count={item.count} title={item.title} wide preferBelow>
+                <GroupItemsPopoverContent groupId={group.id} kind={item.kind} totalCount={item.count} onNavigate={onNavigate} />
+              </PopoverButton>
+            ))}
+            {countItems.map((item) => <CountPill key={item.key} icon={item.icon} count={item.count} title={item.title} />)}
+            {hasUncategorizedItems ? <CountPill icon={<Layers className="w-3.5 h-3.5" />} count={group.itemCount ?? 0} title="Items" /> : null}
             {(group.tags?.length ?? 0) > 0 ? (
               <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={group.tags.length} title="Tags" preferBelow>
                 <EntityLinkList items={group.tags.map((tag) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" onNavigate={onNavigate} />
@@ -1353,6 +1503,15 @@ export function GroupTile({ group, engagement, onClick, onNavigate, selected, on
         </>
       ) : null}
     />
+  );
+}
+
+function CountPill({ icon, count, title }: { icon: ReactNode; count: number; title: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted" title={`${title}: ${count}`}>
+      {icon}
+      <span>{count}</span>
+    </span>
   );
 }
 
@@ -1528,30 +1687,89 @@ export function FaceTile({ face, onClick, selected, onSelect, selecting, childre
   const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
 
   return (
-    <article className={`entity-card group relative overflow-hidden rounded-2xl border bg-card/80 shadow-sm transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/50"}`}>
-      <RouteCardLinkOverlay route={{ page: "face", id: face.id }} onClick={onClick} label={`Open face ${title}`} disabled={selecting} selectionSafeZone />
-      <div onClick={selecting ? onSelect : onClick} className="relative block aspect-square max-h-[22rem] w-full bg-surface/70 text-left">
-        {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
-        {face.coverImageUrl ? <img src={face.coverImageUrl} alt={title} className="h-full w-full bg-surface/85 object-contain p-2" loading="lazy" /> : <div className="flex h-full items-center justify-center bg-surface text-muted"><Fingerprint className="h-12 w-12" /></div>}
-        <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-1 bg-gradient-to-t from-black/80 via-black/35 to-transparent p-3">
-          {face.mergedIntoFaceId ? <span className="inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[11px] text-white"><Merge className="h-3 w-3" />Merged</span> : null}
-          {face.performerId ? <span className="inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[11px] text-white"><Link2 className="h-3 w-3" />Linked</span> : null}
+    <EntityTileFrame
+      route={{ page: "face", id: face.id }}
+      label={`Open face ${title}`}
+      onClick={onClick}
+      selected={selected}
+      onSelect={onSelect}
+      selecting={selecting}
+      mediaClassName="aspect-square bg-surface/80"
+      bodyClassName="p-2.5"
+      extensionClassName="border-t border-border/50 p-2.5"
+      extensionBeforeFooter
+      media={(
+        <>
+          {face.coverImageUrl ? (
+            <img src={face.coverImageUrl} alt={title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" loading="lazy" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-surface text-muted"><Fingerprint className="h-12 w-12" /></div>
+          )}
+          <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-1 bg-gradient-to-t from-black/80 via-black/35 to-transparent p-2.5">
+            {face.performerId ? <span className="inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[11px] text-white"><Link2 className="h-3 w-3" />Linked</span> : null}
+          </div>
+        </>
+      )}
+      body={(
+        <>
+          <h3 className="card-title truncate text-sm font-semibold text-foreground group-hover:text-accent">{title}</h3>
+          <div className="truncate text-xs text-secondary">{face.performerName || `Updated ${new Date(face.updatedAt).toLocaleDateString()}`}</div>
+        </>
+      )}
+      footer={(
+        <>
+          <CountPill icon={<Eye className="w-3.5 h-3.5" />} count={face.detectionCount} title="Detections" />
+          {face.sceneCount > 0 ? (
+            <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={face.sceneCount} title="Scenes" wide preferBelow>
+              <FaceAppearancesPopoverContent faceId={face.id} hostType="scene" />
+            </PopoverButton>
+          ) : null}
+          {face.imageCount > 0 ? (
+            <PopoverButton icon={<ImagesIcon className="w-3.5 h-3.5" />} count={face.imageCount} title="Images" wide preferBelow>
+              <FaceAppearancesPopoverContent faceId={face.id} hostType="image" />
+            </PopoverButton>
+          ) : null}
+        </>
+      )}
+    >
+      {children}
+    </EntityTileFrame>
+  );
+}
+
+function FaceAppearancesPopoverContent({ faceId, hostType }: { faceId: number; hostType: "scene" | "image" }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["face-card-appearances-popover", faceId, hostType],
+    queryFn: () => facesApi.appearances(faceId, { sort: "last_seen", direction: "desc", perPage: 24 }),
+    staleTime: 60_000,
+  });
+
+  if (isLoading) {
+    return <p className="px-1 text-[11px] text-muted">Loading...</p>;
+  }
+
+  const items = (data?.items ?? []).filter((item) => item.hostType === hostType).slice(0, 8);
+  if (items.length === 0) {
+    return <p className="px-1 text-[11px] text-muted">No {hostType === "scene" ? "scenes" : "images"}</p>;
+  }
+
+  return hostType === "image" ? (
+    <div className="grid grid-cols-4 gap-1">
+      {items.map((item) => (
+        <div key={item.appearanceId} className="aspect-square overflow-hidden rounded bg-surface">
+          <CoverImage src={item.thumbnailUrl} alt="" className="h-full w-full" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />
         </div>
-      </div>
-      <div className="relative z-10 space-y-3 p-4">
-        <div>
-          <button type="button" onClick={onClick} className="relative z-10 text-left text-sm font-semibold text-foreground hover:text-accent">{title}</button>
-          <div className="mt-1 text-xs text-secondary">Updated {new Date(face.updatedAt).toLocaleDateString()}</div>
+      ))}
+    </div>
+  ) : (
+    <div className="space-y-1">
+      {items.map((item) => (
+        <div key={item.appearanceId} className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-card">
+          <img src={item.thumbnailUrl} alt="" className="h-7 w-12 flex-shrink-0 rounded bg-surface object-cover" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />
+          <span className="truncate text-[11px] text-foreground">{item.title || `Scene #${item.hostId}`}</span>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-center text-xs">
-          <MetricPill label="Detections" value={face.detectionCount} />
-          <MetricPill label="Scenes" value={face.sceneCount} />
-          <MetricPill label="Images" value={face.imageCount} />
-        </div>
-        {children ? <div className="relative z-20 rounded-xl border border-border bg-surface/50 p-3">{children}</div> : null}
-        <div className="flex items-center justify-between gap-2 text-xs text-secondary"><span>Source: {face.primarySourceKey || "unknown"}</span><span>{face.frameSampleCount ?? 0} samples</span></div>
-      </div>
-    </article>
+      ))}
+    </div>
   );
 }
 
@@ -1560,42 +1778,46 @@ export function FaceAppearanceTile({ appearance, onClick }: { appearance: FaceAp
   const Icon = appearance.hostType === "image" ? ImagesIcon : Film;
 
   return (
-    <article className="entity-card group relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-sm transition-colors hover:border-accent/50">
-      <RouteCardLinkOverlay route={{ page: appearance.hostType, id: appearance.hostId }} onClick={onClick} label={`Open ${hostLabel}`} />
-      <div className={`relative w-full overflow-hidden bg-surface/80 ${appearance.hostType === "image" ? "aspect-square" : "aspect-video"}`}>
-        <div className="absolute inset-0 flex items-center justify-center text-muted">
-          <Icon className="h-10 w-10" />
-        </div>
-        <img
-          src={appearance.thumbnailUrl}
-          alt={hostLabel}
-          className="relative h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-          loading="lazy"
-          onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
-        />
-      </div>
-      <div className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted">
-          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/70 px-2 py-0.5">
-            <Icon className="h-3 w-3" />
-            {appearance.hostType}
-          </span>
-          <span>{appearance.frameSampleCount} frames</span>
-          {appearance.topConfidence != null ? <span>{Math.round(appearance.topConfidence * 100)}% confidence</span> : null}
-        </div>
-        <button type="button" onClick={onClick} className="relative z-10 block text-left text-sm font-semibold text-foreground hover:text-accent">
-          {hostLabel}
-        </button>
-        <div className="grid grid-cols-3 gap-2 text-center text-xs">
-          <MetricPill label="Frames" value={appearance.frameSampleCount} />
-          <MetricPill label="Samples" value={appearance.retainedSpatialSampleCount} />
-          <MetricPill label="Segments" value={appearance.segmentCount} />
-        </div>
-        <div className="text-xs text-secondary">
-          {appearance.hostType === "scene" ? formatFaceAppearanceTimeRange(appearance) : "Image appearance"}
-        </div>
-      </div>
-    </article>
+    <EntityTileFrame
+      route={{ page: appearance.hostType, id: appearance.hostId }}
+      label={`Open ${hostLabel}`}
+      onClick={onClick}
+      mediaClassName={appearance.hostType === "image" ? "aspect-square bg-surface/80" : "aspect-video bg-surface/80"}
+      media={(
+        <>
+          <div className="absolute inset-0 flex items-center justify-center text-muted">
+            <Icon className="h-10 w-10" />
+          </div>
+          <img
+            src={appearance.thumbnailUrl}
+            alt={hostLabel}
+            className="relative h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+            loading="lazy"
+            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
+        </>
+      )}
+      body={(
+        <>
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
+            <span className="inline-flex items-center gap-1 rounded border border-border bg-surface/70 px-1.5 py-0.5">
+              <Icon className="h-3 w-3" />
+              {appearance.hostType}
+            </span>
+            {appearance.hostType === "scene" ? <span>{formatFaceAppearanceTimeRange(appearance)}</span> : <span>Image appearance</span>}
+          </div>
+          <h3 className="card-title truncate text-sm font-semibold text-foreground group-hover:text-accent">{hostLabel}</h3>
+          {appearance.topConfidence != null ? <div className="text-xs text-secondary">{Math.round(appearance.topConfidence * 100)}% confidence</div> : null}
+        </>
+      )}
+      footer={(
+        <>
+          <CountPill icon={<Film className="w-3.5 h-3.5" />} count={appearance.frameSampleCount} title="Frames" />
+          <CountPill icon={<Eye className="w-3.5 h-3.5" />} count={appearance.retainedSpatialSampleCount} title="Samples" />
+          <CountPill icon={<Layers className="w-3.5 h-3.5" />} count={appearance.segmentCount} title="Segments" />
+        </>
+      )}
+    />
   );
 }
 
@@ -1614,10 +1836,6 @@ function formatFaceAppearanceTime(totalSeconds: number) {
     : `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function MetricPill({ label, value }: { label: string; value: number }) {
-  return <div className="rounded-lg border border-border bg-surface/40 px-2 py-1"><div className="text-sm font-semibold text-foreground">{value}</div><div className="text-[10px] uppercase tracking-wide text-muted">{label}</div></div>;
-}
-
 interface SegmentTileItem {
   id: number | string;
   hostType: string;
@@ -1632,21 +1850,29 @@ interface SegmentTileItem {
   title?: string;
   updatedAt?: string;
   hostTitle?: string;
+  refLabel?: string;
+  performerName?: string;
 }
 
 export function SegmentTile({ segment, route, label, eyebrow, footer, onClick, selected, onSelect, selecting }: { segment: SegmentTileItem; route?: any; label?: string; eyebrow?: string; footer?: ReactNode; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
-  const title = segment.title || segment.kind || `Segment ${segment.id}`;
+  const sourceLabel = formatSegmentSourceLabel(segment.sourceKey);
+  const refLabel = segment.performerName || segment.refLabel;
+  const title = segment.title || segment.tagName || refLabel || segment.kind || sourceLabel;
   const cardRoute = route ?? { page: "segment", id: segment.id };
+  const rangeLabel = formatSegmentRangeLabel(segment.startSec, segment.endSec);
+  const confidenceLabel = segment.confidence == null ? null : `${Math.round(segment.confidence * 100)}%`;
 
   return (
-    <article onClick={selecting ? onClick : undefined} className={`entity-card group relative overflow-hidden rounded border bg-card transition-all ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
+    <article onClick={selecting ? onClick : undefined} className={`entity-card scene-card group relative overflow-hidden rounded border bg-card transition-all ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={cardRoute} onClick={onClick} label={label ?? `Open segment ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <div className="relative aspect-video w-full overflow-hidden bg-surface/70">
         {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
-        {segment.hostType === "scene" ? <img src={scenes.screenshotUrl(segment.hostId, segment.updatedAt, segment.startSec)} alt={title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" /> : <div className="flex h-full w-full items-center justify-center bg-surface text-muted"><Layers className="h-10 w-10" /></div>}
+        {segment.hostType === "scene" ? <SegmentHoverPreview hostId={segment.hostId} segmentId={typeof segment.id === "number" ? segment.id : undefined} updatedAt={segment.updatedAt} startSec={segment.startSec} endSec={segment.endSec} title={title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className="flex h-full w-full items-center justify-center bg-surface text-muted"><Layers className="h-10 w-10" /></div>}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-3 text-white">
-          <div className="text-xs font-medium uppercase tracking-wide text-white/75">{eyebrow ?? formatDuration(segment.startSec)}</div>
-          <div className="mt-1 line-clamp-2 text-sm font-semibold">{title}</div>
+          <div className="flex items-end justify-between gap-3">
+            <div className="line-clamp-2 min-w-0 text-sm font-semibold">{title}</div>
+            <div className="shrink-0 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white/85">{eyebrow ?? rangeLabel}</div>
+          </div>
         </div>
       </div>
       <div className="border-t border-border bg-card p-3">
@@ -1654,13 +1880,45 @@ export function SegmentTile({ segment, route, label, eyebrow, footer, onClick, s
         <div className="truncate text-xs text-secondary">{segment.hostTitle || `${segment.hostType} #${segment.hostId}`}</div>
       </div>
       <div className="relative z-10 flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2 text-[11px] text-secondary">
-        {segment.tagName ? <span className="rounded border border-border px-1.5 py-0.5">{segment.tagName}</span> : null}
-        {segment.kind ? <span className="rounded border border-border px-1.5 py-0.5">{segment.kind}</span> : null}
-        {segment.sourceKey ? <span className="rounded border border-border px-1.5 py-0.5">{segment.sourceKey}</span> : null}
-        {segment.confidence != null ? <span className="rounded border border-border px-1.5 py-0.5">{segment.confidence.toFixed(2)} conf</span> : null}
-        {segment.sourceRunId ? <span className="rounded border border-border px-1.5 py-0.5">{segment.sourceRunId}</span> : null}
+        {segment.tagName ? <SegmentInfoChip label="Tag" value={segment.tagName} /> : null}
+        {segment.kind ? <SegmentInfoChip label="Kind" value={segment.kind} /> : null}
+        {refLabel ? <SegmentInfoChip label="Ref" value={refLabel} /> : null}
+        {segment.sourceKey ? <SegmentInfoChip label="Provider" value={sourceLabel} /> : null}
+        {confidenceLabel ? <SegmentInfoChip label="Confidence" value={confidenceLabel} /> : null}
       </div>
       {footer ? <div className="relative z-10 border-t border-border px-3 py-2 text-xs text-secondary">{footer}</div> : null}
     </article>
   );
+}
+
+function SegmentInfoChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1 rounded border border-border bg-surface/60 px-1.5 py-0.5">
+      <span className="shrink-0 text-muted">{label}:</span>
+      <span className="truncate text-foreground">{value}</span>
+    </span>
+  );
+}
+
+function formatSegmentRangeLabel(startSec: number, endSec?: number) {
+  const start = formatDuration(startSec);
+  return endSec == null ? start : `${start} - ${formatDuration(endSec)}`;
+}
+
+function formatSegmentSourceLabel(sourceKey?: string) {
+  if (!sourceKey) {
+    return "Unknown source";
+  }
+
+  if (sourceKey === "user") {
+    return "User";
+  }
+
+  return sourceKey.startsWith("ext:")
+    ? sourceKey.slice(4).split(/[._-]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
+    : sourceKey;
+}
+
+function SegmentHoverPreview({ hostId, segmentId, updatedAt, startSec, endSec, title, className }: { hostId: number; segmentId?: number; updatedAt?: string; startSec: number; endSec?: number; title: string; className: string }) {
+  return <SegmentPreviewMedia hostId={hostId} segmentId={segmentId} updatedAt={updatedAt} startSec={startSec} endSec={endSec} title={title} className={className} />;
 }

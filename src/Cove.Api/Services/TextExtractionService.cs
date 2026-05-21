@@ -134,6 +134,7 @@ public sealed class TextExtractionService
         CancellationToken cancellationToken)
     {
         var content = await File.ReadAllTextAsync(path, cancellationToken);
+        content = NormalizeExtractedText(content);
         return new TextExtractionContent(
             format,
             renderMode,
@@ -150,6 +151,7 @@ public sealed class TextExtractionService
         CancellationToken cancellationToken)
     {
         var html = await File.ReadAllTextAsync(path, cancellationToken);
+        html = NormalizeExtractedText(html);
         var document = new HtmlDocument();
         document.LoadHtml(html);
 
@@ -186,15 +188,15 @@ public sealed class TextExtractionService
             builder.Append(ContentOrderTextExtractor.GetText(page));
         }
 
-        var content = builder.ToString().Trim();
+        var content = NormalizeExtractedText(builder.ToString().Trim());
         return new TextExtractionContent(
             "pdf",
             "text",
             content,
             document.NumberOfPages,
             CountWords(content),
-            document.Information?.Title ?? Path.GetFileNameWithoutExtension(path),
-            document.Information?.Author);
+            NormalizeExtractedText(document.Information?.Title ?? Path.GetFileNameWithoutExtension(path)),
+            NormalizeExtractedText(document.Information?.Author));
     }
 
     private static TextExtractionContent ExtractEpub(string path)
@@ -228,16 +230,21 @@ public sealed class TextExtractionService
             plainTextBuilder.Append(plainText);
         }
 
-        var plainTextContent = plainTextBuilder.ToString().Trim();
-        var content = string.Join("\n", htmlSections);
+        var plainTextContent = NormalizeExtractedText(plainTextBuilder.ToString().Trim());
+        var content = NormalizeExtractedText(string.Join("\n", htmlSections));
         return new TextExtractionContent(
             "epub",
             "html",
             content,
             null,
             CountWords(plainTextContent),
-            TryGetStringProperty(book, "Title") ?? Path.GetFileNameWithoutExtension(path),
+            NormalizeExtractedText(TryGetStringProperty(book, "Title") ?? Path.GetFileNameWithoutExtension(path)),
             TryGetJoinedStringCollection(book, "AuthorList"));
+    }
+
+    private static string NormalizeExtractedText(string? text)
+    {
+        return text?.Replace("\0", string.Empty) ?? string.Empty;
     }
 
     private static string StripHtml(string html)

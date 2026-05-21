@@ -6,6 +6,9 @@ import { CardSelectionToggle, RouteCardLinkOverlay } from "../../components/Rout
 import {
   buildRawSegmentTitle,
   formatDate,
+  formatSegmentCardEyebrow,
+  formatSourceLabel,
+  formatSegmentDuration,
   formatSegmentRange,
   Pill,
   SegmentScenePreview,
@@ -54,6 +57,7 @@ export function RawSegmentResults({
           <SegmentTile
             segment={item}
             label={`Open raw segment ${buildRawSegmentTitle(item)}`}
+            eyebrow={formatSegmentCardEyebrow(item.startSec, item.endSec)}
             onClick={() => (selecting ? onToggle(item.id) : onNavigate({ page: "segment", id: item.id }))}
             selected={selectedIds.has(item.id)}
             onSelect={() => onToggle(item.id)}
@@ -127,23 +131,22 @@ function RawSegmentListRow({
   const title = buildRawSegmentTitle(item);
 
   return (
-    <div onClick={selecting ? onToggle : undefined} className={`group relative cursor-pointer px-4 py-3 transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
+    <div onClick={selecting ? onToggle : undefined} className={`scene-card group relative cursor-pointer px-4 py-3 transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
       <RouteCardLinkOverlay route={{ page: "segment", id: item.id }} onClick={() => onNavigate({ page: "segment", id: item.id })} label={`Open raw segment ${title}`} disabled={selecting} selectionSafeZone />
       <div className="flex items-start gap-3 lg:grid lg:grid-cols-[minmax(0,1.3fr)_140px_minmax(0,1fr)_120px_120px] lg:items-center">
         <div className="relative min-w-0 pl-8">
           <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onToggle} />
           <div className="flex items-start gap-3">
             <div className="hidden h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-surface sm:block">
-              <SegmentScenePreview hostId={item.hostId} updatedAt={item.updatedAt} startSec={item.startSec} title={title} imgClassName="h-full w-full object-cover" />
+              <SegmentScenePreview hostId={item.hostId} segmentId={item.id} updatedAt={item.updatedAt} startSec={item.startSec} endSec={item.endSec} title={title} imgClassName="h-full w-full object-cover" />
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
-                <Pill>#{item.id}</Pill>
                 {item.tagName ? <Pill>{item.tagName}</Pill> : null}
                 {item.kind ? <Pill>{item.kind}</Pill> : null}
-                {item.confidence != null ? <Pill>{item.confidence.toFixed(2)} conf</Pill> : null}
-                {item.sourceRunId ? <Pill>{item.sourceRunId}</Pill> : null}
+                {item.performerName || item.refLabel ? <Pill>{item.performerName || item.refLabel}</Pill> : null}
+                {item.confidence != null ? <Pill>{Math.round(item.confidence * 100)}%</Pill> : null}
               </div>
             </div>
           </div>
@@ -168,12 +171,12 @@ function RawSegmentListRow({
             </div>
           ) : null}
         </div>
-        <div className="hidden text-xs text-secondary lg:block">{item.sourceKey}</div>
+        <div className="hidden text-xs text-secondary lg:block">{formatSourceLabel(item.sourceKey)}</div>
         <div className="hidden text-xs text-secondary lg:block">{formatDate(item.updatedAt)}</div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3 pl-8 text-[11px] text-secondary lg:hidden">
         <span>{formatSegmentRange(item.startSec, item.endSec)}</span>
-        <span>{item.sourceKey}</span>
+        <span>{formatSourceLabel(item.sourceKey)}</span>
         <span>{formatDate(item.updatedAt)}</span>
       </div>
     </div>

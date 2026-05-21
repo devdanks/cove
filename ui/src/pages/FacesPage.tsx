@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { FaceBatchOperationResult, FindFilter, FaceTopSuggestion } from "../api/types";
+import type { CriterionModifier, FaceBatchOperationResult, FindFilter, FaceTopSuggestion, IntCriterion, MultiIdCriterion } from "../api/types";
 import { aiFaces, faces } from "../api/client";
 import type { Face } from "../api/types";
-import { Fingerprint, Link2, Merge, Trash2 } from "lucide-react";
+import { Fingerprint, Link2, Trash2 } from "lucide-react";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import type { FilterDialogCustomSection } from "../components/FilterDialog";
+import type { CriterionDefinition, FilterDialogCustomSection } from "../components/FilterDialog";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
@@ -24,7 +24,6 @@ interface Props {
 }
 
 type TriState = "all" | "yes" | "no";
-type MergeFilter = "all" | "merged";
 type FaceSort = "suggestion_confidence" | "updated_desc" | "created_desc" | "appearance_desc" | "scene_count_desc" | "image_count_desc";
 
 const defaultFaceSort: FaceSort = "suggestion_confidence";
@@ -35,6 +34,12 @@ const FACE_SORT_OPTIONS = [
   { value: "appearance_desc", label: "Most appearances" },
   { value: "scene_count_desc", label: "Most scenes" },
   { value: "image_count_desc", label: "Most images" },
+];
+
+const FACE_CRITERIA: CriterionDefinition[] = [
+  { id: "performers", label: "Linked Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
+  { id: "topSuggestionPerformers", label: "Top Suggestion Performers", type: "multiId", entityType: "performers", filterKey: "topSuggestionPerformersCriterion" },
+  { id: "suggestionConfidence", label: "Suggestion Confidence", type: "number", filterKey: "suggestionConfidenceCriterion" },
 ];
 
 function readTriState(value: unknown): TriState {
@@ -52,26 +57,110 @@ function readFaceSort(value: unknown): FaceSort {
     : defaultFaceSort;
 }
 
-function readMergeFilter(value: unknown): MergeFilter {
-  return value === "merged" ? value : "all";
+function readMinSuggestionConfidence(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : undefined;
+}
+
+function readNumberCriterion(value: unknown): IntCriterion | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const candidate = value as Partial<IntCriterion>;
+  if (typeof candidate.value !== "number" || !Number.isFinite(candidate.value)) {
+    return undefined;
+  }
+
+  const modifier = isCriterionModifier(candidate.modifier) ? candidate.modifier : "EQUALS";
+  const criterion: IntCriterion = {
+    modifier,
+    value: Math.max(0, Math.min(100, candidate.value)),
+  };
+  if ((modifier === "BETWEEN" || modifier === "NOT_BETWEEN") && typeof candidate.value2 === "number" && Number.isFinite(candidate.value2)) {
+    criterion.value2 = Math.max(0, Math.min(100, candidate.value2));
+  }
+
+  return criterion;
+}
+
+function readMultiIdIncludes(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return [] as number[];
+  }
+
+  const criterion = value as Partial<MultiIdCriterion>;
+  return Array.isArray(criterion.value)
+    ? criterion.value.filter((item): item is number => typeof item === "number" && Number.isFinite(item) && item > 0)
+    : [];
+}
+
+function isCriterionModifier(value: unknown): value is CriterionModifier {
+  return value === "EQUALS"
+    || value === "NOT_EQUALS"
+    || value === "GREATER_THAN"
+    || value === "LESS_THAN"
+    || value === "INCLUDES"
+    || value === "EXCLUDES"
+    || value === "INCLUDES_ALL"
+    || value === "EXCLUDES_ALL"
+    || value === "IS_NULL"
+    || value === "NOT_NULL"
+    || value === "BETWEEN"
+    || value === "NOT_BETWEEN"
+    || value === "MATCHES_REGEX"
+    || value === "NOT_MATCHES_REGEX";
+}
+
+function hasMultiIdIncludes(value: unknown) {
+  return readMultiIdIncludes(value).length > 0;
+}
+
+function readSuggestionConfidenceLowerBound(value: unknown) {
+  const legacy = readMinSuggestionConfidence(value);
+  if (legacy != null) {
+    return legacy;
+  }
+
+  const criterion = readNumberCriterion(value);
+  if (!criterion) {
+    return undefined;
+  }
+
+  if (criterion.modifier === "GREATER_THAN" || criterion.modifier === "EQUALS") {
+    return criterion.value;
+  }
+
+  if (criterion.modifier === "BETWEEN" || criterion.modifier === "NOT_BETWEEN") {
+    return Math.min(criterion.value, criterion.value2 ?? criterion.value);
+  }
+
+  return undefined;
 }
 
 function sanitizeFaceFilters(filter: Record<string, unknown>) {
   const next: Record<string, unknown> = {};
   const linked = readTriState(filter.linked);
-  const ignored = readTriState(filter.ignored);
-  const merged = readMergeFilter(filter.merged);
+  const minSuggestionConfidence = readMinSuggestionConfidence(filter.minSuggestionConfidence);
+  const suggestionConfidenceCriterion = readNumberCriterion(filter.suggestionConfidenceCriterion);
 
   if (linked !== "all") {
     next.linked = linked;
   }
 
-  if (ignored !== "all") {
-    next.ignored = ignored;
+  if (minSuggestionConfidence != null) {
+    next.minSuggestionConfidence = minSuggestionConfidence;
   }
 
-  if (merged !== "all") {
-    next.merged = merged;
+  if (suggestionConfidenceCriterion) {
+    next.suggestionConfidenceCriterion = suggestionConfidenceCriterion;
+  }
+
+  if (hasMultiIdIncludes(filter.performersCriterion)) {
+    next.performersCriterion = filter.performersCriterion;
+  }
+
+  if (hasMultiIdIncludes(filter.topSuggestionPerformersCriterion)) {
+    next.topSuggestionPerformersCriterion = filter.topSuggestionPerformersCriterion;
   }
 
   return next;
@@ -80,11 +169,6 @@ function sanitizeFaceFilters(filter: Record<string, unknown>) {
 function formatTriState(value: unknown, yesLabel: string, noLabel: string) {
   const resolved = readTriState(value);
   return resolved === "yes" ? yesLabel : resolved === "no" ? noLabel : "All";
-}
-
-function formatMergeFilter(value: unknown) {
-  const resolved = readMergeFilter(value);
-  return resolved === "merged" ? "Merged only" : "Primary and merged";
 }
 
 function renderSelectFilter(
@@ -129,8 +213,10 @@ export function FacesPage({ onNavigate }: Props) {
     allowInfinitePageSize: true,
   });
   const linked = readTriState(objectFilter.linked);
-  const ignored = readTriState(objectFilter.ignored);
-  const merged = readMergeFilter(objectFilter.merged);
+  const minSuggestionConfidence = readMinSuggestionConfidence(objectFilter.minSuggestionConfidence);
+  const suggestionConfidenceCriterion = readNumberCriterion(objectFilter.suggestionConfidenceCriterion);
+  const linkedPerformerIds = useMemo(() => readMultiIdIncludes(objectFilter.performersCriterion), [objectFilter.performersCriterion]);
+  const topSuggestionPerformerIds = useMemo(() => readMultiIdIncludes(objectFilter.topSuggestionPerformersCriterion), [objectFilter.topSuggestionPerformersCriterion]);
   const sort = readFaceSort(filter.sort);
   const faceFilterSections = useMemo<FilterDialogCustomSection[]>(() => [
     {
@@ -146,34 +232,8 @@ export function FacesPage({ onNavigate }: Props) {
         { value: "yes", label: "Linked" },
       ], "Linked state"),
     },
-    {
-      id: "ignored",
-      label: "Ignored state",
-      filterKey: "ignored",
-      defaultValue: "all",
-      isActive: (value) => readTriState(value) !== "all",
-      summarize: (value) => formatTriState(value, "Ignored", "Not ignored"),
-      renderEditor: (value, onChange) => renderSelectFilter(value, onChange, [
-        { value: "all", label: "Ignored and visible" },
-        { value: "no", label: "Not ignored" },
-        { value: "yes", label: "Ignored" },
-      ], "Ignored state"),
-    },
-    {
-      id: "merged",
-      label: "Merge state",
-      filterKey: "merged",
-      defaultValue: "all",
-      isActive: (value) => readMergeFilter(value) !== "all",
-      summarize: formatMergeFilter,
-      renderEditor: (value, onChange) => renderSelectFilter(value, onChange, [
-        { value: "all", label: "Primary and merged" },
-        { value: "merged", label: "Merged only" },
-      ], "Merge state"),
-    },
   ], []);
   const [comparison, setComparison] = useState<{ face: Face; suggestion: FaceTopSuggestion } | null>(null);
-  const [batchMinConfidence, setBatchMinConfidence] = useState(60);
   const [batchResult, setBatchResult] = useState<FaceBatchOperationResult | null>(null);
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
@@ -181,12 +241,19 @@ export function FacesPage({ onNavigate }: Props) {
   const query = useMemo(() => ({
     q: filter.q?.trim() || undefined,
     linked: linked === "all" ? undefined : linked === "yes",
-    ignored: ignored === "all" ? undefined : ignored === "yes",
-    merged: merged === "all" ? undefined : merged === "merged",
+    ignored: false,
+    merged: false,
+    minSuggestionConfidence,
+    suggestionConfidence: suggestionConfidenceCriterion?.value,
+    suggestionConfidence2: suggestionConfidenceCriterion?.value2,
+    suggestionConfidenceModifier: suggestionConfidenceCriterion?.modifier,
+    performerIds: linkedPerformerIds.length > 0 ? linkedPerformerIds.join(",") : undefined,
+    topSuggestionPerformerIds: topSuggestionPerformerIds.length > 0 ? topSuggestionPerformerIds.join(",") : undefined,
     sort,
     page: filter.page ?? 1,
     perPage: filter.perPage ?? 36,
-  }), [filter.page, filter.perPage, filter.q, ignored, linked, merged, sort]);
+  }), [filter.page, filter.perPage, filter.q, linked, linkedPerformerIds, minSuggestionConfidence, sort, suggestionConfidenceCriterion?.modifier, suggestionConfidenceCriterion?.value, suggestionConfidenceCriterion?.value2, topSuggestionPerformerIds]);
+  const batchMinConfidence = readSuggestionConfidenceLowerBound(objectFilter.suggestionConfidenceCriterion) ?? minSuggestionConfidence ?? 60;
 
   const listData = useInfiniteListData<Face>({
     queryKey: ["faces", query],
@@ -320,10 +387,11 @@ export function FacesPage({ onNavigate }: Props) {
         onSelectAllMatching={listData.infinitePageSize ? selectAll : undefined}
         selectAllMatchingLabel="Select shown"
         infiniteScroll={listData.infiniteScroll}
-        criteriaDefinitions={[]}
+        criteriaDefinitions={FACE_CRITERIA}
         objectFilter={objectFilter}
         onObjectFilterChange={handleObjectFilterChange}
         customFilterSections={faceFilterSections}
+        showCustomFilterDivider={false}
         selectedIds={selectedIds}
         onSelectAll={listData.infinitePageSize ? handleSelectAllMatching : selectAll}
         onSelectNone={selectNone}
@@ -331,24 +399,11 @@ export function FacesPage({ onNavigate }: Props) {
         selectionActions={(
           <div className="flex flex-wrap items-center gap-2">
             {canWriteFaces ? (
-              <label className="flex items-center gap-1.5 text-xs text-secondary">
-                Min
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={batchMinConfidence}
-                  onChange={(event) => setBatchMinConfidence(Math.max(0, Math.min(100, Number(event.target.value) || 0)))}
-                  className="h-7 w-16 rounded border border-border bg-input px-2 text-xs text-foreground outline-none focus:border-accent"
-                />
-              </label>
-            ) : null}
-            {canWriteFaces ? (
               <button
                 type="button"
                 onClick={() => batchLinkTopSuggestionMutation.mutate()}
                 disabled={selectedFaceIds.length === 0 || batchLinkTopSuggestionMutation.isPending || batchDeleteMutation.isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1 text-xs text-foreground transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-accent hover:bg-accent/10 hover:text-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Link2 className="h-3.5 w-3.5" />
                 {batchLinkTopSuggestionMutation.isPending ? "Linking..." : "Link suggested"}
@@ -359,7 +414,7 @@ export function FacesPage({ onNavigate }: Props) {
                 type="button"
                 onClick={() => setConfirmBatchDelete(true)}
                 disabled={selectedFaceIds.length === 0 || batchLinkTopSuggestionMutation.isPending || batchDeleteMutation.isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 px-3 py-1 text-xs text-red-200 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-red-400 hover:bg-red-900/20 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 {batchDeleteMutation.isPending ? "Deleting..." : "Delete"}
@@ -573,7 +628,6 @@ function FaceListRow({
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
-                {face.mergedIntoFaceId ? <Badge icon={<Merge className="h-3 w-3" />} label={`Merged into #${face.mergedIntoFaceId}`} /> : null}
                 {face.performerId ? <Badge icon={<Link2 className="h-3 w-3" />} label={face.performerName || `Performer #${face.performerId}`} /> : null}
               </div>
             </div>

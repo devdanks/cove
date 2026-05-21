@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Tag, TagProvenance } from "../api/types";
 
@@ -12,7 +12,6 @@ export function TagBadge({ name, tag, color, groupColor, onClick, provenance }: 
   const [popupPosition, setPopupPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   const visibleProvenance = provenance?.filter((entry) => !isUserTagSource(entry.sourceKey)) ?? [];
   const badgeLabel = getTagProvenanceBadgeLabel(visibleProvenance);
-  const tooltip = provenance?.length ? buildTagProvenanceTooltip(provenance) : undefined;
   const interactive = Boolean(onClick);
   const resolvedGroupColor = normalizeTagColor(groupColor ?? tag?.tagGroupColor);
   const resolvedColor = normalizeTagColor(color ?? tag?.color ?? groupColor ?? tag?.tagGroupColor);
@@ -79,7 +78,6 @@ export function TagBadge({ name, tag, color, groupColor, onClick, provenance }: 
         <button
           type="button"
           onClick={onClick}
-          title={tooltip}
           style={colorStyle}
           className="inline-flex items-center gap-1.5 rounded border border-border bg-card px-2 py-0.5 text-xs font-medium text-secondary transition hover:bg-card-hover hover:text-foreground"
         >
@@ -87,20 +85,19 @@ export function TagBadge({ name, tag, color, groupColor, onClick, provenance }: 
         </button>
       ) : (
         <span
-          title={tooltip}
           style={colorStyle}
           className="inline-flex items-center gap-1.5 rounded border border-border bg-card px-2 py-0.5 text-xs font-medium text-secondary"
         >
           {badgeContent}
         </span>
       )}
-      {provenance?.length ? <span className="sr-only"><TagProvenancePopupContent provenance={provenance} /></span> : null}
+      {provenance?.length ? <span className="sr-only"><TagProvenancePopupContent provenance={provenance} title="Tag Sources" /></span> : null}
       {showProvenance && provenance?.length && typeof document !== "undefined" ? createPortal(
         <span
           className="pointer-events-none fixed z-50 max-h-[min(70vh,24rem)] w-72 overflow-y-auto rounded-xl border border-border bg-surface/95 p-3 text-left shadow-2xl backdrop-blur"
           style={{ left: popupPosition.left, top: popupPosition.top }}
         >
-          <TagProvenancePopupContent provenance={provenance} />
+          <TagProvenancePopupContent provenance={provenance} title="Tag Sources" />
         </span>,
         document.body,
       ) : null}
@@ -108,10 +105,97 @@ export function TagBadge({ name, tag, color, groupColor, onClick, provenance }: 
   );
 }
 
-function TagProvenancePopupContent({ provenance }: { provenance: TagProvenance[] }) {
+export function ProvenanceBadge({ name, provenance, onClick, sourceLabel = "Source", children }: { name: string; provenance?: TagProvenance[]; onClick?: () => void; sourceLabel?: string; children?: ReactNode }) {
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  const [showProvenance, setShowProvenance] = useState(false);
+  const [popupPosition, setPopupPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const visibleProvenance = provenance?.filter((entry) => !isUserTagSource(entry.sourceKey)) ?? [];
+  const badgeLabel = getTagProvenanceBadgeLabel(visibleProvenance);
+  const interactive = Boolean(onClick);
+
+  useLayoutEffect(() => {
+    if (!showProvenance || !provenance?.length) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+
+      const width = 288;
+      const margin = 8;
+      const left = Math.min(Math.max(margin, rect.right - width), window.innerWidth - width - margin);
+      const preferredTop = rect.bottom + margin;
+      const top = preferredTop < window.innerHeight - margin ? preferredTop : Math.max(margin, rect.top - margin);
+      setPopupPosition({ left, top });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [provenance?.length, showProvenance]);
+
+  const badgeContent = (
+    <>
+      <span>{children ?? name}</span>
+      {badgeLabel ? (
+        <span className="rounded-full border border-emerald-400/40 bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
+          {badgeLabel}
+        </span>
+      ) : null}
+    </>
+  );
+
+  return (
+    <span
+      ref={wrapperRef}
+      className="relative inline-flex"
+      onMouseEnter={() => setShowProvenance(true)}
+      onMouseLeave={() => setShowProvenance(false)}
+      onFocus={() => setShowProvenance(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setShowProvenance(false);
+        }
+      }}
+    >
+      {interactive ? (
+        <button
+          type="button"
+          onClick={onClick}
+          className="inline-flex items-center gap-1.5 rounded border border-border bg-card px-2 py-0.5 text-xs font-medium text-secondary transition hover:bg-card-hover hover:text-foreground"
+        >
+          {badgeContent}
+        </button>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 rounded border border-border bg-card px-2 py-0.5 text-xs font-medium text-secondary">
+          {badgeContent}
+        </span>
+      )}
+      {provenance?.length ? <span className="sr-only"><TagProvenancePopupContent provenance={provenance} title={`${sourceLabel} Sources`} /></span> : null}
+      {showProvenance && provenance?.length && typeof document !== "undefined" ? createPortal(
+        <span
+          className="pointer-events-none fixed z-50 max-h-[min(70vh,24rem)] w-72 overflow-y-auto rounded-xl border border-border bg-surface/95 p-3 text-left shadow-2xl backdrop-blur"
+          style={{ left: popupPosition.left, top: popupPosition.top }}
+        >
+          <TagProvenancePopupContent provenance={provenance} title={`${sourceLabel} Sources`} />
+        </span>,
+        document.body,
+      ) : null}
+    </span>
+  );
+}
+
+function TagProvenancePopupContent({ provenance, title }: { provenance: TagProvenance[]; title: string }) {
   return (
     <>
-      <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">Tag Provenance</span>
+      <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{title}</span>
       <span className="flex flex-col gap-2">
         {provenance
           .slice()
@@ -246,24 +330,6 @@ function formatTagDurationProvenance(entry: TagProvenance) {
   }
 
   return duration;
-}
-
-function buildTagProvenanceTooltip(provenance: TagProvenance[]) {
-  return provenance
-    .map((entry) => {
-      const parts = [formatTagProvenanceSource(entry.sourceKey)];
-      if (entry.modelKey) {
-        parts.push(`model ${entry.modelKey}`);
-      }
-      if (entry.confidence != null) {
-        parts.push(formatTagConfidence(entry.confidence));
-      }
-      if (entry.totalDurationSec != null) {
-        parts.push(formatTagDurationProvenance(entry));
-      }
-      return parts.join(" • ");
-    })
-    .join("\n");
 }
 
 export function formatDuration(seconds: number): string {

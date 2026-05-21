@@ -163,7 +163,7 @@ export function ImageSourceDownloadDialog({ open, sourceUrl, matches, baseTitle,
           tagIds: metadata?.tagIds,
           studioId: metadata?.studioId,
           date: metadata?.date,
-          synopsis: metadata?.details,
+          description: metadata?.details,
           rating: metadata?.rating,
         });
         groupId = group.id;

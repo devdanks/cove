@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import { studios as studiosApi } from "../api/client";
+import { rankByLabel } from "../utils/searchRanking";
 
 interface StudioSelectorProps {
   value?: number;
@@ -18,7 +19,7 @@ export function StudioSelector({ value, onChange, placeholder = "Search studios.
     queryFn: async () => {
       const response = await studiosApi.find({
         q: trimmedSearch || undefined,
-        perPage: 25,
+        perPage: 100,
         sort: "name",
         direction: "asc",
       });
@@ -40,8 +41,8 @@ export function StudioSelector({ value, onChange, placeholder = "Search studios.
 
   const selectedLabel = selectedResult?.name ?? selectedStudio?.name;
   const visibleResults = useMemo(
-    () => (searchResults ?? []).filter((studio) => studio.id !== value),
-    [searchResults, value],
+    () => rankByLabel((searchResults ?? []).filter((studio) => studio.id !== value), trimmedSearch, (studio) => studio.name).slice(0, 25),
+    [searchResults, trimmedSearch, value],
   );
 
   return (

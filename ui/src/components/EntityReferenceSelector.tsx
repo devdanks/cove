@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
-import { galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
-import type { CustomFieldType, Gallery, Group, Image, Performer, Scene, Studio, Tag } from "../api/types";
+import { faces, galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
+import type { CustomFieldType, Face, Gallery, Group, Image, Performer, Scene, Studio, Tag } from "../api/types";
+import { rankSearchOptions } from "../utils/searchRanking";
 
-export type EntityReferenceType = Extract<CustomFieldType, "tag" | "performer" | "studio" | "scene" | "gallery" | "image" | "group">;
+export type EntityReferenceType = Extract<CustomFieldType, "tag" | "performer" | "studio" | "scene" | "gallery" | "image" | "group"> | "face";
 
 export interface EntityReferenceOption {
   id: number;
@@ -12,11 +13,12 @@ export interface EntityReferenceOption {
   secondaryLabel?: string;
 }
 
-const REFERENCE_TYPES = new Set<string>(["tag", "performer", "studio", "scene", "gallery", "image", "group"]);
+const REFERENCE_TYPES = new Set<string>(["tag", "performer", "studio", "scene", "gallery", "image", "group", "face"]);
 
 const ENTITY_LABELS: Record<EntityReferenceType, { singular: string; plural: string; sort: string }> = {
   tag: { singular: "tag", plural: "tags", sort: "name" },
   performer: { singular: "performer", plural: "performers", sort: "name" },
+  face: { singular: "face", plural: "faces", sort: "label" },
   studio: { singular: "studio", plural: "studios", sort: "name" },
   scene: { singular: "scene", plural: "scenes", sort: "title" },
   gallery: { singular: "gallery", plural: "galleries", sort: "title" },
@@ -94,9 +96,7 @@ export function EntityReferenceSelector({
     if (!trimmedSearch || cachedOptions == null) return undefined;
 
     const needle = trimmedSearch.toLowerCase();
-    return cachedOptions
-      .filter((option) => option.label.toLowerCase().includes(needle))
-      .slice(0, 25);
+    return rankSearchOptions(cachedOptions.filter((option) => option.label.toLowerCase().includes(needle)), trimmedSearch).slice(0, 25);
   }, [cachedOptions, trimmedSearch]);
 
   const { data: searchResults, isLoading } = useQuery({
@@ -106,7 +106,10 @@ export function EntityReferenceSelector({
     staleTime: 60_000,
   });
 
-  const searchOptions = cachedSearchOptions ?? searchResults ?? [];
+  const searchOptions = useMemo(
+    () => cachedSearchOptions ?? rankSearchOptions(searchResults ?? [], trimmedSearch).slice(0, 25),
+    [cachedSearchOptions, searchResults, trimmedSearch],
+  );
   const selectedSearchOption = searchOptions.find((option) => option.id === value);
   const { data: selectedOption, isLoading: selectedLoading } = useQuery({
     queryKey: ["entity-reference-selector", entityType, "selected", value],
@@ -218,9 +221,7 @@ export function EntityReferenceMultiSelector({
     if (!trimmedSearch || cachedOptions == null) return undefined;
 
     const needle = trimmedSearch.toLowerCase();
-    return cachedOptions
-      .filter((option) => option.label.toLowerCase().includes(needle))
-      .slice(0, 25);
+    return rankSearchOptions(cachedOptions.filter((option) => option.label.toLowerCase().includes(needle)), trimmedSearch).slice(0, 25);
   }, [cachedOptions, trimmedSearch]);
 
   const { data: searchResults, isLoading } = useQuery({
@@ -230,7 +231,10 @@ export function EntityReferenceMultiSelector({
     staleTime: 60_000,
   });
 
-  const searchOptions = cachedSearchOptions ?? searchResults ?? [];
+  const searchOptions = useMemo(
+    () => cachedSearchOptions ?? rankSearchOptions(searchResults ?? [], trimmedSearch).slice(0, 25),
+    [cachedSearchOptions, searchResults, trimmedSearch],
+  );
   const selectedOptions = useEntityReferenceOptions(entityType, values, searchOptions);
   const excluded = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
   const locked = useMemo(() => new Set(lockedIds ?? []), [lockedIds]);
@@ -363,6 +367,8 @@ function getCachedEntityReferenceOptions(queryClient: ReturnType<typeof useQuery
       return cached.map((item) => toTagOption(item as Tag));
     case "performer":
       return cached.map((item) => toPerformerOption(item as Performer));
+    case "face":
+      return cached.map((item) => toFaceOption(item as Face));
     case "studio":
       return cached.map((item) => toStudioOption(item as Studio));
     case "scene":
@@ -379,11 +385,12 @@ function getCachedEntityReferenceOptions(queryClient: ReturnType<typeof useQuery
 async function searchEntityReferences(entityType: EntityReferenceType, searchText: string): Promise<EntityReferenceOption[]> {
   const query = searchText || undefined;
   const labels = getEntityReferenceLabel(entityType);
-  const filter = { q: query, perPage: 25, sort: labels.sort, direction: "asc" as const };
+  const filter = { q: query, perPage: 100, sort: labels.sort, direction: "asc" as const };
 
   switch (entityType) {
     case "tag": return (await tags.find(filter)).items.map(toTagOption);
     case "performer": return (await performers.find(filter)).items.map(toPerformerOption);
+    case "face": return (await faces.list(filter)).items.map(toFaceOption);
     case "studio": return (await studios.find(filter)).items.map(toStudioOption);
     case "scene": return (await scenes.find(filter)).items.map(toSceneOption);
     case "gallery": return (await galleries.find(filter)).items.map(toGalleryOption);
@@ -396,6 +403,7 @@ async function getEntityReference(entityType: EntityReferenceType, id: number): 
   switch (entityType) {
     case "tag": return toTagOption(await tags.get(id));
     case "performer": return toPerformerOption(await performers.get(id));
+    case "face": return toFaceOption(await faces.get(id));
     case "studio": return toStudioOption(await studios.get(id));
     case "scene": return toSceneOption(await scenes.get(id));
     case "gallery": return toGalleryOption(await galleries.get(id));
@@ -413,6 +421,14 @@ function toPerformerOption(performer: Performer): EntityReferenceOption {
     id: performer.id,
     label: performer.name,
     secondaryLabel: performer.disambiguation ? `(${performer.disambiguation})` : undefined,
+  };
+}
+
+function toFaceOption(face: Face): EntityReferenceOption {
+  return {
+    id: face.id,
+    label: face.label?.trim() || face.performerName?.trim() || `Face #${face.id}`,
+    secondaryLabel: face.performerName && face.label?.trim() ? face.performerName : undefined,
   };
 }
 

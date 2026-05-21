@@ -719,21 +719,31 @@ export interface DeleteEntityOptions {
   deleteGenerated?: boolean;
 }
 
+export type GroupKind = "static" | "dynamic";
+
 export interface Group {
   id: number;
   name: string;
   aliases?: string;
-  duration?: number;
   date?: string;
   studioId?: number;
   studioName?: string;
   director?: string;
-  synopsis?: string;
+  description?: string;
   frontImagePath?: string;
   backImagePath?: string;
   urls: string[];
   tags: Tag[];
   sceneCount: number;
+  imageCount?: number;
+  audioCount?: number;
+  textCount?: number;
+  galleryCount?: number;
+  performerCount?: number;
+  studioCount?: number;
+  tagItemCount?: number;
+  faceCount?: number;
+  segmentCount?: number;
   itemCount?: number;
   isCompilation?: boolean;
   subGroupCount: number;
@@ -741,12 +751,11 @@ export interface Group {
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
-  kind?: "static" | "dynamic";
+  kind?: GroupKind;
   querySourceKey?: string | null;
   queryJson?: string | null;
   lastResolvedAt?: string | null;
   cachedItemCount?: number | null;
-  cacheTtlSec?: number;
   showInSceneLists?: boolean;
   allowedHostTypes?: string[];
   sortOrder?: number;
@@ -844,11 +853,15 @@ export interface GroupPlaybackManifestItem {
   hostId: number;
   sceneId?: number | null;
   audioId?: number | null;
+  imageId?: number | null;
+  textId?: number | null;
+  segmentId?: number | null;
   sceneTitle?: string;
   src: string;
   startSec: number;
   endSec?: number;
   durationSec?: number;
+  displayDurationSec?: number | null;
   posterPath?: string;
   title?: string;
   format?: string | null;
@@ -868,19 +881,17 @@ export interface GallerySummary {
 export interface GroupCreate {
   name: string;
   aliases?: string;
-  duration?: number;
   date?: string;
   rating?: number;
   studioId?: number;
   director?: string;
-  synopsis?: string;
+  description?: string;
   urls?: string[];
   tagIds?: number[];
   customFields?: Record<string, unknown>;
-  kind?: "static" | "dynamic";
+  kind?: GroupKind;
   querySourceKey?: string;
   queryJson?: string | null;
-  cacheTtlSec?: number;
   showInSceneLists?: boolean;
   allowedHostTypes?: string[];
   sortOrder?: number;
@@ -979,6 +990,9 @@ export interface Segment {
   tagName?: string;
   kind?: string;
   refId?: number;
+  refLabel?: string;
+  performerId?: number;
+  performerName?: string;
   payload?: unknown;
   sourceKey: string;
   sourceRunId?: string;
@@ -1126,6 +1140,17 @@ export interface SegmentSpanSearchRequest {
   sceneTitle?: string;
   sceneIds?: number[];
   excludeSceneIds?: number[];
+  tagIds?: number[];
+  kind?: string;
+  sourceKey?: string;
+  refIds?: number[];
+  performerIds?: number[];
+  confidence?: number;
+  confidence2?: number;
+  confidenceModifier?: CriterionModifier;
+  durationSec?: number;
+  durationSec2?: number;
+  durationModifier?: CriterionModifier;
 }
 
 export interface SegmentSpanSearchResultItem {
@@ -2649,6 +2674,7 @@ export interface GroupFilterCriteria {
   urlCriterion?: StringCriterion;
   createdAtCriterion?: TimestampCriterion;
   updatedAtCriterion?: TimestampCriterion;
+  kindCriterion?: StringCriterion;
   isMissingCriterion?: BoolCriterion;
   directorCriterion?: StringCriterion;
   synopsisCriterion?: StringCriterion;
@@ -2801,7 +2827,7 @@ export interface BulkGroupUpdate {
   studioId?: number | null;
   date?: string;
   director?: string;
-  synopsis?: string;
+  description?: string;
   tagIds?: number[];
   tagMode?: BulkUpdateMode;
 }

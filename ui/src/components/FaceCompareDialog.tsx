@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, Fingerprint, Link2, XCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Fingerprint, Link2, XCircle } from "lucide-react";
 import type { Face, FaceSuggestion, FaceSuggestionEvidence, FaceTopSuggestion } from "../api/types";
 import { createRouteLinkProps } from "./cardNavigation";
 import { EditModal } from "./EditModal";
@@ -11,6 +11,7 @@ interface Props {
   open: boolean;
   face: Face | null;
   suggestion: ComparableSuggestion | null;
+  faceImageUrls?: string[];
   disabled?: boolean;
   canReadPerformers: boolean;
   onClose: () => void;
@@ -23,6 +24,7 @@ export function FaceCompareDialog({
   open,
   face,
   suggestion,
+  faceImageUrls,
   disabled = false,
   canReadPerformers,
   onClose,
@@ -42,10 +44,26 @@ export function FaceCompareDialog({
       && suggestion.localPerformerIsLocalOnly === true;
   }, [face, suggestion]);
   const [setPerformerImage, setSetPerformerImage] = useState(false);
+  const [faceImageIndex, setFaceImageIndex] = useState(0);
+  const [suggestionImageIndex, setSuggestionImageIndex] = useState(0);
+  const evidence = useMemo(() => suggestion ? readEvidence(suggestion).slice(0, 5) : [], [suggestion]);
+  const faceImages = useMemo(
+    () => buildCarouselImageUrls(face?.coverImageUrl, faceImageUrls ?? []),
+    [face?.coverImageUrl, faceImageUrls],
+  );
+  const suggestionImages = useMemo(
+    () => buildCarouselImageUrls(suggestion?.coverImageUrl, evidence.map((item) => item.thumbnailUrl), true),
+    [evidence, suggestion?.coverImageUrl],
+  );
 
   useEffect(() => {
     setSetPerformerImage(canSetPerformerImage);
   }, [canSetPerformerImage, face?.id, open, suggestion?.performerId]);
+
+  useEffect(() => {
+    setFaceImageIndex(0);
+    setSuggestionImageIndex(0);
+  }, [face?.id, open, suggestion?.performerId]);
 
   if (!open || !face || !suggestion) {
     return null;
@@ -54,7 +72,6 @@ export function FaceCompareDialog({
   const faceTitle = face.label?.trim() || face.performerName || "Unidentified face";
   const localPerformerId = readLocalPerformerId(suggestion);
   const referenceOnly = localPerformerId == null && suggestion.performerId < 0;
-  const evidence = readEvidence(suggestion).slice(0, 5);
   const why = readWhy(suggestion);
 
   const faceLinkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "face", id: face.id }, () => {
@@ -76,7 +93,9 @@ export function FaceCompareDialog({
           <ComparePane
             eyebrow="Face in question"
             title={faceTitle}
-            imageUrl={face.coverImageUrl}
+            imageUrls={faceImages}
+            imageIndex={faceImageIndex}
+            onImageIndexChange={setFaceImageIndex}
             fallbackLabel="Unidentified face"
             footer={(
               <div className="space-y-2 text-xs text-secondary">
@@ -92,7 +111,9 @@ export function FaceCompareDialog({
           <ComparePane
             eyebrow={referenceOnly ? "Reference suggestion" : "Suggested performer"}
             title={suggestion.performerName}
-            imageUrl={suggestion.coverImageUrl}
+            imageUrls={suggestionImages}
+            imageIndex={suggestionImageIndex}
+            onImageIndexChange={setSuggestionImageIndex}
             fallbackLabel={suggestion.performerName}
             footer={(
               <div className="space-y-2 text-xs text-secondary">
@@ -196,19 +217,27 @@ export function FaceCompareDialog({
 function ComparePane({
   eyebrow,
   title,
-  imageUrl,
+  imageUrls,
+  imageIndex,
+  onImageIndexChange,
   fallbackLabel,
   footer,
 }: {
   eyebrow: string;
   title: string;
-  imageUrl?: string;
+  imageUrls: string[];
+  imageIndex: number;
+  onImageIndexChange: (value: number) => void;
   fallbackLabel: string;
   footer: React.ReactNode;
 }) {
+  const activeIndex = imageUrls.length === 0 ? 0 : Math.min(imageIndex, imageUrls.length - 1);
+  const imageUrl = imageUrls[activeIndex];
+  const canPage = imageUrls.length > 1;
+
   return (
     <section className="overflow-hidden rounded-2xl border border-border bg-card/50">
-      <div className="aspect-square bg-surface/70">
+      <div className="relative aspect-square bg-surface/70">
         {imageUrl ? (
           <img src={imageUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
         ) : (
@@ -216,6 +245,31 @@ function ComparePane({
             <Fingerprint className="h-12 w-12" />
           </div>
         )}
+        {canPage ? (
+          <>
+            <button
+              type="button"
+              onClick={() => onImageIndexChange(activeIndex === 0 ? imageUrls.length - 1 : activeIndex - 1)}
+              className="absolute left-2 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white transition-colors hover:bg-black/75"
+              title="Previous image"
+              aria-label="Previous image"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onImageIndexChange(activeIndex === imageUrls.length - 1 ? 0 : activeIndex + 1)}
+              className="absolute right-2 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white transition-colors hover:bg-black/75"
+              title="Next image"
+              aria-label="Next image"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            <div className="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
+              {activeIndex + 1}/{imageUrls.length}
+            </div>
+          </>
+        ) : null}
       </div>
       <div className="space-y-3 p-4">
         <div>
@@ -238,6 +292,18 @@ function readWhy(suggestion: ComparableSuggestion) {
 
 function readLocalPerformerId(suggestion: ComparableSuggestion) {
   return suggestion.localPerformerId ?? (suggestion.performerId > 0 ? suggestion.performerId : undefined);
+}
+
+function buildCarouselImageUrls(primaryUrl: string | undefined, samples: Array<string | undefined>, skipFirstSampleWithPrimary = false) {
+  const usableSamples = primaryUrl && skipFirstSampleWithPrimary ? samples.slice(1) : samples;
+  return uniqueImageUrls([primaryUrl, ...usableSamples]).slice(0, 3);
+}
+
+function uniqueImageUrls(values: Array<string | undefined>) {
+  return values
+    .map((value) => value?.trim())
+    .filter((value): value is string => !!value)
+    .filter((value, index, all) => all.indexOf(value) === index);
 }
 
 function formatPercent(value: number) {

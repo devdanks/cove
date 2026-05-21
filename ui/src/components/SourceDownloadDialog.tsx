@@ -139,7 +139,7 @@ export function SourceDownloadDialog({ open, entity, sourceUrl, matches, baseTit
           tagIds: metadata?.tagIds,
           studioId: metadata?.studioId,
           date: metadata?.date,
-          synopsis: metadata?.details,
+          description: metadata?.details,
           rating: metadata?.rating,
         });
         groupId = group.id;

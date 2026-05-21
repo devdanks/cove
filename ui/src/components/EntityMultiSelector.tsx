@@ -3,6 +3,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import { faces as facesApi, performers as performersApi, tags as tagsApi } from "../api/client";
 import type { Face, Performer, Tag } from "../api/types";
+import { rankSearchOptions } from "../utils/searchRanking";
 
 type EntitySelectorType = "tags" | "performers" | "faces";
 
@@ -37,7 +38,10 @@ export function EntityMultiSelector({
     staleTime: 60_000,
   });
 
-  const searchOptions = searchResults ?? [];
+  const searchOptions = useMemo(
+    () => rankSearchOptions(searchResults ?? [], trimmedSearch).slice(0, 25),
+    [searchResults, trimmedSearch],
+  );
   const missingSelectedIds = useMemo(
     () => values.filter((value) => !searchOptions.some((option) => option.id === value)),
     [searchOptions, values],
@@ -136,15 +140,15 @@ export function EntityMultiSelector({
 async function searchEntities(entityType: EntitySelectorType, searchText: string) {
   switch (entityType) {
     case "tags": {
-      const response = await tagsApi.find({ q: searchText || undefined, perPage: 25, sort: "name", direction: "asc" });
+      const response = await tagsApi.find({ q: searchText || undefined, perPage: 100, sort: "name", direction: "asc" });
       return response.items.map(toTagOption);
     }
     case "performers": {
-      const response = await performersApi.find({ q: searchText || undefined, perPage: 25, sort: "name", direction: "asc" });
+      const response = await performersApi.find({ q: searchText || undefined, perPage: 100, sort: "name", direction: "asc" });
       return response.items.map(toPerformerOption);
     }
     case "faces": {
-      const response = await facesApi.list({ q: searchText || undefined, merged: false, page: 1, perPage: 25 });
+      const response = await facesApi.list({ q: searchText || undefined, merged: false, page: 1, perPage: 100 });
       return response.items.map(toFaceOption);
     }
   }

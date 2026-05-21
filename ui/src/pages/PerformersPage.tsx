@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { performers } from "../api/client";
 import type { EntityEngagement, FindFilter, Performer, PerformerCreate, PerformerFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { RatingField } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
@@ -284,13 +283,12 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
     details: "",
     favorite: false,
     ignoreAutoTag: false,
-    rating: undefined as number | undefined,
   });
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [createAnother, setCreateAnother] = useState(false);
 
   const resetForm = () => {
-    setForm({ name: "", disambiguation: "", gender: "", details: "", favorite: false, ignoreAutoTag: false, rating: undefined });
+    setForm({ name: "", disambiguation: "", gender: "", details: "", favorite: false, ignoreAutoTag: false });
     setCustomFields({});
   };
 
@@ -315,7 +313,6 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
       details: form.details || undefined,
       favorite: form.favorite || undefined,
       ignoreAutoTag: form.ignoreAutoTag || undefined,
-      rating: form.rating,
       customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     });
   };
@@ -334,7 +331,6 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
       <Field label="Details">
         <TextArea value={form.details} onChange={(v) => setForm({ ...form, details: v })} rows={3} />
       </Field>
-      <RatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} />
       <div className="flex items-center gap-4 mb-4">
         <label className="flex items-center gap-2 text-sm">
           <input

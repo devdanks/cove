@@ -13,7 +13,7 @@ import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLa
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
 import { InteractiveRating } from "../components/Rating";
-import { CustomFieldsDisplay, formatDate, formatDuration, formatFileSize } from "../components/shared";
+import { CustomFieldsDisplay, formatDate, formatDuration, formatFileSize, TagBadge } from "../components/shared";
 import { EntityReferencePopovers, PerformerTile } from "../components/EntityCards";
 import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
@@ -122,18 +122,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
       .filter(Boolean)
       .join(" • ") || undefined;
   }, [audio]);
-  const detailSubtitle = audio && ((canReadPerformers && audio.performers.length > 0) || (canReadTags && audio.tags.length > 0) || (canReadGroups && audio.groups.length > 0) || (canReadStudio && audio.studioId && audio.studioName) || audio.date) ? (
-    <div className="flex flex-wrap items-center gap-2">
-      <EntityReferencePopovers
-        performers={canReadPerformers ? audio.performers : []}
-        tags={canReadTags ? audio.tags : []}
-        groups={canReadGroups ? audio.groups : []}
-        studio={canReadStudio ? { id: audio.studioId, name: audio.studioName } : null}
-        onNavigate={onNavigate}
-      />
-      {audio.date ? <span className="text-sm text-secondary">{formatDate(audio.date)}</span> : null}
-    </div>
-  ) : subtitleText;
+  const detailSubtitle = subtitleText;
   const headerImage = audio?.imagePath ? (
     <img src={audio.imagePath} alt={`${displayTitle} cover`} className="h-20 w-20 rounded-2xl border border-border object-cover shadow-lg shadow-black/20" />
   ) : undefined;
@@ -204,16 +193,16 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
         />
       </div>
     ) : (
-      <div className="flex h-full min-h-[45vh] w-full flex-col overflow-hidden bg-[radial-gradient(circle_at_22%_28%,rgba(236,72,153,0.26),transparent_32%),radial-gradient(circle_at_78%_18%,rgba(20,184,166,0.22),transparent_28%),linear-gradient(180deg,rgba(17,24,39,0.52),rgba(5,5,14,0.9))]">
+      <div className="flex h-full min-h-[45vh] w-full flex-col overflow-hidden bg-background">
         <div className="flex min-h-0 flex-1 items-center justify-center p-6 sm:p-8">
           {audio.imagePath ? (
             <img
               src={audio.imagePath}
               alt={`${displayTitle} cover`}
-              className="max-h-[min(52vh,34rem)] max-w-[min(54vw,42rem)] rounded-xl border border-border object-contain shadow-2xl shadow-black/40"
+              className="max-h-[min(52vh,34rem)] max-w-[min(54vw,42rem)] rounded-lg border border-border bg-card object-contain shadow-lg"
             />
           ) : (
-            <div className="flex h-32 w-32 items-center justify-center rounded-xl border border-border bg-card/55 text-accent shadow-xl shadow-black/25">
+            <div className="flex h-32 w-32 items-center justify-center rounded-lg border border-border bg-card text-accent shadow-sm">
               <FileAudio className="h-14 w-14" />
             </div>
           )}
@@ -385,7 +374,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
       <MediaDetailLayout.Content>
         {activeTab === "details" ? (
           <div className="space-y-4">
-            <MediaDetailLayout.Metadata>
+            <div>
               <DetailGrid
                 items={[
                   { label: "Studio", value: audio.studioName },
@@ -395,15 +384,16 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
                   { label: "Files", value: String(audio.fileCount) },
                 ]}
               />
-            </MediaDetailLayout.Metadata>
+            </div>
+            <AspectRatingsPanel hostType="audio" hostId={audio.id} canRate={canEngageAudio} />
             {audio.details ? (
-              <section className="rounded-3xl border border-border bg-card/75 p-5">
+              <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Notes</h3>
                 <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/92">{audio.details}</p>
-              </section>
+              </div>
             ) : null}
             {audio.urls.length > 0 ? (
-              <section className="rounded-3xl border border-border bg-card/75 p-5">
+              <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Source URLs</h3>
                 <div className="mt-3 flex flex-col gap-2">
                   {audio.urls.map((url) => (
@@ -413,10 +403,10 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
                     </a>
                   ))}
                 </div>
-              </section>
+              </div>
             ) : null}
             {canReadPerformers && audio.performers.length > 0 ? (
-              <section className="rounded-3xl border border-border bg-card/75 p-5">
+              <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Performers</h3>
                 <div className={audio.performers.length > 1 ? "mt-4 grid grid-cols-2 gap-3" : "mt-4 grid max-w-[220px] gap-3"}>
                   {audio.performers.map((performer) => {
@@ -433,25 +423,48 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
                     );
                   })}
                 </div>
-              </section>
+              </div>
             ) : null}
-            {(canReadTags && audio.tags.length > 0) || (canReadGroups && audio.groups.length > 0) || (canReadStudio && audio.studioId && audio.studioName) ? (
-              <RelatedSection icon={<Rows3 className="h-4 w-4" />} title="Related Entities">
-                <EntityReferencePopovers
-                  performers={[]}
-                  tags={canReadTags ? audio.tags : []}
-                  groups={canReadGroups ? audio.groups : []}
-                  studio={canReadStudio ? { id: audio.studioId, name: audio.studioName } : null}
-                  onNavigate={onNavigate}
-                />
-              </RelatedSection>
+            {canReadTags && audio.tags.length > 0 ? (
+              <div>
+                <h3 className="text-sm text-muted mb-2">Tags</h3>
+                <div className="flex flex-wrap gap-2">
+                  {audio.tags.map((tag) => (
+                    <TagBadge key={tag.id} name={tag.name} tag={tag} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {canReadGroups && audio.groups.length > 0 ? (
+              <div>
+                <h3 className="text-sm text-muted mb-2">Groups</h3>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {audio.groups.map((group) => (
+                    <button
+                      key={group.id}
+                      type="button"
+                      onClick={() => onNavigate({ page: "group", id: group.id })}
+                      className="rounded-xl border border-border bg-card p-4 text-left transition hover:border-accent/60"
+                    >
+                      <div className="text-sm font-medium text-foreground">{group.name}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {canReadStudio && audio.studioId && audio.studioName ? (
+              <div>
+                <h3 className="text-sm text-muted mb-2">Studio</h3>
+                <button type="button" onClick={() => onNavigate({ page: "studio", id: audio.studioId! })} className="text-accent hover:underline">
+                  {audio.studioName}
+                </button>
+              </div>
             ) : null}
             {audio.customFields && Object.keys(audio.customFields).length > 0 ? (
               <MediaDetailLayout.Metadata>
                 <CustomFieldsDisplay customFields={audio.customFields} entityType="audio" />
               </MediaDetailLayout.Metadata>
             ) : null}
-            <AspectRatingsPanel hostType="audio" hostId={audio.id} canRate={canEngageAudio} />
           </div>
         ) : null}
 
@@ -514,15 +527,13 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
         ) : null}
 
         {activeTab === "history" ? (
-          <MediaDetailLayout.Metadata>
-            <DetailGrid
-              items={[
-                { label: "Plays", value: String(audioPlayCount) },
-                { label: "Listened", value: formatDuration(audioPlayDuration) },
-                { label: "Page Visits", value: String(audioPageVisitCount) },
-              ]}
-            />
-          </MediaDetailLayout.Metadata>
+          <AudioHistoryTab
+            playCount={audioPlayCount}
+            playDuration={audioPlayDuration}
+            pageVisitCount={audioPageVisitCount}
+            createdAt={audio.createdAt}
+            updatedAt={audio.updatedAt}
+          />
         ) : null}
 
         {activeTab === "edit" ? <AudioEditPanel audio={audio} onSaved={() => setActiveTab("details")} /> : null}
@@ -586,14 +597,48 @@ function DetailGrid({ items }: { items: { label: string; value?: string }[] }) {
   );
 }
 
+function AudioHistoryTab({
+  playCount,
+  playDuration,
+  pageVisitCount,
+  createdAt,
+  updatedAt,
+}: {
+  playCount: number;
+  playDuration: number;
+  pageVisitCount: number;
+  createdAt: string;
+  updatedAt: string;
+}) {
+  return (
+    <div className="space-y-6 text-sm">
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Play History</h3>
+        </div>
+        <div className="mb-2 grid grid-cols-2 gap-2">
+          <div><span className="text-muted">Play Count:</span> <span className="text-foreground">{playCount}</span></div>
+          <div><span className="text-muted">Listened:</span> <span className="text-foreground">{formatDuration(playDuration)}</span></div>
+          <div><span className="text-muted">Page Visits:</span> <span className="text-foreground">{pageVisitCount}</span></div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div><span className="text-muted">Created:</span> <span className="text-foreground">{formatDate(createdAt)}</span></div>
+        <div><span className="text-muted">Updated:</span> <span className="text-foreground">{formatDate(updatedAt)}</span></div>
+      </div>
+    </div>
+  );
+}
+
 function RelatedSection({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-3xl border border-border bg-card/75 p-5">
+    <div>
       <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-muted">
         {icon}
         {title}
       </div>
       <div className="mt-4 flex flex-wrap gap-2">{children}</div>
-    </section>
+    </div>
   );
 }

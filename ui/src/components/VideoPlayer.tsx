@@ -379,7 +379,7 @@ export function VideoPlayer({
       }
     }
 
-    if (faceOverlayEnabled && faceDetections.length > 0) {
+    if (faceOverlayEnabled && (faceDetections.length > 0 || faceSegments.some(hasSegmentFaceKeyframes))) {
       const faceGroups = groupFaceDetections(faceDetections);
       const consumedGroups = new Set<string>();
 
@@ -1182,7 +1182,9 @@ export function VideoPlayer({
               <button
                 onClick={() => setFaceOverlayEnabled((previous) => !previous)}
                 className={`hover:text-accent p-1 ${faceOverlayEnabled ? "text-accent" : ""}`}
-                title={faceOverlayEnabled ? "Hide face boxes on video" : "Show face boxes on video"}
+                title="X-ray"
+                aria-label="X-ray"
+                aria-pressed={faceOverlayEnabled}
               >
                 {faceOverlayEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
               </button>

@@ -49,7 +49,7 @@ vi.mock("../components/ConfirmDialog", () => ({
 }));
 
 vi.mock("../pages/GroupEditModal", () => ({
-  GroupEditModal: () => null,
+  GroupEditModal: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Edit Group Modal" /> : null,
 }));
 
 vi.mock("../router/RouteRegistry", () => ({
@@ -57,6 +57,9 @@ vi.mock("../router/RouteRegistry", () => ({
 }));
 
 vi.mock("../components/EntityCards", () => ({
+  EntityTileFrame: ({ label, onClick, body, media }: { label: string; onClick: () => void; body: React.ReactNode; media: React.ReactNode }) => (
+    <button type="button" aria-label={label} onClick={onClick}>{media}{body}</button>
+  ),
   GroupTile: ({ group, onClick }: { group: { name: string }; onClick: () => void }) => (
     <button type="button" onClick={onClick}>{group.name}</button>
   ),
@@ -71,6 +74,14 @@ vi.mock("../components/QuickViewDialog", () => ({
 
 vi.mock("../components/DetailListToolbar", () => ({
   DetailListToolbar: () => null,
+}));
+
+vi.mock("../components/AspectRatingsPanel", () => ({
+  AspectRatingsPanel: () => <div>Aspect ratings</div>,
+}));
+
+vi.mock("../components/Rating", () => ({
+  InteractiveRating: () => <div>Rating</div>,
 }));
 
 vi.mock("../components/BulkSelectionActions", () => ({
@@ -126,7 +137,7 @@ function buildGroup(overrides: Record<string, unknown> = {}) {
     duration: 3600,
     studioId: 11,
     studioName: "Cove Studio",
-    synopsis: "A curated compilation.",
+    description: "A curated compilation.",
     tags: [],
     urls: ["https://example.com/group/4"],
     customFields: {},
@@ -164,7 +175,7 @@ describe("GroupDetailPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the shared hero layout and switches to the metadata tab", async () => {
+  it("renders the shared hero layout with metadata above the tabs", async () => {
     mockGroups.get.mockResolvedValue(buildGroup());
     mockGroups.items.list.mockResolvedValue([
       { id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 },
@@ -186,17 +197,16 @@ describe("GroupDetailPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Summer Compilation" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /^items$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /metadata/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /^edit$/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId("compilation-player")).not.toBeInTheDocument();
     expect(screen.getByTitle("Standalone Compilation")).toBeInTheDocument();
-
-    const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
-    fireEvent.click(within(tabs).getByRole("tab", { name: /metadata/i }));
-
-    expect(await screen.findByText("https://example.com/group/4")).toBeInTheDocument();
-    expect(screen.getByText("Sub-Group Count")).toBeInTheDocument();
+    expect(screen.getByText("example.com")).toBeInTheDocument();
+    expect(screen.getByText("Kind")).toBeInTheDocument();
+    expect(screen.getByText("Static")).toBeInTheDocument();
   });
 
-  it("switches between metadata and edit tabs", async () => {
+  it("opens the group editor from the hero action", async () => {
     mockGroups.get.mockResolvedValue(buildGroup());
     mockGroups.items.list.mockResolvedValue([
       { id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 },
@@ -217,13 +227,8 @@ describe("GroupDetailPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Summer Compilation" });
-    const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
-
-    fireEvent.click(within(tabs).getByRole("tab", { name: /metadata/i }));
-    expect(await screen.findByText("Sub-Group Count")).toBeInTheDocument();
-
-    fireEvent.click(within(tabs).getByRole("tab", { name: /^edit$/i }));
-    expect(await screen.findByRole("heading", { name: "Edit Group" })).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("Edit"));
+    expect(await screen.findByRole("dialog", { name: "Edit Group Modal" })).toBeInTheDocument();
   });
 
   it("adds a subgroup from the search results", async () => {
@@ -239,7 +244,8 @@ describe("GroupDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: /add sub-group/i }));
+    fireEvent.click(await screen.findByTitle("More actions"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /add sub-group/i }));
     fireEvent.change(screen.getByPlaceholderText("Search groups to add..."), { target: { value: "Nested" } });
     fireEvent.click(await screen.findByRole("button", { name: /nested group/i }));
 

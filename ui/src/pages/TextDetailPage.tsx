@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpenText, Check, Download, ExternalLink, FileText, Files, FolderOpen, Image, Link2, MoreVertical, Rows3, Trash2 } from "lucide-react";
+import { BookOpenText, Check, Download, ExternalLink, Files, FolderOpen, Image, Link2, MoreVertical, Rows3, Trash2 } from "lucide-react";
 import { entityImages, fileOps, playback, texts } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
@@ -13,7 +13,7 @@ import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
 import { InteractiveRating } from "../components/Rating";
 import { TextViewer } from "../components/TextViewer";
-import { CustomFieldsDisplay, formatDate, formatDuration, formatFileSize } from "../components/shared";
+import { CustomFieldsDisplay, formatDate, formatDuration, formatFileSize, TagBadge } from "../components/shared";
 import { EntityReferencePopovers, PerformerTile } from "../components/EntityCards";
 import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
@@ -25,11 +25,18 @@ import { TextEditPanel } from "./TextEditPanel";
 const MediaScrapeDialog = lazy(() => import("../components/MediaScrapeDialog").then((module) => ({ default: module.MediaScrapeDialog })));
 const MediaDownloadDialog = lazy(() => import("../components/MediaDownloadDialog").then((module) => ({ default: module.MediaDownloadDialog })));
 
-type TextTab = "details" | "read" | "file-info" | "history" | "edit";
+type TextTab = "details" | "file-info" | "history" | "edit";
 
 interface Props {
   id: number;
   onNavigate: (route: any) => void;
+}
+
+function isPdfTextFile(file?: { format?: string | null; basename?: string | null; path?: string | null }) {
+  const format = file?.format?.trim().toLowerCase();
+  const basename = file?.basename?.trim().toLowerCase();
+  const path = file?.path?.trim().toLowerCase();
+  return format === "pdf" || basename?.endsWith(".pdf") || path?.endsWith(".pdf") || false;
 }
 
 export function TextDetailPage({ id, onNavigate }: Props) {
@@ -38,14 +45,17 @@ export function TextDetailPage({ id, onNavigate }: Props) {
     queryKey: ["text", id],
     queryFn: () => texts.get(id),
   });
-  const { data: content, isLoading: contentLoading } = useQuery({
+  const { hasPermission, user } = useAuth();
+  const primaryFile = useMemo(() => pickPrimaryTextFile(text), [text]);
+  const canStreamTextFile = hasPermission("stream.read");
+  const primaryFileIsPdf = isPdfTextFile(primaryFile);
+  const { data: content, isLoading: contentLoading, isError: contentError } = useQuery({
     queryKey: ["text", id, "content"],
     queryFn: () => texts.content(id),
-    enabled: !!text,
+    enabled: !!text && !(primaryFileIsPdf && canStreamTextFile),
   });
-  const { hasPermission, user } = useAuth();
   const { backLabel, goBack } = useBackNavigation({ page: "texts" }, onNavigate);
-  const [activeTab, setActiveTab] = useState<TextTab>("read");
+  const [activeTab, setActiveTab] = useState<TextTab>("details");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
@@ -140,7 +150,6 @@ export function TextDetailPage({ id, onNavigate }: Props) {
     };
   }, [queryClient, text, trackTextActivity]);
 
-  const primaryFile = useMemo(() => pickPrimaryTextFile(text), [text]);
   const displayTitle = text ? getTextDisplayTitle(text) : `Text ${id}`;
   const subtitleText = useMemo(() => {
     if (!text) {
@@ -151,24 +160,13 @@ export function TextDetailPage({ id, onNavigate }: Props) {
       .filter(Boolean)
       .join(" • ") || undefined;
   }, [text]);
-  const detailSubtitle = text && ((canReadPerformers && text.performers.length > 0) || (canReadTags && text.tags.length > 0) || (canReadGroups && text.groups.length > 0) || (canReadStudio && text.studioId && text.studioName) || text.date) ? (
-    <div className="flex flex-wrap items-center gap-2">
-      <EntityReferencePopovers
-        performers={canReadPerformers ? text.performers : []}
-        tags={canReadTags ? text.tags : []}
-        groups={canReadGroups ? text.groups : []}
-        studio={canReadStudio ? { id: text.studioId, name: text.studioName } : null}
-        onNavigate={onNavigate}
-      />
-      {text.date ? <span className="text-sm text-secondary">{formatDate(text.date)}</span> : null}
-    </div>
-  ) : subtitleText;
+  const detailSubtitle = subtitleText;
   const headerImage = text?.imagePath ? (
     <img src={text.imagePath} alt={`${displayTitle} cover`} className="h-24 w-20 rounded-2xl border border-border object-cover shadow-lg shadow-black/20" />
   ) : undefined;
   const textCoverUrl = text?.imagePath ?? undefined;
   const tabs = useMemo(() => {
-    const nextTabs: MediaDetailTab[] = [{ key: "read", label: "Read" }, { key: "details", label: "Details" }];
+    const nextTabs: MediaDetailTab[] = [{ key: "details", label: "Details" }];
     if (canReadFiles && (text?.files.length ?? 0) > 0) {
       nextTabs.push({ key: "file-info", label: "File Info", count: text?.files.length ?? 0 });
     }
@@ -181,7 +179,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
-      setActiveTab("read");
+      setActiveTab("details");
     }
   }, [activeTab, tabs]);
 
@@ -207,6 +205,36 @@ export function TextDetailPage({ id, onNavigate }: Props) {
     return <div className="rounded-3xl border border-dashed border-border bg-card/70 px-6 py-10 text-sm text-muted">Text document #{id} was not found.</div>;
   }
 
+  const contentIsPdf = content?.format?.trim().toLowerCase() === "pdf";
+  const showSourcePdf = canStreamTextFile && (primaryFileIsPdf || contentIsPdf);
+  const textMedia = (
+    <div className="flex min-h-0 flex-1 bg-background p-3 sm:p-4">
+      {showSourcePdf ? (
+        <iframe
+          title={displayTitle}
+          src={texts.fileUrl(text.id)}
+          className="h-full min-h-[28rem] w-full rounded-lg border border-border bg-surface"
+        />
+      ) : contentLoading ? (
+        <div className="flex min-h-[28rem] flex-1 items-center justify-center rounded-lg border border-border bg-surface text-sm text-muted">
+          Loading extracted text content...
+        </div>
+      ) : content?.content ? (
+        <TextViewer content={content.content} renderMode={content.renderMode} className="min-h-0 flex-1 rounded-lg" />
+      ) : contentError && canStreamTextFile && text.files.length > 0 ? (
+        <iframe
+          title={displayTitle}
+          src={texts.fileUrl(text.id)}
+          className="h-full min-h-[28rem] w-full rounded-lg border border-border bg-surface"
+        />
+      ) : (
+        <div className="flex min-h-[28rem] flex-1 items-center justify-center rounded-lg border border-dashed border-border bg-surface px-5 text-center text-sm text-muted">
+          No readable text content is available for this document yet.
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
     {text ? (
@@ -230,7 +258,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
       backLabel={backLabel}
       onGoBack={goBack}
       headerImage={headerImage}
-      media={<TextViewer content={content?.content} renderMode={content?.renderMode} />}
+      media={textMedia}
       mediaAspectRatio="auto"
       mediaFullBleed
       mediaSticky={false}
@@ -261,15 +289,6 @@ export function TextDetailPage({ id, onNavigate }: Props) {
             <span className="inline-flex items-center justify-center rounded bg-green-600 p-1 text-white" title="Organized">
               <Check className="h-4 w-4" />
             </span>
-          ) : null}
-          {canReadFiles && text.files.length > 0 ? (
-            <a
-              href={texts.fileUrl(text.id)}
-              className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
-              title="Download source file"
-            >
-              <Download className="h-4 w-4" />
-            </a>
           ) : null}
           {canWriteText || canDeleteText ? (
             <div className="relative" ref={opsMenuRef}>
@@ -349,21 +368,9 @@ export function TextDetailPage({ id, onNavigate }: Props) {
         showDeleteGenerated
       />
       <MediaDetailLayout.Content>
-        {activeTab === "read" ? (
-          <section className="overflow-hidden rounded-3xl border border-border bg-card/75">
-            {contentLoading ? (
-              <div className="p-5 text-sm text-muted">Loading extracted text content...</div>
-            ) : content?.content ? (
-              <TextViewer content={content.content} renderMode={content.renderMode} />
-            ) : (
-              <div className="p-5 text-sm text-muted">No extracted text content is available yet.</div>
-            )}
-          </section>
-        ) : null}
-
         {activeTab === "details" ? (
           <div className="space-y-4">
-            <MediaDetailLayout.Metadata>
+            <div>
               <DetailGrid
                 items={[
                   { label: "Studio", value: text.studioName },
@@ -373,15 +380,16 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                   { label: "Files", value: String(text.fileCount) },
                 ]}
               />
-            </MediaDetailLayout.Metadata>
+            </div>
+            <AspectRatingsPanel hostType="text" hostId={text.id} canRate={canEngageText} />
             {text.details ? (
-              <section className="rounded-3xl border border-border bg-card/75 p-5">
+              <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Notes</h3>
                 <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/92">{text.details}</p>
-              </section>
+              </div>
             ) : null}
             {text.urls.length > 0 ? (
-              <section className="rounded-3xl border border-border bg-card/75 p-5">
+              <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Source URLs</h3>
                 <div className="mt-3 flex flex-col gap-2">
                   {text.urls.map((url) => (
@@ -391,10 +399,10 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                     </a>
                   ))}
                 </div>
-              </section>
+              </div>
             ) : null}
             {canReadPerformers && text.performers.length > 0 ? (
-              <section className="rounded-3xl border border-border bg-card/75 p-5">
+              <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Performers</h3>
                 <div className={text.performers.length > 1 ? "mt-4 grid grid-cols-2 gap-3" : "mt-4 grid max-w-[220px] gap-3"}>
                   {text.performers.map((performer) => {
@@ -411,25 +419,48 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                     );
                   })}
                 </div>
-              </section>
+              </div>
             ) : null}
-            {(canReadTags && text.tags.length > 0) || (canReadGroups && text.groups.length > 0) || (canReadStudio && text.studioId && text.studioName) ? (
-              <RelatedSection icon={<Rows3 className="h-4 w-4" />} title="Related Entities">
-                <EntityReferencePopovers
-                  performers={[]}
-                  tags={canReadTags ? text.tags : []}
-                  groups={canReadGroups ? text.groups : []}
-                  studio={canReadStudio ? { id: text.studioId, name: text.studioName } : null}
-                  onNavigate={onNavigate}
-                />
-              </RelatedSection>
+            {canReadTags && text.tags.length > 0 ? (
+              <div>
+                <h3 className="text-sm text-muted mb-2">Tags</h3>
+                <div className="flex flex-wrap gap-2">
+                  {text.tags.map((tag) => (
+                    <TagBadge key={tag.id} name={tag.name} tag={tag} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {canReadGroups && text.groups.length > 0 ? (
+              <div>
+                <h3 className="text-sm text-muted mb-2">Groups</h3>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {text.groups.map((group) => (
+                    <button
+                      key={group.id}
+                      type="button"
+                      onClick={() => onNavigate({ page: "group", id: group.id })}
+                      className="rounded-xl border border-border bg-card p-4 text-left transition hover:border-accent/60"
+                    >
+                      <div className="text-sm font-medium text-foreground">{group.name}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {canReadStudio && text.studioId && text.studioName ? (
+              <div>
+                <h3 className="text-sm text-muted mb-2">Studio</h3>
+                <button type="button" onClick={() => onNavigate({ page: "studio", id: text.studioId! })} className="text-accent hover:underline">
+                  {text.studioName}
+                </button>
+              </div>
             ) : null}
             {text.customFields && Object.keys(text.customFields).length > 0 ? (
               <MediaDetailLayout.Metadata>
                 <CustomFieldsDisplay customFields={text.customFields} entityType="text" />
               </MediaDetailLayout.Metadata>
             ) : null}
-            <AspectRatingsPanel hostType="text" hostId={text.id} canRate={canEngageText} />
           </div>
         ) : null}
 
@@ -470,14 +501,12 @@ export function TextDetailPage({ id, onNavigate }: Props) {
         ) : null}
 
         {activeTab === "history" ? (
-          <MediaDetailLayout.Metadata>
-            <DetailGrid
-              items={[
-                { label: "Page Visits", value: String(textEngagement?.pageVisitCount ?? 0) },
-                { label: "Time Open", value: formatDuration(textEngagement?.playDuration ?? 0) },
-              ]}
-            />
-          </MediaDetailLayout.Metadata>
+          <TextHistoryTab
+            pageVisitCount={textEngagement?.pageVisitCount ?? 0}
+            timeOpen={textEngagement?.playDuration ?? 0}
+            createdAt={text.createdAt}
+            updatedAt={text.updatedAt}
+          />
         ) : null}
 
         {activeTab === "edit" ? <TextEditPanel text={text} onSaved={() => setActiveTab("details")} /> : null}
@@ -541,14 +570,45 @@ function DetailGrid({ items }: { items: { label: string; value?: string }[] }) {
   );
 }
 
+function TextHistoryTab({
+  pageVisitCount,
+  timeOpen,
+  createdAt,
+  updatedAt,
+}: {
+  pageVisitCount: number;
+  timeOpen: number;
+  createdAt: string;
+  updatedAt: string;
+}) {
+  return (
+    <div className="space-y-6 text-sm">
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">Reading History</h3>
+        </div>
+        <div className="mb-2 grid grid-cols-2 gap-2">
+          <div><span className="text-muted">Page Visits:</span> <span className="text-foreground">{pageVisitCount}</span></div>
+          <div><span className="text-muted">Time Open:</span> <span className="text-foreground">{formatDuration(timeOpen)}</span></div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div><span className="text-muted">Created:</span> <span className="text-foreground">{formatDate(createdAt)}</span></div>
+        <div><span className="text-muted">Updated:</span> <span className="text-foreground">{formatDate(updatedAt)}</span></div>
+      </div>
+    </div>
+  );
+}
+
 function RelatedSection({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-3xl border border-border bg-card/75 p-5">
+    <div>
       <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-muted">
         {icon}
         {title}
       </div>
       <div className="mt-4 flex flex-wrap gap-2">{children}</div>
-    </section>
+    </div>
   );
 }

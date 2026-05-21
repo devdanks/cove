@@ -248,8 +248,8 @@ async function readResponseBody<T>(res: Response): Promise<T> {
 function buildQuery(filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>): string {
   const params = new URLSearchParams();
   if (filter?.q) params.set("q", filter.q);
-  if (filter?.page) params.set("page", String(filter.page));
-  if (filter?.perPage) params.set("perPage", String(filter.perPage));
+  if (filter?.page != null) params.set("page", String(filter.page));
+  if (filter && filter.perPage != null) params.set("perPage", String(filter.perPage));
   if (filter?.sort) params.set("sort", filter.sort);
   if (filter?.direction) params.set("direction", filter.direction);
   if (filter?.seed != null) params.set("seed", String(filter.seed));
@@ -444,9 +444,18 @@ export const segmentLibrary = {
     tagIds?: string;
     kind?: string;
     sourceKey?: string;
+    sourceCategory?: "user" | "extensions";
+    refIds?: string;
+    performerIds?: string;
     tagged?: boolean;
     minConfidence?: number;
     minDurationSec?: number;
+    confidence?: number;
+    confidence2?: number;
+    confidenceModifier?: string;
+    durationSec?: number;
+    durationSec2?: number;
+    durationModifier?: string;
     sort?: string;
     direction?: "asc" | "desc";
     page?: number;
@@ -464,7 +473,7 @@ export const segmentLibrary = {
 
 // ===== Faces =====
 export const faces: {
-  list: (opts?: { q?: string; performerId?: number; linked?: boolean; ignored?: boolean; merged?: boolean; sort?: string; page?: number; perPage?: number }) => Promise<PaginatedResponse<Face>>;
+  list: (opts?: { q?: string; performerId?: number; performerIds?: string; linked?: boolean; ignored?: boolean; merged?: boolean; minSuggestionConfidence?: number; suggestionConfidence?: number; suggestionConfidence2?: number; suggestionConfidenceModifier?: string; topSuggestionPerformerIds?: string; sort?: string; page?: number; perPage?: number }) => Promise<PaginatedResponse<Face>>;
   get: (id: number) => Promise<Face>;
   appearances: (id: number, opts?: { q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) => Promise<PaginatedResponse<FaceAppearance>>;
   sceneFaces: (sceneId: number) => Promise<FaceHostFace[]>;
@@ -473,6 +482,7 @@ export const faces: {
   reviewUnlinked: (take?: number) => Promise<Face[]>;
   reviewAiRun: (opts: { startedAt: string; completedAt: string; take?: number }) => Promise<Face[]>;
   detections: (id: number) => Promise<Detection[]>;
+  detectionCropUrl: (detectionId: number, max?: number) => string;
   deleteImpact: (id: number) => Promise<FaceDeleteImpact>;
   create: (data: FaceCreate) => Promise<Face>;
   update: (id: number, data: FaceUpdate) => Promise<Face>;
@@ -487,12 +497,18 @@ export const faces: {
   suggestions: (id: number, maxResults?: number) => Promise<FaceSuggestion[]>;
   recordSuggestionDecision: (id: number, data: { performerId: number; decision: "accept" | "reject"; setPerformerImage?: boolean }) => Promise<void>;
 } = {
-  list: (opts?: { q?: string; performerId?: number; linked?: boolean; ignored?: boolean; merged?: boolean; sort?: string; page?: number; perPage?: number }) =>
+  list: (opts?: { q?: string; performerId?: number; performerIds?: string; linked?: boolean; ignored?: boolean; merged?: boolean; minSuggestionConfidence?: number; suggestionConfidence?: number; suggestionConfidence2?: number; suggestionConfidenceModifier?: string; topSuggestionPerformerIds?: string; sort?: string; page?: number; perPage?: number }) =>
     request<PaginatedResponse<Face>>(`/faces${buildQuery({ page: opts?.page, perPage: opts?.perPage, q: opts?.q }, {
       performerId: opts?.performerId,
+      performerIds: opts?.performerIds,
       linked: opts?.linked,
       ignored: opts?.ignored,
       merged: opts?.merged,
+      minSuggestionConfidence: opts?.minSuggestionConfidence,
+      suggestionConfidence: opts?.suggestionConfidence,
+      suggestionConfidence2: opts?.suggestionConfidence2,
+      suggestionConfidenceModifier: opts?.suggestionConfidenceModifier,
+      topSuggestionPerformerIds: opts?.topSuggestionPerformerIds,
       sort: opts?.sort,
     })}`),
   get: (id: number) => request<Face>(`/faces/${id}`),
@@ -505,6 +521,7 @@ export const faces: {
   reviewAiRun: (opts: { startedAt: string; completedAt: string; take?: number }) =>
     request<Face[]>(`/faces/review/ai-run${buildQuery(undefined, { startedAt: opts.startedAt, completedAt: opts.completedAt, take: opts.take })}`),
   detections: (id: number) => request<Detection[]>(`/faces/${id}/detections`),
+  detectionCropUrl: (detectionId: number, max?: number) => buildMediaUrl(`/stream/detection/${detectionId}/crop`, undefined, max),
   deleteImpact: (id: number) => request<FaceDeleteImpact>(`/faces/${id}/delete-impact`),
   create: (data: FaceCreate) => request<Face>("/faces", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: FaceUpdate) => request<Face>(`/faces/${id}`, { method: "PUT", body: JSON.stringify(data) }),
@@ -805,6 +822,7 @@ export const groups = {
     request<void>(`/groups/${id}/subgroups/reorder`, { method: "PUT", body: JSON.stringify({ subGroupIds }) }),
   items: {
     list: (groupId: number) => request<GroupItem[]>(`/groups/${groupId}/items`),
+    page: (groupId: number, filter?: FindFilter) => request<PaginatedResponse<GroupItem>>(`/groups/${groupId}/items/page${buildQuery(filter)}`),
     create: (groupId: number, data: GroupItemCreate) =>
       request<GroupItem>(`/groups/${groupId}/items`, { method: "POST", body: JSON.stringify(data) }),
     update: (groupId: number, itemId: number, data: GroupItemUpdate) =>
@@ -867,6 +885,12 @@ export const entityImages = {
   sceneCoverUrl: (id: number, version?: string, max = 1600) => buildMediaUrl(`/scenes/${id}/image`, version, max),
   uploadSceneCoverImage: (id: number, file: File) => uploadImage(`/scenes/${id}/image`, file),
   deleteSceneCoverImage: (id: number) => deleteImage(`/scenes/${id}/image`),
+
+  segmentCoverUrl: (id: number, version?: string, max = 1600) => buildMediaUrl(`/segments/${id}/image`, version, max),
+  uploadSegmentCoverImage: (id: number, file: File) => uploadImage(`/segments/${id}/image`, file),
+  deleteSegmentCoverImage: (id: number) => deleteImage(`/segments/${id}/image`),
+  setSegmentCoverFromFrame: (id: number, atSeconds?: number) =>
+    request<{ success: boolean }>(`/segments/${id}/image/from-frame`, { method: "POST", body: JSON.stringify({ atSeconds }) }),
 
   performerImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/performers/${id}/image`, version, max),
   uploadPerformerImage: (id: number, file: File) => uploadImage(`/performers/${id}/image`, file),

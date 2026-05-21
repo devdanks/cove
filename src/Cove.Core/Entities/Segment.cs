@@ -34,6 +34,7 @@ public class Segment : BaseEntity
 
     public string? Title { get; set; }
     public string? ColorHint { get; set; }
+    public string? ImageBlobId { get; set; }
 
     public Tag? Tag { get; set; }
 }

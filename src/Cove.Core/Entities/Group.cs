@@ -11,7 +11,7 @@ public class Group : BaseEntity
     public int CacheTtlSec { get; set; } = 60;
     public bool ShowInSceneLists { get; set; } = false;
     public int SortOrder { get; set; }
-    public List<string> AllowedHostTypes { get; set; } = ["scene"];
+    public List<string> AllowedHostTypes { get; set; } = ["scene", "image", "audio", "text", "group", "performer", "studio", "tag", "gallery", "face", "segment"];
     public string? Aliases { get; set; }
     public int? Duration { get; set; } // seconds
     public DateOnly? Date { get; set; }

@@ -1,5 +1,5 @@
-import { ArrowLeft, Check, Heart } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Heart } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 export interface EntityHeroCount {
   key: string;
@@ -23,6 +23,9 @@ export interface EntityHeroLayoutProps {
   imageFallback?: ReactNode;
   onImageClick?: () => void;
   imageActionTitle?: string;
+  imageCarouselUrls?: string[];
+  imageCarouselIndex?: number;
+  onImageCarouselIndexChange?: (index: number) => void;
   title: ReactNode;
   subtitle?: ReactNode;
   sortName?: ReactNode;
@@ -62,6 +65,9 @@ export function EntityHeroLayout({
   imageFallback,
   onImageClick,
   imageActionTitle = "Change cover",
+  imageCarouselUrls,
+  imageCarouselIndex = 0,
+  onImageCarouselIndexChange,
   title,
   subtitle,
   sortName,
@@ -87,6 +93,13 @@ export function EntityHeroLayout({
   const resolvedFallbackClassName = imageFallbackClassName ?? "h-full w-full items-center justify-center bg-card text-muted";
   const resolvedHeroRowClassName = heroRowClassName ?? "flex flex-col gap-6 md:flex-row md:items-start";
   const resolvedContentClassName = contentClassName ?? "w-full px-4 py-6";
+  const carouselUrls = useMemo(
+    () => Array.from(new Set((imageCarouselUrls ?? []).filter((url): url is string => typeof url === "string" && url.trim().length > 0))),
+    [imageCarouselUrls],
+  );
+  const hasCarousel = carouselUrls.length > 1 && onImageCarouselIndexChange != null;
+  const boundedCarouselIndex = carouselUrls.length > 0 ? Math.min(Math.max(imageCarouselIndex, 0), carouselUrls.length - 1) : 0;
+  const resolvedImageUrl = carouselUrls[boundedCarouselIndex] ?? imageUrl;
   const [optimisticOrganized, setOptimisticOrganized] = useState<boolean | null>(null);
   const displayedOrganized = typeof organized === "boolean" ? optimisticOrganized ?? organized : organized;
 
@@ -142,9 +155,9 @@ export function EntityHeroLayout({
   const hasHeaderActions = Boolean(organizedAction || favoriteAction || actions);
   const imageContent = (
     <>
-      {imageUrl ? (
+      {resolvedImageUrl ? (
         <img
-          src={imageUrl}
+          src={resolvedImageUrl}
           alt={imageAlt ?? ""}
           className={resolvedImageClassName}
           onError={(e) => {
@@ -157,11 +170,44 @@ export function EntityHeroLayout({
       <div
         className={[
           resolvedFallbackClassName,
-          imageUrl ? "hidden" : "flex",
+          resolvedImageUrl ? "hidden" : "flex",
         ].join(" ")}
       >
         {imageFallback}
       </div>
+      {hasCarousel ? (
+        <>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onImageCarouselIndexChange((boundedCarouselIndex - 1 + carouselUrls.length) % carouselUrls.length);
+            }}
+            className="absolute left-2 top-1/2 z-20 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-white/15 bg-black/65 text-white shadow-lg transition hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-accent"
+            aria-label="Previous image"
+            title="Previous image"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onImageCarouselIndexChange((boundedCarouselIndex + 1) % carouselUrls.length);
+            }}
+            className="absolute right-2 top-1/2 z-20 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-white/15 bg-black/65 text-white shadow-lg transition hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-accent"
+            aria-label="Next image"
+            title="Next image"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <span className="pointer-events-none absolute bottom-2 right-2 z-20 rounded bg-black/65 px-2 py-0.5 text-[11px] font-medium text-white">
+            {boundedCarouselIndex + 1}/{carouselUrls.length}
+          </span>
+        </>
+      ) : null}
       {onImageClick ? (
         <span className="pointer-events-none absolute inset-x-3 bottom-3 rounded-lg bg-black/70 px-3 py-2 text-center text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
           {imageActionTitle}
@@ -200,12 +246,17 @@ export function EntityHeroLayout({
           </div>
 
           <div className={resolvedHeroRowClassName}>
-            {onImageClick ? (
+            {onImageClick && !hasCarousel ? (
               <button type="button" onClick={onImageClick} title={imageActionTitle} className={`${resolvedImageContainerClassName} group focus:outline-none focus:ring-2 focus:ring-accent`}>
                 {imageContent}
               </button>
             ) : (
-              <div className={resolvedImageContainerClassName}>{imageContent}</div>
+              <div className={`${resolvedImageContainerClassName} ${onImageClick ? "group focus-within:ring-2 focus-within:ring-accent" : ""}`}>
+                {onImageClick ? (
+                  <button type="button" onClick={onImageClick} title={imageActionTitle} aria-label={imageActionTitle} className="absolute inset-0 z-10 focus:outline-none" />
+                ) : null}
+                {imageContent}
+              </div>
             )}
 
             <div className="min-w-0 flex-1">

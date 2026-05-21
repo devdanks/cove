@@ -180,6 +180,71 @@ public class DynamicGroupsAndBookmarksTests
     }
 
     [Fact]
+    public async Task FilterDynamicGroupSource_UsesUppercasePerformerCriterion()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var principalAccessor = scope.PrincipalAccessor;
+        principalAccessor.Set(CreatePrincipal(7));
+
+        var performer = new Performer { Name = "Matched Performer" };
+        var included = new Scene { Title = "Included" };
+        included.ScenePerformers.Add(new ScenePerformer { Performer = performer });
+        var excluded = new Scene { Title = "Excluded" };
+        context.AddRange(included, excluded);
+        await context.SaveChangesAsync();
+
+        var group = new Group
+        {
+            Name = "Performer Scenes",
+            Kind = GroupKind.Dynamic,
+            QuerySourceKey = DynamicGroupResolver.FilterSourceKey,
+            QueryJson = "{\"entityTypes\":[\"scene\"],\"findFilters\":{\"scene\":{\"sort\":\"title\",\"direction\":\"asc\"}},\"objectFilters\":{\"scene\":{\"performersCriterion\":{\"value\":[" + performer.Id + "],\"modifier\":\"INCLUDES_ALL\"}}}}",
+        };
+        context.Add(group);
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context, principalAccessor, includeFilterSource: true);
+        var page = await resolver.ResolvePageDtosAsync(group.Id, new FindFilter { Page = 1, PerPage = 10 }, forceRefresh: true, CancellationToken.None);
+
+        var item = Assert.Single(page.Items);
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(included.Id, item.SceneId);
+        Assert.Equal("Included", item.Title);
+    }
+
+    [Fact]
+    public async Task FilterDynamicGroupSource_ReturnsTotalAcrossEntityTypesWhenPageIsFilled()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var principalAccessor = scope.PrincipalAccessor;
+        principalAccessor.Set(CreatePrincipal(7));
+
+        for (var index = 0; index < 40; index++)
+            context.Scenes.Add(new Scene { Title = $"Scene {index:D2}" });
+        for (var index = 0; index < 25; index++)
+            context.Images.Add(new Image { Title = $"Image {index:D2}" });
+
+        var group = new Group
+        {
+            Name = "Mixed Dynamic",
+            Kind = GroupKind.Dynamic,
+            QuerySourceKey = DynamicGroupResolver.FilterSourceKey,
+            QueryJson = "{\"entityTypes\":[\"scene\",\"image\"],\"findFilters\":{\"scene\":{\"sort\":\"title\",\"direction\":\"asc\"},\"image\":{\"sort\":\"title\",\"direction\":\"asc\"}}}",
+        };
+        context.Groups.Add(group);
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context, principalAccessor, includeFilterSource: true);
+        var page = await resolver.ResolvePageDtosAsync(group.Id, new FindFilter { Page = 1, PerPage = 40 }, forceRefresh: true, CancellationToken.None);
+
+        Assert.Equal(65, page.TotalCount);
+        Assert.Equal(40, page.Items.Count);
+        Assert.All(page.Items, item => Assert.Equal("scene", item.HostType));
+    }
+
+    [Fact]
     public async Task SnapshotDynamicGroup_WritesStaticGroupItems()
     {
         await using var scope = CreateContext();
@@ -234,7 +299,7 @@ public class DynamicGroupsAndBookmarksTests
             new ContinueWatchingDynamicGroupSource(context),
         };
         if (includeFilterSource)
-            sources.Add(new FilterDynamicGroupSource(new SceneRepository(context)));
+            sources.Add(new FilterDynamicGroupSource(context, new SceneRepository(context), new ImageRepository(context)));
 
         return new DynamicGroupResolver(context, sources, principalAccessor);
     }

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { segmentLibrary } from "../../api/client";
 import { EntityMultiSelector } from "../../components/EntityMultiSelector";
 import type { FilterDialogCustomSection } from "../../components/FilterDialog";
@@ -12,6 +13,7 @@ export function createDerivedSpanCustomFilterSection(scopeSceneIds: number[]): F
     filterKey: "derivedSpanQuery",
     defaultValue: createDefaultDerivedSpanQueryFilter(),
     isActive: isDerivedSpanQueryFilterActive,
+    shouldKeepDraft: () => true,
     summarize: summarizeDerivedSpanQuery,
     renderEditor: (value, onChange) => (
       <DerivedSpanQueryEditor
@@ -236,7 +238,7 @@ function DerivedSpanQueryEditor({
   });
 
   const sourceOptions = optionsQuery.data?.sourceKeys ?? [];
-  const kindOptions = optionsQuery.data?.kinds ?? [];
+  const kindOptions = useMemo(() => Array.from(new Set(["tag", "performer", "face", ...(optionsQuery.data?.kinds ?? [])])), [optionsQuery.data?.kinds]);
   const optionsLoading = optionsQuery.isLoading;
 
   const updateOperand = (index: number, patch: Partial<DerivedSpanOperandFilterValue>) => {
@@ -326,7 +328,16 @@ function DerivedSpanQueryEditor({
                 <span className="font-semibold uppercase tracking-wide text-muted">Kind</span>
                 <select
                   value={operand.kind ?? ""}
-                  onChange={(event) => updateOperand(index, { kind: event.target.value || undefined })}
+                  onChange={(event) => {
+                    const nextKind = event.target.value || undefined;
+                    const selectorKind = normalizeOperandSelectorKind(nextKind);
+                    updateOperand(index, {
+                      kind: nextKind,
+                      tagIds: selectorKind === "tag" ? operand.tagIds : [],
+                      performerIds: selectorKind === "performer" ? operand.performerIds : [],
+                      faceIds: selectorKind === "face" ? operand.faceIds : [],
+                    });
+                  }}
                   className="w-full rounded border border-border bg-input px-2 py-1.5 text-sm text-foreground focus:border-accent focus:outline-none"
                 >
                   <option value="">Any kind</option>
@@ -351,21 +362,7 @@ function DerivedSpanQueryEditor({
               </label>
             </div>
 
-            <div className="mt-3 grid gap-3 lg:grid-cols-3">
-              <div className="space-y-1">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</div>
-                <EntityMultiSelector entityType="tags" values={operand.tagIds} onChange={(tagIds) => updateOperand(index, { tagIds })} placeholder="Search tags..." emptyMessage="No tags found" />
-              </div>
-              <div className="space-y-1">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted">Performers</div>
-                <EntityMultiSelector entityType="performers" values={operand.performerIds} onChange={(performerIds) => updateOperand(index, { performerIds })} placeholder="Search performers..." emptyMessage="No performers found" />
-                <p className="text-[11px] text-muted">Performer matches use linked faces automatically.</p>
-              </div>
-              <div className="space-y-1">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted">Faces</div>
-                <EntityMultiSelector entityType="faces" values={operand.faceIds} onChange={(faceIds) => updateOperand(index, { faceIds })} placeholder="Search faces..." emptyMessage="No faces found" />
-              </div>
-            </div>
+            <OperandEntitySelector operand={operand} onChange={(patch) => updateOperand(index, patch)} />
           </div>
         ))}
       </div>
@@ -379,6 +376,49 @@ function DerivedSpanQueryEditor({
       </button>
     </div>
   );
+}
+
+function OperandEntitySelector({ operand, onChange }: { operand: DerivedSpanOperandFilterValue; onChange: (patch: Partial<DerivedSpanOperandFilterValue>) => void }) {
+  const selectorKind = normalizeOperandSelectorKind(operand.kind);
+
+  if (selectorKind === "tag") {
+    return (
+      <div className="mt-3 max-w-xl space-y-1">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</div>
+        <EntityMultiSelector entityType="tags" values={operand.tagIds} onChange={(tagIds) => onChange({ tagIds })} placeholder="Search tags..." emptyMessage="No tags found" />
+      </div>
+    );
+  }
+
+  if (selectorKind === "performer") {
+    return (
+      <div className="mt-3 max-w-xl space-y-1">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Performers</div>
+        <EntityMultiSelector entityType="performers" values={operand.performerIds} onChange={(performerIds) => onChange({ performerIds })} placeholder="Search performers..." emptyMessage="No performers found" />
+        <p className="text-[11px] text-muted">Performer matches use linked faces automatically.</p>
+      </div>
+    );
+  }
+
+  if (selectorKind === "face") {
+    return (
+      <div className="mt-3 max-w-xl space-y-1">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Faces</div>
+        <EntityMultiSelector entityType="faces" values={operand.faceIds} onChange={(faceIds) => onChange({ faceIds })} placeholder="Search faces..." emptyMessage="No faces found" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded border border-border bg-surface/40 px-3 py-2 text-xs text-secondary">
+      Select a segment type to choose matching tags, performers, or faces.
+    </div>
+  );
+}
+
+function normalizeOperandSelectorKind(kind?: string) {
+  const normalized = kind?.trim().toLowerCase();
+  return normalized === "tag" || normalized === "performer" || normalized === "face" ? normalized : undefined;
 }
 
 function parseOptionalNumber(value: string) {

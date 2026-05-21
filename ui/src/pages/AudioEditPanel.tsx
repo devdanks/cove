@@ -116,11 +116,6 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
       </div>
 
       <div className="space-y-1">
-        <span className="text-xs text-secondary">Custom Fields</span>
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="audio" />
-      </div>
-
-      <div className="space-y-1">
         <span className="text-xs text-secondary">Tags</span>
         <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
       </div>
@@ -155,6 +150,11 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
           ))}
         </div>
         <EntityReferenceMultiSelector entityType="group" values={selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." inputClassName={inputCls} />
+      </div>
+
+      <div className="space-y-1">
+        <span className="text-xs text-secondary">Custom Fields</span>
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="audio" />
       </div>
 
       {mutation.error ? <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{(mutation.error as Error).message}</div> : null}

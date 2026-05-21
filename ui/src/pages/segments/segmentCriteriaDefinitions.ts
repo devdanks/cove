@@ -1,10 +1,33 @@
 import type { CriterionDefinition } from "../../components/FilterDialog";
+import type { CriterionModifier, IntCriterion, MultiIdCriterion } from "../../api/types";
 import type { SegmentsPageContentView } from "./types";
+
+const SEGMENT_NUMBER_MODIFIERS: CriterionModifier[] = ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"];
+
+export interface SegmentCriteriaOptions {
+  kindOptions?: { value: string; label: string }[];
+  sourceOptions?: { value: string; label: string }[];
+}
 
 export const SEGMENT_CRITERIA: CriterionDefinition[] = [
   { id: "sceneTitle", label: "Scene Title", type: "string", filterKey: "sceneTitleCriterion" },
   { id: "scenes", label: "Scenes", type: "multiId", entityType: "scenes", filterKey: "scenesCriterion" },
 ];
+
+export function createSegmentCriteria(options: SegmentCriteriaOptions = {}): CriterionDefinition[] {
+  return [
+  ...SEGMENT_CRITERIA,
+  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "rawTagsCriterion" },
+  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "rawPerformersCriterion" },
+  { id: "faces", label: "Faces", type: "multiId", entityType: "faces", filterKey: "rawFacesCriterion" },
+  { id: "kind", label: "Segment Type", type: "enum", filterKey: "rawKindCriterion", modifiers: ["EQUALS"], options: options.kindOptions ?? [] },
+  { id: "source", label: "Source", type: "enum", filterKey: "rawSourceCriterion", modifiers: ["EQUALS"], options: options.sourceOptions ?? [] },
+  { id: "confidence", label: "Confidence", type: "number", filterKey: "rawConfidenceCriterion", modifiers: SEGMENT_NUMBER_MODIFIERS },
+  { id: "duration", label: "Duration", type: "duration", filterKey: "rawDurationCriterion", modifiers: SEGMENT_NUMBER_MODIFIERS },
+  ];
+}
+
+export const RAW_SEGMENT_CRITERIA: CriterionDefinition[] = createSegmentCriteria();
 
 export interface SceneSelectionCriterion {
   includeIds: number[];
@@ -60,4 +83,55 @@ export function readRawSegmentIdsFromUrl() {
     .split(",")
     .map((value) => Number(value))
     .filter((value) => Number.isInteger(value) && value > 0);
+}
+
+export function readMultiIdCriterionIds(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return [] as number[];
+  }
+
+  const criterion = value as Partial<MultiIdCriterion>;
+  return Array.isArray(criterion.value)
+    ? criterion.value.filter((item): item is number => typeof item === "number" && Number.isFinite(item) && item > 0)
+    : [];
+}
+
+export function readMinimumNumberCriterion(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const criterion = value as Partial<IntCriterion>;
+  if (typeof criterion.value !== "number" || !Number.isFinite(criterion.value)) {
+    return undefined;
+  }
+
+  if (criterion.modifier === "BETWEEN" && typeof criterion.value2 === "number" && Number.isFinite(criterion.value2)) {
+    return Math.min(criterion.value, criterion.value2);
+  }
+
+  return criterion.value;
+}
+
+export interface SegmentNumberCriterionValue {
+  modifier?: CriterionModifier;
+  value?: number;
+  value2?: number;
+}
+
+export function readNumberCriterion(value: unknown): SegmentNumberCriterionValue | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const criterion = value as Partial<IntCriterion>;
+  if (typeof criterion.value !== "number" || !Number.isFinite(criterion.value)) {
+    return undefined;
+  }
+
+  return {
+    modifier: criterion.modifier,
+    value: criterion.value,
+    value2: typeof criterion.value2 === "number" && Number.isFinite(criterion.value2) ? criterion.value2 : undefined,
+  };
 }

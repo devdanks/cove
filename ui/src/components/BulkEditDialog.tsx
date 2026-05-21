@@ -474,6 +474,6 @@ export const GROUP_BULK_FIELDS: BulkEditField[] = [
   { key: "studioId", label: "Studio", type: "select", entityType: "studios", nullable: true },
   { key: "date", label: "Date", type: "date" },
   { key: "director", label: "Director", type: "string" },
-  { key: "synopsis", label: "Synopsis", type: "string" },
+  { key: "description", label: "Description", type: "string" },
   { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
 ];

@@ -3,6 +3,7 @@ using Cove.Api.Controllers;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Interfaces;
 using Cove.Data;
 using Cove.Data.Services;
 using Microsoft.Data.Sqlite;
@@ -27,7 +28,7 @@ public class SegmentCoreControllerTests
         await context.SaveChangesAsync();
 
         var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
-        var controller = new SceneSegmentsController(context, spanResolver);
+        var controller = CreateSceneSegmentsController(context, spanResolver);
         var createDto = new SegmentCreateDto(
             12.5,
             18.25,
@@ -156,7 +157,7 @@ public class SegmentCoreControllerTests
         var principalAccessor = new CurrentPrincipalAccessor();
         principalAccessor.Set(CreatePrincipal(7));
         var spanResolver = new SegmentSpanResolver(context, principalAccessor, new MemoryCache(new MemoryCacheOptions()));
-        var controller = new SceneSegmentsController(context, spanResolver);
+        var controller = CreateSceneSegmentsController(context, spanResolver);
 
         var spansResult = await controller.GetSpans(scene.Id, profile.Id, CancellationToken.None);
         var spansOk = Assert.IsType<OkObjectResult>(spansResult.Result);
@@ -229,7 +230,7 @@ public class SegmentCoreControllerTests
         await context.SaveChangesAsync();
 
         var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
-        var controller = new SceneSegmentsController(context, spanResolver);
+        var controller = CreateSceneSegmentsController(context, spanResolver);
 
         var queryResult = await controller.QuerySpans(scene.Id, new SegmentSpanQueryRequestDto(
             null,
@@ -298,7 +299,7 @@ public class SegmentCoreControllerTests
 
         var principalAccessor = new CurrentPrincipalAccessor();
         principalAccessor.Set(CreatePrincipal(7));
-        var controller = new SceneSegmentsController(context, new SegmentSpanResolver(context, principalAccessor, new MemoryCache(new MemoryCacheOptions())));
+        var controller = CreateSceneSegmentsController(context, new SegmentSpanResolver(context, principalAccessor, new MemoryCache(new MemoryCacheOptions())));
 
         var spansResult = await controller.GetSpans(scene.Id, profile.Id, CancellationToken.None);
         var spansOk = Assert.IsType<OkObjectResult>(spansResult.Result);
@@ -348,7 +349,7 @@ public class SegmentCoreControllerTests
         await context.SaveChangesAsync();
 
         var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
-        var controller = new SceneSegmentsController(context, spanResolver);
+        var controller = CreateSceneSegmentsController(context, spanResolver);
 
         var queryResult = await controller.QuerySpans(scene.Id, new SegmentSpanQueryRequestDto(
             null,
@@ -401,7 +402,7 @@ public class SegmentCoreControllerTests
         await context.SaveChangesAsync();
 
         var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
-        var sceneController = new SceneSegmentsController(context, spanResolver);
+        var sceneController = CreateSceneSegmentsController(context, spanResolver);
 
         var queryResult = await sceneController.QuerySpans(scene.Id, new SegmentSpanQueryRequestDto(
             null,
@@ -547,7 +548,7 @@ public class SegmentCoreControllerTests
             new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>());
 
-        var listResult = await controller.List(q: "Opening", ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, sort: null, direction: null, page: 1, perPage: 20, cancellationToken: CancellationToken.None);
+        var listResult = await controller.List(q: "Opening", ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: null, minConfidence: null, minDurationSec: null, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: null, direction: null, page: 1, perPage: 20, cancellationToken: CancellationToken.None);
         var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
         var page = Assert.IsType<PaginatedResponse<SegmentRecordDto>>(listOk.Value);
         Assert.Equal(1, page.TotalCount);
@@ -622,13 +623,13 @@ public class SegmentCoreControllerTests
             new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>());
 
-        var filteredResult = await controller.List(q: null, ids: null, sceneId: scene.Id, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: "highlight", sourceKey: null, tagged: true, minConfidence: 0.8f, minDurationSec: 5, sort: "duration", direction: "desc", page: 1, perPage: 20, cancellationToken: CancellationToken.None);
+        var filteredResult = await controller.List(q: null, ids: null, sceneId: scene.Id, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: "highlight", sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: true, minConfidence: 0.8f, minDurationSec: 5, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: "duration", direction: "desc", page: 1, perPage: 20, cancellationToken: CancellationToken.None);
         var filteredOk = Assert.IsType<OkObjectResult>(filteredResult.Result);
         var filteredPage = Assert.IsType<PaginatedResponse<SegmentRecordDto>>(filteredOk.Value);
         var filtered = Assert.Single(filteredPage.Items);
         Assert.Equal("Tagged beat", filtered.Title);
 
-        var sortedResult = await controller.List(q: null, ids: null, sceneId: scene.Id, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, sort: "duration", direction: "asc", page: 1, perPage: 20, cancellationToken: CancellationToken.None);
+        var sortedResult = await controller.List(q: null, ids: null, sceneId: scene.Id, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: null, minConfidence: null, minDurationSec: null, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: "duration", direction: "asc", page: 1, perPage: 20, cancellationToken: CancellationToken.None);
         var sortedOk = Assert.IsType<OkObjectResult>(sortedResult.Result);
         var sortedPage = Assert.IsType<PaginatedResponse<SegmentRecordDto>>(sortedOk.Value);
 
@@ -1359,7 +1360,20 @@ public class SegmentCoreControllerTests
         var group = new Group { Name = "Mixed Media" };
         var audio = new Audio { Title = "Audio Chapter" };
         var text = new TextDocument { Title = "Text Chapter" };
-        context.AddRange(group, audio, text);
+        var image = new Image { Title = "Image Chapter" };
+        var scene = new Scene { Title = "Segment Host", MaxDuration = 80 };
+        context.AddRange(group, audio, text, image, scene);
+        await context.SaveChangesAsync();
+        var segment = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 30,
+            EndSec = 36,
+            Kind = "highlight",
+            Title = "Segment Chapter",
+        };
+        context.Segments.Add(segment);
         await context.SaveChangesAsync();
 
         var controller = new GroupItemsController(context, new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
@@ -1403,6 +1417,55 @@ public class SegmentCoreControllerTests
         Assert.Equal("text", textItem.HostType);
         Assert.Equal(text.Id, textItem.HostId);
         Assert.Equal("Text Chapter", textItem.Title);
+
+        var createImageResult = await controller.Create(group.Id, new GroupItemCreateDto(
+            2,
+            GroupItemKind.Image,
+            null,
+            "image",
+            image.Id,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null), CancellationToken.None);
+        var createImageCreated = Assert.IsType<CreatedAtActionResult>(createImageResult.Result);
+        var imageItem = Assert.IsType<GroupItemDto>(createImageCreated.Value);
+        Assert.Equal(GroupItemKind.Image, imageItem.Kind);
+        Assert.Equal(image.Id, imageItem.HostId);
+
+        var createSegmentResult = await controller.Create(group.Id, new GroupItemCreateDto(
+            3,
+            GroupItemKind.Segment,
+            null,
+            "segment",
+            segment.Id,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null), CancellationToken.None);
+        var createSegmentCreated = Assert.IsType<CreatedAtActionResult>(createSegmentResult.Result);
+        var segmentItem = Assert.IsType<GroupItemDto>(createSegmentCreated.Value);
+        Assert.Equal(GroupItemKind.Segment, segmentItem.Kind);
+        Assert.Equal(segment.Id, segmentItem.HostId);
+
+        var manifestResult = await controller.GetPlaybackManifest(group.Id, CancellationToken.None);
+        var manifestOk = Assert.IsType<OkObjectResult>(manifestResult.Result);
+        var manifest = Assert.IsType<GroupPlaybackManifestDto>(manifestOk.Value);
+        Assert.Contains(manifest.Items, item => item.AudioId == audio.Id && item.Src == $"/api/audios/{audio.Id}/stream");
+        Assert.Contains(manifest.Items, item => item.TextId == text.Id && item.Src == $"/api/texts/{text.Id}/file");
+        Assert.Contains(manifest.Items, item => item.ImageId == image.Id && item.Src == $"/api/stream/image/{image.Id}");
+        var segmentManifestItem = Assert.Single(manifest.Items.Where(item => item.SegmentId == segment.Id));
+        Assert.Equal("segment", segmentManifestItem.HostType);
+        Assert.Equal(scene.Id, segmentManifestItem.SceneId);
+        Assert.Equal(30, segmentManifestItem.StartSec);
+        Assert.Equal(36, segmentManifestItem.EndSec);
+        Assert.Equal(6, segmentManifestItem.DurationSec);
     }
 
     [Fact]

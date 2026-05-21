@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries } from "../api/client";
 import type { EntityEngagement, FindFilter, Gallery, GalleryCreate, GalleryFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
-import { InteractiveRatingField, RatingBanner } from "../components/Rating";
+import { RatingBanner } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
@@ -336,13 +336,12 @@ function GalleryCreateModal({ open, onClose, onCreated }: { open: boolean; onClo
     date: "",
     details: "",
     photographer: "",
-    rating: undefined as number | undefined,
   });
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [createAnother, setCreateAnother] = useState(false);
 
   const resetForm = () => {
-    setForm({ title: "", code: "", date: "", details: "", photographer: "", rating: undefined });
+    setForm({ title: "", code: "", date: "", details: "", photographer: "" });
     setCustomFields({});
   };
 
@@ -366,7 +365,6 @@ function GalleryCreateModal({ open, onClose, onCreated }: { open: boolean; onClo
       date: form.date || undefined,
       details: form.details || undefined,
       photographer: form.photographer || undefined,
-      rating: form.rating,
       customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     });
   };
@@ -388,7 +386,6 @@ function GalleryCreateModal({ open, onClose, onCreated }: { open: boolean; onClo
       <Field label="Details">
         <TextArea value={form.details} onChange={(v) => setForm({ ...form, details: v })} rows={3} />
       </Field>
-      <InteractiveRatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} />
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="gallery" />
       </Field>
