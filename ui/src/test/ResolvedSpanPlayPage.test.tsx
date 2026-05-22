@@ -11,6 +11,7 @@ const { mockScenes, mockSegmentDisplayProfiles, mockSegmentLibrary, mockGoBack }
     screenshotUrl: vi.fn((id: number) => `/scene-${id}.jpg`),
     segments: {
       spanDetail: vi.fn(),
+      spans: vi.fn(),
     },
   },
   mockSegmentDisplayProfiles: {
@@ -121,8 +122,9 @@ describe("ResolvedSpanPlayPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders VideoPlayer clip props and seeks within the logical union timeline", async () => {
+  it("renders VideoPlayer clip props and interval details", async () => {
     mockScenes.segments.spanDetail.mockResolvedValue(buildDetail());
+    mockScenes.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
     mockScenes.get.mockResolvedValue(buildScene());
     mockSegmentDisplayProfiles.get.mockResolvedValue({ id: 3, name: "Default Profile" });
     mockSegmentLibrary.list.mockResolvedValue({
@@ -137,12 +139,14 @@ describe("ResolvedSpanPlayPage", () => {
     expect(await screen.findByText("Clip 5-10 @ 5")).toBeInTheDocument();
     expect(screen.queryByTestId("media-detail-layout-media-frame")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Seek within the resolved span"), { target: { value: "7" } });
-    expect(await screen.findByText("Clip 20-25 @ 22")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /intervals/i }));
+    expect(await screen.findByText("Interval 1")).toBeInTheDocument();
+    expect(screen.getByText("Interval 2")).toBeInTheDocument();
   });
 
-  it("auto-advances between intervals and loops back to the first interval", async () => {
+  it("auto-advances between intervals", async () => {
     mockScenes.segments.spanDetail.mockResolvedValue(buildDetail());
+    mockScenes.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
     mockScenes.get.mockResolvedValue(buildScene());
     mockSegmentDisplayProfiles.get.mockResolvedValue({ id: 3, name: "Default Profile" });
     mockSegmentLibrary.list.mockResolvedValue({
@@ -158,10 +162,6 @@ describe("ResolvedSpanPlayPage", () => {
 
     fireEvent.click(screen.getByText("End clip"));
     expect(await screen.findByText("Clip 20-25 @ 20")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Loop span" }));
-    fireEvent.click(screen.getByText("End clip"));
-    expect(await screen.findByText("Clip 5-10 @ 5")).toBeInTheDocument();
   });
 
   it("describes derived intersection spans without union-only copy", async () => {
@@ -170,6 +170,7 @@ describe("ResolvedSpanPlayPage", () => {
     detail.span.tagName = "Intersection";
 
     mockScenes.segments.spanDetail.mockResolvedValue(detail);
+    mockScenes.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
     mockScenes.get.mockResolvedValue(buildScene());
 
     renderPage({
@@ -181,12 +182,14 @@ describe("ResolvedSpanPlayPage", () => {
       },
     });
 
-    expect(await screen.findByText("Derived Intersection")).toBeInTheDocument();
-    expect(screen.getByText("Playback follows the resolved intersection output intervals and automatically skips the gaps between them.")).toBeInTheDocument();
+    expect((await screen.findAllByText("Intersection")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Derived")).toBeInTheDocument();
+    expect(screen.queryByText(/Union progress/i)).not.toBeInTheDocument();
   });
 
   it("creates a metadata-preserving scene from the resolved span", async () => {
     mockScenes.segments.spanDetail.mockResolvedValue(buildDetail());
+    mockScenes.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
     mockScenes.get.mockResolvedValue(buildScene());
     mockScenes.createSubScene.mockResolvedValue({ id: 777 });
     mockSegmentDisplayProfiles.get.mockResolvedValue({ id: 3, name: "Default Profile" });
@@ -200,7 +203,8 @@ describe("ResolvedSpanPlayPage", () => {
     const onNavigate = vi.fn();
     renderPage({ onNavigate });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Make Scene" }));
+    fireEvent.click(await screen.findByTitle("Operations"));
+    fireEvent.click(await screen.findByRole("button", { name: /make scene/i }));
 
     await waitFor(() => {
       expect(mockScenes.createSubScene).toHaveBeenCalledWith(14, expect.objectContaining({

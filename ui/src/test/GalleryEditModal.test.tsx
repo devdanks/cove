@@ -22,6 +22,7 @@ vi.mock("../components/EntityReferenceSelector", () => ({
 }));
 
 vi.mock("../components/shared", () => ({
+  buildTagProvenanceById: () => new Map(),
   CustomFieldsEditor: () => <div>Custom Fields Editor</div>,
 }));
 

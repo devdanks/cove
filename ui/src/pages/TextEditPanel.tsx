@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { texts } from "../api/client";
 import type { SceneGroupInput, TextDocument, TextUpdate } from "../api/types";
+import { Field } from "../components/EditModal";
 import { PerformerContextTagEditor, buildPerformerContextTagIds, syncPerformerContextTags } from "../components/PerformerContextTags";
-import { CustomFieldsEditor } from "../components/shared";
+import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { EntityReferenceMultiSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
@@ -58,6 +59,7 @@ export function TextEditPanel({ text, onSaved }: Props) {
   const setSelectedGroupIds = (groupIds: number[]) => {
     setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
   };
+  const tagProvenanceById = buildTagProvenanceById(text.tags, text.fieldProvenance);
 
   const handleSave = () => {
     mutation.mutate({
@@ -77,60 +79,50 @@ export function TextEditPanel({ text, onSaved }: Props) {
   return (
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="space-y-1">
-          <span className="text-xs text-secondary">Title</span>
+        <Field label="Title" fieldProvenance={text.fieldProvenance} fieldKey="title">
           <input value={title} onChange={(event) => setTitle(event.target.value)} className={inputCls} />
-        </label>
-        <label className="space-y-1">
-          <span className="text-xs text-secondary">Date</span>
+        </Field>
+        <Field label="Date" fieldProvenance={text.fieldProvenance} fieldKey="date">
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className={inputCls} />
-        </label>
+        </Field>
       </div>
 
-      <label className="space-y-1">
-        <span className="text-xs text-secondary">Code</span>
+      <Field label="Code" fieldProvenance={text.fieldProvenance} fieldKey="code">
         <input value={code} onChange={(event) => setCode(event.target.value)} className={inputCls} />
-      </label>
+      </Field>
 
-      <label className="space-y-1">
-        <span className="text-xs text-secondary">Description</span>
+      <Field label="Description" fieldProvenance={text.fieldProvenance} fieldKey="details">
         <textarea value={details} onChange={(event) => setDetails(event.target.value)} rows={4} className={inputCls} />
-      </label>
+      </Field>
 
-      <label className="block space-y-1">
-        <span className="text-xs text-secondary">Studio</span>
+      <Field label="Studio" fieldProvenance={text.fieldProvenance} fieldKey={["studio", "studioId"]}>
         <StudioSelector value={studioId} onChange={setStudioId} placeholder="Search studios..." />
-      </label>
+      </Field>
 
-      <div className="space-y-1">
-        <span className="text-xs text-secondary">URLs</span>
+      <Field label="URLs" fieldProvenance={text.fieldProvenance} fieldKey="urls">
         <StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" />
-      </div>
+      </Field>
 
-      <div className="space-y-1">
-        <span className="text-xs text-secondary">Tags</span>
-        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
-      </div>
+      <Field label="Tags" fieldProvenance={text.fieldProvenance} fieldKey="tags">
+        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} selectedProvenanceById={tagProvenanceById} />
+      </Field>
 
-      <div className="space-y-1">
-        <span className="text-xs text-secondary">Performers</span>
+      <Field label="Performers" fieldProvenance={text.fieldProvenance} fieldKey="performers">
         <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." inputClassName={inputCls} />
-      </div>
+      </Field>
 
       {selectedPerformerIds.length > 0 ? (
-        <div className="space-y-1">
-          <span className="text-xs text-secondary">Performer Occurrence Tags</span>
+        <Field label="Performer Occurrence Tags" fieldProvenance={text.fieldProvenance} fieldKey="contextTags">
           <PerformerContextTagEditor
             performerIds={selectedPerformerIds}
             contextTagIdsByPerformer={contextTagIdsByPerformer}
             onChange={(performerId, tagIds) => setContextTagIdsByPerformer((current) => ({ ...current, [performerId]: tagIds }))}
             inputClassName={inputCls}
           />
-        </div>
+        </Field>
       ) : null}
 
-      <div className="space-y-1">
-        <span className="text-xs text-secondary">Groups</span>
+      <Field label="Groups" fieldProvenance={text.fieldProvenance} fieldKey="groups">
         <div className="mb-1 flex flex-wrap gap-1.5">
           {selectedGroups.map((group) => (
             <span key={group.groupId} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">
@@ -142,12 +134,11 @@ export function TextEditPanel({ text, onSaved }: Props) {
           ))}
         </div>
         <EntityReferenceMultiSelector entityType="group" values={selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." inputClassName={inputCls} />
-      </div>
+      </Field>
 
-      <div className="space-y-1">
-        <span className="text-xs text-secondary">Custom Fields</span>
+      <Field label="Custom Fields" fieldProvenance={text.fieldProvenance} fieldKey="customFields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="text" />
-      </div>
+      </Field>
 
       {mutation.error ? <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{(mutation.error as Error).message}</div> : null}
 

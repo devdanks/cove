@@ -471,13 +471,14 @@ public class DownloaderService(
         };
     }
 
-    internal static ScrapedSceneDto? ConvertScrapeResultToSceneMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    internal static ScrapedSceneDto? ConvertScrapeResultToSceneMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl, string? sourceScraperId = null)
     {
         if (result.Count == 0)
             return null;
 
         var dto = new ScrapedSceneDto
         {
+            SourceScraperId = sourceScraperId,
             Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
             Code = GetScrapeResultString(result, "Code", "code"),
             Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
@@ -498,13 +499,14 @@ public class DownloaderService(
             : null;
     }
 
-    internal static ScrapedImageDto? ConvertScrapeResultToImageMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    internal static ScrapedImageDto? ConvertScrapeResultToImageMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl, string? sourceScraperId = null)
     {
         if (result.Count == 0)
             return null;
 
         var dto = new ScrapedImageDto
         {
+            SourceScraperId = sourceScraperId,
             Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
             Date = GetScrapeResultString(result, "Date", "date", "ReleaseDate", "releaseDate"),
             Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
@@ -525,13 +527,14 @@ public class DownloaderService(
             : null;
     }
 
-    internal static ScrapedAudioMetadata? ConvertScrapeResultToAudioMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    internal static ScrapedAudioMetadata? ConvertScrapeResultToAudioMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl, string? sourceScraperId = null)
     {
         if (result.Count == 0)
             return null;
 
         var metadata = new ScrapedAudioMetadata
         {
+            SourceScraperId = sourceScraperId,
             Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
             Code = GetScrapeResultString(result, "Code", "code"),
             Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
@@ -552,13 +555,14 @@ public class DownloaderService(
             : null;
     }
 
-    internal static ScrapedTextMetadata? ConvertScrapeResultToTextMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    internal static ScrapedTextMetadata? ConvertScrapeResultToTextMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl, string? sourceScraperId = null)
     {
         if (result.Count == 0)
             return null;
 
         var metadata = new ScrapedTextMetadata
         {
+            SourceScraperId = sourceScraperId,
             Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
             Code = GetScrapeResultString(result, "Code", "code"),
             Details = GetScrapeResultString(result, "Details", "details", "Description", "description", "Synopsis", "synopsis"),
@@ -579,13 +583,14 @@ public class DownloaderService(
             : null;
     }
 
-    internal static ScrapedGroupDto? ConvertScrapeResultToGroupMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    internal static ScrapedGroupDto? ConvertScrapeResultToGroupMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl, string? sourceScraperId = null)
     {
         if (result.Count == 0)
             return null;
 
         var dto = new ScrapedGroupDto
         {
+            SourceScraperId = sourceScraperId,
             Name = GetScrapeResultString(result, "Name", "name", "Title", "title"),
             Aliases = GetScrapeResultStringList(result, "Aliases", "aliases", "Alias", "alias"),
             Duration = GetScrapeResultInt(result, "Duration", "duration", "DurationSeconds", "durationSeconds"),
@@ -620,6 +625,7 @@ public class DownloaderService(
 
         return new ScrapedAudioMetadata
         {
+            SourceScraperId = primary.SourceScraperId ?? secondary.SourceScraperId,
             Title = ChooseValue(primary.Title, secondary.Title),
             Code = ChooseValue(primary.Code, secondary.Code),
             Details = ChooseValue(primary.Details, secondary.Details),
@@ -641,6 +647,7 @@ public class DownloaderService(
 
         return primary with
         {
+            SourceScraperId = primary.SourceScraperId ?? secondary.SourceScraperId,
             Title = ChooseValue(primary.Title, secondary.Title),
             Code = ChooseValue(primary.Code, secondary.Code),
             Details = ChooseValue(primary.Details, secondary.Details),
@@ -664,6 +671,7 @@ public class DownloaderService(
 
         return new ScrapedTextMetadata
         {
+            SourceScraperId = primary.SourceScraperId ?? secondary.SourceScraperId,
             Title = ChooseValue(primary.Title, secondary.Title),
             Code = ChooseValue(primary.Code, secondary.Code),
             Details = ChooseValue(primary.Details, secondary.Details),
@@ -685,6 +693,7 @@ public class DownloaderService(
 
         return primary with
         {
+            SourceScraperId = primary.SourceScraperId ?? secondary.SourceScraperId,
             Title = ChooseValue(primary.Title, secondary.Title),
             Date = ChooseValue(primary.Date, secondary.Date),
             Details = ChooseValue(primary.Details, secondary.Details),
@@ -708,6 +717,7 @@ public class DownloaderService(
 
         return primary with
         {
+            SourceScraperId = primary.SourceScraperId ?? secondary.SourceScraperId,
             Name = ChooseValue(primary.Name, secondary.Name),
             Aliases = MergeDistinctStrings(primary.Aliases, secondary.Aliases),
             Duration = primary.Duration ?? secondary.Duration,
@@ -805,10 +815,11 @@ public class DownloaderService(
         var scraperService = services.GetRequiredService<ScraperService>();
         var primaryUrl = request.Url;
         var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
-        var primary = ConvertScrapeResultToImageMetadata(await ScrapeMetadataAsync(scraperService, primaryUrl, "image", ct) ?? [], primaryUrl);
+        var primaryScrape = await ScrapeMetadataAsync(scraperService, primaryUrl, "image", ct);
+        var primary = ConvertScrapeResultToImageMetadata(primaryScrape?.Result ?? [], primaryUrl, primaryScrape?.ScraperId);
         var secondary = secondaryUrl == null
             ? null
-            : ConvertScrapeResultToImageMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "image", ct) ?? [], secondaryUrl);
+            : await ConvertScrapedImageMetadataAsync(scraperService, secondaryUrl, ct);
         return MergeImageMetadata(primary, secondary);
     }
 
@@ -817,10 +828,11 @@ public class DownloaderService(
         var scraperService = services.GetRequiredService<ScraperService>();
         var primaryUrl = request.Url;
         var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
-        var primary = ConvertScrapeResultToSceneMetadata(await ScrapeMetadataAsync(scraperService, primaryUrl, "scene", ct) ?? [], primaryUrl);
+        var primaryScrape = await ScrapeMetadataAsync(scraperService, primaryUrl, "scene", ct);
+        var primary = ConvertScrapeResultToSceneMetadata(primaryScrape?.Result ?? [], primaryUrl, primaryScrape?.ScraperId);
         var secondary = secondaryUrl == null
             ? null
-            : ConvertScrapeResultToSceneMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "scene", ct) ?? [], secondaryUrl);
+            : await ConvertScrapedSceneMetadataAsync(scraperService, secondaryUrl, ct);
         return MergeSceneMetadata(primary, secondary);
     }
 
@@ -829,10 +841,11 @@ public class DownloaderService(
         var scraperService = services.GetRequiredService<ScraperService>();
         var primaryUrl = request.Url;
         var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
-        var primary = ConvertScrapeResultToAudioMetadata(await ScrapeMetadataAsync(scraperService, primaryUrl, "audio", ct) ?? [], primaryUrl);
+        var primaryScrape = await ScrapeMetadataAsync(scraperService, primaryUrl, "audio", ct);
+        var primary = ConvertScrapeResultToAudioMetadata(primaryScrape?.Result ?? [], primaryUrl, primaryScrape?.ScraperId);
         var secondary = secondaryUrl == null
             ? null
-            : ConvertScrapeResultToAudioMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "audio", ct) ?? [], secondaryUrl);
+            : await ConvertScrapedAudioMetadataAsync(scraperService, secondaryUrl, ct);
         return MergeAudioMetadata(primary, secondary);
     }
 
@@ -841,11 +854,36 @@ public class DownloaderService(
         var scraperService = services.GetRequiredService<ScraperService>();
         var primaryUrl = request.Url;
         var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
-        var primary = ConvertScrapeResultToTextMetadata(await ScrapeMetadataAsync(scraperService, primaryUrl, "text", ct) ?? [], primaryUrl);
+        var primaryScrape = await ScrapeMetadataAsync(scraperService, primaryUrl, "text", ct);
+        var primary = ConvertScrapeResultToTextMetadata(primaryScrape?.Result ?? [], primaryUrl, primaryScrape?.ScraperId);
         var secondary = secondaryUrl == null
             ? null
-            : ConvertScrapeResultToTextMetadata(await ScrapeMetadataAsync(scraperService, secondaryUrl, "text", ct) ?? [], secondaryUrl);
+            : await ConvertScrapedTextMetadataAsync(scraperService, secondaryUrl, ct);
         return MergeTextMetadata(primary, secondary);
+    }
+
+    private static async Task<ScrapedImageDto?> ConvertScrapedImageMetadataAsync(ScraperService scraperService, string url, CancellationToken ct)
+    {
+        var scrape = await ScrapeMetadataAsync(scraperService, url, "image", ct);
+        return ConvertScrapeResultToImageMetadata(scrape?.Result ?? [], url, scrape?.ScraperId);
+    }
+
+    private static async Task<ScrapedSceneDto?> ConvertScrapedSceneMetadataAsync(ScraperService scraperService, string url, CancellationToken ct)
+    {
+        var scrape = await ScrapeMetadataAsync(scraperService, url, "scene", ct);
+        return ConvertScrapeResultToSceneMetadata(scrape?.Result ?? [], url, scrape?.ScraperId);
+    }
+
+    private static async Task<ScrapedAudioMetadata?> ConvertScrapedAudioMetadataAsync(ScraperService scraperService, string url, CancellationToken ct)
+    {
+        var scrape = await ScrapeMetadataAsync(scraperService, url, "audio", ct);
+        return ConvertScrapeResultToAudioMetadata(scrape?.Result ?? [], url, scrape?.ScraperId);
+    }
+
+    private static async Task<ScrapedTextMetadata?> ConvertScrapedTextMetadataAsync(ScraperService scraperService, string url, CancellationToken ct)
+    {
+        var scrape = await ScrapeMetadataAsync(scraperService, url, "text", ct);
+        return ConvertScrapeResultToTextMetadata(scrape?.Result ?? [], url, scrape?.ScraperId);
     }
 
     private async Task<ScrapedGroupDto?> BuildMergedGroupMetadataAsync(IServiceProvider services, IReadOnlyList<string> urls, CancellationToken ct)
@@ -854,7 +892,8 @@ public class DownloaderService(
         ScrapedGroupDto? merged = null;
         foreach (var url in urls.Where(url => !string.IsNullOrWhiteSpace(url)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var scraped = ConvertScrapeResultToGroupMetadata(await ScrapeMetadataAsync(scraperService, url, "group", ct) ?? [], url);
+            var scrape = await ScrapeMetadataAsync(scraperService, url, "group", ct);
+            var scraped = ConvertScrapeResultToGroupMetadata(scrape?.Result ?? [], url, scrape?.ScraperId);
             merged = MergeGroupMetadata(merged, scraped);
         }
 
@@ -961,6 +1000,7 @@ public class DownloaderService(
             return false;
 
         var fieldProvenance = new Dictionary<string, object?>();
+        var sourceKey = BuildScraperSourceKey(metadata.SourceScraperId);
 
         if (!string.IsNullOrWhiteSpace(metadata.Title))
         {
@@ -999,7 +1039,7 @@ public class DownloaderService(
         var tagNames = NormalizeNames(metadata.TagNames);
         if (tagNames.Count > 0)
         {
-            await ApplyAudioTagsAsync(db, audio, tagNames, options.CreateMissingTags, tagProvenanceService, ct);
+            await ApplyAudioTagsAsync(db, audio, tagNames, options.CreateMissingTags, tagProvenanceService, sourceKey, ct);
             fieldProvenance["tags"] = tagNames;
         }
 
@@ -1018,7 +1058,7 @@ public class DownloaderService(
         }
 
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Audio, audio.Id, fieldProvenance, "scraper", cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Audio, audio.Id, fieldProvenance, sourceKey, cancellationToken: ct);
 
         await db.SaveChangesAsync(ct);
         await RefreshAudioArraysAsync(db, audio, ct);
@@ -1048,6 +1088,7 @@ public class DownloaderService(
             return false;
 
         var fieldProvenance = new Dictionary<string, object?>();
+        var sourceKey = BuildScraperSourceKey(metadata.SourceScraperId);
 
         if (!string.IsNullOrWhiteSpace(metadata.Title))
         {
@@ -1086,7 +1127,7 @@ public class DownloaderService(
         var tagNames = NormalizeNames(metadata.TagNames);
         if (tagNames.Count > 0)
         {
-            await ApplyImageTagsAsync(db, image, tagNames, options.CreateMissingTags, tagProvenanceService, ct);
+            await ApplyImageTagsAsync(db, image, tagNames, options.CreateMissingTags, tagProvenanceService, sourceKey, ct);
             fieldProvenance["tags"] = tagNames;
         }
 
@@ -1105,7 +1146,7 @@ public class DownloaderService(
         }
 
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Image, image.Id, fieldProvenance, "scraper", cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Image, image.Id, fieldProvenance, sourceKey, cancellationToken: ct);
 
         await db.SaveChangesAsync(ct);
         eventBus?.Publish(new EntityEvent(EventType.ImageUpdated, "Image", image.Id));
@@ -1134,6 +1175,7 @@ public class DownloaderService(
             return false;
 
         var fieldProvenance = new Dictionary<string, object?>();
+        var sourceKey = BuildScraperSourceKey(metadata.SourceScraperId);
 
         if (!string.IsNullOrWhiteSpace(metadata.Title))
         {
@@ -1172,7 +1214,7 @@ public class DownloaderService(
         var tagNames = NormalizeNames(metadata.TagNames);
         if (tagNames.Count > 0)
         {
-            await ApplyTextTagsAsync(db, textDocument, tagNames, options.CreateMissingTags, tagProvenanceService, ct);
+            await ApplyTextTagsAsync(db, textDocument, tagNames, options.CreateMissingTags, tagProvenanceService, sourceKey, ct);
             fieldProvenance["tags"] = tagNames;
         }
 
@@ -1191,7 +1233,7 @@ public class DownloaderService(
         }
 
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Text, textDocument.Id, fieldProvenance, "scraper", cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Text, textDocument.Id, fieldProvenance, sourceKey, cancellationToken: ct);
 
         await db.SaveChangesAsync(ct);
         await RefreshTextArraysAsync(db, textDocument, ct);
@@ -1199,14 +1241,16 @@ public class DownloaderService(
         return true;
     }
 
-    private static async Task<Dictionary<string, object>?> ScrapeMetadataAsync(ScraperService scraperService, string? url, string entityType, CancellationToken ct)
+    private static async Task<(string ScraperId, Dictionary<string, object> Result)?> ScrapeMetadataAsync(ScraperService scraperService, string? url, string entityType, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(url))
             return null;
 
-        var scraped = await scraperService.ScrapeUrlAutoAsync(url, entityType, ct);
-        return scraped?.Result;
+        return await scraperService.ScrapeUrlAutoAsync(url, entityType, ct);
     }
+
+    private static string BuildScraperSourceKey(string? scraperId)
+        => string.IsNullOrWhiteSpace(scraperId) ? "scraper" : $"scraper:{scraperId.Trim()}";
 
     private static string? ResolveSourceMetadataUrl(DownloaderRequest request, string primaryUrl)
     {
@@ -1423,7 +1467,7 @@ public class DownloaderService(
         }
     }
 
-    private static async Task ApplyAudioTagsAsync(CoveContext db, Audio audio, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, CancellationToken ct)
+    private static async Task ApplyAudioTagsAsync(CoveContext db, Audio audio, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, string sourceKey, CancellationToken ct)
     {
         var tagLookup = await LoadTagsByNameAsync(db, tagNames, createMissing, ct);
         var existing = audio.AudioTags
@@ -1436,16 +1480,17 @@ public class DownloaderService(
             if (!tagLookup.TryGetValue(tagName, out var tag))
                 continue;
 
+            if (tagProvenanceService != null)
+                await tagProvenanceService.RecordAsync(AffinityHostType.Audio, audio.Id, tag, sourceKey, cancellationToken: ct);
+
             if (!existing.Add(tag.Name))
                 continue;
 
             audio.AudioTags.Add(new AudioTag { Audio = audio, Tag = tag });
-            if (tagProvenanceService != null)
-                await tagProvenanceService.RecordAsync(AffinityHostType.Audio, audio.Id, tag, "scraper", cancellationToken: ct);
         }
     }
 
-    private static async Task ApplyImageTagsAsync(CoveContext db, Image image, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, CancellationToken ct)
+    private static async Task ApplyImageTagsAsync(CoveContext db, Image image, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, string sourceKey, CancellationToken ct)
     {
         var tagLookup = await LoadTagsByNameAsync(db, tagNames, createMissing, ct);
         var existing = image.ImageTags
@@ -1458,16 +1503,17 @@ public class DownloaderService(
             if (!tagLookup.TryGetValue(tagName, out var tag))
                 continue;
 
+            if (tagProvenanceService != null)
+                await tagProvenanceService.RecordAsync(AffinityHostType.Image, image.Id, tag, sourceKey, cancellationToken: ct);
+
             if (!existing.Add(tag.Name))
                 continue;
 
             image.ImageTags.Add(new ImageTag { Image = image, Tag = tag });
-            if (tagProvenanceService != null)
-                await tagProvenanceService.RecordAsync(AffinityHostType.Image, image.Id, tag, "scraper", cancellationToken: ct);
         }
     }
 
-    private static async Task ApplyTextTagsAsync(CoveContext db, TextDocument textDocument, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, CancellationToken ct)
+    private static async Task ApplyTextTagsAsync(CoveContext db, TextDocument textDocument, IReadOnlyList<string> tagNames, bool createMissing, ITagProvenanceService? tagProvenanceService, string sourceKey, CancellationToken ct)
     {
         var tagLookup = await LoadTagsByNameAsync(db, tagNames, createMissing, ct);
         var existing = textDocument.TextTags
@@ -1480,12 +1526,13 @@ public class DownloaderService(
             if (!tagLookup.TryGetValue(tagName, out var tag))
                 continue;
 
+            if (tagProvenanceService != null)
+                await tagProvenanceService.RecordAsync(AffinityHostType.Text, textDocument.Id, tag, sourceKey, cancellationToken: ct);
+
             if (!existing.Add(tag.Name))
                 continue;
 
             textDocument.TextTags.Add(new TextTag { TextDocument = textDocument, Tag = tag });
-            if (tagProvenanceService != null)
-                await tagProvenanceService.RecordAsync(AffinityHostType.Text, textDocument.Id, tag, "scraper", cancellationToken: ct);
         }
     }
 
@@ -2595,6 +2642,7 @@ public class DownloaderService(
 
     internal sealed record ScrapedAudioMetadata
     {
+        public string? SourceScraperId { get; init; }
         public string? Title { get; init; }
         public string? Code { get; init; }
         public string? Details { get; init; }
@@ -2607,6 +2655,7 @@ public class DownloaderService(
 
     internal sealed record ScrapedTextMetadata
     {
+        public string? SourceScraperId { get; init; }
         public string? Title { get; init; }
         public string? Code { get; init; }
         public string? Details { get; init; }

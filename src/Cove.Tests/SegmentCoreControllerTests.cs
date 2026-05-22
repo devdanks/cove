@@ -1545,6 +1545,9 @@ public class SegmentCoreControllerTests
 
     private static JsonElement ParseJson(string json) => JsonSerializer.Deserialize<JsonElement>(json);
 
+    private static SceneSegmentsController CreateSceneSegmentsController(CoveContext context, SegmentSpanResolver spanResolver)
+        => new(context, spanResolver, new StubBlobService());
+
     private static async Task<TestContextScope> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -1593,6 +1596,18 @@ public class SegmentCoreControllerTests
             base.OnModelCreating(modelBuilder);
 
         }
+    }
+
+    private sealed class StubBlobService : IBlobService
+    {
+        public Task<string> StoreBlobAsync(Stream data, string contentType, CancellationToken ct = default)
+            => Task.FromResult($"stub-{Guid.NewGuid():N}");
+
+        public Task<(Stream Stream, string ContentType)?> GetBlobAsync(string blobId, CancellationToken ct = default)
+            => Task.FromResult<(Stream, string)?>(null);
+
+        public Task DeleteBlobAsync(string blobId, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     private sealed class TestContextScope : IAsyncDisposable

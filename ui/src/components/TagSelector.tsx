@@ -1,6 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { Tag } from "../api/types";
+import type { Tag, TagProvenance } from "../api/types";
+import { TagProvenanceHover } from "./TagProvenanceHover";
 import { rankByLabel } from "../utils/searchRanking";
 
 export type SelectableTag = Pick<Tag, "id" | "name" | "color" | "tagGroupId" | "tagGroupName" | "tagGroupColor">;
@@ -51,7 +52,7 @@ export function filterTagsForSelector<TTag extends SelectableTag>(tags: TTag[], 
   return q ? rankByLabel(matched, search, (tag) => tag.name) : matched;
 }
 
-export function SelectedTagChips({ tags, onRemove, emptyText, className }: { tags: SelectableTag[]; onRemove?: (tag: SelectableTag) => void; emptyText?: string; className?: string }) {
+export function SelectedTagChips({ tags, onRemove, emptyText, className, provenanceById }: { tags: SelectableTag[]; onRemove?: (tag: SelectableTag) => void; emptyText?: string; className?: string; provenanceById?: Record<number, TagProvenance[] | undefined> }) {
   if (tags.length === 0) {
     return emptyText ? <div className="text-xs text-muted">{emptyText}</div> : null;
   }
@@ -60,7 +61,7 @@ export function SelectedTagChips({ tags, onRemove, emptyText, className }: { tag
     <div className={className ?? "flex flex-wrap gap-1.5"}>
       {tags.map((tag) => {
         const style = getTagChipStyle(tag);
-        return (
+        const chip = (
           <span
             key={tag.id}
             style={style}
@@ -75,6 +76,8 @@ export function SelectedTagChips({ tags, onRemove, emptyText, className }: { tag
             ) : null}
           </span>
         );
+        const provenance = provenanceById?.[tag.id];
+        return provenance?.length ? <TagProvenanceHover key={tag.id} provenance={provenance}>{chip}</TagProvenanceHover> : chip;
       })}
     </div>
   );

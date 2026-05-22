@@ -22,6 +22,7 @@ export interface Scene {
   createdAt: string;
   updatedAt: string;
   contextTagApplications?: TagApplication[];
+  fieldProvenance?: FieldProvenance[];
   parentSceneId?: number | null;
   parentSceneTitle?: string | null;
   clipStartSec?: number | null;
@@ -107,6 +108,7 @@ export interface Performer {
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface PerformerRemoteId {
@@ -171,6 +173,7 @@ export interface PerformerScrapeRequest {
 }
 
 export interface ScrapedPerformer {
+  sourceScraperId?: string;
   name?: string;
   disambiguation?: string;
   gender?: string;
@@ -246,6 +249,16 @@ export interface TagProvenance {
   hostDurationSec?: number;
 }
 
+export interface FieldProvenance {
+  fieldKey: string;
+  sourceKey: string;
+  sourceRunId?: string;
+  modelKey?: string;
+  value?: unknown;
+  confidence?: number;
+  createdAt: string;
+}
+
 export interface TagGroup {
   id: number;
   name: string;
@@ -313,6 +326,7 @@ export interface TagDetail extends Tag {
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface TagGraphNode {
@@ -395,6 +409,7 @@ export interface Studio {
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface StudioRemoteId {
@@ -442,6 +457,7 @@ export interface Gallery {
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface GalleryFileInfo {
@@ -521,6 +537,7 @@ export interface Image {
   createdAt: string;
   updatedAt: string;
   contextTagApplications?: TagApplication[];
+  fieldProvenance?: FieldProvenance[];
 }
 
 
@@ -615,6 +632,7 @@ export interface Audio {
   maxDuration: number;
   hasVideoFiles: boolean;
   contextTagApplications?: TagApplication[];
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface AudioCreate {
@@ -678,6 +696,7 @@ export interface TextDocument {
   maxWordCount?: number | null;
   maxPageCount?: number | null;
   contextTagApplications?: TagApplication[];
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface TextCreate {
@@ -759,6 +778,7 @@ export interface Group {
   showInSceneLists?: boolean;
   allowedHostTypes?: string[];
   sortOrder?: number;
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface GroupReorder {

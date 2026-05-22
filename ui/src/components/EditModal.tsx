@@ -1,11 +1,13 @@
 import { X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
+import type { FieldProvenance } from "../api/types";
+import { FieldProvenanceHover } from "./FieldProvenanceHover";
 
 interface Props {
   title: string;
   open: boolean;
   onClose: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 export function EditModal({ title, open, onClose, children }: Props) {
@@ -39,13 +41,29 @@ export function EditModal({ title, open, onClose, children }: Props) {
 }
 
 // Reusable field components
-export function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
+export function Field({
+  label,
+  children,
+  fieldProvenance,
+  fieldKey,
+}: {
+  label: string;
+  children: ReactNode;
+  fieldProvenance?: FieldProvenance[];
+  fieldKey?: string | string[];
+}) {
+  const content = (
     <div className="mb-4">
       <label className="block text-xs text-secondary mb-1">{label}</label>
       {children}
     </div>
   );
+
+  return fieldKey ? (
+    <FieldProvenanceHover fieldProvenance={fieldProvenance} fieldKey={fieldKey} block>
+      {content}
+    </FieldProvenanceHover>
+  ) : content;
 }
 
 export function TextInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {

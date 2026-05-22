@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { galleries, images, scenes, fileOps } from "../api/client";
 import type { FindFilter, Gallery, Image, ImageFilterCriteria, Scene, SceneFilterCriteria } from "../api/types";
-import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
+import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, Check, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GalleryEditModal } from "./GalleryEditModal";
@@ -285,7 +285,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         imageContainerClassName="relative flex h-96 w-72 max-w-full flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/35 md:h-[34rem] md:w-[25rem]"
         onImageClick={canWriteGallery ? () => setCoverOpen(true) : undefined}
         imageFallback={<ImageIcon className="h-14 w-14" />}
-        title={gallery.title || "Untitled Gallery"}
+        title={<FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="title">{gallery.title || "Untitled Gallery"}</FieldProvenanceHover>}
         favorite={galleryFavorite}
         favoritePending={galleryFavoritePending}
         onFavoriteToggle={canEngageGallery ? () => setGalleryFavorite(!galleryFavorite) : undefined}
@@ -294,19 +294,21 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         onOrganizedToggle={canWriteGallery ? (organized) => galleryUpdateMut.mutate({ organized }) : undefined}
         aliases={
           <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
-            {gallery.date ? <span>{formatDate(gallery.date)}</span> : null}
+            {gallery.date ? <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="date"><span>{formatDate(gallery.date)}</span></FieldProvenanceHover> : null}
             {gallery.studioName && gallery.studioId ? (
               canReadStudios ? (
-                <button onClick={() => onNavigate({ page: "studio", id: gallery.studioId })} className="text-accent hover:underline">{gallery.studioName}</button>
+                <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="studio">
+                  <button onClick={() => onNavigate({ page: "studio", id: gallery.studioId })} className="text-accent hover:underline">{gallery.studioName}</button>
+                </FieldProvenanceHover>
               ) : (
-                <span>{gallery.studioName}</span>
+                <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="studio"><span>{gallery.studioName}</span></FieldProvenanceHover>
               )
             ) : null}
-            {gallery.photographer ? <span>Photographer: {gallery.photographer}</span> : null}
-            {gallery.code ? <span>Code: {gallery.code}</span> : null}
+            {gallery.photographer ? <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="photographer"><span>Photographer: {gallery.photographer}</span></FieldProvenanceHover> : null}
+            {gallery.code ? <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="code"><span>Code: {gallery.code}</span></FieldProvenanceHover> : null}
           </span>
         }
-        description={gallery.details}
+        description={gallery.details ? <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="details" block>{gallery.details}</FieldProvenanceHover> : undefined}
         counts={[
           { key: "images", label: "Images", value: effectiveImageCount, icon: <ImageIcon className="h-4 w-4" /> },
           { key: "scenes", label: "Scenes", value: gallery.sceneCount, icon: <Film className="h-4 w-4" /> },
@@ -362,18 +364,20 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
             {canReadTags && gallery.tags.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {gallery.tags.map((tag) => (
-                  <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                  <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={resolveTagProvenance(tag, gallery.fieldProvenance)} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
                 ))}
               </div>
             ) : null}
             {gallery.urls.length > 0 ? (
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {gallery.urls.map((url, index) => (
-                  <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="flex max-w-xs items-center gap-1 truncate text-accent hover:underline">
-                    <LinkIcon className="h-3.5 w-3.5 flex-shrink-0" />{new URL(url).hostname}
-                  </a>
-                ))}
-              </div>
+              <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="urls" block>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {gallery.urls.map((url, index) => (
+                    <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="flex max-w-xs items-center gap-1 truncate text-accent hover:underline">
+                      <LinkIcon className="h-3.5 w-3.5 flex-shrink-0" />{new URL(url).hostname}
+                    </a>
+                  ))}
+                </div>
+              </FieldProvenanceHover>
             ) : null}
             <CustomFieldsDisplay customFields={gallery.customFields} entityType="gallery" />
           </div>

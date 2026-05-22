@@ -28,6 +28,7 @@ vi.mock("../components/ImageInput", () => ({
 }));
 
 vi.mock("../components/shared", () => ({
+  buildTagProvenanceById: () => new Map(),
   CustomFieldsEditor: () => <div>Custom Fields Editor</div>,
 }));
 

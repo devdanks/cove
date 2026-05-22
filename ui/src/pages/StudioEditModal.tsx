@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { studios } from "../api/client";
 import type { Studio, StudioUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
-import { CustomFieldsEditor } from "../components/shared";
+import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { EntityReferenceMultiSelector, EntityReferenceSelector } from "../components/EntityReferenceSelector";
@@ -27,6 +27,7 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
 
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(studio.customFields ?? {}) });
   const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(studio.remoteIds.map((remoteId) => ({ ...remoteId })));
+  const tagProvenanceById = buildTagProvenanceById(studio.tags, studio.fieldProvenance);
 
   useEffect(() => {
     setName(studio.name);
@@ -69,43 +70,43 @@ export function StudioEditModal({ studio, open, onClose }: Props) {
     <EditModal title={`Edit Studio: ${studio.name}`} open={open} onClose={onClose}>
       <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Name *">
+        <Field label="Name *" fieldProvenance={studio.fieldProvenance} fieldKey="name">
           <TextInput value={name} onChange={setName} placeholder="Studio name" />
         </Field>
-        <Field label="Parent Studio">
+        <Field label="Parent Studio" fieldProvenance={studio.fieldProvenance} fieldKey={["parent", "parentId"]}>
           <EntityReferenceSelector entityType="studio" value={parentId} onChange={setParentId} placeholder="Search parent studios..." excludeIds={[studio.id]} />
         </Field>
       </div>
 
-      <Field label="Details">
+      <Field label="Details" fieldProvenance={studio.fieldProvenance} fieldKey="details">
         <TextArea value={details} onChange={setDetails} placeholder="Studio description" rows={3} />
       </Field>
 
-      <div className="flex items-end gap-4 pb-4">
+      <Field label="Auto Tagging" fieldProvenance={studio.fieldProvenance} fieldKey="ignoreAutoTag">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={ignoreAutoTag} onChange={(e) => setIgnoreAutoTag(e.target.checked)} className="rounded bg-card border-border" />
             Ignore Auto Tag
           </label>
-      </div>
+      </Field>
 
-      <Field label="URLs">
+      <Field label="URLs" fieldProvenance={studio.fieldProvenance} fieldKey="urls">
         <StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" />
       </Field>
 
-      <Field label="Aliases">
+      <Field label="Aliases" fieldProvenance={studio.fieldProvenance} fieldKey="aliases">
         <StringListEditor values={aliases} onChange={setAliases} placeholder="Alternate name" addLabel="Add Alias" />
       </Field>
 
       {/* Tags */}
-      <Field label="Tags">
-        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." />
+      <Field label="Tags" fieldProvenance={studio.fieldProvenance} fieldKey="tags">
+        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." selectedProvenanceById={tagProvenanceById} />
       </Field>
 
-      <Field label="Remote IDs">
+      <Field label="Remote IDs" fieldProvenance={studio.fieldProvenance} fieldKey="remoteIds">
         <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
       </Field>
 
-      <Field label="Custom Fields">
+      <Field label="Custom Fields" fieldProvenance={studio.fieldProvenance} fieldKey="customFields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="studio" />
       </Field>
   </div>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bookmark, Camera, ChevronLeft, ChevronRight, Clapperboard, Clock, ExternalLink, Film, Image, MoreVertical, Network, Save, Sparkles, Trash2 } from "lucide-react";
+import { Bookmark, Camera, ChevronLeft, ChevronRight, Clapperboard, Clock, ExternalLink, Film, Image, MoreVertical, Network, Sparkles, Trash2 } from "lucide-react";
 import { entityImages, scenes, segmentLibrary } from "../api/client";
 import type { Scene, SegmentRecord, TagProvenance } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -80,6 +80,70 @@ function formatSegmentTimeInput(seconds: number) {
   return hours > 0 ? `${hours}:${minutes.toString().padStart(2, "0")}:${secondText}` : `${minutes}:${secondText}`;
 }
 
+function isHexColorValue(value?: string | null) {
+  return /^#[0-9a-fA-F]{6}$/.test(value?.trim() ?? "");
+}
+
+function getSegmentContextDescriptor(segment: SegmentRecord) {
+  const normalizedKind = segment.kind?.trim().toLowerCase() ?? "";
+  const performerId = getSegmentPerformerId(segment);
+  const faceId = getSegmentFaceId(segment);
+  const referenceLabel = segment.performerName?.trim() || segment.refLabel?.trim() || segment.tagName?.trim();
+
+  if (segment.tagId != null || segment.tagName?.trim()) {
+    return {
+      label: "Tag",
+      title: "Next With Same Tag",
+      emptyMessage: segment.tagName?.trim()
+        ? `No later ${segment.tagName.trim()} segment is in this scene.`
+        : "This segment does not have a tag to follow.",
+      matchKey: segment.tagId != null ? `tag:${segment.tagId}` : `tag-name:${segment.tagName?.trim().toLowerCase()}`,
+    };
+  }
+
+  if (performerId != null || (normalizedKind === "performer" && referenceLabel)) {
+    return {
+      label: "Performer",
+      title: "Next With Same Performer",
+      emptyMessage: referenceLabel
+        ? `No later ${referenceLabel} segment is in this scene.`
+        : "This segment does not have a performer to follow.",
+      matchKey: performerId != null ? `performer:${performerId}` : `performer-name:${referenceLabel?.toLowerCase()}`,
+    };
+  }
+
+  if (faceId != null || (normalizedKind.includes("face") && referenceLabel)) {
+    return {
+      label: "Face",
+      title: "Next With Same Face",
+      emptyMessage: referenceLabel
+        ? `No later ${referenceLabel} segment is in this scene.`
+        : "This segment does not have a face to follow.",
+      matchKey: faceId != null ? `face:${faceId}` : `face-name:${referenceLabel?.toLowerCase()}`,
+    };
+  }
+
+  if (segment.refId != null || referenceLabel) {
+    const label = normalizedKind ? normalizedKind[0].toUpperCase() + normalizedKind.slice(1) : "Reference";
+    return {
+      label,
+      title: `Next With Same ${label}`,
+      emptyMessage: referenceLabel
+        ? `No later ${referenceLabel} segment is in this scene.`
+        : `This segment does not have a ${label.toLowerCase()} to follow.`,
+      matchKey: segment.refId != null
+        ? `${normalizedKind || "reference"}:${segment.refId}`
+        : `${normalizedKind || "reference"}-name:${referenceLabel?.toLowerCase()}`,
+    };
+  }
+
+  return null;
+}
+
+function getSegmentContextMatchKey(segment: SegmentRecord) {
+  return getSegmentContextDescriptor(segment)?.matchKey;
+}
+
 function setStartTimeFromSeconds(seconds: number, setStartSec: (value: number) => void, setStartText: (value: string) => void) {
   const normalized = Math.max(0, seconds);
   setStartSec(normalized);
@@ -133,7 +197,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const opsMenuRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
+  const resetEditState = () => {
     if (!segment) {
       return;
     }
@@ -147,6 +211,14 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
     setSelectedPerformerId(getSegmentPerformerId(segment));
     setSelectedFaceId(getSegmentFaceId(segment));
     setSegmentVideoTime(segment.startSec);
+  };
+
+  useEffect(() => {
+    if (!segment) {
+      return;
+    }
+
+    resetEditState();
   }, [segment]);
 
   const { data: siblingSegments = [], isLoading: siblingSegmentsLoading } = useQuery({
@@ -297,13 +369,14 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
     () => [...siblingSegments].sort((left, right) => left.startSec - right.startSec || (left.endSec ?? left.startSec) - (right.endSec ?? right.startSec) || left.id - right.id),
     [siblingSegments],
   );
+  const contextDescriptor = useMemo(() => (segment ? getSegmentContextDescriptor(segment) : null), [segment]);
   const sceneContext = useMemo(() => {
     if (!segment) {
       return {
         currentIndex: -1,
         previous: [] as SegmentRecord[],
         next: [] as SegmentRecord[],
-        nextSameTag: undefined as SegmentRecord | undefined,
+        nextSameReference: undefined as SegmentRecord | undefined,
         intersecting: [] as SegmentRecord[],
       };
     }
@@ -316,16 +389,17 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
       const itemEnd = item.endSec ?? item.startSec;
       return item.id !== segment.id && item.startSec < currentEnd && itemEnd > segment.startSec;
     };
-    const nextSameTag = segment.tagId == null
+    const currentContextMatchKey = getSegmentContextMatchKey(segment);
+    const nextSameReference = currentContextMatchKey == null
       ? undefined
-      : orderedSiblingSegments.find((item) => item.id !== segment.id && item.tagId === segment.tagId && item.startSec >= segment.startSec);
+      : orderedSiblingSegments.find((item) => item.id !== segment.id && getSegmentContextMatchKey(item) === currentContextMatchKey && item.startSec >= segment.startSec);
     const intersecting = orderedSiblingSegments.filter(intersectsCurrent).slice(0, 6);
 
     return {
       currentIndex,
       previous,
       next,
-      nextSameTag,
+      nextSameReference,
       intersecting,
     };
   }, [orderedSiblingSegments, segment]);
@@ -436,7 +510,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">{canWriteSegments ? "Edit Segment" : "Segment Details"}</h2>
           <p className="mt-1 text-sm text-secondary">
             {canWriteSegments
-              ? "Update the timing, metadata, and tag assignment for this segment."
+              ? "Update the timing, metadata, and reference assignment for this segment."
               : "You have read access to this segment, but not write access."}
           </p>
         </div>
@@ -526,6 +600,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
             <EntityReferenceSelector
               entityType={kind}
               value={kind === "tag" ? selectedTagId ?? undefined : kind === "performer" ? selectedPerformerId ?? undefined : selectedFaceId ?? undefined}
+              selectedLabel={kind === "tag" ? segment.tagName ?? undefined : kind === "performer" ? segment.performerName ?? segment.refLabel ?? undefined : segment.refLabel ?? undefined}
               onChange={(value) => {
                 if (kind === "tag") setSelectedTagId(value ?? null);
                 if (kind === "performer") setSelectedPerformerId(value ?? null);
@@ -533,19 +608,29 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
               }}
               placeholder={kind === "tag" ? "Search tags..." : kind === "performer" ? "Search performers..." : "Search faces..."}
               disabled={kind === "tag" ? !canReadTags : kind === "performer" ? !canReadPerformers : !canReadFaces}
-              inputClassName="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent disabled:cursor-not-allowed disabled:text-muted"
+              selectedDisplay="input"
+              inputClassName="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 pr-8 text-sm font-normal text-foreground outline-none focus:border-accent disabled:cursor-not-allowed disabled:text-muted"
             />
           </label>
 
           <label className="block text-xs font-semibold uppercase tracking-wide text-muted">
             Color hint
-            <input
-              type="text"
-              value={colorHint}
-              onChange={(event) => setColorHint(event.target.value)}
-              placeholder="Optional"
-              className="mt-2 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
-            />
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="color"
+                value={isHexColorValue(colorHint) ? colorHint : "#6ee7b7"}
+                onChange={(event) => setColorHint(event.target.value)}
+                className="h-10 w-12 rounded border border-border bg-card p-1"
+                aria-label="Choose segment color hint"
+              />
+              <input
+                type="text"
+                value={colorHint}
+                onChange={(event) => setColorHint(event.target.value)}
+                placeholder="#6ee7b7"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-input px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-accent"
+              />
+            </div>
           </label>
         </div>
       ) : (
@@ -572,26 +657,24 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
                   ? `Choose a ${kind}.`
                   : "Changes are written back through the owning scene segment API."}
           </div>
-          <div className="flex items-center gap-2">
-            {canDeleteSegments ? (
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(true)}
-                disabled={deleteMutation.isPending}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-200 transition-colors hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Trash2 className="h-4 w-4" />
-                {deleteMutation.isPending ? "Deleting..." : "Delete"}
-              </button>
-            ) : null}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                resetEditState();
+                setActiveTab("overview");
+              }}
+              className="px-4 py-2 text-sm text-secondary transition hover:text-foreground"
+            >
+              Cancel
+            </button>
             <button
               type="button"
               onClick={() => updateMutation.mutate()}
               disabled={!canSave || updateMutation.isPending}
-              className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-accent px-4 py-2 text-sm text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Save className="h-4 w-4" />
-              {updateMutation.isPending ? "Saving..." : "Save changes"}
+              {updateMutation.isPending ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
@@ -629,7 +712,13 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
               <SegmentContextSection title="Previous Segments" items={sceneContext.previous} onNavigate={onNavigate} emptyMessage="This is the first segment in the scene." />
               <SegmentContextSection title="Next Segments" items={sceneContext.next} onNavigate={onNavigate} emptyMessage="This is the last segment in the scene." />
               <SegmentContextSection title="Intersecting Segments" items={sceneContext.intersecting} onNavigate={onNavigate} emptyMessage="No other segments overlap this time range." />
-              <SegmentContextSection title="Next With Same Tag" items={sceneContext.nextSameTag ? [sceneContext.nextSameTag] : []} onNavigate={onNavigate} emptyMessage={segment.tagName ? `No later ${segment.tagName} segment is in this scene.` : "This segment does not have a tag to follow."} compact />
+              <SegmentContextSection
+                title={contextDescriptor?.title ?? "Next With Same Reference"}
+                items={sceneContext.nextSameReference ? [sceneContext.nextSameReference] : []}
+                onNavigate={onNavigate}
+                emptyMessage={contextDescriptor?.emptyMessage ?? "This segment does not have a matching reference to follow."}
+                compact
+              />
             </>
           )}
         </div>

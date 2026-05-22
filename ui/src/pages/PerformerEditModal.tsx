@@ -4,7 +4,7 @@ import { performers, tags as tagsApi } from "../api/client";
 import type { Performer, PerformerUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, NumberInput, SaveButton } from "../components/EditModal";
 import { InteractiveRatingField } from "../components/Rating";
-import { CustomFieldsEditor } from "../components/shared";
+import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { GroupedTagOptionList, SelectedTagChips, type SelectableTag } from "../components/TagSelector";
@@ -155,6 +155,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
   const selectedTags = selectedTagIds
     .map((tagId) => selectedTagsById[tagId])
     .filter((tag): tag is SelectedTagOption => Boolean(tag));
+  const tagProvenanceById = buildTagProvenanceById(performer.tags, performer.fieldProvenance);
 
   const addTag = (tag: SelectedTagOption) => {
     setSelectedTagIds((current) => current.includes(tag.id) ? current : [...current, tag.id]);
@@ -166,16 +167,16 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
     <EditModal title="Edit Performer" open={open} onClose={onClose}>
       <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Name *">
+        <Field label="Name *" fieldProvenance={performer.fieldProvenance} fieldKey="name">
           <TextInput value={name} onChange={setName} placeholder="Performer name" />
         </Field>
-        <Field label="Disambiguation">
+        <Field label="Disambiguation" fieldProvenance={performer.fieldProvenance} fieldKey="disambiguation">
           <TextInput value={disambiguation} onChange={setDisambiguation} placeholder="e.g. (2020s)" />
         </Field>
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <Field label="Gender">
+        <Field label="Gender" fieldProvenance={performer.fieldProvenance} fieldKey="gender">
           <select
             value={gender}
             onChange={(e) => setGender(e.target.value)}
@@ -187,7 +188,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
             ))}
           </select>
         </Field>
-        <Field label="Birthdate">
+        <Field label="Birthdate" fieldProvenance={performer.fieldProvenance} fieldKey="birthdate">
           <input
             type="date"
             value={birthdate}
@@ -195,7 +196,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
             className="w-full bg-card border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
           />
         </Field>
-        <Field label="Death Date">
+        <Field label="Death Date" fieldProvenance={performer.fieldProvenance} fieldKey="deathDate">
           <input
             type="date"
             value={deathDate}
@@ -203,52 +204,52 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
             className="w-full bg-card border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
           />
         </Field>
-        <Field label="Country">
+        <Field label="Country" fieldProvenance={performer.fieldProvenance} fieldKey="country">
           <TextInput value={country} onChange={setCountry} placeholder="e.g. US" />
         </Field>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Field label="Ethnicity">
+        <Field label="Ethnicity" fieldProvenance={performer.fieldProvenance} fieldKey="ethnicity">
           <TextInput value={ethnicity} onChange={setEthnicity} />
         </Field>
-        <Field label="Eye Color">
+        <Field label="Eye Color" fieldProvenance={performer.fieldProvenance} fieldKey="eyeColor">
           <TextInput value={eyeColor} onChange={setEyeColor} />
         </Field>
-        <Field label="Hair Color">
+        <Field label="Hair Color" fieldProvenance={performer.fieldProvenance} fieldKey="hairColor">
           <TextInput value={hairColor} onChange={setHairColor} />
         </Field>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Field label="Height (cm)">
+        <Field label="Height (cm)" fieldProvenance={performer.fieldProvenance} fieldKey="heightCm">
           <NumberInput value={heightCm} onChange={setHeightCm} min={50} max={250} />
         </Field>
-        <Field label="Weight (kg)">
+        <Field label="Weight (kg)" fieldProvenance={performer.fieldProvenance} fieldKey="weight">
           <NumberInput value={weight} onChange={setWeight} min={20} max={300} />
         </Field>
-        <Field label="Measurements">
+        <Field label="Measurements" fieldProvenance={performer.fieldProvenance} fieldKey="measurements">
           <TextInput value={measurements} onChange={setMeasurements} placeholder="34D-24-34" />
         </Field>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Tattoos">
+        <Field label="Tattoos" fieldProvenance={performer.fieldProvenance} fieldKey="tattoos">
           <TextInput value={tattoos} onChange={setTattoos} />
         </Field>
-        <Field label="Piercings">
+        <Field label="Piercings" fieldProvenance={performer.fieldProvenance} fieldKey="piercings">
           <TextInput value={piercings} onChange={setPiercings} />
         </Field>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Field label="Fake Tits">
+        <Field label="Fake Tits" fieldProvenance={performer.fieldProvenance} fieldKey="fakeTits">
           <TextInput value={fakeTits} onChange={setFakeTits} placeholder="e.g. Augmented" />
         </Field>
-        <Field label="Penis Length (cm)">
+        <Field label="Penis Length (cm)" fieldProvenance={performer.fieldProvenance} fieldKey="penisLength">
           <NumberInput value={penisLength} onChange={setPenisLength} min={0} max={50} />
         </Field>
-        <Field label="Circumcised">
+        <Field label="Circumcised" fieldProvenance={performer.fieldProvenance} fieldKey="circumcised">
           <select
             value={circumcised}
             onChange={(e) => setCircumcised(e.target.value)}
@@ -263,7 +264,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Career Start">
+        <Field label="Career Start" fieldProvenance={performer.fieldProvenance} fieldKey="careerStart">
           <input
             type="date"
             value={careerStart}
@@ -271,7 +272,7 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
             className="w-full bg-card border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
           />
         </Field>
-        <Field label="Career End">
+        <Field label="Career End" fieldProvenance={performer.fieldProvenance} fieldKey="careerEnd">
           <input
             type="date"
             value={careerEnd}
@@ -281,24 +282,24 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
         </Field>
       </div>
 
-      <Field label="Details">
+      <Field label="Details" fieldProvenance={performer.fieldProvenance} fieldKey="details">
         <TextArea value={details} onChange={setDetails} placeholder="Bio / notes" rows={2} />
       </Field>
 
       <div className="grid grid-cols-2 gap-4">
-        <InteractiveRatingField value={rating} onChange={setRating} label="Rating" />
-        <Field label="Aliases">
+        <InteractiveRatingField value={rating} onChange={setRating} label="Rating" fieldProvenance={performer.fieldProvenance} />
+        <Field label="Aliases" fieldProvenance={performer.fieldProvenance} fieldKey="aliases">
           <StringListEditor values={aliases} onChange={setAliases} placeholder="Alias" addLabel="Add Alias" />
         </Field>
       </div>
 
-      <Field label="URLs">
+      <Field label="URLs" fieldProvenance={performer.fieldProvenance} fieldKey="urls">
         <StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" />
       </Field>
 
       {/* Tags */}
-      <Field label="Tags">
-        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds((current) => current.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" />
+      <Field label="Tags" fieldProvenance={performer.fieldProvenance} fieldKey="tags">
+        <SelectedTagChips tags={selectedTags} onRemove={(tag) => setSelectedTagIds((current) => current.filter((id) => id !== tag.id))} className="mb-2 flex flex-wrap gap-1.5" provenanceById={tagProvenanceById} />
         <input
           type="text"
           value={tagSearch}
@@ -319,17 +320,17 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
         )}
       </Field>
 
-      <div className="flex gap-6 mb-4">
+      <Field label="Auto Tagging" fieldProvenance={performer.fieldProvenance} fieldKey="ignoreAutoTag">
         <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer">
           <input type="checkbox" checked={ignoreAutoTag} onChange={(e) => setIgnoreAutoTag(e.target.checked)} className="rounded border-border bg-card" />
           Ignore Auto Tag
         </label>
-      </div>
+      </Field>
 
-      <Field label="Remote IDs">
+      <Field label="Remote IDs" fieldProvenance={performer.fieldProvenance} fieldKey="remoteIds">
         <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
       </Field>
-      <Field label="Custom Fields">
+      <Field label="Custom Fields" fieldProvenance={performer.fieldProvenance} fieldKey="customFields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="performer" />
       </Field>
       </div>

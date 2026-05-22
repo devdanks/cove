@@ -58,6 +58,7 @@ public sealed class GroupMetadataApplyService(
             return false;
 
         var fieldProvenance = new Dictionary<string, object?>();
+        var sourceKey = BuildScraperSourceKey(metadata.SourceScraperId);
 
         if (ShouldApply(fieldSet, "name") && !string.IsNullOrWhiteSpace(metadata.Name))
         {
@@ -108,7 +109,7 @@ public sealed class GroupMetadataApplyService(
             fieldProvenance["urls"] = urls;
 
         var tagNames = NormalizeNames(metadata.TagNames);
-        var appliedTagNames = await ApplyTagsAsync(group, tagNames, collectionModes, options.CreateMissingTags, tagSelections, ct);
+        var appliedTagNames = await ApplyTagsAsync(group, tagNames, collectionModes, options.CreateMissingTags, tagSelections, sourceKey, sourceRunId, ct);
         if (appliedTagNames.Count > 0)
             fieldProvenance["tags"] = appliedTagNames;
 
@@ -117,7 +118,7 @@ public sealed class GroupMetadataApplyService(
             fieldProvenance["studio"] = studioName;
 
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Group, group.Id, fieldProvenance, "scraper", sourceRunId: sourceRunId, cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Group, group.Id, fieldProvenance, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
 
         await db.SaveChangesAsync(ct);
         eventBus.Publish(new EntityEvent(EventType.GroupUpdated, "Group", group.Id));
@@ -126,6 +127,9 @@ public sealed class GroupMetadataApplyService(
 
     private static bool ShouldApply(HashSet<string>? replaceFields, string field)
         => replaceFields == null || replaceFields.Contains(field);
+
+    private static string BuildScraperSourceKey(string? scraperId)
+        => string.IsNullOrWhiteSpace(scraperId) ? "scraper" : $"scraper:{scraperId.Trim()}";
 
     private static bool ApplyAliases(Group group, IReadOnlyList<string> aliases, IDictionary<string, string> collectionModes)
     {
@@ -173,6 +177,8 @@ public sealed class GroupMetadataApplyService(
         IDictionary<string, string> collectionModes,
         bool createMissing,
         IReadOnlyDictionary<string, string>? selections,
+        string sourceKey,
+        string? sourceRunId,
         CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "tags");
@@ -212,11 +218,10 @@ public sealed class GroupMetadataApplyService(
             }
 
             applied.Add(tag.Name);
-            if (!existingTagIds.Add(tag.Id))
-                continue;
+            if (existingTagIds.Add(tag.Id))
+                group.GroupTags.Add(new GroupTag { GroupId = group.Id, TagId = tag.Id, Tag = tag });
 
-            group.GroupTags.Add(new GroupTag { GroupId = group.Id, TagId = tag.Id, Tag = tag });
-            await tagProvenanceService.RecordAsync(AffinityHostType.Group, group.Id, tag, "scraper", cancellationToken: ct);
+            await tagProvenanceService.RecordAsync(AffinityHostType.Group, group.Id, tag, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
         }
 
         return applied.Distinct(StringComparer.OrdinalIgnoreCase).ToList();

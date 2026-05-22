@@ -1,7 +1,7 @@
 import { Star } from "lucide-react";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Field } from "./EditModal";
-import type { RatingStarPrecision, RatingSystemOptions } from "../api/types";
+import type { FieldProvenance, RatingStarPrecision, RatingSystemOptions } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
 import { authStore } from "../auth/authStore";
 import { RATING_OPTIONS_CHANGE_EVENT, readStoredRatingOptionsOverride } from "../utils/ratingPreferences";
@@ -294,12 +294,12 @@ export function getRatingBannerColor(rating: number | undefined, options?: Ratin
   return "#939393";
 }
 
-export function RatingField({ value, onChange }: { value?: number; onChange: (value: number | undefined) => void }) {
+export function RatingField({ value, onChange, fieldProvenance, fieldKey = "rating" }: { value?: number; onChange: (value: number | undefined) => void; fieldProvenance?: FieldProvenance[]; fieldKey?: string | string[] }) {
   const options = useRatingOptions();
   const displayValue = convertToRatingFormat(value, options);
 
   return (
-    <Field label={getRatingInputLabel(options)}>
+    <Field label={getRatingInputLabel(options)} fieldProvenance={fieldProvenance} fieldKey={fieldKey}>
       <div className="space-y-2">
         <RatingNumberInput value={value} onChange={onChange} options={options} />
         {options.type === "stars" && displayValue !== null && (
@@ -317,15 +317,19 @@ export function InteractiveRatingField({
   value,
   onChange,
   label,
+  fieldProvenance,
+  fieldKey = "rating",
 }: {
   value?: number;
   onChange: (value: number | undefined) => void;
   label?: string;
+  fieldProvenance?: FieldProvenance[];
+  fieldKey?: string | string[];
 }) {
   const options = useRatingOptions();
 
   return (
-    <Field label={label ?? getRatingInputLabel(options)}>
+    <Field label={label ?? getRatingInputLabel(options)} fieldProvenance={fieldProvenance} fieldKey={fieldKey}>
       <InteractiveRating value={value} onChange={onChange} />
     </Field>
   );

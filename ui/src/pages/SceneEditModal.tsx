@@ -4,7 +4,7 @@ import { scenes, tagApplications } from "../api/client";
 import type { Scene, SceneUpdate, TagApplication } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
-import { CustomFieldsEditor } from "../components/shared";
+import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
 import { StudioSelector } from "../components/StudioSelector";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { EntityReferenceMultiSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
@@ -105,6 +105,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
 
   const lockedTagIds = getLockedTagIds(scene.tags);
   const displayedTagIds = mergeTagIds(lockedTagIds, selectedTagIds);
+  const tagProvenanceById = buildTagProvenanceById(scene.tags, scene.fieldProvenance);
   const updateSelectedTagIds = (tagIds: number[]) => {
     const locked = new Set(lockedTagIds);
     setSelectedTagIds(tagIds.filter((tagId) => !locked.has(tagId)));
@@ -113,10 +114,10 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   return (
     <EditModal title="Edit Scene" open={open} onClose={onClose}>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Title">
+        <Field label="Title" fieldProvenance={scene.fieldProvenance} fieldKey="title">
           <TextInput value={title} onChange={setTitle} placeholder="Scene title" />
         </Field>
-        <Field label="Date">
+        <Field label="Date" fieldProvenance={scene.fieldProvenance} fieldKey="date">
           <input
             type="date"
             value={date}
@@ -127,21 +128,21 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Studio Code">
+        <Field label="Studio Code" fieldProvenance={scene.fieldProvenance} fieldKey="code">
           <TextInput value={code} onChange={setCode} placeholder="Studio code" />
         </Field>
-        <Field label="Director">
+        <Field label="Director" fieldProvenance={scene.fieldProvenance} fieldKey="director">
           <TextInput value={director} onChange={setDirector} placeholder="Director name" />
         </Field>
       </div>
 
-      <Field label="Details">
+      <Field label="Details" fieldProvenance={scene.fieldProvenance} fieldKey="details">
         <TextArea value={details} onChange={setDetails} placeholder="Scene description" />
       </Field>
 
       <div className="grid grid-cols-2 gap-4">
-        <RatingField value={rating} onChange={setRating} />
-        <Field label="VR">
+        <RatingField value={rating} onChange={setRating} fieldProvenance={scene.fieldProvenance} />
+        <Field label="VR" fieldProvenance={scene.fieldProvenance} fieldKey="isVr">
           <label className="inline-flex items-center gap-2 rounded border border-border bg-card px-3 py-2 text-sm text-foreground">
             <input type="checkbox" checked={isVr} onChange={(event) => setIsVr(event.target.checked)} className="accent-accent" />
             <span>VR</span>
@@ -149,11 +150,11 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
         </Field>
       </div>
 
-      <Field label="Studio">
+      <Field label="Studio" fieldProvenance={scene.fieldProvenance} fieldKey={["studio", "studioId"]}>
         <StudioSelector value={studioId} onChange={setStudioId} />
       </Field>
 
-      <Field label="URLs">
+      <Field label="URLs" fieldProvenance={scene.fieldProvenance} fieldKey="urls">
         <div className="space-y-1.5">
           {urls.map((url, i) => (
             <div key={i} className="flex items-center gap-1.5">
@@ -181,17 +182,17 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       </Field>
 
       {/* Tags */}
-      <Field label="Tags">
-        <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." />
+      <Field label="Tags" fieldProvenance={scene.fieldProvenance} fieldKey="tags">
+        <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." selectedProvenanceById={tagProvenanceById} />
       </Field>
 
       {/* Performers */}
-      <Field label="Performers">
+      <Field label="Performers" fieldProvenance={scene.fieldProvenance} fieldKey="performers">
         <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." />
       </Field>
 
       {selectedPerformerIds.length > 0 ? (
-        <Field label="Performer Occurrence Tags">
+        <Field label="Performer Occurrence Tags" fieldProvenance={scene.fieldProvenance} fieldKey="contextTags">
           <div className="space-y-3 rounded-lg border border-border bg-surface/40 p-3">
             {selectedPerformerIds.map((performerId) => {
               const tagIds = contextTagIdsByPerformer[performerId] ?? [];
@@ -217,12 +218,12 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
         </Field>
       ) : null}
 
-      <Field label="Galleries">
+      <Field label="Galleries" fieldProvenance={scene.fieldProvenance} fieldKey="galleries">
         <EntityReferenceMultiSelector entityType="gallery" values={selectedGalleryIds} onChange={setSelectedGalleryIds} placeholder="Search galleries..." />
       </Field>
 
       {/* Groups */}
-      <Field label="Groups">
+      <Field label="Groups" fieldProvenance={scene.fieldProvenance} fieldKey="groups">
         <div className="space-y-1.5 mb-2">
           {selectedGroups.map((sg) => {
             return (
@@ -248,11 +249,11 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
         <EntityReferenceMultiSelector entityType="group" values={selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." />
       </Field>
 
-      <Field label="Remote IDs">
+      <Field label="Remote IDs" fieldProvenance={scene.fieldProvenance} fieldKey="remoteIds">
         <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
       </Field>
 
-      <Field label="Custom Fields">
+      <Field label="Custom Fields" fieldProvenance={scene.fieldProvenance} fieldKey="customFields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
       </Field>
 

@@ -12,6 +12,9 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    private static string BuildScraperSourceKey(string? scraperId)
+        => string.IsNullOrWhiteSpace(scraperId) ? "scraper" : $"scraper:{scraperId.Trim()}";
+
     public async Task<ScrapeAttemptDto> CreateAttemptAsync(CreateScrapeAttemptDto dto, CancellationToken ct = default)
     {
         var inputKind = dto.InputKind?.Trim().ToLowerInvariant();
@@ -237,8 +240,11 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             await sceneCoverService.TryApplyRemoteCoverAsync(scene, imageUrl, ct);
         }
 
+        var sourceKey = BuildScraperSourceKey(attempt.ScraperId);
+        var sourceRunId = attempt.Id.ToString();
+
         ApplyUrls(scene, root, collectionModes);
-        await ApplyTagsAsync(scene, root, collectionModes, dto.CreateMissingTags, tagSelections, ct);
+        await ApplyTagsAsync(scene, root, collectionModes, dto.CreateMissingTags, tagSelections, sourceKey, sourceRunId, ct);
         await ApplyPerformersAsync(scene, root, collectionModes, dto.CreateMissingPerformers, performerSelections, ct);
         if (dto.HydratePerformers)
             await HydratePerformersAsync(root, dto.CreateMissingPerformers, dto.CreateMissingTags, performerSelections, ct);
@@ -246,7 +252,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
 
         var fieldProvenance = BuildAppliedSceneFieldProvenance(root, replaceFields, collectionModes, tagSelections, performerSelections);
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, "scraper", sourceRunId: attempt.Id.ToString(), cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
 
         if (dto.MarkOrganized)
             scene.Organized = true;
@@ -536,14 +542,17 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                 audio.Date = parsedDate;
         }
 
+        var sourceKey = BuildScraperSourceKey(attempt.ScraperId);
+        var sourceRunId = attempt.Id.ToString();
+
         ApplyAudioUrls(audio, root, collectionModes);
-        await ApplyAudioTagsAsync(audio, root, collectionModes, dto.CreateMissingTags, tagSelections, ct);
+        await ApplyAudioTagsAsync(audio, root, collectionModes, dto.CreateMissingTags, tagSelections, sourceKey, sourceRunId, ct);
         await ApplyAudioPerformersAsync(audio, root, collectionModes, dto.CreateMissingPerformers, performerSelections, ct);
         await ApplyAudioStudioAsync(audio, root, collectionModes, dto.CreateMissingStudio, ct);
 
         var fieldProvenance = BuildAppliedAudioFieldProvenance(root, replaceFields, collectionModes, tagSelections, performerSelections);
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Audio, audio.Id, fieldProvenance, "scraper", sourceRunId: attempt.Id.ToString(), cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Audio, audio.Id, fieldProvenance, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
 
         if (dto.MarkOrganized)
             audio.Organized = true;
@@ -609,14 +618,17 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                 textDocument.Date = parsedDate;
         }
 
+        var sourceKey = BuildScraperSourceKey(attempt.ScraperId);
+        var sourceRunId = attempt.Id.ToString();
+
         ApplyTextUrls(textDocument, root, collectionModes);
-        await ApplyTextTagsAsync(textDocument, root, collectionModes, dto.CreateMissingTags, tagSelections, ct);
+        await ApplyTextTagsAsync(textDocument, root, collectionModes, dto.CreateMissingTags, tagSelections, sourceKey, sourceRunId, ct);
         await ApplyTextPerformersAsync(textDocument, root, collectionModes, dto.CreateMissingPerformers, performerSelections, ct);
         await ApplyTextStudioAsync(textDocument, root, collectionModes, dto.CreateMissingStudio, ct);
 
         var fieldProvenance = BuildAppliedTextFieldProvenance(root, replaceFields, collectionModes, tagSelections, performerSelections);
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Text, textDocument.Id, fieldProvenance, "scraper", sourceRunId: attempt.Id.ToString(), cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Text, textDocument.Id, fieldProvenance, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
 
         if (dto.MarkOrganized)
             textDocument.Organized = true;
@@ -689,14 +701,17 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                 image.Date = parsedDate;
         }
 
+        var sourceKey = BuildScraperSourceKey(attempt.ScraperId);
+        var sourceRunId = attempt.Id.ToString();
+
         ApplyImageUrls(image, root, collectionModes);
-        await ApplyImageTagsAsync(image, root, collectionModes, dto.CreateMissingTags, tagSelections, ct);
+        await ApplyImageTagsAsync(image, root, collectionModes, dto.CreateMissingTags, tagSelections, sourceKey, sourceRunId, ct);
         await ApplyImagePerformersAsync(image, root, collectionModes, dto.CreateMissingPerformers, performerSelections, ct);
         await ApplyImageStudioAsync(image, root, collectionModes, dto.CreateMissingStudio, ct);
 
         var fieldProvenance = BuildAppliedImageFieldProvenance(root, replaceFields, collectionModes, tagSelections, performerSelections);
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Image, image.Id, fieldProvenance, "scraper", sourceRunId: attempt.Id.ToString(), cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Image, image.Id, fieldProvenance, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
 
         if (dto.MarkOrganized)
             image.Organized = true;
@@ -826,7 +841,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         }
     }
 
-    private async Task ApplyAudioTagsAsync(Audio audio, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, CancellationToken ct)
+    private async Task ApplyAudioTagsAsync(Audio audio, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, string sourceKey, string sourceRunId, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "tags");
         if (mode == "skip")
@@ -874,15 +889,16 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                 tagLookup[tagName] = tag;
             }
 
+            await tagProvenanceService.RecordAsync(AffinityHostType.Audio, audio.Id, tag, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
+
             if (!existingTagNames.Add(tag.Name))
                 continue;
 
             audio.AudioTags.Add(new AudioTag { AudioId = audio.Id, TagId = tag.Id, Tag = tag });
-            await tagProvenanceService.RecordAsync(AffinityHostType.Audio, audio.Id, tag, "scraper", cancellationToken: ct);
         }
     }
 
-    private async Task ApplyTextTagsAsync(TextDocument textDocument, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, CancellationToken ct)
+    private async Task ApplyTextTagsAsync(TextDocument textDocument, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, string sourceKey, string sourceRunId, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "tags");
         if (mode == "skip")
@@ -930,15 +946,16 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                 tagLookup[tagName] = tag;
             }
 
+            await tagProvenanceService.RecordAsync(AffinityHostType.Text, textDocument.Id, tag, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
+
             if (!existingTagNames.Add(tag.Name))
                 continue;
 
             textDocument.TextTags.Add(new TextTag { TextDocumentId = textDocument.Id, TagId = tag.Id, Tag = tag });
-            await tagProvenanceService.RecordAsync(AffinityHostType.Text, textDocument.Id, tag, "scraper", cancellationToken: ct);
         }
     }
 
-    private async Task ApplyImageTagsAsync(Image image, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, CancellationToken ct)
+    private async Task ApplyImageTagsAsync(Image image, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, string sourceKey, string sourceRunId, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "tags");
         if (mode == "skip")
@@ -986,11 +1003,12 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                 tagLookup[tagName] = tag;
             }
 
+            await tagProvenanceService.RecordAsync(AffinityHostType.Image, image.Id, tag, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
+
             if (!existingTagNames.Add(tag.Name))
                 continue;
 
             image.ImageTags.Add(new ImageTag { ImageId = image.Id, TagId = tag.Id, Tag = tag });
-            await tagProvenanceService.RecordAsync(AffinityHostType.Image, image.Id, tag, "scraper", cancellationToken: ct);
         }
     }
 
@@ -1322,7 +1340,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         }
     }
 
-    private async Task ApplyTagsAsync(Scene scene, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, CancellationToken ct)
+    private async Task ApplyTagsAsync(Scene scene, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, string sourceKey, string sourceRunId, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "tags");
         if (mode == "skip")
@@ -1368,10 +1386,9 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             appliedTagNames.Add(tag.Name);
 
             if (existingTagIds.Add(tag.Id))
-            {
                 scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tag.Id, Tag = tag });
-                await tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, "scraper", cancellationToken: ct);
-            }
+
+            await tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
         }
 
         await ApplyTagHierarchyAsync(root, tagLookup, selections == null && createMissing, appliedTagNames, ct);

@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { galleries } from "../api/client";
 import type { Gallery, GalleryUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
-import { CustomFieldsEditor } from "../components/shared";
+import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
@@ -28,6 +28,7 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
     performerIds: gallery.performers.map((p) => p.id),
   });
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(gallery.customFields ?? {}) });
+  const tagProvenanceById = buildTagProvenanceById(gallery.tags, gallery.fieldProvenance);
 
   const mutation = useMutation({
     mutationFn: (data: GalleryUpdate) => galleries.update(gallery.id, data),
@@ -57,14 +58,14 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
     <EditModal title={`Edit Gallery: ${gallery.title || "Untitled"}`} open={open} onClose={onClose}>
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2">
-          <Field label="Title">
+          <Field label="Title" fieldProvenance={gallery.fieldProvenance} fieldKey="title">
             <TextInput value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
           </Field>
         </div>
-        <Field label="Studio Code">
+        <Field label="Studio Code" fieldProvenance={gallery.fieldProvenance} fieldKey="code">
           <TextInput value={form.code} onChange={(v) => setForm({ ...form, code: v })} />
         </Field>
-        <Field label="Date">
+        <Field label="Date" fieldProvenance={gallery.fieldProvenance} fieldKey="date">
           <input
             type="date"
             value={form.date}
@@ -72,31 +73,31 @@ export function GalleryEditModal({ gallery, open, onClose }: Props) {
             className="w-full bg-card border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
           />
         </Field>
-        <Field label="Photographer">
+        <Field label="Photographer" fieldProvenance={gallery.fieldProvenance} fieldKey="photographer">
           <TextInput value={form.photographer} onChange={(v) => setForm({ ...form, photographer: v })} />
         </Field>
-        <Field label="Studio">
+        <Field label="Studio" fieldProvenance={gallery.fieldProvenance} fieldKey={["studio", "studioId"]}>
           <StudioSelector value={form.studioId} onChange={(studioId) => setForm({ ...form, studioId })} />
         </Field>
       </div>
-      <Field label="Details">
+      <Field label="Details" fieldProvenance={gallery.fieldProvenance} fieldKey="details">
         <TextArea value={form.details} onChange={(v) => setForm({ ...form, details: v })} rows={3} />
       </Field>
-      <Field label="URLs">
+      <Field label="URLs" fieldProvenance={gallery.fieldProvenance} fieldKey="urls">
         <StringListEditor values={form.urls} onChange={(value) => setForm({ ...form, urls: value })} placeholder="https://..." addLabel="Add URL" inputType="url" />
       </Field>
 
       {/* Tags picker */}
-      <Field label="Tags">
-        <EntityReferenceMultiSelector entityType="tag" values={form.tagIds} onChange={(tagIds) => setForm({ ...form, tagIds })} placeholder="Search tags..." />
+      <Field label="Tags" fieldProvenance={gallery.fieldProvenance} fieldKey="tags">
+        <EntityReferenceMultiSelector entityType="tag" values={form.tagIds} onChange={(tagIds) => setForm({ ...form, tagIds })} placeholder="Search tags..." selectedProvenanceById={tagProvenanceById} />
       </Field>
 
       {/* Performers picker */}
-      <Field label="Performers">
+      <Field label="Performers" fieldProvenance={gallery.fieldProvenance} fieldKey="performers">
         <EntityReferenceMultiSelector entityType="performer" values={form.performerIds} onChange={(performerIds) => setForm({ ...form, performerIds })} placeholder="Search performers..." />
       </Field>
 
-      <Field label="Custom Fields">
+      <Field label="Custom Fields" fieldProvenance={gallery.fieldProvenance} fieldKey="customFields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="gallery" />
       </Field>
 

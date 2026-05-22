@@ -64,7 +64,8 @@ public record PerformerDto(
     List<string> Urls, List<string> Aliases, List<TagDto> Tags,
     List<PerformerRemoteIdDto> RemoteIds,
     int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount,
-    string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
+    string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record PerformerRemoteIdDto(string Endpoint, string RemoteId);
 
@@ -170,7 +171,8 @@ public record TagDetailDto(
     bool? ShowAsSegment = null, string? SegmentColorOverride = null, int? SegmentLaneOverride = null,
     string? Color = null, int? TagGroupId = null, string? TagGroupName = null, string? TagGroupColor = null,
     double? MinOccurrenceSec = null, double? MinOccurrencePercent = null, List<TagRemoteIdDto>? RemoteIds = null,
-    bool Organized = false);
+    bool Organized = false,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record TagRemoteIdDto(string Endpoint, string RemoteId);
 
@@ -282,7 +284,8 @@ public record TagUpdateDto(
 public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
     List<string> Urls, List<string> Aliases, List<TagDto> Tags, List<StudioRemoteIdDto> RemoteIds,
     int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount,
-    string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt);
+    string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record StudioRemoteIdDto(string Endpoint, string RemoteId);
 
@@ -298,7 +301,8 @@ public record GalleryDto(int Id, string? Title, string? Code, string? Date, stri
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     int ImageCount, int SceneCount, List<int> SceneIds, string? FolderPath, List<GalleryFileInfoDto> Files,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    string? CoverPath = null, int? CoverImageId = null);
+    string? CoverPath = null, int? CoverImageId = null,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record GalleryFileInfoDto(int Id, string Path, long Size, string ModTime, List<FingerprintDto> Fingerprints);
 
@@ -313,7 +317,8 @@ public record ImageDto(int Id, string? Title, string? Code, string? Details, str
     bool Organized, int? StudioId, string? StudioName, string? Date,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     int GalleryCount, List<int> GalleryIds, List<GallerySummaryDto> Galleries, List<GroupSummaryDto> Groups, List<ImageFileDto> Files, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
-    List<TagApplicationDto>? ContextTagApplications = null);
+    List<TagApplicationDto>? ContextTagApplications = null,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record ImageFileDto(int Id, string Path, string Basename, string Format, int Width, int Height, long Size);
 
@@ -333,7 +338,8 @@ public record AudioDto(
     List<AudioTrackDto> Tracks, List<AudioFileDto> Files, List<GroupSummaryDto> Groups,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     int FileCount, double MaxDuration, bool HasVideoFiles, string? ImagePath = null,
-    List<TagApplicationDto>? ContextTagApplications = null);
+    List<TagApplicationDto>? ContextTagApplications = null,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record AudioFileDto(
     int Id, string Path, string Basename, string Format, double Duration,
@@ -360,7 +366,8 @@ public record TextDocumentDto(
     List<TextFileDto> Files, List<GroupSummaryDto> Groups,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     int FileCount, int? MaxWordCount, int? MaxPageCount, string? ImagePath = null,
-    List<TagApplicationDto>? ContextTagApplications = null);
+    List<TagApplicationDto>? ContextTagApplications = null,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record TextFileDto(
     int Id, string Path, string Basename, string Format, int? PageCount,
@@ -400,7 +407,8 @@ public record GroupDto(int Id, string Name, string? Aliases, string? Date,
     int StudioCount = 0,
     int TagItemCount = 0,
     int FaceCount = 0,
-    int SegmentCount = 0);
+    int SegmentCount = 0,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record GroupSummaryDto(int Id, string Name, int SceneIndex);
 
@@ -2042,6 +2050,7 @@ public record ScrapeUrlDto(string Url, string ContentType);
 
 public record ScrapedSceneDto
 {
+    public string? SourceScraperId { get; init; }
     public string? Title { get; init; }
     public string? Code { get; init; }
     public string? Details { get; init; }
@@ -2056,6 +2065,7 @@ public record ScrapedSceneDto
 
 public record ScrapedPerformerDto
 {
+    public string? SourceScraperId { get; init; }
     public string? Name { get; init; }
     public string? Disambiguation { get; init; }
     public string? Gender { get; init; }
@@ -2092,6 +2102,7 @@ public record ScrapedGalleryDto
 
 public record ScrapedImageDto
 {
+    public string? SourceScraperId { get; init; }
     public string? Title { get; init; }
     public string? Date { get; init; }
     public string? Details { get; init; }
@@ -2132,6 +2143,7 @@ public record ScrapedTextDto
 
 public record ScrapedGroupDto
 {
+    public string? SourceScraperId { get; init; }
     public string? Name { get; init; }
     public List<string> Aliases { get; init; } = [];
     public int? Duration { get; init; }

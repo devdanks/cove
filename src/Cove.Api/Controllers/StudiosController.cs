@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.StudiosRead)]
-public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService? customFields = null) : ControllerBase
+public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService? customFields = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private sealed record StudioUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount);
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
@@ -206,10 +206,13 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
     {
         var usageCounts = (await LoadStudioUsageCountsAsync([studio.Id], ct)).GetValueOrDefault(studio.Id);
         var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Studio, studio.Id, ct);
-        return MapToDto(studio, usageCounts, customFieldValues);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Studio, studio.Id, ct)).ToList();
+        return MapToDto(studio, usageCounts, customFieldValues, fieldProvenance);
     }
 
-    private StudioDto MapToDto(Studio s, StudioUsageCounts? usageCounts = null, Dictionary<string, object>? customFieldValues = null) => new(
+    private StudioDto MapToDto(Studio s, StudioUsageCounts? usageCounts = null, Dictionary<string, object>? customFieldValues = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         s.Id, s.Name, s.ParentId, s.Parent?.Name, s.Favorite, s.Details, s.IgnoreAutoTag, s.Organized,
         s.Urls.Select(u => u.Url).ToList(),
         s.Aliases.Select(a => a.Alias).ToList(),
@@ -225,7 +228,8 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         usageCounts?.TextCount ?? 0,
         EntityImageUrls.StudioOrNull(ControllerContext.HttpContext, s),
         customFieldValues,
-        s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o")
+        s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o"),
+        fieldProvenance
     );
 
     private static List<StudioRemoteIdDto> NormalizeRemoteIds(IEnumerable<StudioRemoteIdDto> remoteIds)

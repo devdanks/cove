@@ -12,8 +12,9 @@ import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
+import type { FieldProvenance } from "../api/types";
 import { InteractiveRating } from "../components/Rating";
-import { CustomFieldsDisplay, formatDate, formatDuration, formatFileSize, TagBadge } from "../components/shared";
+import { CustomFieldsDisplay, FieldProvenanceHover, formatDate, formatDuration, formatFileSize, TagBadge, resolveTagProvenance } from "../components/shared";
 import { EntityReferencePopovers, PerformerTile } from "../components/EntityCards";
 import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
@@ -247,7 +248,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
       />
     ) : null}
     <MediaDetailLayout
-      title={displayTitle}
+      title={<FieldProvenanceHover fieldProvenance={audio.fieldProvenance} fieldKey="title">{displayTitle}</FieldProvenanceHover>}
       subtitle={detailSubtitle}
       backLabel={backLabel}
       onGoBack={goBack}
@@ -376,9 +377,10 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
           <div className="space-y-4">
             <div>
               <DetailGrid
+                fieldProvenance={audio.fieldProvenance}
                 items={[
-                  { label: "Studio", value: audio.studioName },
-                  { label: "Date", value: audio.date ? formatDate(audio.date) : undefined },
+                  { label: "Studio", value: audio.studioName, fieldKey: "studio" },
+                  { label: "Date", value: audio.date ? formatDate(audio.date) : undefined, fieldKey: "date" },
                   { label: "Duration", value: audio.maxDuration > 0 ? formatDuration(audio.maxDuration) : undefined },
                   { label: "Tracks", value: audio.tracks.length > 0 ? String(audio.tracks.length) : undefined },
                   { label: "Files", value: String(audio.fileCount) },
@@ -389,40 +391,46 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
             {audio.details ? (
               <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Notes</h3>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/92">{audio.details}</p>
+                <FieldProvenanceHover fieldProvenance={audio.fieldProvenance} fieldKey="details" block>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/92">{audio.details}</p>
+                </FieldProvenanceHover>
               </div>
             ) : null}
             {audio.urls.length > 0 ? (
               <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Source URLs</h3>
-                <div className="mt-3 flex flex-col gap-2">
-                  {audio.urls.map((url) => (
-                    <a key={url} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-accent transition hover:text-accent/80">
-                      <Link2 className="h-4 w-4" />
-                      <span className="truncate">{url}</span>
-                    </a>
-                  ))}
-                </div>
+                <FieldProvenanceHover fieldProvenance={audio.fieldProvenance} fieldKey="urls" block className="mt-3">
+                  <div className="flex flex-col gap-2">
+                    {audio.urls.map((url) => (
+                      <a key={url} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-accent transition hover:text-accent/80">
+                        <Link2 className="h-4 w-4" />
+                        <span className="truncate">{url}</span>
+                      </a>
+                    ))}
+                  </div>
+                </FieldProvenanceHover>
               </div>
             ) : null}
             {canReadPerformers && audio.performers.length > 0 ? (
               <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">Performers</h3>
-                <div className={audio.performers.length > 1 ? "mt-4 grid grid-cols-2 gap-3" : "mt-4 grid max-w-[220px] gap-3"}>
-                  {audio.performers.map((performer) => {
-                    const contextTags = getPerformerContextTags(audio.contextTagApplications, performer.id);
-                    return (
-                      <PerformerTile
-                        key={performer.id}
-                        performer={performer}
-                        onClick={() => onNavigate({ page: "performer", id: performer.id })}
-                        onNavigate={onNavigate}
-                      >
-                        {contextTags.length > 0 ? <div className="space-y-2 text-xs text-secondary"><PerformerContextTagList contextTags={contextTags} onNavigate={onNavigate} /></div> : null}
-                      </PerformerTile>
-                    );
-                  })}
-                </div>
+                <FieldProvenanceHover fieldProvenance={audio.fieldProvenance} fieldKey="performers" block className="mt-4">
+                  <div className={audio.performers.length > 1 ? "grid grid-cols-2 gap-3" : "grid max-w-[220px] gap-3"}>
+                    {audio.performers.map((performer) => {
+                      const contextTags = getPerformerContextTags(audio.contextTagApplications, performer.id);
+                      return (
+                        <PerformerTile
+                          key={performer.id}
+                          performer={performer}
+                          onClick={() => onNavigate({ page: "performer", id: performer.id })}
+                          onNavigate={onNavigate}
+                        >
+                          {contextTags.length > 0 ? <div className="space-y-2 text-xs text-secondary"><PerformerContextTagList contextTags={contextTags} onNavigate={onNavigate} /></div> : null}
+                        </PerformerTile>
+                      );
+                    })}
+                  </div>
+                </FieldProvenanceHover>
               </div>
             ) : null}
             {canReadTags && audio.tags.length > 0 ? (
@@ -430,7 +438,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
                 <h3 className="text-sm text-muted mb-2">Tags</h3>
                 <div className="flex flex-wrap gap-2">
                   {audio.tags.map((tag) => (
-                    <TagBadge key={tag.id} name={tag.name} tag={tag} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                    <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={resolveTagProvenance(tag, audio.fieldProvenance)} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
                   ))}
                 </div>
               </div>
@@ -455,9 +463,11 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
             {canReadStudio && audio.studioId && audio.studioName ? (
               <div>
                 <h3 className="text-sm text-muted mb-2">Studio</h3>
-                <button type="button" onClick={() => onNavigate({ page: "studio", id: audio.studioId! })} className="text-accent hover:underline">
-                  {audio.studioName}
-                </button>
+                <FieldProvenanceHover fieldProvenance={audio.fieldProvenance} fieldKey="studio">
+                  <button type="button" onClick={() => onNavigate({ page: "studio", id: audio.studioId! })} className="text-accent hover:underline">
+                    {audio.studioName}
+                  </button>
+                </FieldProvenanceHover>
               </div>
             ) : null}
             {audio.customFields && Object.keys(audio.customFields).length > 0 ? (
@@ -579,7 +589,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   );
 }
 
-function DetailGrid({ items }: { items: { label: string; value?: string }[] }) {
+function DetailGrid({ items, fieldProvenance }: { items: { label: string; value?: string; fieldKey?: string | string[] }[]; fieldProvenance?: FieldProvenance[] }) {
   const visibleItems = items.filter((item) => item.value != null && String(item.value).trim() !== "");
   if (visibleItems.length === 0) {
     return <p className="text-sm text-muted">No metadata available.</p>;
@@ -590,7 +600,9 @@ function DetailGrid({ items }: { items: { label: string; value?: string }[] }) {
       {visibleItems.map((item) => (
         <div key={item.label}>
           <dt className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted">{item.label}</dt>
-          <dd className="mt-1 text-sm text-foreground">{item.value}</dd>
+          <dd className="mt-1 text-sm text-foreground">
+            {item.fieldKey ? <FieldProvenanceHover fieldProvenance={fieldProvenance} fieldKey={item.fieldKey}>{item.value}</FieldProvenanceHover> : item.value}
+          </dd>
         </div>
       ))}
     </dl>

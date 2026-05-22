@@ -3,12 +3,30 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SegmentDetailPage } from "../pages/SegmentDetailPage";
 
-const { mockScenes, mockSegmentLibrary, mockTags, mockGoBack } = vi.hoisted(() => ({
+vi.stubGlobal("IntersectionObserver", vi.fn(function IntersectionObserver() {
+  return {
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn(),
+  };
+}));
+
+const { mockEntityImages, mockScenes, mockSegmentLibrary, mockTags, mockGoBack } = vi.hoisted(() => ({
+  mockEntityImages: {
+    segmentCoverUrl: vi.fn(() => "/segment-cover.jpg"),
+    sceneCoverUrl: vi.fn(() => "/scene-cover.jpg"),
+    studioImageUrl: vi.fn(() => "/studio-image.jpg"),
+    uploadSegmentCoverImage: vi.fn(),
+    deleteSegmentCoverImage: vi.fn(),
+    setSegmentCoverFromFrame: vi.fn(),
+  },
   mockScenes: {
     get: vi.fn(),
     createSubScene: vi.fn(),
     streamUrl: vi.fn(() => "/stream/scene.mp4"),
     screenshotUrl: vi.fn(() => "/scene.jpg"),
+    previewUrl: vi.fn(() => "/scene-preview.mp4"),
+    previewStatusUrl: vi.fn(() => "/scene-preview-status"),
     segments: {
       list: vi.fn(),
       spans: vi.fn(),
@@ -26,6 +44,7 @@ const { mockScenes, mockSegmentLibrary, mockTags, mockGoBack } = vi.hoisted(() =
 }));
 
 vi.mock("../api/client", () => ({
+  entityImages: mockEntityImages,
   scenes: mockScenes,
   segmentLibrary: mockSegmentLibrary,
   tags: mockTags,
@@ -46,6 +65,11 @@ vi.mock("../hooks/useBackNavigation", () => ({
     backLabel: "Back to segments",
     goBack: mockGoBack,
   }),
+}));
+
+vi.mock("../state/AppConfigContext", () => ({
+  useAppConfig: () => ({ config: { ui: { keybindingOverrides: {} } } }),
+  useOptionalAppConfig: () => ({ config: { ui: { keybindingOverrides: {}, videoObjectFit: "cover" } } }),
 }));
 
 function buildSegment(overrides: Record<string, unknown> = {}) {
@@ -120,7 +144,7 @@ describe("SegmentDetailPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders media layout tabs and resolved span preview", async () => {
+  it("renders media layout tabs and timeline context", async () => {
     mockSegmentLibrary.get.mockResolvedValue(buildSegment());
     mockScenes.get.mockResolvedValue(buildScene());
     mockScenes.segments.list.mockResolvedValue([
@@ -157,9 +181,7 @@ describe("SegmentDetailPage", () => {
     expect(screen.getAllByText("Cold Open").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Action Beat").length).toBeGreaterThan(0);
 
-    fireEvent.click(within(tabs).getByRole("tab", { name: /resolved spans/i }));
-    expect(await screen.findByText("Opening Stretch")).toBeInTheDocument();
-    expect(screen.getByText("Contains current segment")).toBeInTheDocument();
+    expect(within(tabs).queryByRole("tab", { name: /resolved spans/i })).not.toBeInTheDocument();
   });
 
   it("supports keyboard shortcuts for edit and adjacent navigation", async () => {
@@ -198,7 +220,8 @@ describe("SegmentDetailPage", () => {
 
     const { onNavigate } = renderPage();
 
-    const makeSceneButton = await screen.findByRole("button", { name: "Make Scene" });
+    fireEvent.click(await screen.findByTitle("Operations"));
+    const makeSceneButton = await screen.findByRole("button", { name: /make scene/i });
     await waitFor(() => {
       expect(makeSceneButton).toBeEnabled();
     });

@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import { faces, galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
-import type { CustomFieldType, Face, Gallery, Group, Image, Performer, Scene, Studio, Tag } from "../api/types";
+import type { CustomFieldType, Face, Gallery, Group, Image, Performer, Scene, Studio, Tag, TagProvenance } from "../api/types";
+import { TagProvenanceHover } from "./TagProvenanceHover";
 import { rankSearchOptions } from "../utils/searchRanking";
 
 export type EntityReferenceType = Extract<CustomFieldType, "tag" | "performer" | "studio" | "scene" | "gallery" | "image" | "group"> | "face";
@@ -74,6 +75,8 @@ export function EntityReferenceSelector({
   disabled = false,
   inputClassName,
   excludeIds,
+  selectedDisplay = "chip",
+  selectedLabel,
 }: {
   entityType: EntityReferenceType;
   value?: number;
@@ -82,6 +85,8 @@ export function EntityReferenceSelector({
   disabled?: boolean;
   inputClassName?: string;
   excludeIds?: Iterable<number>;
+  selectedDisplay?: "chip" | "input";
+  selectedLabel?: string;
 }) {
   const [searchText, setSearchText] = useState("");
   const trimmedSearch = searchText.trim();
@@ -119,6 +124,8 @@ export function EntityReferenceSelector({
   });
 
   const selected = selectedSearchOption ?? selectedOption;
+  const selectedInputLabel = selected?.label ?? selectedLabel?.trim() ?? (selectedLoading ? `Loading ${labels.singular}...` : "");
+  const showSelectedInInput = selectedDisplay === "input" && typeof value === "number" && searchText === "" && selectedInputLabel !== "";
   const excluded = useMemo(() => new Set(excludeIds ?? []), [excludeIds]);
   const visibleResults = useMemo(
     () => searchOptions.filter((option) => option.id !== value && !excluded.has(option.id)),
@@ -127,7 +134,7 @@ export function EntityReferenceSelector({
 
   return (
     <div className="min-w-0 space-y-2">
-      {typeof value === "number" ? (
+      {typeof value === "number" && selectedDisplay === "chip" ? (
         <div className="flex flex-wrap gap-1">
           <span className="inline-flex max-w-full items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[10px] text-foreground">
             <span className="min-w-0 truncate">{selected?.label ?? (selectedLoading ? `Loading ${labels.singular}...` : `Unavailable ${labels.singular}`)}</span>
@@ -145,14 +152,35 @@ export function EntityReferenceSelector({
         </div>
       ) : null}
 
-      <input
-        type="text"
-        value={searchText}
-        onChange={(event) => setSearchText(event.target.value)}
-        placeholder={placeholder ?? `Search ${labels.plural}...`}
-        disabled={disabled}
-        className={inputClassName ?? "w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-muted disabled:opacity-50 focus:border-accent focus:outline-none"}
-      />
+      <div className="relative">
+        <input
+          type="text"
+          value={showSelectedInInput ? selectedInputLabel : searchText}
+          onChange={(event) => setSearchText(event.target.value)}
+          onFocus={(event) => {
+            if (showSelectedInInput) {
+              event.currentTarget.select();
+            }
+          }}
+          placeholder={placeholder ?? `Search ${labels.plural}...`}
+          disabled={disabled}
+          className={inputClassName ?? "w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-muted disabled:opacity-50 focus:border-accent focus:outline-none"}
+        />
+        {selectedDisplay === "input" && typeof value === "number" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchText("");
+              onChange(undefined);
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted hover:text-foreground disabled:opacity-50"
+            aria-label={`Clear selected ${labels.singular}`}
+            disabled={disabled}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        ) : null}
+      </div>
 
       {trimmedSearch ? (
         <div className="max-h-40 overflow-y-auto overflow-x-hidden rounded border border-border bg-surface">
@@ -195,6 +223,7 @@ export function EntityReferenceMultiSelector({
   containerClassName,
   excludeIds,
   lockedIds,
+  selectedProvenanceById,
 }: {
   entityType: EntityReferenceType;
   values: number[];
@@ -207,6 +236,7 @@ export function EntityReferenceMultiSelector({
   containerClassName?: string;
   excludeIds?: Iterable<number>;
   lockedIds?: Iterable<number>;
+  selectedProvenanceById?: Record<number, TagProvenance[] | undefined>;
 }) {
   const [searchText, setSearchText] = useState("");
   const trimmedSearch = searchText.trim();
@@ -250,7 +280,7 @@ export function EntityReferenceMultiSelector({
           {values.map((id) => {
             const option = selectedOptions.get(id);
             const lockedValue = locked.has(id);
-            return (
+            const chip = (
               <span key={id} className="inline-flex items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[10px] text-foreground" title={lockedValue ? "Derived tag" : undefined}>
                 <span>{option?.label ?? `Loading ${labels.singular}...`}</span>
                 {option?.secondaryLabel ? <span className="text-muted">{option.secondaryLabel}</span> : null}
@@ -267,6 +297,8 @@ export function EntityReferenceMultiSelector({
                 ) : null}
               </span>
             );
+            const provenance = selectedProvenanceById?.[id];
+            return provenance?.length ? <TagProvenanceHover key={id} provenance={provenance}>{chip}</TagProvenanceHover> : chip;
           })}
         </div>
       ) : null}

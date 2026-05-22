@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, galleries, groups, images, metadata, performers, scenes, segmentLibrary, studios, tags, texts, entityImages } from "../api/client";
 import type { Audio, FindFilter, Gallery, Group, Image, Performer, Scene, SceneFilterCriteria, SegmentRecord, Studio, TagDetail as TagDetailModel, TextDocument } from "../api/types";
-import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
+import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Building2, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MoreVertical, Music, Pencil, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TagEditModal } from "./TagEditModal";
@@ -235,10 +235,10 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         imageClassName="h-full w-full object-contain p-3"
         onImageClick={canWriteTag ? () => setCoverOpen(true) : undefined}
         imageFallback={<TagIcon className="h-14 w-14 text-accent" />}
-        title={tag.name}
-        sortName={tag.sortName && tag.sortName !== tag.name ? tag.sortName : undefined}
-        aliases={tag.aliases.length > 0 ? tag.aliases.join(", ") : undefined}
-        description={tag.description}
+        title={<FieldProvenanceHover fieldProvenance={tag.fieldProvenance} fieldKey="name">{tag.name}</FieldProvenanceHover>}
+        sortName={tag.sortName && tag.sortName !== tag.name ? <FieldProvenanceHover fieldProvenance={tag.fieldProvenance} fieldKey="sortName">{tag.sortName}</FieldProvenanceHover> : undefined}
+        aliases={tag.aliases.length > 0 ? <FieldProvenanceHover fieldProvenance={tag.fieldProvenance} fieldKey="aliases">{tag.aliases.join(", ")}</FieldProvenanceHover> : undefined}
+        description={tag.description ? <FieldProvenanceHover fieldProvenance={tag.fieldProvenance} fieldKey="description" block>{tag.description}</FieldProvenanceHover> : undefined}
         favorite={tagFavorite}
         onFavoriteToggle={canEngageTag ? () => setTagFavorite(!tagFavorite) : undefined}
         organized={tag.organized}
@@ -408,7 +408,7 @@ function TagHierarchyLinks({
               <TagIcon className="h-3 w-3" /> Parents
             </span>
             {tag.parents.map((parent) => (
-              <TagBadge key={parent.id} name={parent.name} tag={parent} onClick={() => onNavigate({ page: "tag", id: parent.id })} />
+              <TagBadge key={parent.id} name={parent.name} tag={parent} provenance={resolveTagProvenance(parent, tag.fieldProvenance, "parents")} onClick={() => onNavigate({ page: "tag", id: parent.id })} />
             ))}
           </div>
         ) : null}
@@ -418,7 +418,7 @@ function TagHierarchyLinks({
               <TagIcon className="h-3 w-3" /> Sub Tags
             </span>
             {tag.children.map((child) => (
-              <TagBadge key={child.id} name={child.name} tag={child} onClick={() => onNavigate({ page: "tag", id: child.id })} />
+              <TagBadge key={child.id} name={child.name} tag={child} provenance={resolveTagProvenance(child, tag.fieldProvenance, "children")} onClick={() => onNavigate({ page: "tag", id: child.id })} />
             ))}
           </div>
         ) : null}

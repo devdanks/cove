@@ -30,6 +30,7 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
             return false;
 
         var fieldProvenance = new Dictionary<string, object?>();
+        var sourceKey = BuildScraperSourceKey(metadata.SourceScraperId);
 
         if (!string.IsNullOrWhiteSpace(metadata.Title))
         {
@@ -76,7 +77,7 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         var tagNames = NormalizeNames(metadata.TagNames);
         if (tagNames.Count > 0)
             fieldProvenance["tags"] = tagNames;
-        await ApplyTagsAsync(scene, tagNames, options.CreateMissingTags, ct);
+        await ApplyTagsAsync(scene, tagNames, options.CreateMissingTags, sourceKey, ct);
 
         var performerNames = NormalizeNames(metadata.PerformerNames);
         if (performerNames.Count > 0)
@@ -89,7 +90,7 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         await ApplyStudioAsync(scene, studioName, options.CreateMissingStudio, ct);
 
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, "scraper", cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, sourceKey, cancellationToken: ct);
 
         await db.SaveChangesAsync(ct);
         eventBus.Publish(new EntityEvent(EventType.SceneUpdated, "Scene", scene.Id));
@@ -106,7 +107,10 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
         }
     }
 
-    private async Task ApplyTagsAsync(Scene scene, IReadOnlyList<string> tagNames, bool createMissing, CancellationToken ct)
+    private static string BuildScraperSourceKey(string? scraperId)
+        => string.IsNullOrWhiteSpace(scraperId) ? "scraper" : $"scraper:{scraperId.Trim()}";
+
+    private async Task ApplyTagsAsync(Scene scene, IReadOnlyList<string> tagNames, bool createMissing, string sourceKey, CancellationToken ct)
     {
         var names = NormalizeNames(tagNames);
         if (names.Count == 0)
@@ -135,10 +139,9 @@ public class SceneMetadataApplyService(CoveContext db, IEventBus eventBus, IScen
             }
 
             if (existing.Add(tag.Name))
-            {
                 scene.SceneTags.Add(new SceneTag { Scene = scene, Tag = tag });
-                await tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, "scraper", cancellationToken: ct);
-            }
+
+            await tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, sourceKey, cancellationToken: ct);
         }
     }
 

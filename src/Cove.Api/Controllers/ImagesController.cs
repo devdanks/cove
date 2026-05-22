@@ -14,7 +14,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.ImagesRead)]
-public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, IUserEngagementService engagementService, CustomFieldService customFields, IThumbnailService thumbnailService, IScanService scanService, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, IUserEngagementService engagementService, CustomFieldService customFields, IThumbnailService thumbnailService, IScanService scanService, ITagProvenanceService? tagProvenanceService = null, ICurrentPrincipalAccessor? principalAccessor = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private bool CanReadFiles => principalAccessor?.Current?.Has(Permissions.FilesRead) == true;
     private static string GetVisibleBasename(string path, string basename) => string.IsNullOrWhiteSpace(basename) ? System.IO.Path.GetFileName(path) : basename;
@@ -227,10 +227,13 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
         var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Image, image.Id, cancellationToken);
         var groups = await GetGroupsAsync(image.Id, cancellationToken);
         var contextTagApplications = await GetContextTagApplicationsAsync(image.Id, cancellationToken);
-        return MapToDto(image, customFieldValues, null, groups, provenanceLookup, snapshot, principalAccessor?.Current?.UserId != null, contextTagApplications);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Image, image.Id, cancellationToken)).ToList();
+        return MapToDto(image, customFieldValues, null, groups, provenanceLookup, snapshot, principalAccessor?.Current?.UserId != null, contextTagApplications, fieldProvenance);
     }
 
-    private ImageDto MapToDto(Image i, Dictionary<string, object>? customFieldValues = null, int? galleryCount = null, List<GroupSummaryDto>? groups = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, List<TagApplicationDto>? contextTagApplications = null) => new(
+    private ImageDto MapToDto(Image i, Dictionary<string, object>? customFieldValues = null, int? galleryCount = null, List<GroupSummaryDto>? groups = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, UserEngagementSnapshot? engagement = null, bool preferUserSnapshot = false, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         i.Id, i.Title, i.Code, i.Details, i.Photographer,
         i.Organized,
         i.StudioId, i.Studio?.Name,
@@ -252,7 +255,8 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
             f.Size)).ToList() ?? [],
         customFieldValues,
         i.CreatedAt.ToString("o"), i.UpdatedAt.ToString("o"),
-        contextTagApplications
+        contextTagApplications,
+        fieldProvenance
     );
 
     private async Task<List<ImageDto>> MapListToDtos(IReadOnlyList<Image> items, CancellationToken ct)

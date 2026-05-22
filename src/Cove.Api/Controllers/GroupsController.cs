@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.GroupsRead)]
-public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, IUserEngagementService engagementService, CustomFieldService? customFields = null, DynamicGroupResolver? dynamicGroups = null, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, IUserEngagementService engagementService, CustomFieldService? customFields = null, DynamicGroupResolver? dynamicGroups = null, ICurrentPrincipalAccessor? principalAccessor = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private static readonly string[] DefaultAllowedHostTypes = ["scene", "image", "audio", "text", "group", "performer", "studio", "tag", "gallery", "face", "segment"];
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
@@ -71,9 +71,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
     {
         var group = await groupRepo.GetByIdWithRelationsAsync(id, ct);
         if (group == null) return NotFound();
-        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, id, ct);
-        var dynamicCounts = await GetDynamicCountsAsync([group], ct);
-        return Ok(MapToDto(group, customFieldValues, dynamicCounts.GetValueOrDefault(group.Id)));
+        return Ok(await MapToDetailDtoAsync(group, ct));
     }
 
     [HttpPost]
@@ -101,8 +99,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Group, group.Id, dto.Rating, cancellationToken: ct);
         var result = await groupRepo.GetByIdWithRelationsAsync(group.Id, ct);
-        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, group.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = group.Id }, MapToDto(result!, customFieldValues));
+        return CreatedAtAction(nameof(GetById), new { id = group.Id }, await MapToDetailDtoAsync(result!, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -155,8 +152,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         if (dto.Rating.HasValue)
             await engagementService.SetRatingAsync(AffinityHostType.Group, id, dto.Rating, cancellationToken: ct);
         var updated = await groupRepo.GetByIdWithRelationsAsync(id, ct);
-        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, id, ct);
-        return Ok(MapToDto(updated!, customFieldValues));
+        return Ok(await MapToDetailDtoAsync(updated!, ct));
     }
 
     [HttpDelete("{id:int}")]
@@ -395,7 +391,17 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         return Ok();
     }
 
-    private GroupDto MapToDto(Group g, Dictionary<string, object>? customFieldValues = null, GroupItemTypeCounts? dynamicCounts = null)
+    private async Task<GroupDto> MapToDetailDtoAsync(Group group, CancellationToken ct)
+    {
+        var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Group, group.Id, ct);
+        var dynamicCounts = await GetDynamicCountsAsync([group], ct);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Group, group.Id, ct)).ToList();
+        return MapToDto(group, customFieldValues, dynamicCounts.GetValueOrDefault(group.Id), fieldProvenance);
+    }
+
+    private GroupDto MapToDto(Group g, Dictionary<string, object>? customFieldValues = null, GroupItemTypeCounts? dynamicCounts = null, List<FieldProvenanceDto>? fieldProvenance = null)
     {
         var counts = dynamicCounts ?? CountStaticItems(g);
         var itemCount = g.Kind == GroupKind.Dynamic ? dynamicCounts?.ItemCount ?? g.CachedItemCount ?? counts.ItemCount : g.GroupItems.Count;
@@ -430,7 +436,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             counts.StudioCount,
             counts.TagItemCount,
             counts.FaceCount,
-            counts.SegmentCount);
+                counts.SegmentCount,
+                fieldProvenance);
     }
 
     private string? ResolveFrontImagePath(Group group)

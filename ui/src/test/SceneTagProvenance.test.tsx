@@ -50,7 +50,7 @@ describe("Scene tag provenance", () => {
       </QueryClientProvider>
     );
 
-    expect(screen.getByText("AI")).toBeInTheDocument();
+    expect(screen.getByText("AI Tagged")).toBeInTheDocument();
     expect(screen.getByText("Ai.Tagging")).toBeInTheDocument();
     expect(screen.getByText("Model tagger-v1")).toBeInTheDocument();
     expect(screen.getByText("Run run-17")).toBeInTheDocument();

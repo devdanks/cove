@@ -14,7 +14,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.GalleriesRead)]
-public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null, CustomFieldService? customFields = null) : ControllerBase
+public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null, CustomFieldService? customFields = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
     private sealed record GalleryRelationshipCounts(IReadOnlyDictionary<int, int> ImageCounts, IReadOnlyDictionary<int, int> SceneCounts);
@@ -213,15 +213,19 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
 
         var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Gallery, gallery.Id, cancellationToken);
         var relationshipCounts = await GetRelationshipCountsAsync([gallery.Id], cancellationToken);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Gallery, gallery.Id, cancellationToken)).ToList();
         return MapToDto(
             gallery,
             customFieldValues,
             GetRelationshipCount(relationshipCounts.ImageCounts, gallery.Id),
             GetRelationshipCount(relationshipCounts.SceneCounts, gallery.Id),
-            provenanceLookup);
+            provenanceLookup,
+            fieldProvenance);
     }
 
-    private GalleryDto MapToDto(Gallery g, Dictionary<string, object>? customFieldValues = null, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null) => new(
+    private GalleryDto MapToDto(Gallery g, Dictionary<string, object>? customFieldValues = null, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         g.Id, g.Title, g.Code, g.Date?.ToString("yyyy-MM-dd"), g.Details, g.Photographer,
         g.Organized, g.StudioId, g.Studio?.Name,
         g.Urls.Select(u => u.Url).ToList(),
@@ -236,7 +240,8 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         customFieldValues,
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
         ResolveCoverPath(g, imageCount, sceneCount),
-        g.CoverImageId
+        g.CoverImageId,
+        fieldProvenance
     );
 
     /// <summary>Resolve cover image URL through the unified gallery cover endpoint.</summary>

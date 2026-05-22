@@ -916,11 +916,13 @@ public class SceneFilterBehaviorTests
         var ok = Assert.IsType<OkObjectResult>(response.Result);
         var payload = Assert.IsType<PaginatedResponse<SceneListEntryDto>>(ok.Value);
 
-        Assert.Equal(2, payload.TotalCount);
-        Assert.Equal(["compilation", "scene"], payload.Items.Select(item => item.Kind).ToArray());
-        Assert.Equal("compilation row", payload.Items[0].Group?.Name);
+        Assert.Equal(3, payload.TotalCount);
+        Assert.Equal(["compilation", "compilation", "scene"], payload.Items.Select(item => item.Kind).ToArray());
+        Assert.Equal("ordinary scene group", payload.Items[0].Group?.Name);
         Assert.True(payload.Items[0].Group?.IsCompilation);
-        Assert.Equal("scene row", payload.Items[1].Scene?.Title);
+        Assert.Equal("compilation row", payload.Items[1].Group?.Name);
+        Assert.True(payload.Items[1].Group?.IsCompilation);
+        Assert.Equal("scene row", payload.Items[2].Scene?.Title);
     }
 
     [Fact]

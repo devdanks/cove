@@ -16,7 +16,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.AudiosRead)]
-public class AudiosController(CoveContext db, CustomFieldService customFields, IScanService scanService, IThumbnailService thumbnailService, IBlobService blobService, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class AudiosController(CoveContext db, CustomFieldService customFields, IScanService scanService, IThumbnailService thumbnailService, IBlobService blobService, ICurrentPrincipalAccessor? principalAccessor = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
@@ -121,11 +121,7 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
             return NotFound();
         }
 
-        var groups = await GetGroupsAsync(id, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, id, ct);
-        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [id], ct);
-        var contextTagApplications = await GetContextTagApplicationsAsync(id, ct);
-        return Ok(MapToDto(audio, groups, customFieldValues, effectiveTags, contextTagApplications));
+        return Ok(await MapToDetailDtoAsync(audio, ct));
     }
 
     [HttpGet("{id:int}/stream")]
@@ -191,11 +187,7 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
 
         var created = await GetAudioForDtoAsync(audio.Id, ct);
         if (created == null) return NotFound();
-        var groups = await GetGroupsAsync(audio.Id, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, audio.Id, ct);
-        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [audio.Id], ct);
-        var contextTagApplications = await GetContextTagApplicationsAsync(audio.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = audio.Id }, MapToDto(created, groups, customFieldValues, effectiveTags, contextTagApplications));
+        return CreatedAtAction(nameof(GetById), new { id = audio.Id }, await MapToDetailDtoAsync(created, ct));
     }
 
     [HttpPost("from-file")]
@@ -217,11 +209,7 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
             .FirstOrDefaultAsync(item => item.Id == audioId, ct);
         if (audio == null) return NotFound();
 
-        var groups = await GetGroupsAsync(audioId, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, audioId, ct);
-        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [audioId], ct);
-        var contextTagApplications = await GetContextTagApplicationsAsync(audioId, ct);
-        return CreatedAtAction(nameof(GetById), new { id = audioId }, MapToDto(audio, groups, customFieldValues, effectiveTags, contextTagApplications));
+        return CreatedAtAction(nameof(GetById), new { id = audioId }, await MapToDetailDtoAsync(audio, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -296,11 +284,7 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
             return NotFound();
         }
 
-        var groups = await GetGroupsAsync(id, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, id, ct);
-        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [id], ct);
-        var contextTagApplications = await GetContextTagApplicationsAsync(id, ct);
-        return Ok(MapToDto(updated, groups, customFieldValues, effectiveTags, contextTagApplications));
+        return Ok(await MapToDetailDtoAsync(updated, ct));
     }
 
     [HttpPost("bulk")]
@@ -580,7 +564,19 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         return query.Where(audio => !matchingAll.Select(match => match.Id).Contains(audio.Id));
     }
 
-    private AudioDto MapToDto(Audio audio, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues, IReadOnlyDictionary<int, List<TagDto>>? effectiveTagsByAudioId = null, List<TagApplicationDto>? contextTagApplications = null) => new(
+    private async Task<AudioDto> MapToDetailDtoAsync(Audio audio, CancellationToken ct)
+    {
+        var groups = await GetGroupsAsync(audio.Id, ct);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Audio, audio.Id, ct);
+        var effectiveTags = await EffectiveTagDtoLoader.LoadAsync(db, AffinityHostType.Audio, [audio.Id], ct);
+        var contextTagApplications = await GetContextTagApplicationsAsync(audio.Id, ct);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Audio, audio.Id, ct)).ToList();
+        return MapToDto(audio, groups, customFieldValues, effectiveTags, contextTagApplications, fieldProvenance);
+    }
+
+    private AudioDto MapToDto(Audio audio, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues, IReadOnlyDictionary<int, List<TagDto>>? effectiveTagsByAudioId = null, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         audio.Id,
         audio.Title,
         audio.Code,
@@ -620,7 +616,8 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         audio.MaxDuration,
         audio.HasVideoFiles,
         audio.ImageBlobId != null ? EntityImageUrls.Audio(ControllerContext.HttpContext, audio.Id, audio.UpdatedAt) : null,
-        contextTagApplications);
+        contextTagApplications,
+        fieldProvenance);
 
     private async Task<List<TagApplicationDto>?> GetContextTagApplicationsAsync(int audioId, CancellationToken ct)
     {

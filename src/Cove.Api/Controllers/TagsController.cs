@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.TagsRead)]
-public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, CustomFieldService customFields, SegmentSpanResolver? spanResolver = null) : ControllerBase
+public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, CustomFieldService customFields, SegmentSpanResolver? spanResolver = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private sealed record TagUsageCounts(
         int SceneCount,
@@ -490,6 +490,9 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     {
         var usageCounts = (await LoadTagUsageCountsAsync([t.Id], ct)).GetValueOrDefault(t.Id)
             ?? new TagUsageCounts(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Tag, t.Id, ct)).ToList();
 
         return new TagDetailDto(
             t.Id,
@@ -523,7 +526,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 t.MinOccurrenceSec,
                 t.MinOccurrencePercent,
                 t.RemoteIds.Select(remoteId => new TagRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
-                t.Organized);
+                t.Organized,
+                fieldProvenance);
     }
 
     private List<TagListDto> MapTagListDtos(IReadOnlyList<Tag> items, IReadOnlyDictionary<int, TagUsageCounts> usageCountsByTagId)

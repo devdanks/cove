@@ -331,6 +331,9 @@ query Me {
 
         ApplyRemotePerformer(performer, box.Endpoint, remote, importConfig);
         await DownloadPerformerImageAsync(performer, remote, ct);
+        var fieldProvenance = BuildPerformerMetadataFieldProvenance(remote, importConfig, box.Endpoint);
+        if (fieldProvenance.Count > 0 && _fieldProvenanceService != null)
+            await _fieldProvenanceService.RecordManyAsync(AffinityHostType.Performer, performer.Id, fieldProvenance, BuildMetadataSourceKey(box.Endpoint), sourceRunId: box.Endpoint, cancellationToken: ct);
         return true;
     }
 
@@ -445,6 +448,10 @@ query Me {
             }
         }
 
+        var fieldProvenance = BuildStudioMetadataFieldProvenance(remote, importConfig, box.Endpoint);
+        if (fieldProvenance.Count > 0 && _fieldProvenanceService != null)
+            await _fieldProvenanceService.RecordManyAsync(AffinityHostType.Studio, studio.Id, fieldProvenance, BuildMetadataSourceKey(box.Endpoint), sourceRunId: box.Endpoint, cancellationToken: ct);
+
         return true;
     }
 
@@ -496,6 +503,9 @@ query Me {
         tag.Description = Coalesce(tag.Description, remote.Description) ?? tag.Description;
         MergeAliases(tag, remote.Aliases);
         UpsertRemoteId(tag.RemoteIds, box.Endpoint, remote.Id, id => id.Endpoint, id => id.RemoteId, (id, value) => id.RemoteId = value, value => new TagRemoteId { Endpoint = box.Endpoint, RemoteId = value });
+        var fieldProvenance = BuildTagMetadataFieldProvenance(remote, box.Endpoint);
+        if (fieldProvenance.Count > 0 && _fieldProvenanceService != null)
+            await _fieldProvenanceService.RecordManyAsync(AffinityHostType.Tag, tag.Id, fieldProvenance, BuildMetadataSourceKey(box.Endpoint), sourceRunId: box.Endpoint, cancellationToken: ct);
         return true;
     }
 
@@ -1133,6 +1143,7 @@ query Me {
         var allowedPerformerGenders = BuildAllowedPerformerGenderSet(importConfig?.PerformerGenders);
         var skipSingleNamePerformers = importConfig?.SkipSingleNamePerformers ?? false;
         var fieldProvenance = new Dictionary<string, object?>();
+        var sourceKey = BuildMetadataSourceKey(endpoint);
 
         ApplyMetadataStringField(fieldProvenance, "title", remote.Title, GetMetadataFieldStrategy(fieldStrategies, "title", defaultScalarStrategy), value => scene.Title = value, scene.Title);
         ApplyMetadataStringField(fieldProvenance, "code", remote.Code, GetMetadataFieldStrategy(fieldStrategies, "code", defaultScalarStrategy), value => scene.Code = value, scene.Code);
@@ -1197,8 +1208,9 @@ query Me {
                 if (!alreadyLinkedTag)
                 {
                     scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, Tag = tag });
-                    await _tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, "metadata", cancellationToken: ct);
                 }
+
+                await _tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, sourceKey, sourceRunId: endpoint, cancellationToken: ct);
             }
 
             if (appliedTagNames.Count > 0)
@@ -1258,9 +1270,10 @@ query Me {
         {
             remoteId.RemoteId = remote.Id;
         }
+        fieldProvenance["remote_ids"] = new[] { new { endpoint, remoteId = remote.Id } };
 
         if (fieldProvenance.Count > 0 && _fieldProvenanceService != null)
-            await _fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, "metadata", sourceRunId: endpoint, cancellationToken: ct);
+            await _fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, sourceKey, sourceRunId: endpoint, cancellationToken: ct);
     }
 
     // ===== Submissions =====
@@ -1576,6 +1589,105 @@ query Me {
         Skip,
         Create,
         Existing,
+    }
+
+    private static Dictionary<string, object?> BuildPerformerMetadataFieldProvenance(MetadataServerRemotePerformer remote, MetadataServerPerformerImportRequestDto? importConfig, string endpoint)
+    {
+        var fields = new Dictionary<string, object?>();
+        var strategies = importConfig?.FieldStrategies ?? [];
+
+        void AddString(string field, string? value)
+        {
+            if (GetMetadataFieldStrategy(strategies, field, MetadataFieldStrategy.Merge) != MetadataFieldStrategy.Ignore && !string.IsNullOrWhiteSpace(value))
+                fields[field] = value.Trim();
+        }
+
+        void AddValue(string field, object? value)
+        {
+            if (GetMetadataFieldStrategy(strategies, field, MetadataFieldStrategy.Merge) != MetadataFieldStrategy.Ignore && value != null)
+                fields[field] = value;
+        }
+
+        AddString("name", remote.Name);
+        AddString("disambiguation", remote.Disambiguation);
+        AddString("gender", HumanizeGraphQlEnum(remote.Gender));
+        AddString("birthdate", remote.BirthDate);
+        AddString("deathDate", remote.DeathDate);
+        AddString("country", remote.Country);
+        AddString("ethnicity", HumanizeGraphQlEnum(remote.Ethnicity));
+        AddString("eyeColor", HumanizeGraphQlEnum(remote.EyeColor));
+        AddString("hairColor", HumanizeGraphQlEnum(remote.HairColor));
+        if (remote.Height.HasValue && remote.Height.Value > 0)
+            AddValue("heightCm", remote.Height.Value);
+        AddString("measurements", FormatMeasurements(remote.Measurements));
+        AddString("fakeTits", HumanizeGraphQlEnum(remote.BreastType));
+        if (remote.CareerStartYear.HasValue && remote.CareerStartYear.Value > 0)
+            AddValue("careerStart", remote.CareerStartYear.Value);
+        if (remote.CareerEndYear.HasValue && remote.CareerEndYear.Value > 0)
+            AddValue("careerEnd", remote.CareerEndYear.Value);
+        AddString("tattoos", FormatBodyModifications(remote.Tattoos));
+        AddString("piercings", FormatBodyModifications(remote.Piercings));
+
+        var aliases = remote.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Select(alias => alias.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (aliases.Count > 0 && GetMetadataFieldStrategy(strategies, "aliases", MetadataFieldStrategy.Merge) != MetadataFieldStrategy.Ignore)
+            fields["aliases"] = aliases;
+
+        var urls = remote.Urls.Select(url => url.Url).Where(url => !string.IsNullOrWhiteSpace(url)).Select(url => url.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (urls.Count > 0 && GetMetadataFieldStrategy(strategies, "urls", MetadataFieldStrategy.Merge) != MetadataFieldStrategy.Ignore)
+            fields["urls"] = urls;
+
+        var imageUrl = remote.Images.FirstOrDefault()?.Url;
+        if (!string.IsNullOrWhiteSpace(imageUrl) && GetMetadataFieldStrategy(strategies, "image", MetadataFieldStrategy.Merge) != MetadataFieldStrategy.Ignore)
+            fields["image_url"] = imageUrl.Trim();
+
+        fields["remote_ids"] = new[] { new { endpoint, remoteId = remote.Id } };
+        return fields;
+    }
+
+    private static Dictionary<string, object?> BuildStudioMetadataFieldProvenance(MetadataServerRemoteStudio remote, MetadataServerStudioImportRequestDto? importConfig, string endpoint)
+    {
+        var fields = new Dictionary<string, object?>();
+        var strategies = importConfig?.FieldStrategies ?? [];
+
+        if (!IsIgnoredImportStrategy(GetImportStrategy(strategies, "name", defaultStrategy: "overwrite")) && !string.IsNullOrWhiteSpace(remote.Name))
+            fields["name"] = remote.Name.Trim();
+
+        var aliases = remote.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Select(alias => alias.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (aliases.Count > 0 && !IsIgnoredImportStrategy(GetImportStrategy(strategies, "aliases", defaultStrategy: "merge")))
+            fields["aliases"] = aliases;
+
+        var urls = remote.Urls.Select(url => url.Url).Where(url => !string.IsNullOrWhiteSpace(url)).Select(url => url.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (urls.Count > 0 && !IsIgnoredImportStrategy(GetImportStrategy(strategies, "urls", defaultStrategy: "merge")))
+            fields["urls"] = urls;
+
+        var imageUrl = remote.Images.FirstOrDefault()?.Url;
+        if (!string.IsNullOrWhiteSpace(imageUrl) && !IsIgnoredImportStrategy(GetImportStrategy(strategies, "image", defaultStrategy: "overwrite")))
+            fields["image_url"] = imageUrl.Trim();
+
+        if (remote.Parent != null && !IsIgnoredImportStrategy(GetImportStrategy(strategies, "parent", defaultStrategy: "merge")))
+            fields["parent"] = remote.Parent.Name;
+
+        fields["remote_ids"] = new[] { new { endpoint, remoteId = remote.Id } };
+        return fields;
+    }
+
+    private static Dictionary<string, object?> BuildTagMetadataFieldProvenance(MetadataServerRemoteTag remote, string endpoint)
+    {
+        var fields = new Dictionary<string, object?>
+        {
+            ["remote_ids"] = new[] { new { endpoint, remoteId = remote.Id } },
+        };
+
+        if (!string.IsNullOrWhiteSpace(remote.Name))
+            fields["name"] = remote.Name.Trim();
+        if (!string.IsNullOrWhiteSpace(remote.Description))
+            fields["description"] = remote.Description.Trim();
+
+        var aliases = remote.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Select(alias => alias.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (aliases.Count > 0)
+            fields["aliases"] = aliases;
+
+        return fields;
     }
 
     private void ApplyRemotePerformer(Performer performer, string endpoint, MetadataServerRemotePerformer remote, MetadataServerPerformerImportRequestDto? importConfig = null)
@@ -2444,6 +2556,9 @@ query Me {
     {
         return string.IsNullOrWhiteSpace(nextValue) ? currentValue : nextValue.Trim();
     }
+
+    private static string BuildMetadataSourceKey(string? endpoint)
+        => string.IsNullOrWhiteSpace(endpoint) ? "metadata" : $"metadata:{endpoint.Trim()}";
 
     private enum MetadataFieldStrategy
     {

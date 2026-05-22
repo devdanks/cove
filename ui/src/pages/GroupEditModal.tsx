@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groups } from "../api/client";
 import type { Group, GroupUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
-import { CustomFieldsEditor } from "../components/shared";
+import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
@@ -32,6 +32,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const [showInSceneLists, setShowInSceneLists] = useState(group.showInSceneLists ?? false);
 
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(group.customFields ?? {}) });
+  const tagProvenanceById = buildTagProvenanceById(group.tags, group.fieldProvenance);
   const { data: dynamicSources = [] } = useQuery({
     queryKey: ["group-dynamic-sources"],
     queryFn: () => groups.dynamicSources(),
@@ -85,16 +86,16 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   return (
     <EditModal title={`Edit Group: ${group.name}`} open={open} onClose={onClose}>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Name *">
+        <Field label="Name *" fieldProvenance={group.fieldProvenance} fieldKey="name">
           <TextInput value={name} onChange={setName} placeholder="Group name" />
         </Field>
-        <Field label="Studio">
+        <Field label="Studio" fieldProvenance={group.fieldProvenance} fieldKey={["studio", "studioId"]}>
           <StudioSelector value={studioId} onChange={setStudioId} />
         </Field>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Kind">
+        <Field label="Kind" fieldProvenance={group.fieldProvenance} fieldKey="kind">
           <div className="inline-flex rounded-lg border border-border bg-card p-1">
             {(["static", "dynamic"] as const).map((nextKind) => (
               <button
@@ -108,17 +109,17 @@ export function GroupEditModal({ group, open, onClose }: Props) {
             ))}
           </div>
         </Field>
-        <div className="flex items-end pb-1">
+        <Field label="Scene Browsing" fieldProvenance={group.fieldProvenance} fieldKey="showInSceneLists">
           <label className="inline-flex items-center gap-2 text-sm text-foreground">
             <input type="checkbox" checked={showInSceneLists} onChange={(event) => setShowInSceneLists(event.target.checked)} className="h-4 w-4 accent-accent" />
             Show in scene browsing
           </label>
-        </div>
+        </Field>
       </div>
 
       {kind === "dynamic" ? (
         <div className="grid grid-cols-1 gap-4">
-          <Field label="Dynamic source">
+          <Field label="Dynamic source" fieldProvenance={group.fieldProvenance} fieldKey="querySourceKey">
             <select
               value={querySourceKey}
               onChange={(event) => {
@@ -142,10 +143,10 @@ export function GroupEditModal({ group, open, onClose }: Props) {
       ) : null}
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Director">
+        <Field label="Director" fieldProvenance={group.fieldProvenance} fieldKey="director">
           <TextInput value={director} onChange={setDirector} placeholder="Director name" />
         </Field>
-        <Field label="Date">
+        <Field label="Date" fieldProvenance={group.fieldProvenance} fieldKey="date">
           <input
             type="date"
             value={date}
@@ -155,24 +156,24 @@ export function GroupEditModal({ group, open, onClose }: Props) {
         </Field>
       </div>
 
-      <Field label="Description">
+      <Field label="Description" fieldProvenance={group.fieldProvenance} fieldKey={["description", "details", "synopsis"]}>
         <TextArea value={description} onChange={setDescription} placeholder="Group description" rows={4} />
       </Field>
 
-      <Field label="Aliases">
+      <Field label="Aliases" fieldProvenance={group.fieldProvenance} fieldKey="aliases">
         <StringListEditor values={aliases} onChange={setAliases} placeholder="Alias" addLabel="Add Alias" />
       </Field>
 
-      <Field label="URLs">
+      <Field label="URLs" fieldProvenance={group.fieldProvenance} fieldKey="urls">
         <StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" />
       </Field>
 
       {/* Tags */}
-      <Field label="Tags">
-        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." />
+      <Field label="Tags" fieldProvenance={group.fieldProvenance} fieldKey="tags">
+        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." selectedProvenanceById={tagProvenanceById} />
       </Field>
 
-      <Field label="Custom Fields">
+      <Field label="Custom Fields" fieldProvenance={group.fieldProvenance} fieldKey="customFields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="group" />
       </Field>
 

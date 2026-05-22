@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.PerformersRead)]
-public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService? customFields = null) : ControllerBase
+public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService? customFields = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private sealed record PerformerUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount);
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
@@ -513,7 +513,10 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
     {
         var usageCounts = (await LoadPerformerUsageCountsAsync([performer.Id], ct)).GetValueOrDefault(performer.Id);
         var customFieldValues = await _customFields.GetValuesAsync(CustomFieldEntityTypes.Performer, performer.Id, ct);
-        return MapToDto(performer, usageCounts, customFieldValues);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Performer, performer.Id, ct)).ToList();
+        return MapToDto(performer, usageCounts, customFieldValues, fieldProvenance);
     }
 
     private static IQueryable<Group> ApplyGroupSort(IQueryable<Group> query, string? sort, bool desc) => sort switch
@@ -559,7 +562,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt)
             : null;
 
-    private PerformerDto MapToDto(Performer p, PerformerUsageCounts? usageCounts = null, Dictionary<string, object>? customFieldValues = null) => new(
+    private PerformerDto MapToDto(Performer p, PerformerUsageCounts? usageCounts = null, Dictionary<string, object>? customFieldValues = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         p.Id, p.Name, p.Disambiguation, p.Gender?.ToString(),
         p.Birthdate?.ToString("yyyy-MM-dd"), p.DeathDate?.ToString("yyyy-MM-dd"),
         p.Ethnicity, p.Country, p.EyeColor, p.HairColor, p.HeightCm, p.Weight,
@@ -578,7 +581,8 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         usageCounts?.TextCount ?? 0,
         EntityImageUrls.PerformerOrNull(ControllerContext.HttpContext, p),
         customFieldValues,
-        p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o")
+        p.CreatedAt.ToString("o"), p.UpdatedAt.ToString("o"),
+        fieldProvenance
     );
 
     private static Dictionary<string, object>? GetCustomFields(IReadOnlyDictionary<int, Dictionary<string, object>> lookup, int id)

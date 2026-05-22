@@ -15,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.TextsRead)]
-public class TextsController(CoveContext db, CustomFieldService customFields, TextExtractionService textExtractionService, IScanService scanService, IThumbnailService thumbnailService, IBlobService blobService, ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+public class TextsController(CoveContext db, CustomFieldService customFields, TextExtractionService textExtractionService, IScanService scanService, IThumbnailService thumbnailService, IBlobService blobService, ICurrentPrincipalAccessor? principalAccessor = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
@@ -115,10 +115,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
             return NotFound();
         }
 
-        var groups = await GetGroupsAsync(id, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, id, ct);
-        var contextTagApplications = await GetContextTagApplicationsAsync(id, ct);
-        return Ok(MapToDto(text, groups, customFieldValues, contextTagApplications));
+        return Ok(await MapToDetailDtoAsync(text, ct));
     }
 
     [HttpGet("{id:int}/content")]
@@ -202,10 +199,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
 
         var created = await GetTextForDtoAsync(text.Id, ct);
         if (created == null) return NotFound();
-        var groups = await GetGroupsAsync(text.Id, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, text.Id, ct);
-        var contextTagApplications = await GetContextTagApplicationsAsync(text.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { id = text.Id }, MapToDto(created, groups, customFieldValues, contextTagApplications));
+        return CreatedAtAction(nameof(GetById), new { id = text.Id }, await MapToDetailDtoAsync(created, ct));
     }
 
     [HttpPost("from-file")]
@@ -226,10 +220,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
             .FirstOrDefaultAsync(item => item.Id == textDocumentId, ct);
         if (text == null) return NotFound();
 
-        var groups = await GetGroupsAsync(textDocumentId, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, textDocumentId, ct);
-        var contextTagApplications = await GetContextTagApplicationsAsync(textDocumentId, ct);
-        return CreatedAtAction(nameof(GetById), new { id = textDocumentId }, MapToDto(text, groups, customFieldValues, contextTagApplications));
+        return CreatedAtAction(nameof(GetById), new { id = textDocumentId }, await MapToDetailDtoAsync(text, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -303,10 +294,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
             return NotFound();
         }
 
-        var groups = await GetGroupsAsync(id, ct);
-        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, id, ct);
-        var contextTagApplications = await GetContextTagApplicationsAsync(id, ct);
-        return Ok(MapToDto(updated, groups, customFieldValues, contextTagApplications));
+        return Ok(await MapToDetailDtoAsync(updated, ct));
     }
 
     [HttpPost("bulk")]
@@ -560,7 +548,18 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         return query.Where(text => !matchingAll.Select(match => match.Id).Contains(text.Id));
     }
 
-    private TextDocumentDto MapToDto(TextDocument text, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues, List<TagApplicationDto>? contextTagApplications = null) => new(
+    private async Task<TextDocumentDto> MapToDetailDtoAsync(TextDocument text, CancellationToken ct)
+    {
+        var groups = await GetGroupsAsync(text.Id, ct);
+        var customFieldValues = await customFields.GetValuesAsync(CustomFieldEntityTypes.Text, text.Id, ct);
+        var contextTagApplications = await GetContextTagApplicationsAsync(text.Id, ct);
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : (await fieldProvenanceService.GetForHostAsync(AffinityHostType.Text, text.Id, ct)).ToList();
+        return MapToDto(text, groups, customFieldValues, contextTagApplications, fieldProvenance);
+    }
+
+    private TextDocumentDto MapToDto(TextDocument text, List<GroupSummaryDto>? groups, Dictionary<string, object>? customFieldValues, List<TagApplicationDto>? contextTagApplications = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         text.Id,
         text.Title,
         text.Code,
@@ -596,7 +595,8 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         text.MaxWordCount,
         text.MaxPageCount,
         text.ImageBlobId != null ? EntityImageUrls.Text(ControllerContext.HttpContext, text.Id, text.UpdatedAt) : null,
-        contextTagApplications);
+        contextTagApplications,
+        fieldProvenance);
 
     private async Task<List<TagApplicationDto>?> GetContextTagApplicationsAsync(int textId, CancellationToken ct)
     {

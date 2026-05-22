@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, galleries, groups, images, metadata, performers, scenes, studios, texts, entityImages } from "../api/client";
 import type { Audio, AudioFilterCriteria, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, MetadataServer, MetadataServerStudioMatch, Performer, PerformerFilterCriteria, Scene, SceneFilterCriteria, Studio, StudioFilterCriteria, TextDocument, TextFilterCriteria } from "../api/types";
-import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
+import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { ChevronDown, Building2, CloudDownload, CloudUpload, FileText, Film, FolderOpen, GitMerge, Headphones, ImageIcon, Layers, Link as LinkIcon, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { StudioEditModal } from "./StudioEditModal";
@@ -250,15 +250,17 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         imageClassName="h-full w-full object-contain p-3"
         onImageClick={canWriteStudio ? () => setCoverOpen(true) : undefined}
         imageFallback={<Building2 className="h-14 w-14 text-accent" />}
-        title={studio.name}
+        title={<FieldProvenanceHover fieldProvenance={studio.fieldProvenance} fieldKey="name">{studio.name}</FieldProvenanceHover>}
         subtitle={studio.parentName && studio.parentId ? (
           canReadEntity("studio", hasPermission) ? (
-            <button onClick={() => onNavigate({ page: "studio", id: studio.parentId })} className="text-accent hover:underline">
-              Part of {studio.parentName}
-            </button>
-          ) : <span>Part of {studio.parentName}</span>
+            <FieldProvenanceHover fieldProvenance={studio.fieldProvenance} fieldKey="parent">
+              <button onClick={() => onNavigate({ page: "studio", id: studio.parentId })} className="text-accent hover:underline">
+                Part of {studio.parentName}
+              </button>
+            </FieldProvenanceHover>
+          ) : <FieldProvenanceHover fieldProvenance={studio.fieldProvenance} fieldKey="parent"><span>Part of {studio.parentName}</span></FieldProvenanceHover>
         ) : undefined}
-        aliases={studio.aliases.length > 0 ? studio.aliases.join(", ") : undefined}
+        aliases={studio.aliases.length > 0 ? <FieldProvenanceHover fieldProvenance={studio.fieldProvenance} fieldKey="aliases">{studio.aliases.join(", ")}</FieldProvenanceHover> : undefined}
         favorite={studioFavorite}
         onFavoriteToggle={canEngageStudio ? () => setStudioFavorite(!studioFavorite) : undefined}
         organized={studio.organized}
@@ -293,23 +295,25 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
                 <InteractiveRating value={studioRating} onChange={(value) => setStudioRating(value)} readOnly={!canEngageStudio} />
               </div>
             </div>
-            {studio.details ? <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{studio.details}</p> : null}
+            {studio.details ? <FieldProvenanceHover fieldProvenance={studio.fieldProvenance} fieldKey="details" block><p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{studio.details}</p></FieldProvenanceHover> : null}
             {canReadTags && studio.tags.length > 0 ? (
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {studio.tags.map((tag) => (
-                  <TagBadge key={tag.id} name={tag.name} tag={tag} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                  <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={resolveTagProvenance(tag, studio.fieldProvenance)} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
                 ))}
               </div>
             ) : null}
             {studio.urls.length > 0 ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {studio.urls.map((url, index) => (
-                  <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-xs items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
-                    <LinkIcon className="h-3 w-3 flex-shrink-0" />
-                    <span className="truncate">{formatUrlHost(url)}</span>
-                  </a>
-                ))}
-              </div>
+              <FieldProvenanceHover fieldProvenance={studio.fieldProvenance} fieldKey="urls" block className="mt-3">
+                <div className="flex flex-wrap gap-2">
+                  {studio.urls.map((url, index) => (
+                    <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-xs items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
+                      <LinkIcon className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate">{formatUrlHost(url)}</span>
+                    </a>
+                  ))}
+                </div>
+              </FieldProvenanceHover>
             ) : null}
             <CustomFieldsDisplay customFields={studio.customFields} entityType="studio" />
             <StudioMetadataServerPanel studio={studio} metadataServers={metadataServers} onNavigate={onNavigate} />

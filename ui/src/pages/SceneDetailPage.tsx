@@ -1,6 +1,6 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { faces, scenes, segmentDisplayProfiles, tagApplications, entityImages, metadata, fileOps } from "../api/client";
-import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay, CustomFieldsEditor } from "../components/shared";
+import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay, CustomFieldsEditor, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { 
   Pencil, Plus, Trash2, Search, Eye, EyeOff, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import type { Detection, Face, PerformerSummary, ResolvedSpan, Scene, SceneUpdate, Segment, TagApplication } from "../api/types";
+import type { Detection, Face, PerformerSummary, ResolvedSpan, Scene, SceneUpdate, Segment, TagApplication, TagProvenance } from "../api/types";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { InteractiveRating } from "../components/Rating";
@@ -451,36 +451,42 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     <div className="flex flex-wrap items-start gap-4 text-sm text-secondary">
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         {scene.date ? (
-          <span>
-            {new Date(`${scene.date}T00:00:00`).toLocaleDateString(undefined, {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </span>
+          <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="date">
+            <span>
+              {new Date(`${scene.date}T00:00:00`).toLocaleDateString(undefined, {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })}
+            </span>
+          </FieldProvenanceHover>
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
           {scene.studioName && scene.studioId ? (
-            <button
-              type="button"
-              onClick={() => onNavigate({ page: "studio", id: scene.studioId })}
-              className="font-medium text-accent hover:underline"
-            >
-              {scene.studioName}
-            </button>
+            <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="studio">
+              <button
+                type="button"
+                onClick={() => onNavigate({ page: "studio", id: scene.studioId })}
+                className="font-medium text-accent hover:underline"
+              >
+                {scene.studioName}
+              </button>
+            </FieldProvenanceHover>
           ) : null}
           {file && file.frameRate > 0 ? <span>{file.frameRate.toFixed(0)} fps</span> : null}
           {file && resLabel ? <span className="font-semibold text-accent">{resLabel}</span> : null}
-          {scene.code ? <span>Code {scene.code}</span> : null}
+          {scene.code ? <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="code"><span>Code {scene.code}</span></FieldProvenanceHover> : null}
           {scene.director ? (
-            <button
-              type="button"
-              onClick={() => onNavigate({ page: "scenes", query: scene.director })}
-              className="hover:text-foreground"
-            >
-              Director {scene.director}
-            </button>
+            <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="director">
+              <button
+                type="button"
+                onClick={() => onNavigate({ page: "scenes", query: scene.director })}
+                className="hover:text-foreground"
+              >
+                Director {scene.director}
+              </button>
+            </FieldProvenanceHover>
           ) : null}
         </div>
       </div>
@@ -753,7 +759,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         showDeleteFile
       />
       <MediaDetailLayout
-        title={sceneTitle}
+        title={<FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="title">{sceneTitle}</FieldProvenanceHover>}
         headerImage={sceneHeaderImage}
         subtitle={sceneSubtitle}
         backLabel={backLabel}
@@ -879,16 +885,18 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
         {scene.code && (
           <>
             <dt className="text-muted pr-3">Studio Code</dt>
-            <dd className="text-foreground">{scene.code}</dd>
+            <dd className="text-foreground"><FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="code">{scene.code}</FieldProvenanceHover></dd>
           </>
         )}
         {scene.director && (
           <>
             <dt className="text-muted pr-3">Director</dt>
             <dd>
-              <button onClick={() => onNavigate({ page: "scenes", query: scene.director })} className="text-accent hover:underline">
-                {scene.director}
-              </button>
+              <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="director">
+                <button onClick={() => onNavigate({ page: "scenes", query: scene.director })} className="text-accent hover:underline">
+                  {scene.director}
+                </button>
+              </FieldProvenanceHover>
             </dd>
           </>
         )}
@@ -897,7 +905,9 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       {/* Details / Description */}
       {scene.details && (
         <div>
-          <p className="text-sm text-foreground whitespace-pre-wrap">{scene.details}</p>
+          <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="details" block>
+            <p className="text-sm text-foreground whitespace-pre-wrap">{scene.details}</p>
+          </FieldProvenanceHover>
         </div>
       )}
 
@@ -911,7 +921,7 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
                 key={tag.id} 
                 name={tag.name} 
                 tag={tag}
-                provenance={tag.provenance}
+                provenance={resolveTagProvenance(tag, scene.fieldProvenance)}
                 onClick={() => onNavigate({ page: "tag", id: tag.id })} 
               />
             ))}
@@ -923,26 +933,28 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       {scene.performers.length > 0 && (
         <div>
           <h6 className="text-sm text-muted mb-2">Performer{scene.performers.length > 1 ? "s" : ""}</h6>
-          <div className={scene.performers.length > 1 ? "grid grid-cols-2 gap-3" : "grid max-w-[220px] gap-3"}>
-            {scene.performers.map((performer: any) => {
-              const contextTags = (scene.contextTagApplications ?? []).filter((application) => application.contextType === "performer" && application.contextId === performer.id);
-              const ageAtScene = getAgeAtDate(scene.date, performer.birthdate);
-              const footer = ageAtScene || contextTags.length > 0
-                ? <ScenePerformerTileFooter ageAtScene={ageAtScene} contextTags={contextTags} />
-                : null;
+          <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="performers" block>
+            <div className={scene.performers.length > 1 ? "grid grid-cols-2 gap-3" : "grid max-w-[220px] gap-3"}>
+              {scene.performers.map((performer: any) => {
+                const contextTags = (scene.contextTagApplications ?? []).filter((application) => application.contextType === "performer" && application.contextId === performer.id);
+                const ageAtScene = getAgeAtDate(scene.date, performer.birthdate);
+                const footer = ageAtScene || contextTags.length > 0
+                  ? <ScenePerformerTileFooter ageAtScene={ageAtScene} contextTags={contextTags} />
+                  : null;
 
-              return (
-                <PerformerTile
-                  key={performer.id}
-                  performer={performer}
-                  onClick={() => onNavigate({ page: "performer", id: performer.id })}
-                  onNavigate={onNavigate}
-                >
-                  {footer}
-                </PerformerTile>
-              );
-            })}
-          </div>
+                return (
+                  <PerformerTile
+                    key={performer.id}
+                    performer={performer}
+                    onClick={() => onNavigate({ page: "performer", id: performer.id })}
+                    onNavigate={onNavigate}
+                  >
+                    {footer}
+                  </PerformerTile>
+                );
+              })}
+            </div>
+          </FieldProvenanceHover>
         </div>
       )}
 
@@ -1044,19 +1056,21 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       {scene.urls && scene.urls.length > 0 && (
         <div>
           <h6 className="text-sm text-muted mb-2">URLs</h6>
-          <div className="space-y-1">
-            {scene.urls.map((url: string, i: number) => (
-              <a
-                key={i}
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-accent hover:underline text-sm block truncate"
-              >
-                {url}
-              </a>
-            ))}
-          </div>
+          <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="urls" block>
+            <div className="space-y-1">
+              {scene.urls.map((url: string, i: number) => (
+                <a
+                  key={i}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent hover:underline text-sm block truncate"
+                >
+                  {url}
+                </a>
+              ))}
+            </div>
+          </FieldProvenanceHover>
         </div>
       )}
 
@@ -2332,6 +2346,13 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
 
   const lockedTagIds = getLockedTagIds(scene.tags);
   const displayedTagIds = mergeTagIds(lockedTagIds, selectedTagIds);
+  const tagProvenanceById = useMemo(() => {
+    const lookup: Record<number, TagProvenance[] | undefined> = {};
+    for (const tag of scene.tags) {
+      lookup[tag.id] = resolveTagProvenance(tag, scene.fieldProvenance);
+    }
+    return lookup;
+  }, [scene.fieldProvenance, scene.tags]);
   const updateSelectedTagIds = (tagIds: number[]) => {
     const locked = new Set(lockedTagIds);
     setSelectedTagIds(tagIds.filter((tagId) => !locked.has(tagId)));
@@ -2342,34 +2363,50 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-1"><span className="text-xs text-secondary">Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} /></label>
-        <label className="space-y-1"><span className="text-xs text-secondary">Date</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></label>
+        <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="title" block>
+          <label className="space-y-1"><span className="text-xs text-secondary">Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} /></label>
+        </FieldProvenanceHover>
+        <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="date" block>
+          <label className="space-y-1"><span className="text-xs text-secondary">Date</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></label>
+        </FieldProvenanceHover>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-1"><span className="text-xs text-secondary">Studio Code</span><input value={code} onChange={(e) => setCode(e.target.value)} className={inputCls} /></label>
-        <label className="space-y-1"><span className="text-xs text-secondary">Director</span><input value={director} onChange={(e) => setDirector(e.target.value)} className={inputCls} /></label>
+        <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="code" block>
+          <label className="space-y-1"><span className="text-xs text-secondary">Studio Code</span><input value={code} onChange={(e) => setCode(e.target.value)} className={inputCls} /></label>
+        </FieldProvenanceHover>
+        <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="director" block>
+          <label className="space-y-1"><span className="text-xs text-secondary">Director</span><input value={director} onChange={(e) => setDirector(e.target.value)} className={inputCls} /></label>
+        </FieldProvenanceHover>
       </div>
-      <label className="block space-y-1"><span className="text-xs text-secondary">Details</span><textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={3} className={inputCls} /></label>
+      <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="details" block>
+        <label className="block space-y-1"><span className="text-xs text-secondary">Details</span><textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={3} className={inputCls} /></label>
+      </FieldProvenanceHover>
       <label className="inline-flex items-center gap-2 text-sm text-secondary">
         <input type="checkbox" checked={isVr} onChange={(e) => setIsVr(e.target.checked)} className="rounded border-border bg-card" />
         VR
       </label>
-      <div className="space-y-1">
-        <span className="text-xs text-secondary">Studio</span>
-        <StudioSelector value={studioId} onChange={setStudioId} placeholder="Search studios..." />
-      </div>
-      <div className="space-y-1"><span className="text-xs text-secondary">URLs</span><StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" /></div>
+      <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="studio" block>
+        <div className="space-y-1">
+          <span className="text-xs text-secondary">Studio</span>
+          <StudioSelector value={studioId} onChange={setStudioId} placeholder="Search studios..." />
+        </div>
+      </FieldProvenanceHover>
+      <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="urls" block>
+        <div className="space-y-1"><span className="text-xs text-secondary">URLs</span><StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" /></div>
+      </FieldProvenanceHover>
       {/* Tags */}
       <div className="space-y-1">
         <span className="text-xs text-secondary">Tags</span>
-        <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} />
+        <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." inputClassName={inputCls} selectedProvenanceById={tagProvenanceById} />
       </div>
 
       {/* Performers */}
-      <div className="space-y-1">
-        <span className="text-xs text-secondary">Performers</span>
-        <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." inputClassName={inputCls} />
-      </div>
+      <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="performers" block>
+        <div className="space-y-1">
+          <span className="text-xs text-secondary">Performers</span>
+          <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." inputClassName={inputCls} />
+        </div>
+      </FieldProvenanceHover>
 
       {selectedPerformerIds.length > 0 ? (
         <div className="space-y-2 rounded-lg border border-border bg-surface/40 p-3">

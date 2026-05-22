@@ -1,7 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, faces, galleries, groups, images, metadata, performers, scenes, texts, entityImages } from "../api/client";
-import type { Audio, AudioFilterCriteria, Face, FaceSimilar, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, Performer as PerformerModel, PerformerFilterCriteria, Scene, SceneFilterCriteria, MetadataServer, MetadataServerPerformerMatch, TextDocument, TextFilterCriteria } from "../api/types";
-import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay } from "../components/shared";
+import type { Audio, AudioFilterCriteria, Face, FaceSimilar, FieldProvenance, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, Performer as PerformerModel, PerformerFilterCriteria, Scene, SceneFilterCriteria, MetadataServer, MetadataServerPerformerMatch, TextDocument, TextFilterCriteria } from "../api/types";
+import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MapPin, MoreHorizontal, MoreVertical, Music, Pencil, Ruler, Scale, Search, Sparkles, Trash2, Users, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PerformerEditModal } from "./PerformerEditModal";
@@ -261,9 +261,9 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
         onImageClick={canWritePerformer ? () => setCoverOpen(true) : undefined}
         imageFallbackClassName="flex h-full w-full items-center justify-center bg-gradient-to-b from-card to-surface"
         imageFallback={<UserRound className="h-20 w-20 text-muted/50" />}
-        title={performer.name}
-        subtitle={performer.disambiguation || undefined}
-        aliases={performer.aliases.length > 0 ? performer.aliases.join(", ") : undefined}
+        title={<FieldProvenanceHover fieldProvenance={performer.fieldProvenance} fieldKey="name">{performer.name}</FieldProvenanceHover>}
+        subtitle={performer.disambiguation ? <FieldProvenanceHover fieldProvenance={performer.fieldProvenance} fieldKey="disambiguation">{performer.disambiguation}</FieldProvenanceHover> : undefined}
+        aliases={performer.aliases.length > 0 ? <FieldProvenanceHover fieldProvenance={performer.fieldProvenance} fieldKey="aliases">{performer.aliases.join(", ")}</FieldProvenanceHover> : undefined}
         favorite={performerFavorite}
         onFavoriteToggle={canEngagePerformer ? () => setPerformerFavorite(!performerFavorite) : undefined}
         counts={[
@@ -290,28 +290,28 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-              {performer.gender && <InfoItem icon={<UserRound className="h-4 w-4" />} label="Gender" value={performer.gender} />}
+              {performer.gender && <InfoItem icon={<UserRound className="h-4 w-4" />} label="Gender" value={performer.gender} fieldProvenance={performer.fieldProvenance} fieldKey="gender" />}
               {performer.birthdate && (
-                <InfoItem icon={<Calendar className="h-4 w-4" />} label="Born" value={`${formatDate(performer.birthdate)}${age ? ` (${age})` : ""}`} />
+                <InfoItem icon={<Calendar className="h-4 w-4" />} label="Born" value={`${formatDate(performer.birthdate)}${age ? ` (${age})` : ""}`} fieldProvenance={performer.fieldProvenance} fieldKey="birthdate" />
               )}
-              {performer.deathDate && <InfoItem icon={<Calendar className="h-4 w-4" />} label="Died" value={formatDate(performer.deathDate)} />}
-              {performer.country && <InfoItem icon={<MapPin className="h-4 w-4" />} label="Country" value={performer.country} />}
-              {performer.ethnicity && <InfoItem label="Ethnicity" value={performer.ethnicity} />}
-              {performer.heightCm && <InfoItem icon={<Ruler className="h-4 w-4" />} label="Height" value={`${performer.heightCm} cm`} />}
-              {performer.weight && <InfoItem icon={<Scale className="h-4 w-4" />} label="Weight" value={`${performer.weight} kg`} />}
-              {performer.measurements && <InfoItem label="Measurements" value={performer.measurements} />}
-              {performer.eyeColor && <InfoItem label="Eye Color" value={performer.eyeColor} />}
-              {performer.hairColor && <InfoItem label="Hair Color" value={performer.hairColor} />}
-              {performer.fakeTits && <InfoItem label="Fake Tits" value={performer.fakeTits} />}
-              {performer.penisLength != null && <InfoItem label="Penis Length" value={`${performer.penisLength} cm`} />}
-              {performer.circumcised && <InfoItem label="Circumcised" value={performer.circumcised} />}
-              {performer.tattoos && <InfoItem label="Tattoos" value={performer.tattoos} />}
-              {performer.piercings && <InfoItem label="Piercings" value={performer.piercings} />}
-              {performer.careerStart && <InfoItem label="Career" value={`${performer.careerStart}${performer.careerEnd ? ` – ${performer.careerEnd}` : " – present"}`} />}
+              {performer.deathDate && <InfoItem icon={<Calendar className="h-4 w-4" />} label="Died" value={formatDate(performer.deathDate)} fieldProvenance={performer.fieldProvenance} fieldKey="deathDate" />}
+              {performer.country && <InfoItem icon={<MapPin className="h-4 w-4" />} label="Country" value={performer.country} fieldProvenance={performer.fieldProvenance} fieldKey="country" />}
+              {performer.ethnicity && <InfoItem label="Ethnicity" value={performer.ethnicity} fieldProvenance={performer.fieldProvenance} fieldKey="ethnicity" />}
+              {performer.heightCm && <InfoItem icon={<Ruler className="h-4 w-4" />} label="Height" value={`${performer.heightCm} cm`} fieldProvenance={performer.fieldProvenance} fieldKey="height_cm" />}
+              {performer.weight && <InfoItem icon={<Scale className="h-4 w-4" />} label="Weight" value={`${performer.weight} kg`} fieldProvenance={performer.fieldProvenance} fieldKey="weight" />}
+              {performer.measurements && <InfoItem label="Measurements" value={performer.measurements} fieldProvenance={performer.fieldProvenance} fieldKey="measurements" />}
+              {performer.eyeColor && <InfoItem label="Eye Color" value={performer.eyeColor} fieldProvenance={performer.fieldProvenance} fieldKey="eye_color" />}
+              {performer.hairColor && <InfoItem label="Hair Color" value={performer.hairColor} fieldProvenance={performer.fieldProvenance} fieldKey="hair_color" />}
+              {performer.fakeTits && <InfoItem label="Fake Tits" value={performer.fakeTits} fieldProvenance={performer.fieldProvenance} fieldKey="fake_tits" />}
+              {performer.penisLength != null && <InfoItem label="Penis Length" value={`${performer.penisLength} cm`} fieldProvenance={performer.fieldProvenance} fieldKey="penis_length" />}
+              {performer.circumcised && <InfoItem label="Circumcised" value={performer.circumcised} fieldProvenance={performer.fieldProvenance} fieldKey="circumcised" />}
+              {performer.tattoos && <InfoItem label="Tattoos" value={performer.tattoos} fieldProvenance={performer.fieldProvenance} fieldKey="tattoos" />}
+              {performer.piercings && <InfoItem label="Piercings" value={performer.piercings} fieldProvenance={performer.fieldProvenance} fieldKey="piercings" />}
+              {performer.careerStart && <InfoItem label="Career" value={`${performer.careerStart}${performer.careerEnd ? ` – ${performer.careerEnd}` : " – present"}`} fieldProvenance={performer.fieldProvenance} fieldKey={["career_start", "careerStart"]} />}
             </div>
 
             {performer.urls.length > 0 ? (
-              <div className="mt-4 space-y-2">
+              <FieldProvenanceHover fieldProvenance={performer.fieldProvenance} fieldKey="urls" block className="mt-4 space-y-2">
                 <div ref={urlsRef} className={`flex flex-wrap gap-2 ${urlsExpanded ? "" : "max-h-[4.5rem] overflow-hidden"}`}>
                   {performer.urls.map((url, i) => (
                     <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
@@ -331,7 +331,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                     {urlsExpanded ? "Show less" : <MoreHorizontal className="h-4 w-4" />}
                   </button>
                 ) : null}
-              </div>
+              </FieldProvenanceHover>
             ) : null}
 
             {autoTagMut.isSuccess ? <p className="mt-4 text-sm text-emerald-300">Auto-tag job queued.</p> : null}
@@ -339,12 +339,12 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
             {canReadTags && performer.tags.length > 0 ? (
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {performer.tags.map((tag) => (
-                  <TagBadge key={tag.id} name={tag.name} tag={tag} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                  <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={resolveTagProvenance(tag, performer.fieldProvenance)} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
                 ))}
               </div>
             ) : null}
 
-            {performer.details ? <p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{performer.details}</p> : null}
+            {performer.details ? <FieldProvenanceHover fieldProvenance={performer.fieldProvenance} fieldKey="details" block><p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-secondary">{performer.details}</p></FieldProvenanceHover> : null}
             <CustomFieldsDisplay customFields={performer.customFields} entityType="performer" />
             <PerformerMetadataServerPanel performer={performer} metadataServers={metadataServers} onNavigate={onNavigate} />
           </>
@@ -959,13 +959,15 @@ function PerformerMetadataServerPanel({ performer, metadataServers, onNavigate }
   );
 }
 
-function InfoItem({ icon, label, value }: { icon?: React.ReactNode; label: string; value: string }) {
+function InfoItem({ icon, label, value, fieldProvenance, fieldKey }: { icon?: React.ReactNode; label: string; value: string; fieldProvenance?: FieldProvenance[]; fieldKey?: string | string[] }) {
+  const valueNode = fieldKey ? <FieldProvenanceHover fieldProvenance={fieldProvenance} fieldKey={fieldKey}>{value}</FieldProvenanceHover> : value;
+
   return (
     <div className="flex items-center gap-2 text-sm">
       {icon && <span className="text-muted">{icon}</span>}
       <div>
         <div className="text-xs text-muted">{label}</div>
-        <div className="text-foreground">{value}</div>
+        <div className="text-foreground">{valueNode}</div>
       </div>
     </div>
   );

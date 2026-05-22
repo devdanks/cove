@@ -195,10 +195,8 @@ describe("Audio and text detail pages", () => {
     expect(screen.queryByRole("tab", { name: /related/i })).not.toBeInTheDocument();
     expect(mockTrackInteraction).toHaveBeenCalledWith(expect.objectContaining({ hostType: "audio", hostId: 14, kind: "pageVisit" }));
 
-    const relatedSection = (await screen.findByText("Related Entities")).closest("section");
-    expect(relatedSection).not.toBeNull();
-    expect(within(relatedSection!).getByTitle("Groups")).toBeInTheDocument();
-    expect(within(relatedSection!).queryByTitle("Performers")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Groups" })).toBeInTheDocument();
+    expect(screen.getByText("Late Night Mix")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Performers" })).toBeInTheDocument();
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
@@ -238,10 +236,8 @@ describe("Audio and text detail pages", () => {
 
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
     fireEvent.click(within(tabs).getByRole("tab", { name: /details/i }));
-    const relatedSection = (await screen.findByText("Related Entities")).closest("section");
-    expect(relatedSection).not.toBeNull();
-    expect(within(relatedSection!).getByTitle("Groups")).toBeInTheDocument();
-    expect(within(relatedSection!).queryByTitle("Performers")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Groups" })).toBeInTheDocument();
+    expect(screen.getByText("Wave 5")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Performers" })).toBeInTheDocument();
 
     view.unmount();

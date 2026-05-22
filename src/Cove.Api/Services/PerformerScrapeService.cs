@@ -27,18 +27,14 @@ public class PerformerScrapeService(
         if (string.IsNullOrWhiteSpace(url))
             return null;
 
-        Dictionary<string, object>? result;
         if (!string.IsNullOrWhiteSpace(scraperId))
         {
-            result = await scraperService.ScrapeUrlAsync(scraperId, "performer", url, ct);
-        }
-        else
-        {
-            var hit = await scraperService.ScrapeUrlAutoAsync(url, "performer", ct);
-            result = hit?.Result;
+            var result = await scraperService.ScrapeUrlAsync(scraperId, "performer", url, ct);
+            return result == null ? null : ConvertScrapeResult(result, url, scraperId);
         }
 
-        return result == null ? null : ConvertScrapeResult(result, url);
+        var hit = await scraperService.ScrapeUrlAutoAsync(url, "performer", ct);
+        return hit == null ? null : ConvertScrapeResult(hit.Value.Result, url, hit.Value.ScraperId);
     }
 
     public async Task<ScrapedPerformerDto?> ScrapeByNameAsync(string name, string? scraperId = null, CancellationToken ct = default)
@@ -78,6 +74,7 @@ public class PerformerScrapeService(
         CancellationToken ct = default)
     {
         var fieldProvenance = new Dictionary<string, object?>();
+        var sourceKey = BuildScraperSourceKey(scraped.SourceScraperId);
         var replaceFieldSet = replaceFields?.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         bool ShouldApplyField(params string[] names) => replaceFieldSet == null || names.Any(replaceFieldSet.Contains);
@@ -238,14 +235,16 @@ public class PerformerScrapeService(
                     lookup[tagName] = tag;
                 }
 
-                if (existingTagIds.Contains(tag.Id) || !existingTagNames.Add(tag.Name))
-                    continue;
-
-                existingTagIds.Add(tag.Id);
-                performer.PerformerTags.Add(new PerformerTag { Performer = performer, Tag = tag, TagId = tag.Id });
                 appliedTagNames.Add(tag.Name);
+
+                if (!existingTagIds.Contains(tag.Id) && existingTagNames.Add(tag.Name))
+                {
+                    existingTagIds.Add(tag.Id);
+                    performer.PerformerTags.Add(new PerformerTag { Performer = performer, Tag = tag, TagId = tag.Id });
+                }
+
                 if (tagProvenanceService != null)
-                    await tagProvenanceService.RecordAsync(AffinityHostType.Performer, performer.Id, tag, "scraper", cancellationToken: ct);
+                    await tagProvenanceService.RecordAsync(AffinityHostType.Performer, performer.Id, tag, sourceKey, cancellationToken: ct);
             }
 
             if (appliedTagNames.Count > 0)
@@ -253,10 +252,10 @@ public class PerformerScrapeService(
         }
 
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Performer, performer.Id, fieldProvenance, "scraper", cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Performer, performer.Id, fieldProvenance, sourceKey, cancellationToken: ct);
     }
 
-    internal static ScrapedPerformerDto? ConvertScrapeResult(IReadOnlyDictionary<string, object> result, string sourceUrl)
+    internal static ScrapedPerformerDto? ConvertScrapeResult(IReadOnlyDictionary<string, object> result, string sourceUrl, string? sourceScraperId = null)
     {
         if (result.Count == 0)
             return null;
@@ -329,6 +328,7 @@ public class PerformerScrapeService(
         var resolvedImageUrl = ResolveAbsoluteUrl(GetString("Image", "image", "ImageUrl", "imageUrl"), sourceUrl);
         var dto = new ScrapedPerformerDto
         {
+            SourceScraperId = sourceScraperId,
             Name = GetString("Name", "name", "Title", "title"),
             Disambiguation = GetString("Disambiguation", "disambiguation"),
             Gender = GetString("Gender", "gender"),
@@ -368,6 +368,9 @@ public class PerformerScrapeService(
     private static bool TryParseEnum<TEnum>(string value, out TEnum parsed) where TEnum : struct
         => Enum.TryParse(value, true, out parsed);
 
+    private static string BuildScraperSourceKey(string? scraperId)
+        => string.IsNullOrWhiteSpace(scraperId) ? "scraper" : $"scraper:{scraperId.Trim()}";
+
     private async Task<ScrapedPerformerDto?> TryScrapeByNameAsync(string scraperId, string name, CancellationToken ct)
     {
         var candidates = await scraperService.ScrapeNameAsync(scraperId, "performer", name, ct);
@@ -375,7 +378,7 @@ public class PerformerScrapeService(
             return null;
 
         return candidates
-            .Select(candidate => ConvertScrapeResult(candidate, ExtractCandidateUrl(candidate) ?? string.Empty))
+            .Select(candidate => ConvertScrapeResult(candidate, ExtractCandidateUrl(candidate) ?? string.Empty, scraperId))
             .OfType<ScrapedPerformerDto>()
             .OrderByDescending(candidate => ScoreCandidate(candidate, name))
             .FirstOrDefault();

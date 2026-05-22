@@ -1,7 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, entityEngagement, entityImages, groups, images, scenes, segmentLibrary, texts } from "../api/client";
 import type { AffinityHostType, Audio, BoolCriterion, DateCriterion, EntityEngagement, FindFilter, Group, GroupItem, GroupItemKind, Image, IntCriterion, MultiIdCriterion, Scene, SceneFilterCriteria, SegmentDerivedQueryDescriptor, SegmentRecord, SegmentSpanDerivedQuery, StringCriterion, TextDocument, TimestampCriterion } from "../api/types";
-import { formatDate, formatDuration, TagBadge, CustomFieldsDisplay } from "../components/shared";
+import { formatDate, formatDuration, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Building2, ExternalLink, FileText, Film, Fingerprint, FolderOpen, GripVertical, Headphones, Images, Layers, Link as LinkIcon, Loader2, Merge, MoreVertical, Pencil, Play, Plus, Tag, Trash2, Unlink, User, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GroupEditModal } from "./GroupEditModal";
@@ -273,23 +273,25 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       />
 
       <EntityHeroLayout
-        title={group.name}
-        description={group.description || undefined}
+        title={<FieldProvenanceHover fieldProvenance={group.fieldProvenance} fieldKey="name">{group.name}</FieldProvenanceHover>}
+        description={group.description ? <FieldProvenanceHover fieldProvenance={group.fieldProvenance} fieldKey={["synopsis", "description", "details"]} block>{group.description}</FieldProvenanceHover> : undefined}
         favorite={groupFavorite}
         favoritePending={groupFavoritePending}
         onFavoriteToggle={canEngageGroup ? () => setGroupFavorite(!groupFavorite) : undefined}
-        aliases={group.aliases || undefined}
+        aliases={group.aliases ? <FieldProvenanceHover fieldProvenance={group.fieldProvenance} fieldKey="aliases">{group.aliases}</FieldProvenanceHover> : undefined}
         metaRow={
           <div className="flex flex-wrap items-center gap-3 text-sm text-secondary">
-            {group.date ? <span>{formatDate(group.date)}</span> : null}
-            {group.director ? <span>Director: {group.director}</span> : null}
+            {group.date ? <FieldProvenanceHover fieldProvenance={group.fieldProvenance} fieldKey="date"><span>{formatDate(group.date)}</span></FieldProvenanceHover> : null}
+            {group.director ? <FieldProvenanceHover fieldProvenance={group.fieldProvenance} fieldKey="director"><span>Director: {group.director}</span></FieldProvenanceHover> : null}
             {group.studioName && group.studioId ? (
               canReadStudios ? (
-                <button onClick={() => onNavigate({ page: "studio", id: group.studioId })} className="text-accent hover:underline">
-                  {group.studioName}
-                </button>
+                <FieldProvenanceHover fieldProvenance={group.fieldProvenance} fieldKey="studio">
+                  <button onClick={() => onNavigate({ page: "studio", id: group.studioId })} className="text-accent hover:underline">
+                    {group.studioName}
+                  </button>
+                </FieldProvenanceHover>
               ) : (
-                <span>{group.studioName}</span>
+                <FieldProvenanceHover fieldProvenance={group.fieldProvenance} fieldKey="studio"><span>{group.studioName}</span></FieldProvenanceHover>
               )
             ) : null}
           </div>
@@ -391,20 +393,22 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
             </div>
 
             {group.urls.length > 0 ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {group.urls.map((url, index) => (
-                  <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
-                    <ExternalLink className="h-3 w-3" />
-                    {(() => { try { return new URL(url).hostname.replace("www.", ""); } catch { return url; } })()}
-                  </a>
-                ))}
-              </div>
+              <FieldProvenanceHover fieldProvenance={group.fieldProvenance} fieldKey="urls" block className="mt-4">
+                <div className="flex flex-wrap gap-2">
+                  {group.urls.map((url, index) => (
+                    <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
+                      <ExternalLink className="h-3 w-3" />
+                      {(() => { try { return new URL(url).hostname.replace("www.", ""); } catch { return url; } })()}
+                    </a>
+                  ))}
+                </div>
+              </FieldProvenanceHover>
             ) : null}
 
             {canReadTags && group.tags.length > 0 ? (
               <div className="mt-4 flex flex-wrap gap-1.5">
                 {group.tags.map((tag) => (
-                  <TagBadge key={tag.id} name={tag.name} tag={tag} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                  <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={resolveTagProvenance(tag, group.fieldProvenance)} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
                 ))}
               </div>
             ) : null}

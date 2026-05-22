@@ -4,7 +4,7 @@ import { images, system } from "../api/client";
 import type { DownloaderMatch, Image, ImageCreate, SceneGroupInput } from "../api/types";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
-import { CustomFieldsEditor } from "../components/shared";
+import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { EntityReferenceMultiSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
@@ -137,6 +137,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
     setForm(cloneFormState(initialState));
   }, [initialState, open, resetSignal]);
   const showRating = Boolean(image);
+  const tagProvenanceById = buildTagProvenanceById(image?.tags ?? [], image?.fieldProvenance);
 
   const buildPayload = (): ImageCreate => {
     const urlList = form.urls.map((url) => url.trim()).filter(Boolean);
@@ -214,10 +215,10 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
 
       <>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Title">
+        <Field label="Title" fieldProvenance={image?.fieldProvenance} fieldKey="title">
           <TextInput value={form.title} onChange={(value) => setForm({ ...form, title: value })} placeholder="Image title" />
         </Field>
-        <Field label="Date">
+        <Field label="Date" fieldProvenance={image?.fieldProvenance} fieldKey="date">
           <input
             type="date"
             value={form.date}
@@ -228,45 +229,45 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Studio Code">
+        <Field label="Studio Code" fieldProvenance={image?.fieldProvenance} fieldKey="code">
           <TextInput value={form.code} onChange={(value) => setForm({ ...form, code: value })} placeholder="Image code" />
         </Field>
-        <Field label="Photographer">
+        <Field label="Photographer" fieldProvenance={image?.fieldProvenance} fieldKey="photographer">
           <TextInput value={form.photographer} onChange={(value) => setForm({ ...form, photographer: value })} placeholder="Photographer name" />
         </Field>
       </div>
 
-      <Field label="Details">
+      <Field label="Details" fieldProvenance={image?.fieldProvenance} fieldKey="details">
         <TextArea value={form.details} onChange={(value) => setForm({ ...form, details: value })} placeholder="Image description" />
       </Field>
 
       {renderMode === "panel" || !showRating ? (
-        <Field label="Studio">
+        <Field label="Studio" fieldProvenance={image?.fieldProvenance} fieldKey={["studio", "studioId"]}>
           <StudioSelector value={form.studioId} onChange={(studioId) => setForm({ ...form, studioId })} />
         </Field>
       ) : (
         <div className="grid grid-cols-2 gap-4">
-          <RatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} />
-          <Field label="Studio">
+          <RatingField value={form.rating} onChange={(value) => setForm({ ...form, rating: value })} fieldProvenance={image?.fieldProvenance} />
+          <Field label="Studio" fieldProvenance={image?.fieldProvenance} fieldKey={["studio", "studioId"]}>
             <StudioSelector value={form.studioId} onChange={(studioId) => setForm({ ...form, studioId })} />
           </Field>
         </div>
       )}
 
-      <Field label="URLs">
+      <Field label="URLs" fieldProvenance={image?.fieldProvenance} fieldKey="urls">
         <StringListEditor values={form.urls} onChange={(value) => setForm({ ...form, urls: value })} placeholder="https://..." addLabel="Add URL" inputType="url" />
       </Field>
 
-      <Field label="Tags">
-        <EntityReferenceMultiSelector entityType="tag" values={form.selectedTagIds} onChange={(selectedTagIds) => setForm({ ...form, selectedTagIds })} placeholder="Search tags..." />
+      <Field label="Tags" fieldProvenance={image?.fieldProvenance} fieldKey="tags">
+        <EntityReferenceMultiSelector entityType="tag" values={form.selectedTagIds} onChange={(selectedTagIds) => setForm({ ...form, selectedTagIds })} placeholder="Search tags..." selectedProvenanceById={tagProvenanceById} />
       </Field>
 
-      <Field label="Performers">
+      <Field label="Performers" fieldProvenance={image?.fieldProvenance} fieldKey="performers">
         <EntityReferenceMultiSelector entityType="performer" values={form.selectedPerformerIds} onChange={(selectedPerformerIds) => setForm({ ...form, selectedPerformerIds })} placeholder="Search performers..." />
       </Field>
 
       {form.selectedPerformerIds.length > 0 ? (
-        <Field label="Performer Occurrence Tags">
+        <Field label="Performer Occurrence Tags" fieldProvenance={image?.fieldProvenance} fieldKey="contextTags">
           <PerformerContextTagEditor
             performerIds={form.selectedPerformerIds}
             contextTagIdsByPerformer={form.contextTagIdsByPerformer}
@@ -279,11 +280,11 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
       ) : null}
 
       {/* Galleries */}
-      <Field label="Galleries">
+      <Field label="Galleries" fieldProvenance={image?.fieldProvenance} fieldKey="galleries">
         <EntityReferenceMultiSelector entityType="gallery" values={form.selectedGalleryIds} onChange={(selectedGalleryIds) => setForm({ ...form, selectedGalleryIds })} placeholder="Search galleries..." />
       </Field>
 
-      <Field label="Groups">
+      <Field label="Groups" fieldProvenance={image?.fieldProvenance} fieldKey="groups">
         <div className="flex flex-wrap gap-1.5 mb-2">
           {form.selectedGroups.map((selectedGroup) => {
             return (
@@ -297,7 +298,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
         <EntityReferenceMultiSelector entityType="group" values={form.selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." />
       </Field>
 
-      <Field label="Custom Fields">
+      <Field label="Custom Fields" fieldProvenance={image?.fieldProvenance} fieldKey="customFields">
         <CustomFieldsEditor value={form.customFields} onChange={(v) => setForm({ ...form, customFields: v })} entityType="image" />
       </Field>
 

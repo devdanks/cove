@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { entityImages, faces, images, playback, fileOps } from "../api/client";
-import { formatDate, TagBadge, CustomFieldsDisplay } from "../components/shared";
+import { formatDate, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Check, Download, Eye, FolderOpen, Image as ImageIcon, ImageOff, Layers, Link as LinkIcon, Maximize, MoreVertical, RefreshCw, Search, Sparkles, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -320,23 +320,27 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">People and Studio</h2>
             {canReadStudios && currentImage.studioName && currentImage.studioId ? (
               <div className="mt-3">
-                <button onClick={() => onNavigate({ page: "studio", id: currentImage.studioId })} className="text-sm text-accent hover:underline">
-                  {currentImage.studioName}
-                </button>
+                <FieldProvenanceHover fieldProvenance={currentImage.fieldProvenance} fieldKey="studio">
+                  <button onClick={() => onNavigate({ page: "studio", id: currentImage.studioId })} className="text-sm text-accent hover:underline">
+                    {currentImage.studioName}
+                  </button>
+                </FieldProvenanceHover>
               </div>
             ) : null}
             {canReadPerformers && currentImage.performers.length > 0 ? (
-              <div className={currentImage.performers.length > 1 ? "mt-3 grid grid-cols-2 gap-3" : "mt-3 grid max-w-[220px] gap-3"}>
-                {currentImage.performers.map((performer) => (
-                  <ImagePerformerCard
-                    key={performer.id}
-                    performer={performer}
-                    contextTags={getPerformerContextTags(currentImage.contextTagApplications, performer.id)}
-                    onClick={() => onNavigate({ page: "performer", id: performer.id })}
-                    onNavigate={onNavigate}
-                  />
-                ))}
-              </div>
+              <FieldProvenanceHover fieldProvenance={currentImage.fieldProvenance} fieldKey="performers" block className="mt-3">
+                <div className={currentImage.performers.length > 1 ? "grid grid-cols-2 gap-3" : "grid max-w-[220px] gap-3"}>
+                  {currentImage.performers.map((performer) => (
+                    <ImagePerformerCard
+                      key={performer.id}
+                      performer={performer}
+                      contextTags={getPerformerContextTags(currentImage.contextTagApplications, performer.id)}
+                      onClick={() => onNavigate({ page: "performer", id: performer.id })}
+                      onNavigate={onNavigate}
+                    />
+                  ))}
+                </div>
+              </FieldProvenanceHover>
             ) : null}
           </section>
         ) : null}
@@ -346,7 +350,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</h2>
             <div className="mt-3 flex flex-wrap gap-1.5">
               {currentImage.tags.map((tag) => (
-                <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={tag.provenance} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={resolveTagProvenance(tag, currentImage.fieldProvenance)} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
               ))}
             </div>
           </section>
@@ -408,7 +412,9 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       {image.details ? (
         <section>
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Description</h2>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-secondary">{image.details}</p>
+          <FieldProvenanceHover fieldProvenance={image.fieldProvenance} fieldKey="details" block>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-secondary">{image.details}</p>
+          </FieldProvenanceHover>
         </section>
       ) : null}
 
@@ -429,13 +435,15 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
           <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
             <LinkIcon className="h-3.5 w-3.5" /> URLs
           </h2>
-          <div className="space-y-1">
-            {image.urls.map((url, index) => (
-              <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="block truncate text-sm text-accent hover:underline">
-                {url}
-              </a>
-            ))}
-          </div>
+          <FieldProvenanceHover fieldProvenance={image.fieldProvenance} fieldKey="urls" block>
+            <div className="space-y-1">
+              {image.urls.map((url, index) => (
+                <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="block truncate text-sm text-accent hover:underline">
+                  {url}
+                </a>
+              ))}
+            </div>
+          </FieldProvenanceHover>
         </section>
       ) : null}
 
@@ -607,20 +615,22 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
         </div>
       )}
       <MediaDetailLayout
-        title={displayTitle}
+        title={<FieldProvenanceHover fieldProvenance={image.fieldProvenance} fieldKey="title">{displayTitle}</FieldProvenanceHover>}
         subtitle={
           <div className="flex flex-wrap items-center gap-3 text-sm text-secondary">
-            {image.date ? <span>{formatDate(image.date)}</span> : null}
+            {image.date ? <FieldProvenanceHover fieldProvenance={image.fieldProvenance} fieldKey="date"><span>{formatDate(image.date)}</span></FieldProvenanceHover> : null}
             {image.studioName && image.studioId ? (
               canReadStudios ? (
-                <button onClick={() => onNavigate({ page: "studio", id: image.studioId })} className="text-accent hover:underline">
-                  {image.studioName}
-                </button>
+                <FieldProvenanceHover fieldProvenance={image.fieldProvenance} fieldKey="studio">
+                  <button onClick={() => onNavigate({ page: "studio", id: image.studioId })} className="text-accent hover:underline">
+                    {image.studioName}
+                  </button>
+                </FieldProvenanceHover>
               ) : (
-                <span>{image.studioName}</span>
+                <FieldProvenanceHover fieldProvenance={image.fieldProvenance} fieldKey="studio"><span>{image.studioName}</span></FieldProvenanceHover>
               )
             ) : null}
-            {image.photographer ? <span>Photo: {image.photographer}</span> : null}
+            {image.photographer ? <FieldProvenanceHover fieldProvenance={image.fieldProvenance} fieldKey="photographer"><span>Photo: {image.photographer}</span></FieldProvenanceHover> : null}
           </div>
         }
         backLabel={backLabel}

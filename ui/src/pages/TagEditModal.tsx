@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tags, tagGroups } from "../api/client";
 import type { TagDetail, TagUpdate, Tag } from "../api/types";
 import { EditModal, Field, NumberInput, SaveButton, SelectInput, TextArea, TextInput } from "../components/EditModal";
-import { CustomFieldsEditor } from "../components/shared";
+import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { StringListEditor } from "../components/StringListEditor";
 import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
@@ -41,6 +41,8 @@ export function TagEditModal({ tag, open, onClose }: Props) {
     queryKey: ["tag-groups"],
     queryFn: tagGroups.list,
   });
+  const parentTagProvenanceById = buildTagProvenanceById(tag.parents, tag.fieldProvenance, "parents");
+  const childTagProvenanceById = buildTagProvenanceById(tag.children, tag.fieldProvenance, "children");
 
   useEffect(() => {
     setName(tag.name);
@@ -94,20 +96,20 @@ export function TagEditModal({ tag, open, onClose }: Props) {
 
   return (
     <EditModal title={`Edit Tag: ${tag.name}`} open={open} onClose={onClose}>
-      <Field label="Name *">
+      <Field label="Name *" fieldProvenance={tag.fieldProvenance} fieldKey="name">
         <TextInput value={name} onChange={setName} placeholder="Tag name" />
       </Field>
 
-      <Field label="Sort Name">
+      <Field label="Sort Name" fieldProvenance={tag.fieldProvenance} fieldKey="sortName">
         <TextInput value={sortName} onChange={setSortName} placeholder="Custom sort name (optional)" />
       </Field>
 
-      <Field label="Description">
+      <Field label="Description" fieldProvenance={tag.fieldProvenance} fieldKey="description">
         <TextArea value={description} onChange={setDescription} placeholder="Tag description" rows={3} />
       </Field>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <Field label="Badge Color">
+        <Field label="Badge Color" fieldProvenance={tag.fieldProvenance} fieldKey="color">
           <div className="flex items-center gap-2">
             <input
               type="color"
@@ -118,7 +120,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
             <TextInput value={color} onChange={setColor} placeholder="#6ee7b7" />
           </div>
         </Field>
-        <Field label="Tag Group">
+        <Field label="Tag Group" fieldProvenance={tag.fieldProvenance} fieldKey={["tagGroup", "tagGroupId"]}>
           <SelectInput
             value={tagGroupId?.toString() ?? ""}
             onChange={(value) => setTagGroupId(value ? Number(value) : undefined)}
@@ -128,15 +130,15 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <Field label="Min Seconds">
+        <Field label="Min Seconds" fieldProvenance={tag.fieldProvenance} fieldKey="minOccurrenceSec">
           <NumberInput value={minOccurrenceSec} onChange={setMinOccurrenceSec} min={0} />
         </Field>
-        <Field label="Min Percent">
+        <Field label="Min Percent" fieldProvenance={tag.fieldProvenance} fieldKey="minOccurrencePercent">
           <NumberInput value={minOccurrencePercent} onChange={setMinOccurrencePercent} min={0} max={100} />
         </Field>
       </div>
 
-      <Field label="Aliases">
+      <Field label="Aliases" fieldProvenance={tag.fieldProvenance} fieldKey="aliases">
         <StringListEditor
           values={aliases}
           onChange={setAliases}
@@ -145,14 +147,14 @@ export function TagEditModal({ tag, open, onClose }: Props) {
         />
       </Field>
 
-      <div className="flex items-center gap-4 mb-4">
+      <Field label="Auto Tagging" fieldProvenance={tag.fieldProvenance} fieldKey="ignoreAutoTag">
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={ignoreAutoTag} onChange={(e) => setIgnoreAutoTag(e.target.checked)} className="rounded bg-card border-border" />
           Ignore Auto Tag
         </label>
-      </div>
+      </Field>
 
-      <Field label="Player Bar">
+      <Field label="Player Bar" fieldProvenance={tag.fieldProvenance} fieldKey="showAsSegment">
         <div className="space-y-3 rounded-xl border border-border bg-surface/40 p-3">
           <SelectInput
             value={playerBarMode}
@@ -182,20 +184,20 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       </Field>
 
       {/* Parent Tags */}
-      <Field label="Parent Tags">
-        <EntityReferenceMultiSelector entityType="tag" values={selectedParentIds} onChange={setSelectedParentIds} placeholder="Search parent tags..." excludeIds={[tag.id, ...selectedChildIds]} />
+      <Field label="Parent Tags" fieldProvenance={tag.fieldProvenance} fieldKey="parents">
+        <EntityReferenceMultiSelector entityType="tag" values={selectedParentIds} onChange={setSelectedParentIds} placeholder="Search parent tags..." excludeIds={[tag.id, ...selectedChildIds]} selectedProvenanceById={parentTagProvenanceById} />
       </Field>
 
       {/* Child Tags */}
-      <Field label="Child Tags">
-        <EntityReferenceMultiSelector entityType="tag" values={selectedChildIds} onChange={setSelectedChildIds} placeholder="Search child tags..." excludeIds={[tag.id, ...selectedParentIds]} />
+      <Field label="Child Tags" fieldProvenance={tag.fieldProvenance} fieldKey="children">
+        <EntityReferenceMultiSelector entityType="tag" values={selectedChildIds} onChange={setSelectedChildIds} placeholder="Search child tags..." excludeIds={[tag.id, ...selectedParentIds]} selectedProvenanceById={childTagProvenanceById} />
       </Field>
 
-      <Field label="Remote IDs">
+      <Field label="Remote IDs" fieldProvenance={tag.fieldProvenance} fieldKey="remoteIds">
         <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
       </Field>
 
-      <Field label="Custom Fields">
+      <Field label="Custom Fields" fieldProvenance={tag.fieldProvenance} fieldKey="customFields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="tag" />
       </Field>
 
