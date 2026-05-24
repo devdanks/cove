@@ -5,6 +5,7 @@ using Cove.Data.Auth;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
+using Pgvector;
 
 #nullable disable
 
@@ -17,6 +18,7 @@ namespace Cove.Data.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("CREATE SCHEMA IF NOT EXISTS public;");
+            migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS vector;");
 
             migrationBuilder.CreateTable(
                 name: "ai_runs",
@@ -137,7 +139,7 @@ namespace Cove.Data.Migrations
                     Modality = table.Column<int>(type: "integer", nullable: false),
                     IsSemantic = table.Column<bool>(type: "boolean", nullable: false),
                     Dim = table.Column<int>(type: "integer", nullable: false),
-                    Vector = table.Column<string>(type: "text", nullable: false),
+                    Vector = table.Column<Vector>(type: "vector", nullable: false),
                     SectionIndex = table.Column<int>(type: "integer", nullable: false),
                     StartSec = table.Column<double>(type: "double precision", nullable: true),
                     EndSec = table.Column<double>(type: "double precision", nullable: true),

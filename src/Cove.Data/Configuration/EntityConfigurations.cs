@@ -871,7 +871,6 @@ public class EmbeddingConfiguration : IEntityTypeConfiguration<Embedding>
         builder.Property(embedding => embedding.KindFamily).HasMaxLength(200);
         builder.Property(embedding => embedding.SourceKey).IsRequired().HasMaxLength(200);
         builder.Property(embedding => embedding.SourceRunId).HasMaxLength(200);
-        builder.Property(embedding => embedding.Vector).HasColumnType("text");
         builder.Property(embedding => embedding.Meta).HasColumnType("jsonb");
 
         builder.HasIndex(embedding => new { embedding.HostType, embedding.HostId });

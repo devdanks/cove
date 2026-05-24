@@ -5,6 +5,8 @@ export type KeybindingDefinition = {
   keys: string;
 };
 
+type KeyboardLikeEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">;
+
 export const KEYBINDING_DEFAULTS: KeybindingDefinition[] = [
   { id: "global.home", group: "Global Navigation", label: "Home", keys: "g h" },
   { id: "global.scenes", group: "Global Navigation", label: "Scenes", keys: "g s" },
@@ -51,10 +53,129 @@ export const KEYBINDING_GROUPS = Array.from(
 ).map(([group, definitions]) => ({ group, definitions }));
 
 export function resolveKeybinding(overrides: Record<string, string> | undefined, id: string, fallback: string) {
-  const override = overrides?.[id]?.trim();
-  return override || fallback;
+  const override = normalizeShortcutSequence(overrides?.[id]);
+  return override || normalizeShortcutSequence(fallback);
 }
 
 export function keybindingDefault(id: string) {
   return KEYBINDING_DEFAULTS.find((definition) => definition.id === id)?.keys ?? "";
+}
+
+export function normalizeShortcutKeyName(key: string | null | undefined) {
+  if (key === " ") {
+    return "Space";
+  }
+
+  const raw = (key ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const lower = raw.toLowerCase();
+  switch (lower) {
+    case " ":
+    case "space":
+    case "spacebar":
+      return "Space";
+    case "esc":
+    case "escape":
+      return "Escape";
+    case "left":
+    case "arrowleft":
+      return "ArrowLeft";
+    case "right":
+    case "arrowright":
+      return "ArrowRight";
+    case "up":
+    case "arrowup":
+      return "ArrowUp";
+    case "down":
+    case "arrowdown":
+      return "ArrowDown";
+    case "return":
+    case "enter":
+      return "Enter";
+    case "del":
+    case "delete":
+      return "Delete";
+    case "control":
+    case "ctrl":
+    case "shift":
+    case "alt":
+    case "meta":
+    case "cmd":
+    case "command":
+      return null;
+    default:
+      return raw.length === 1 && /[a-z]/i.test(raw) ? raw.toLowerCase() : raw;
+  }
+}
+
+export function normalizeShortcutEvent(event: KeyboardLikeEvent) {
+  const key = normalizeShortcutKeyName(event.key);
+  if (!key) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  if (event.ctrlKey || event.metaKey) parts.push("Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey && key.length > 1) parts.push("Shift");
+  parts.push(key);
+  return parts.join("+");
+}
+
+export function normalizeShortcutSequence(value: string | null | undefined) {
+  return (value ?? "")
+    .split(/\s+/)
+    .map(normalizeShortcutStroke)
+    .filter((part): part is string => !!part)
+    .join(" ");
+}
+
+function normalizeShortcutStroke(value: string) {
+  const stroke = value.trim();
+  if (!stroke) {
+    return null;
+  }
+
+  if (stroke === "+") {
+    return "+";
+  }
+
+  const rawParts = stroke.endsWith("+")
+    ? [...stroke.slice(0, -1).split("+").filter(Boolean), "+"]
+    : stroke.split("+").filter(Boolean);
+
+  const modifiers = new Set<string>();
+  let key: string | null = null;
+  for (const part of rawParts) {
+    const normalized = part.trim().toLowerCase();
+    if (!normalized) {
+      continue;
+    }
+
+    if (normalized === "ctrl" || normalized === "control" || normalized === "cmd" || normalized === "command" || normalized === "meta") {
+      modifiers.add("Ctrl");
+      continue;
+    }
+    if (normalized === "alt" || normalized === "option") {
+      modifiers.add("Alt");
+      continue;
+    }
+    if (normalized === "shift") {
+      modifiers.add("Shift");
+      continue;
+    }
+
+    key = normalizeShortcutKeyName(part);
+  }
+
+  if (!key) {
+    return null;
+  }
+
+  const orderedModifiers = ["Ctrl", "Alt", ...(key.length > 1 && modifiers.has("Shift") ? ["Shift"] : [])]
+    .filter((modifier) => modifiers.has(modifier));
+  return [...orderedModifiers, key].join("+");
 }

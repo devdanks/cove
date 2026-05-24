@@ -48,16 +48,6 @@ public abstract class FullExtensionBase : CoveExtensionBase,
     // ── IApiExtension ────────────────────────────────────────────────
     public virtual void MapEndpoints(IEndpointRouteBuilder endpoints) { }
 
-    // ── IUIExtension ─────────────────────────────────────────────────
-    /// <summary>
-    /// Override to build your UI manifest. Use <see cref="UIManifestBuilder"/> for ergonomic creation.
-    /// Default implementation returns an empty manifest.
-    /// </summary>
-    public virtual UIManifest GetUIManifest() => new();
-
-    /// <summary>Create a UIManifestBuilder pre-configured with this extension's ID.</summary>
-    protected UIManifestBuilder ManifestBuilder() => new(Id);
-
     // ── IEventExtension ──────────────────────────────────────────────
     /// <summary>Override to register event handlers with <see cref="OnEvent"/>, <see cref="OnCreated"/>, etc.</summary>
     protected virtual void DefineEventHandlers() { }
@@ -89,7 +79,29 @@ public abstract class FullExtensionBase : CoveExtensionBase,
         string? description = null,
         bool supportsParameters = false)
     {
-        _jobs.Add(new ExtensionJobDefinition(id, name, description, supportsParameters));
+        AddJob(id, name, handler, description, supportsParameters, showInTaskList: false);
+    }
+
+    protected void Job(
+        string id,
+        string name,
+        Func<IReadOnlyDictionary<string, string>?, IJobProgress, CancellationToken, Task> handler,
+        string? description,
+        bool supportsParameters,
+        bool showInTaskList)
+    {
+        AddJob(id, name, handler, description, supportsParameters, showInTaskList);
+    }
+
+    private void AddJob(
+        string id,
+        string name,
+        Func<IReadOnlyDictionary<string, string>?, IJobProgress, CancellationToken, Task> handler,
+        string? description,
+        bool supportsParameters,
+        bool showInTaskList)
+    {
+        _jobs.Add(new ExtensionJobDefinition(id, name, description, supportsParameters) { ShowInTaskList = showInTaskList });
         _jobRunners[id] = handler;
     }
 

@@ -146,13 +146,6 @@ public class ConfigService
             Scraping = new ScrapingConfigDto
             {
                 ScraperDirectories = cfg.Scraping.ScraperDirectories,
-                ScraperPackageSources = cfg.Scraping.ScraperPackageSources
-                    .Select(source => new PackageSourceDto
-                    {
-                        Name = source.Name,
-                        Url = source.Url,
-                    })
-                    .ToList(),
                 MetadataServers = cfg.Scraping.MetadataServers
                     .Select(box => new MetadataServerDto
                     {
@@ -165,6 +158,7 @@ public class ConfigService
                 ScraperPreferences = cfg.Scraping.ScraperPreferences
                     .Select(preference => new ScraperPreferenceDto
                     {
+                        EntityType = preference.EntityType,
                         Site = preference.Site,
                         ScraperId = preference.ScraperId,
                     })
@@ -380,15 +374,6 @@ public class ConfigService
             .Select(path => path.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        cfg.Scraping.ScraperPackageSources = dto.Scraping.ScraperPackageSources
-            .Where(source => !string.IsNullOrWhiteSpace(source.Url))
-            .Select(source => new PackageSource
-            {
-                Name = source.Name?.Trim() ?? string.Empty,
-                Url = source.Url.Trim(),
-            })
-            .DistinctBy(source => source.Url, StringComparer.OrdinalIgnoreCase)
-            .ToList();
         cfg.Scraping.MetadataServers = dto.Scraping.MetadataServers
             .Where(box => !string.IsNullOrWhiteSpace(box.Endpoint))
             .Select(box => new MetadataServerInstance
@@ -404,10 +389,11 @@ public class ConfigService
             .Where(preference => !string.IsNullOrWhiteSpace(preference.Site) && !string.IsNullOrWhiteSpace(preference.ScraperId))
             .Select(preference => new ScraperPreference
             {
+                EntityType = preference.EntityType?.Trim().ToLowerInvariant() ?? string.Empty,
                 Site = preference.Site.Trim().ToLowerInvariant(),
                 ScraperId = preference.ScraperId.Trim(),
             })
-            .DistinctBy(preference => preference.Site, StringComparer.OrdinalIgnoreCase)
+            .DistinctBy(preference => $"{preference.EntityType}\u001f{preference.Site}", StringComparer.OrdinalIgnoreCase)
             .ToList();
         cfg.Scraping.IdentifyDefaults = new IdentifyDefaultsConfig
         {

@@ -188,7 +188,7 @@ export function AiDataSettingsPanel() {
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <LabeledInput label="Source key" value={filters.sourceKey} onChange={(value) => setFilters((current) => ({ ...current, sourceKey: value }))} placeholder="ext:ai.tagging" />
+          <LabeledInput label="Source key" value={filters.sourceKey} onChange={(value) => setFilters((current) => ({ ...current, sourceKey: value }))} placeholder="ext:your.extension" />
           <LabeledInput label="Source run id" value={filters.sourceRunId} onChange={(value) => setFilters((current) => ({ ...current, sourceRunId: value }))} placeholder="run-1234" />
           <LabeledInput label="Model" value={filters.model} onChange={(value) => setFilters((current) => ({ ...current, model: value }))} placeholder="tagger-v1" />
           <LabeledSelect label="Modality" value={filters.modality} onChange={(value) => setFilters((current) => ({ ...current, modality: value }))} options={MODALITY_OPTIONS} />

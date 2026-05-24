@@ -24,8 +24,14 @@ import { CustomFieldsEditor } from "../components/shared";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
+import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 
 const GRAPH_VIEW_LIMIT = 5000;
+
+function clampOptionalPercent(value: number | undefined) {
+  if (value == null || !Number.isFinite(value)) return undefined;
+  return Math.min(100, Math.max(0, value));
+}
 
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
@@ -267,11 +273,13 @@ function TagGroupManagerDialog({ open, onClose }: { open: boolean; onClose: () =
 function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: number) => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({ name: "", description: "", aliases: [] as string[], color: "", tagGroupId: undefined as number | undefined, minOccurrenceSec: undefined as number | undefined, minOccurrencePercent: undefined as number | undefined });
+  const [selectedParentIds, setSelectedParentIds] = useState<number[]>([]);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [createAnother, setCreateAnother] = useState(false);
   const { data: groups = [] } = useQuery({ queryKey: ["tag-groups"], queryFn: tagGroups.list });
   const resetForm = () => {
     setForm({ name: "", description: "", aliases: [], color: "", tagGroupId: undefined, minOccurrenceSec: undefined, minOccurrencePercent: undefined });
+    setSelectedParentIds([]);
     setCustomFields({});
   };
   const mutation = useMutation({
@@ -317,7 +325,7 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
           <NumberInput value={form.minOccurrenceSec} onChange={(value) => setForm({ ...form, minOccurrenceSec: value })} min={0} />
         </Field>
         <Field label="Min Percent">
-          <NumberInput value={form.minOccurrencePercent} onChange={(value) => setForm({ ...form, minOccurrencePercent: value })} min={0} max={100} />
+          <NumberInput value={form.minOccurrencePercent} onChange={(value) => setForm({ ...form, minOccurrencePercent: clampOptionalPercent(value) })} min={0} max={100} />
         </Field>
       </div>
       <Field label="Aliases">
@@ -328,6 +336,9 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
           addLabel="Add Alias"
         />
       </Field>
+      <Field label="Parent Tags">
+        <EntityReferenceMultiSelector entityType="tag" values={selectedParentIds} onChange={setSelectedParentIds} placeholder="Search parent tags..." />
+      </Field>
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="tag" />
       </Field>
@@ -337,8 +348,9 @@ function TagCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: 
           color: form.color.trim() || null,
           tagGroupId: form.tagGroupId ?? null,
           minOccurrenceSec: form.minOccurrenceSec ?? null,
-          minOccurrencePercent: form.minOccurrencePercent ?? null,
+          minOccurrencePercent: clampOptionalPercent(form.minOccurrencePercent) ?? null,
           aliases: form.aliases.map((alias) => alias.trim()).filter(Boolean),
+          parentIds: selectedParentIds,
           customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
         })} />
     </EditModal>

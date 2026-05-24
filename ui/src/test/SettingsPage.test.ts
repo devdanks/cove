@@ -32,31 +32,34 @@ describe("resolveVisibleSettingsTab", () => {
   it("falls back to the first visible tab when the requested tab is hidden", () => {
     expect(
       resolveVisibleSettingsTab("library", [
-        { key: "interface" },
-        { key: "changelog" },
-        { key: "about" },
+        { key: "my-appearance-theme" },
+        { key: "my-theme" },
+        { key: "system-info-about" },
       ])
-    ).toBe("interface");
+    ).toBe("my-appearance-theme");
   });
 
   it("keeps the requested tab when it is visible", () => {
     expect(
-      resolveVisibleSettingsTab("about", [
-        { key: "interface" },
-        { key: "about" },
+      resolveVisibleSettingsTab("system-info-about", [
+        { key: "my-appearance-theme" },
+        { key: "system-info-about" },
       ])
-    ).toBe("about");
+    ).toBe("system-info-about");
   });
 });
 
 describe("isLimitedPrimarySettingsTabVisible", () => {
-  it("keeps User Settings visible for limited users", () => {
-    expect(isLimitedPrimarySettingsTabVisible("user-settings", false)).toBe(true);
-    expect(isLimitedPrimarySettingsTabVisible("library", false)).toBe(false);
+  it("keeps personal and system info tabs visible for limited users", () => {
+    expect(isLimitedPrimarySettingsTabVisible("my-account", false)).toBe(true);
+    expect(isLimitedPrimarySettingsTabVisible("my-appearance-theme", false)).toBe(true);
+    expect(isLimitedPrimarySettingsTabVisible("my-theme", false)).toBe(true);
+    expect(isLimitedPrimarySettingsTabVisible("system-info-about", false)).toBe(true);
+    expect(isLimitedPrimarySettingsTabVisible("library-paths-storage", false)).toBe(false);
   });
 
   it("keeps display profiles gated by segment access", () => {
-    expect(isLimitedPrimarySettingsTabVisible("display-profiles", false)).toBe(false);
-    expect(isLimitedPrimarySettingsTabVisible("display-profiles", true)).toBe(true);
+    expect(isLimitedPrimarySettingsTabVisible("library-display-profiles", false)).toBe(false);
+    expect(isLimitedPrimarySettingsTabVisible("library-display-profiles", true)).toBe(true);
   });
 });

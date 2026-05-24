@@ -9,6 +9,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 using Cove.Api.Hubs;
 using Cove.Api.Services;
 using Cove.Core.Entities.Galleries;
@@ -48,6 +50,17 @@ static async Task EnsurePostgresMigrationInfrastructureAsync(CoveContext db)
     }
 }
 
+static LogEventLevel ParseSerilogLogLevel(string? level)
+    => level?.Trim().ToLowerInvariant() switch
+    {
+        "trace" or "verbose" => LogEventLevel.Verbose,
+        "debug" => LogEventLevel.Debug,
+        "warning" or "warn" => LogEventLevel.Warning,
+        "error" => LogEventLevel.Error,
+        "critical" or "fatal" => LogEventLevel.Fatal,
+        _ => LogEventLevel.Information,
+    };
+
 static async Task<bool> HasPostgresApplicationTablesAsync(CoveContext db)
 {
     var conn = db.Database.GetDbConnection();
@@ -82,6 +95,9 @@ try
     var isIntegrationStartupTest = builder.Environment.IsEnvironment("IntegrationStartup");
     var isTestHarness = isIntegrationTest || isIntegrationStartupTest;
 
+    var runtimeLogLevelSwitch = new LoggingLevelSwitch(ParseSerilogLogLevel(builder.Configuration.GetValue<string>("Cove:LogLevel")));
+    builder.Services.AddSingleton(runtimeLogLevelSwitch);
+
     if (isTestHarness)
     {
         Log.Logger = new LoggerConfiguration()
@@ -99,6 +115,7 @@ try
             .ReadFrom.Configuration(context.Configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
+            .MinimumLevel.ControlledBy(services.GetRequiredService<LoggingLevelSwitch>())
             .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
             .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
             .WriteTo.Console()
@@ -129,7 +146,7 @@ try
         // Build from individual settings (managed or external)
         var pgPort = pgSection.GetValue<int?>("Port") ?? 5433;
         var pgDb = pgSection.GetValue<string>("Database") ?? "cove";
-        connectionString = $"Host=127.0.0.1;Port={pgPort};Database={pgDb};Username=postgres;Trust Server Certificate=true;Minimum Pool Size=10;Maximum Pool Size=200;Timeout=15;Command Timeout=30";
+        connectionString = $"Host=127.0.0.1;Port={pgPort};Database={pgDb};Username=postgres;Trust Server Certificate=true;Minimum Pool Size=2;Maximum Pool Size=100;Timeout=15;Command Timeout=30";
     }
     coveCfgInstance.DatabaseConnectionString = connectionString;
     builder.Services.AddCoveData(connectionString);

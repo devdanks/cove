@@ -21,6 +21,7 @@ public class PostgresManagerService : IHostedService
     // PostgreSQL 18.3 - latest stable release
     private const string PgMajor = "18";
     private const string PgFullVersion = "18.3";
+    private const string PgvectorVersion = "0.8.2";
 
     // Windows: EDB portable binaries (still available for Windows/macOS)
     private const string WinUrl = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260146";
@@ -41,6 +42,7 @@ public class PostgresManagerService : IHostedService
     private string BinDir => Path.Combine(CoveDir, "pgsql", "bin");
     private string DataDir => Path.Combine(CoveDir, "pgdata");
     private string LogFile => Path.Combine(CoveDir, "pg.log");
+    private string BundledPgvectorDir => BundledPgvectorCandidateDirs().First();
 
     private string Exe(string name) =>
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Path.Combine(BinDir, $"{name}.exe")
@@ -83,12 +85,16 @@ public class PostgresManagerService : IHostedService
         // 2. Check if a stale instance exists from a previous crash
         await StopStaleInstanceAsync(ct);
 
+        await EnsurePgvectorInstalledAsync(ct);
+
         // 3. Init data directory if needed
         if (!File.Exists(Path.Combine(DataDir, "PG_VERSION")))
         {
             _logger.LogInformation("Initializing data directory at {DataDir}", DataDir);
             await InitDbAsync(ct);
         }
+
+        await EnsureManagedConfigurationAsync(ct);
 
         // 4. Start PostgreSQL
         _logger.LogInformation("Starting PostgreSQL on port {Port}", _config.Port);
@@ -228,7 +234,7 @@ public class PostgresManagerService : IHostedService
 
             var installCode = await RunAsync(
                 "/usr/bin/apt-get",
-                $"install -y postgresql-{PgMajor} postgresql-client-{PgMajor}",
+                $"install -y postgresql-{PgMajor} postgresql-client-{PgMajor} postgresql-{PgMajor}-pgvector",
                 CoveDir, ct);
 
             if (installCode == 0)
@@ -346,6 +352,33 @@ public class PostgresManagerService : IHostedService
                 }
             }
 
+            var pgvectorBase = "https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector";
+            var pgvectorDownloaded = false;
+            foreach (var pkgName in new[]
+            {
+                $"postgresql-{PgMajor}-pgvector_{PgvectorVersion}-1.pgdg{pgdgSuffix}+1_{arch}.deb",
+                $"postgresql-{PgMajor}-pgvector_{PgvectorVersion}-1_{arch}.deb",
+            })
+            {
+                try
+                {
+                    await DownloadFileAsync($"{pgvectorBase}/{pkgName}", Path.Combine(tempDir, pkgName), ct);
+                    pgvectorDownloaded = true;
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogInformation(ex, "PostgreSQL pgvector package {PackageName} was not available at {BaseUrl}", pkgName, pgvectorBase);
+                }
+            }
+
+            if (!pgvectorDownloaded)
+            {
+                throw new InvalidOperationException(
+                    $"Could not download postgresql-{PgMajor}-pgvector {PgvectorVersion} for {codename}/{arch}. " +
+                    "Install PostgreSQL and pgvector with your OS package manager or configure an external pgvector-enabled connection string.");
+            }
+
             // Extract .deb packages
             foreach (var debFile in Directory.GetFiles(tempDir, "*.deb"))
             {
@@ -387,6 +420,251 @@ public class PostgresManagerService : IHostedService
             if (Directory.Exists(extractDir)) Directory.Delete(extractDir, recursive: true);
         }
     }
+
+    private async Task EnsurePgvectorInstalledAsync(CancellationToken ct)
+    {
+        if (await PgvectorFilesAvailableAsync(ct))
+        {
+            _logger.LogInformation("pgvector extension files are available for managed PostgreSQL");
+            return;
+        }
+
+        if (await TryInstallBundledPgvectorAsync(ct))
+        {
+            _logger.LogInformation("Installed bundled pgvector extension files for managed PostgreSQL");
+            return;
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            var installed = await TryInstallLinuxPgvectorPackageAsync(ct);
+            if (installed && await PgvectorFilesAvailableAsync(ct))
+            {
+                _logger.LogInformation("Installed pgvector extension files for managed PostgreSQL");
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(BuildPgvectorUnavailableMessage());
+    }
+
+    private async Task<bool> TryInstallBundledPgvectorAsync(CancellationToken ct)
+    {
+        var bundleRoot = FindBundledPgvectorRoot();
+        if (bundleRoot == null)
+        {
+            _logger.LogInformation("Bundled pgvector payload was not found. Searched: {BundleDirs}", string.Join(Path.PathSeparator, BundledPgvectorCandidateDirs()));
+            return false;
+        }
+
+        var pkglibDir = await PgConfigPathAsync("--pkglibdir", ct)
+            ?? throw new InvalidOperationException("Could not resolve managed PostgreSQL pkglibdir with pg_config.");
+        var sharedDir = await PgConfigPathAsync("--sharedir", ct)
+            ?? throw new InvalidOperationException("Could not resolve managed PostgreSQL sharedir with pg_config.");
+
+        var libraryPath = FindPgvectorLibrary(bundleRoot)
+            ?? throw new InvalidOperationException($"Bundled pgvector payload at '{bundleRoot}' does not contain one of: {string.Join(", ", ExpectedPgvectorLibraryNames())}.");
+        var controlPath = FindPgvectorControlFile(bundleRoot)
+            ?? throw new InvalidOperationException($"Bundled pgvector payload at '{bundleRoot}' does not contain vector.control.");
+
+        Directory.CreateDirectory(pkglibDir);
+        File.Copy(libraryPath, Path.Combine(pkglibDir, Path.GetFileName(libraryPath)), overwrite: true);
+
+        var extensionDir = Path.Combine(sharedDir, "extension");
+        Directory.CreateDirectory(extensionDir);
+        File.Copy(controlPath, Path.Combine(extensionDir, "vector.control"), overwrite: true);
+
+        foreach (var sqlPath in Directory.EnumerateFiles(bundleRoot, "vector--*.sql", SearchOption.AllDirectories))
+        {
+            File.Copy(sqlPath, Path.Combine(extensionDir, Path.GetFileName(sqlPath)), overwrite: true);
+        }
+
+        await CopyBundledPgvectorHeadersAsync(bundleRoot, ct);
+
+        if (await PgvectorFilesAvailableAsync(ct))
+            return true;
+
+        throw new InvalidOperationException($"Bundled pgvector payload at '{bundleRoot}' was copied but managed PostgreSQL still cannot see pgvector extension files.");
+    }
+
+    private string? FindBundledPgvectorRoot()
+    {
+        return BundledPgvectorCandidateDirs().FirstOrDefault(path =>
+            Directory.Exists(path)
+            && FindPgvectorLibrary(path) != null
+            && FindPgvectorControlFile(path) != null);
+    }
+
+    private IEnumerable<string> BundledPgvectorCandidateDirs()
+    {
+        foreach (var baseDir in RuntimeBaseDirs())
+        {
+            yield return Path.Combine(baseDir, "runtimes", CurrentRuntimeId(), "native", "postgresql", $"pg{PgMajor}", "pgvector");
+            yield return Path.Combine(baseDir, "postgresql", $"pg{PgMajor}", "pgvector", CurrentRuntimeId());
+            yield return Path.Combine(baseDir, "pgvector", $"pg{PgMajor}", CurrentRuntimeId());
+            yield return Path.Combine(baseDir, "pgvector");
+        }
+    }
+
+    private static IEnumerable<string> RuntimeBaseDirs()
+    {
+        var comparer = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        var seen = new HashSet<string>(comparer);
+
+        foreach (var path in new[]
+        {
+            AppContext.BaseDirectory,
+            Path.GetDirectoryName(Environment.ProcessPath),
+            Directory.GetCurrentDirectory(),
+        })
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                continue;
+
+            var fullPath = Path.GetFullPath(path);
+            if (seen.Add(fullPath))
+                yield return fullPath;
+        }
+    }
+
+    private static string CurrentRuntimeId()
+    {
+        var os = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "win"
+            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? "osx"
+                : "linux";
+
+        var arch = RuntimeInformation.OSArchitecture switch
+        {
+            Architecture.X64 => "x64",
+            Architecture.Arm64 => "arm64",
+            Architecture.X86 => "x86",
+            Architecture.Arm => "arm",
+            _ => RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(),
+        };
+
+        return $"{os}-{arch}";
+    }
+
+    private static IReadOnlyList<string> ExpectedPgvectorLibraryNames()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return ["vector.dll"];
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return ["vector.so", "vector.dylib"];
+
+        return ["vector.so"];
+    }
+
+    private static string? FindPgvectorLibrary(string root)
+    {
+        foreach (var fileName in ExpectedPgvectorLibraryNames())
+        {
+            var match = Directory.EnumerateFiles(root, fileName, SearchOption.AllDirectories).FirstOrDefault();
+            if (match != null)
+                return match;
+        }
+
+        return null;
+    }
+
+    private static string? FindPgvectorControlFile(string root)
+        => Directory.EnumerateFiles(root, "vector.control", SearchOption.AllDirectories).FirstOrDefault();
+
+    private async Task CopyBundledPgvectorHeadersAsync(string bundleRoot, CancellationToken ct)
+    {
+        var sourceHeadersDir = Path.Combine(bundleRoot, "include", "server", "extension", "vector");
+        if (!Directory.Exists(sourceHeadersDir))
+            return;
+
+        var includeServerDir = await PgConfigPathAsync("--includedir-server", ct);
+        if (string.IsNullOrWhiteSpace(includeServerDir))
+            return;
+
+        var targetHeadersDir = Path.Combine(includeServerDir, "extension", "vector");
+        Directory.CreateDirectory(targetHeadersDir);
+        foreach (var headerPath in Directory.EnumerateFiles(sourceHeadersDir, "*.h", SearchOption.TopDirectoryOnly))
+        {
+            File.Copy(headerPath, Path.Combine(targetHeadersDir, Path.GetFileName(headerPath)), overwrite: true);
+        }
+    }
+
+    private async Task<bool> TryInstallLinuxPgvectorPackageAsync(CancellationToken ct)
+    {
+        if (!File.Exists("/usr/bin/apt-get"))
+            return false;
+
+        try
+        {
+            await TryAddPgdgRepoAsync(ct);
+            var exitCode = await RunAsync(
+                "/usr/bin/apt-get",
+                $"install -y postgresql-{PgMajor}-pgvector",
+                CoveDir,
+                ct);
+            if (exitCode == 0)
+                return true;
+
+            _logger.LogWarning("apt-get install postgresql-{Major}-pgvector failed (exit {Code})", PgMajor, exitCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to install postgresql-{Major}-pgvector via apt-get", PgMajor);
+        }
+
+        return false;
+    }
+
+    private async Task<bool> PgvectorFilesAvailableAsync(CancellationToken ct)
+    {
+        var sharedDir = await PgConfigPathAsync("--sharedir", ct);
+        if (string.IsNullOrWhiteSpace(sharedDir))
+            return false;
+
+        var controlFile = Path.Combine(sharedDir, "extension", "vector.control");
+        if (!File.Exists(controlFile))
+            return false;
+
+        var pkglibDir = await PgConfigPathAsync("--pkglibdir", ct);
+        if (string.IsNullOrWhiteSpace(pkglibDir) || !Directory.Exists(pkglibDir))
+            return true;
+
+        return ExpectedPgvectorLibraryNames()
+            .Select(name => Path.Combine(pkglibDir, name))
+            .Any(File.Exists);
+    }
+
+    private async Task<string?> PgConfigPathAsync(string argument, CancellationToken ct)
+    {
+        var pgConfig = Exe("pg_config");
+        if (!File.Exists(pgConfig))
+            return null;
+
+        var (exitCode, stdout) = await RunWithOutputAsync(pgConfig, argument, BinDir, ct);
+        return exitCode == 0 ? stdout.Trim() : null;
+    }
+
+    private static string BuildPgvectorUnavailableMessage()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return "Managed PostgreSQL could not install pgvector automatically because this Cove build does not include the Windows pgvector payload for PostgreSQL " + PgMajor + ". Reinstall the full Cove native package, use Docker, or configure Cove with an external PostgreSQL server that already has pgvector installed.";
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return "Managed PostgreSQL could not install pgvector automatically because this Cove build does not include the macOS pgvector payload for PostgreSQL " + PgMajor + ". Reinstall the full Cove native package, use Docker, or configure Cove with an external PostgreSQL server that already has pgvector installed.";
+        }
+
+        return "Managed PostgreSQL could not install pgvector automatically. Reinstall the full Cove native package, install the official PostgreSQL pgvector package for PostgreSQL " + PgMajor + ", use Docker, or configure Cove with an external PostgreSQL server that already has pgvector installed.";
+    }
+
+    private static string BuildPgvectorCreateExtensionFailureMessage(string database)
+        => $"Could not enable pgvector in database '{database}'. Install pgvector extension files for this PostgreSQL server and rerun Cove migrations.";
 
     private async Task TryAddPgdgRepoAsync(CancellationToken ct)
     {
@@ -488,11 +766,80 @@ public class PostgresManagerService : IHostedService
             # ── Cove managed ──
             port = {_config.Port}
             listen_addresses = '127.0.0.1'
-            max_connections = 20
+            max_connections = 150
             shared_buffers = 128MB
             log_destination = 'stderr'
             logging_collector = off
             """, ct);
+    }
+
+    private async Task EnsureManagedConfigurationAsync(CancellationToken ct)
+    {
+        var configPath = Path.Combine(DataDir, "postgresql.conf");
+        if (!File.Exists(configPath))
+            return;
+
+        var desiredSettings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["port"] = _config.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["listen_addresses"] = "'127.0.0.1'",
+            ["max_connections"] = "150",
+            ["shared_buffers"] = "128MB",
+            ["log_destination"] = "'stderr'",
+            ["logging_collector"] = "off",
+        };
+
+        var lines = (await File.ReadAllLinesAsync(configPath, ct)).ToList();
+        var changed = false;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith('#'))
+                continue;
+
+            foreach (var (key, value) in desiredSettings)
+            {
+                if (!IsSettingLine(trimmed, key))
+                    continue;
+
+                var nextLine = $"{key} = {value}";
+                seen.Add(key);
+                if (!string.Equals(line.Trim(), nextLine, StringComparison.OrdinalIgnoreCase))
+                {
+                    lines[i] = nextLine;
+                    changed = true;
+                }
+                break;
+            }
+        }
+
+        var missingSettings = desiredSettings.Where(setting => !seen.Contains(setting.Key)).ToArray();
+        if (missingSettings.Length > 0)
+        {
+            lines.Add("");
+            lines.Add("# -- Cove managed --");
+            lines.AddRange(missingSettings.Select(setting => $"{setting.Key} = {setting.Value}"));
+            changed = true;
+        }
+
+        if (!changed)
+            return;
+
+        await File.WriteAllLinesAsync(configPath, lines, ct);
+        _logger.LogInformation("Updated managed PostgreSQL configuration at {ConfigPath}", configPath);
+    }
+
+    private static bool IsSettingLine(string trimmedLine, string settingName)
+    {
+        if (!trimmedLine.StartsWith(settingName, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return trimmedLine.Length == settingName.Length
+            || char.IsWhiteSpace(trimmedLine[settingName.Length])
+            || trimmedLine[settingName.Length] == '=';
     }
 
     private async Task PgCtlAsync(string args, CancellationToken ct)
@@ -585,7 +932,7 @@ public class PostgresManagerService : IHostedService
                 $"-h 127.0.0.1 -p {_config.Port} -U postgres -d {_config.Database} -c \"CREATE EXTENSION IF NOT EXISTS vector\"",
                 BinDir, ct);
             if (vectorExitCode != 0)
-                _logger.LogWarning("pgvector extension not available in existing database '{Db}' — vector search features will be disabled", _config.Database);
+                throw new InvalidOperationException(BuildPgvectorCreateExtensionFailureMessage(_config.Database));
             return;
         }
 
@@ -602,7 +949,7 @@ public class PostgresManagerService : IHostedService
             BinDir, ct);
 
         if (extResult != 0)
-            _logger.LogWarning("pgvector extension not available — vector search features will be disabled");
+            throw new InvalidOperationException(BuildPgvectorCreateExtensionFailureMessage(_config.Database));
     }
 
     // ─── Process helpers ────────────────────────────────────────────

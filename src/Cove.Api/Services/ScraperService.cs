@@ -84,11 +84,20 @@ public class ScraperService
             .Where(s => string.IsNullOrWhiteSpace(entityType) ||
                         string.Equals(s.EntityType, entityType, StringComparison.OrdinalIgnoreCase))
             .Where(s => s.SupportedScrapes.Any(k => string.Equals(k, "URL", StringComparison.OrdinalIgnoreCase)))
-            .Where(s => s.Urls.Any(pattern => UrlMatchesPattern(loweredUrl, pattern)))
+            .Where(s => ScraperMatchesUrl(loweredUrl, s))
             .OrderBy(s => s.SourcePath.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(s => BestPatternStrength(loweredUrl, s.Urls))
+            .ThenByDescending(s => BestPatternStrength(loweredUrl, s.Urls.Concat(s.PreferenceSites ?? [])))
             .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static bool ScraperMatchesUrl(string loweredUrl, ScraperSummaryDto scraper)
+    {
+        if (scraper.Urls.Any(pattern => UrlMatchesPattern(loweredUrl, pattern)))
+            return true;
+
+        var preferenceSites = scraper.PreferenceSites;
+        return preferenceSites?.Any(site => UrlMatchesPreferenceSite(loweredUrl, site)) == true;
     }
 
     /// <summary>
@@ -153,6 +162,48 @@ public class ScraperService
         return best;
     }
 
+    private static bool UrlMatchesPreferenceSite(string loweredUrl, string site)
+    {
+        var normalizedSite = NormalizePreferenceSite(site);
+        if (string.IsNullOrWhiteSpace(normalizedSite) || normalizedSite == "*")
+            return false;
+
+        var host = TryGetHost(loweredUrl);
+        return host.Length > 0 && (host == normalizedSite || host.EndsWith($".{normalizedSite}", StringComparison.Ordinal));
+    }
+
+    private static string NormalizePreferenceSite(string site)
+    {
+        var trimmed = site.Trim().ToLowerInvariant();
+        if (trimmed.Length == 0)
+            return string.Empty;
+
+        if (!trimmed.Contains("://", StringComparison.Ordinal))
+            trimmed = $"https://{trimmed}";
+
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
+            return RemoveLeadingWww(uri.Host.TrimStart('*', '.'));
+
+        var normalized = site.Trim().ToLowerInvariant()
+            .Replace("http://", string.Empty, StringComparison.Ordinal)
+            .Replace("https://", string.Empty, StringComparison.Ordinal)
+            .TrimStart('*', '.')
+            .Split('/', '?', '#', '*')[0];
+
+        return RemoveLeadingWww(normalized);
+    }
+
+    private static string TryGetHost(string loweredUrl)
+    {
+        if (Uri.TryCreate(loweredUrl, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
+            return RemoveLeadingWww(uri.Host.ToLowerInvariant());
+
+        return string.Empty;
+    }
+
+    private static string RemoveLeadingWww(string host)
+        => host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? host[4..] : host;
+
     private IReadOnlyList<ScraperSummaryDto> LoadScrapers()
     {
         var summaries = new List<ScraperSummaryDto>();
@@ -205,7 +256,18 @@ public class ScraperService
 
         foreach (var provider in _extensionManager.GetScraperProviders())
         {
-            foreach (var descriptor in provider.GetScrapers())
+            IReadOnlyList<ScraperDescriptor> descriptors;
+            try
+            {
+                descriptors = provider.GetScrapers();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load scraper descriptors from extension {ExtensionId}", provider.Id);
+                continue;
+            }
+
+            foreach (var descriptor in descriptors)
             {
                 _extensionScraperCache[descriptor.Id] = new ExtensionScraperRegistration(provider, descriptor);
                 summaries.Add(new ScraperSummaryDto(
@@ -214,7 +276,8 @@ public class ScraperService
                     descriptor.Entity.ToString().ToLowerInvariant(),
                     GetSupportedScrapeNames(descriptor.Capabilities),
                     descriptor.SupportedUrls.Where(url => !string.IsNullOrWhiteSpace(url)).Select(url => url.Trim()).ToList(),
-                    $"builtin:{provider.Id}"));
+                    $"builtin:{provider.Id}",
+                    NormalizePreferenceSites(descriptor.PreferenceSites)));
             }
         }
 
@@ -395,6 +458,18 @@ public class ScraperService
             Urls: urls.OrderBy(url => url, StringComparer.OrdinalIgnoreCase).ToList(),
             SourcePath: file
         ));
+    }
+
+    private static List<string>? NormalizePreferenceSites(IEnumerable<string>? preferenceSites)
+    {
+        var normalizedSites = preferenceSites?
+            .Select(NormalizePreferenceSite)
+            .Where(site => !string.IsNullOrWhiteSpace(site) && site != "*")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(site => site, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return normalizedSites is { Count: > 0 } ? normalizedSites : null;
     }
 
     private sealed class ScraperManifest

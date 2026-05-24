@@ -98,6 +98,13 @@ public class UIManifestBuilder
         return this;
     }
 
+    /// <summary>Expose a UI-consumable feature capability.</summary>
+    public UIManifestBuilder AddFeature(string key, Dictionary<string, string>? options = null)
+    {
+        _manifest.Features.Add(new UIFeatureDefinition(key, _extensionId, options));
+        return this;
+    }
+
     /// <summary>Override a host component.</summary>
     public UIManifestBuilder OverrideComponent(
         string targetComponent,
@@ -117,9 +124,10 @@ public class UIManifestBuilder
         string? icon = null,
         string? apiEndpoint = null,
         string? handlerName = null,
-        int order = 100)
+        int order = 100,
+        bool suppressSuccessAlert = false)
     {
-        _manifest.Actions.Add(new ExtensionAction(id, label, _extensionId, actionType, entityTypes, icon, apiEndpoint, handlerName, order));
+        _manifest.Actions.Add(new ExtensionAction(id, label, _extensionId, actionType, entityTypes, icon, apiEndpoint, handlerName, order, SuppressSuccessAlert: suppressSuccessAlert));
         return this;
     }
 
@@ -133,9 +141,10 @@ public class UIManifestBuilder
         string? apiEndpoint,
         string? handlerName,
         int order,
-        string requiredPermission)
+        string requiredPermission,
+        bool suppressSuccessAlert = false)
     {
-        _manifest.Actions.Add(new ExtensionAction(id, label, _extensionId, actionType, entityTypes, icon, apiEndpoint, handlerName, order)
+        _manifest.Actions.Add(new ExtensionAction(id, label, _extensionId, actionType, entityTypes, icon, apiEndpoint, handlerName, order, SuppressSuccessAlert: suppressSuccessAlert)
         {
             RequiredPermission = requiredPermission,
         });
@@ -146,6 +155,37 @@ public class UIManifestBuilder
     public UIManifestBuilder AddSettingsPanel(UISettingsPanel panel)
     {
         _manifest.SettingsPanels.Add(panel);
+        return this;
+    }
+
+    /// <summary>Add a dedicated tab within the Extensions settings group.</summary>
+    public UIManifestBuilder AddSettingsTab(UISettingsTab tab)
+    {
+        _manifest.SettingsTabs.Add(tab);
+        return this;
+    }
+
+    /// <summary>Add a dedicated tab within the Extensions settings group.</summary>
+    public UIManifestBuilder AddSettingsTab(
+        string key,
+        string label,
+        int order = 100,
+        string? icon = null,
+        string? parentTabKey = null,
+        string? description = null,
+        string[]? searchKeywords = null,
+        string[]? aliases = null)
+    {
+        _manifest.SettingsTabs.Add(new UISettingsTab(
+            key,
+            label,
+            _extensionId,
+            order,
+            icon,
+            parentTabKey,
+            description,
+            searchKeywords,
+            aliases));
         return this;
     }
 

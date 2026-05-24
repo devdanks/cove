@@ -185,9 +185,6 @@ export function DuplicateFinderPage({ onNavigate }: Props) {
       {/* Duplicate groups */}
       {groups && groups.length > 0 && (
         <div className="space-y-4">
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-            Cove pre-selects the likely keeper in each group. Review the file paths before deleting; physical file deletion is opt-in on the confirmation dialog.
-          </div>
           {groups.map((group, gi) => {
             const selected = selectedPerGroup.get(gi) ?? new Set();
             return (

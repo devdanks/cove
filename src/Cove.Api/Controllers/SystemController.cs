@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using Serilog.Core;
+using Serilog.Events;
 using Cove.Api.Middleware;
 using Cove.Api.Services;
 using Cove.Core.Auth;
@@ -17,16 +19,14 @@ namespace Cove.Api.Controllers;
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.SystemRead)]
 public class SystemController(
-    ISceneRepository sceneRepo, IImageRepository imageRepo,
-    IGalleryRepository galleryRepo, IPerformerRepository performerRepo,
-    IStudioRepository studioRepo, ITagRepository tagRepo,
-    IGroupRepository groupRepo, ConfigService configService,
+    ConfigService configService,
     ScraperService scraperService, MetadataServerService metadataServerService,
     CoveConfiguration coveConfiguration,
     CoveContext db,
     ICurrentPrincipalAccessor principalAccessor,
     IAuditService auditService,
     IHostApplicationLifetime applicationLifetime,
+    LoggingLevelSwitch loggingLevelSwitch,
     ILogger<SystemController> logger) : ControllerBase
 {
     private static readonly Dictionary<string, string> UiAssetContentTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -113,15 +113,92 @@ public class SystemController(
     [RequiresPermission(Permissions.SystemRead)]
     public async Task<ActionResult<StatsDto>> GetStats(CancellationToken ct)
     {
-        var sceneCt = await sceneRepo.CountAsync(ct);
-        var imageCt = await imageRepo.CountAsync(ct);
-        var galleryCt = await galleryRepo.CountAsync(ct);
-        var performerCt = await performerRepo.CountAsync(ct);
-        var studioCt = await studioRepo.CountAsync(ct);
-        var tagCt = await tagRepo.CountAsync(ct);
-        var groupCt = await groupRepo.CountAsync(ct);
+        async Task<(long ViewCount, long CompleteCount, double ConsumedSeconds)> GetEngagementStats(AffinityHostType hostType)
+        {
+            var query = db.UserEntityAffinities.Where(affinity => affinity.HostType == hostType);
+            var viewCount = await query.SumAsync(affinity => (long?)affinity.ViewCount, ct) ?? 0L;
+            var completeCount = await query.SumAsync(affinity => (long?)affinity.CompleteCount, ct) ?? 0L;
+            var consumedSeconds = await query.SumAsync(affinity => (double?)affinity.TotalConsumedSec, ct) ?? 0d;
 
-        return Ok(new StatsDto(sceneCt, imageCt, galleryCt, performerCt, studioCt, tagCt, groupCt, 0, 0));
+            return (viewCount, completeCount, consumedSeconds);
+        }
+
+        var sceneCt = await db.Scenes.CountAsync(ct);
+        var imageCt = await db.Images.CountAsync(ct);
+        var galleryCt = await db.Galleries.CountAsync(ct);
+        var performerCt = await db.Performers.CountAsync(ct);
+        var studioCt = await db.Studios.CountAsync(ct);
+        var tagCt = await db.Tags.CountAsync(ct);
+        var groupCt = await db.Groups.CountAsync(ct);
+        var audioCt = await db.Audios.CountAsync(ct);
+        var textCt = await db.TextDocuments.CountAsync(ct);
+
+        var segmentCt = await db.Segments.CountAsync(ct);
+        var faceCt = await db.Faces.CountAsync(ct);
+        var faceAppearanceCt = await db.FaceAppearances.CountAsync(ct);
+        var embeddingCt = await db.Embeddings.CountAsync(ct);
+        var detectionCt = await db.Detections.CountAsync(ct);
+        var tagApplicationCt = await db.TagApplications.CountAsync(ct);
+        var aiRunCt = await db.AiRuns.CountAsync(ct);
+
+        var sceneFileSize = await db.VideoFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
+        var imageFileSize = await db.ImageFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
+        var audioFileSize = await db.AudioFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
+        var textFileSize = await db.TextFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
+        var totalFileSize = sceneFileSize + imageFileSize + audioFileSize + textFileSize;
+
+        var sceneDuration = await db.VideoFiles.SumAsync(file => (double?)file.Duration, ct) ?? 0d;
+        var audioDuration = await db.AudioFiles.SumAsync(file => (double?)file.Duration, ct) ?? 0d;
+
+        var sceneEngagement = await GetEngagementStats(AffinityHostType.Scene);
+        var audioEngagement = await GetEngagementStats(AffinityHostType.Audio);
+        var textEngagement = await GetEngagementStats(AffinityHostType.Text);
+        var imageEngagement = await GetEngagementStats(AffinityHostType.Image);
+
+        var totalLikes = await db.UserEntityAffinities.SumAsync(affinity => (long?)affinity.LikeCount, ct) ?? 0L;
+        var totalDerivedLikes = await db.UserEntityAffinities.SumAsync(affinity => (long?)affinity.DerivedLikeCount, ct) ?? 0L;
+        var totalFavorites = await db.UserEntityAffinities.LongCountAsync(affinity => affinity.IsFavorite, ct);
+
+        return Ok(new StatsDto(
+            sceneCt,
+            imageCt,
+            galleryCt,
+            performerCt,
+            studioCt,
+            tagCt,
+            groupCt,
+            audioCt,
+            textCt,
+            segmentCt,
+            faceCt,
+            faceAppearanceCt,
+            embeddingCt,
+            detectionCt,
+            tagApplicationCt,
+            aiRunCt,
+            sceneFileSize,
+            imageFileSize,
+            audioFileSize,
+            textFileSize,
+            totalFileSize,
+            sceneDuration,
+            audioDuration,
+            sceneEngagement.ConsumedSeconds + audioEngagement.ConsumedSeconds,
+            sceneEngagement.ViewCount,
+            audioEngagement.ViewCount,
+            textEngagement.ViewCount,
+            imageEngagement.ViewCount,
+            sceneEngagement.CompleteCount,
+            audioEngagement.CompleteCount,
+            textEngagement.CompleteCount,
+            imageEngagement.CompleteCount,
+            sceneEngagement.ConsumedSeconds,
+            audioEngagement.ConsumedSeconds,
+            textEngagement.ConsumedSeconds,
+            imageEngagement.ConsumedSeconds,
+            totalLikes,
+            totalDerivedLikes,
+            totalFavorites));
     }
 
     [HttpGet("config")]
@@ -137,6 +214,60 @@ public class SystemController(
     {
         await configService.SaveConfigAsync(config);
         return Ok(configService.GetConfig());
+    }
+
+    [HttpPatch("log-level")]
+    [RequiresPermission(Permissions.SystemSettingsWrite)]
+    public async Task<ActionResult<object>> SetLogLevel([FromBody] SetLogLevelRequest request, CancellationToken ct)
+    {
+        if (!TryParseLogLevel(request.Level, out var level, out var normalizedLevel))
+            return BadRequest("Invalid log level. Expected Trace, Debug, Info, Warning, Error, or Critical.");
+
+        loggingLevelSwitch.MinimumLevel = level;
+        coveConfiguration.LogLevel = normalizedLevel;
+        await configService.SaveCurrentConfigAsync();
+        logger.LogInformation("Runtime log level changed to {LogLevel}", normalizedLevel);
+
+        return Ok(new { level = normalizedLevel });
+    }
+
+    private static bool TryParseLogLevel(string? value, out LogEventLevel level, out string normalizedLevel)
+    {
+        switch (value?.Trim().ToLowerInvariant())
+        {
+            case "trace":
+            case "verbose":
+                level = LogEventLevel.Verbose;
+                normalizedLevel = "Trace";
+                return true;
+            case "debug":
+                level = LogEventLevel.Debug;
+                normalizedLevel = "Debug";
+                return true;
+            case "info":
+            case "information":
+                level = LogEventLevel.Information;
+                normalizedLevel = "Info";
+                return true;
+            case "warning":
+            case "warn":
+                level = LogEventLevel.Warning;
+                normalizedLevel = "Warning";
+                return true;
+            case "error":
+                level = LogEventLevel.Error;
+                normalizedLevel = "Error";
+                return true;
+            case "critical":
+            case "fatal":
+                level = LogEventLevel.Fatal;
+                normalizedLevel = "Critical";
+                return true;
+            default:
+                level = LogEventLevel.Information;
+                normalizedLevel = "Info";
+                return false;
+        }
     }
 
     [HttpPost("ui/favicon")]
@@ -359,10 +490,18 @@ public class SystemController(
             }
         }
 
-        var preflight = await downloaderService.PreflightBatchAsync(dto.Items, dto.FollowUp, ct);
-        var itemsToQueue = preflight.ItemsToQueue;
+        IReadOnlyList<DownloaderBatchItemDto> itemsToQueue = dto.Items;
+        IReadOnlyList<DownloaderBatchStartIssueDto> issues = Array.Empty<DownloaderBatchStartIssueDto>();
+
+        if (dto.PreflightBeforeQueue)
+        {
+            var preflight = await downloaderService.PreflightBatchAsync(dto.Items, dto.FollowUp, ct);
+            itemsToQueue = preflight.ItemsToQueue;
+            issues = preflight.Issues;
+        }
+
         if (itemsToQueue.Count == 0)
-            return Accepted(new { jobId = (string?)null, queuedCount = 0, issues = preflight.Issues });
+            return Accepted(new { jobId = (string?)null, queuedCount = 0, issues });
 
         var jobId = jobService.Enqueue(
             "download-batch",
@@ -374,7 +513,7 @@ public class SystemController(
             },
             exclusive: false);
 
-        return Accepted(new { jobId, queuedCount = itemsToQueue.Count, issues = preflight.Issues });
+        return Accepted(new { jobId, queuedCount = itemsToQueue.Count, issues });
     }
 
     [HttpPost("metadata-servers/validate")]
@@ -477,3 +616,5 @@ public class SystemController(
         return string.Join(' ', parts);
     }
 }
+
+public record SetLogLevelRequest(string? Level);

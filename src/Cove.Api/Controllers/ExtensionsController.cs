@@ -273,10 +273,13 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
     {
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id);
         if (ext == null && extensionManager.GetInstallation(id) == null) return NotFound();
-        await extensionManager.EnableExtensionAsync(id, ct);
-        await extensionManager.InitializeExtensionAsync(id, HttpContext.RequestServices, ct);
+        var enabledExtensions = await extensionManager.EnableExtensionAsync(id, ct);
+        foreach (var extensionId in enabledExtensions)
+        {
+            await extensionManager.InitializeExtensionAsync(extensionId, HttpContext.RequestServices, ct);
+        }
         scraperService.ReloadScrapers();
-        return Ok();
+        return Ok(new { enabledExtensions });
     }
 
     /// <summary>Disable an extension.</summary>
@@ -285,9 +288,9 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
     {
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id);
         if (ext == null && extensionManager.GetInstallation(id) == null) return NotFound();
-        await extensionManager.DisableExtensionAsync(id, ct);
+        var disabledExtensions = await extensionManager.DisableExtensionAsync(id, ct);
         scraperService.ReloadScrapers();
-        return Ok();
+        return Ok(new { disabledExtensions });
     }
 
     /// <summary>Get extension key-value store data.</summary>
@@ -558,7 +561,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
         var installedVersions = extensionManager.Installations.Values
             .ToDictionary(i => i.ExtensionId, i => i.Version, StringComparer.OrdinalIgnoreCase);
-        var installDependencies = request.InstallDependencies || string.Equals(detail.Kind, "bundle", StringComparison.OrdinalIgnoreCase);
+        var installDependencies = request.InstallDependencies;
         var dependencyPlan = new List<RegistryInstallPlanItem>();
         var dependencyInfos = new List<DependencyInfo>();
         var missingDeps = new Dictionary<string, DependencyInfo>(StringComparer.OrdinalIgnoreCase);
@@ -666,49 +669,89 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         [FromBody] RegistryUninstallRequest request,
         CancellationToken ct = default)
     {
-        var unloaded = await extensionManager.UnloadExtensionAsync(request.ExtensionId, HttpContext.RequestServices, ct);
-        if (!unloaded)
+        if (!extensionManager.Installations.ContainsKey(request.ExtensionId)
+            && !extensionManager.Extensions.Any(extension => string.Equals(extension.Id, request.ExtensionId, StringComparison.OrdinalIgnoreCase)))
+        {
             return NotFound($"Extension '{request.ExtensionId}' not found.");
+        }
 
-        // Remove the extension directory
+        var dependents = extensionManager.GetDependentExtensionIds(request.ExtensionId)
+            .Select(CreateDependencyImpact)
+            .ToList();
+
+        if (dependents.Count > 0 && !request.UninstallDependents)
+        {
+            return Ok(new
+            {
+                requiresDependents = true,
+                extension = CreateDependencyImpact(request.ExtensionId),
+                dependents,
+            });
+        }
+
         var extensionsDir = Path.Combine(extensionManager.Context.DataDirectory, "..", "extensions");
         extensionsDir = Path.GetFullPath(extensionsDir);
-        var extDir = Path.Combine(extensionsDir, request.ExtensionId);
+        var idsToUninstall = dependents
+            .Select(dependent => dependent.Id)
+            .Append(request.ExtensionId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var uninstalledExtensions = new List<string>();
 
-        if (Directory.Exists(extDir))
+        foreach (var extensionId in idsToUninstall)
         {
-            const int maxAttempts = 8;
-            Exception? lastError = null;
-            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            var unloaded = await extensionManager.UnloadExtensionAsync(extensionId, HttpContext.RequestServices, ct);
+            if (!unloaded)
             {
-                try
+                if (string.Equals(extensionId, request.ExtensionId, StringComparison.OrdinalIgnoreCase))
+                    return NotFound($"Extension '{request.ExtensionId}' not found.");
+
+                continue;
+            }
+
+            var extDir = Path.Combine(extensionsDir, extensionId);
+            if (Directory.Exists(extDir))
+            {
+                var deleteError = await DeleteDirectoryWithRetriesAsync(extDir, ct);
+                if (deleteError != null && Directory.Exists(extDir))
                 {
-                    RemoveReadOnlyAttributes(extDir);
-                    Directory.Delete(extDir, recursive: true);
-                    lastError = null;
-                    break;
-                }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                {
-                    lastError = ex;
-                    await Task.Delay(TimeSpan.FromMilliseconds(150 * attempt), ct);
+                    return Conflict(new
+                    {
+                        message = $"Extension '{extensionId}' was unloaded but files are still locked by another process.",
+                        extensionId,
+                        path = extDir,
+                        detail = deleteError.Message,
+                    });
                 }
             }
 
-            if (lastError != null && Directory.Exists(extDir))
-            {
-                return Conflict(new
-                {
-                    message = $"Extension '{request.ExtensionId}' was unloaded but files are still locked by another process.",
-                    extensionId = request.ExtensionId,
-                    path = extDir,
-                    detail = lastError.Message,
-                });
-            }
+            uninstalledExtensions.Add(extensionId);
         }
 
         scraperService.ReloadScrapers();
-        return Ok(new { message = $"Extension '{request.ExtensionId}' uninstalled." });
+        return Ok(new
+        {
+            message = dependents.Count > 0
+                ? $"Extension '{request.ExtensionId}' and {dependents.Count} dependent extension{(dependents.Count == 1 ? string.Empty : "s")} uninstalled."
+                : $"Extension '{request.ExtensionId}' uninstalled.",
+            requiresDependents = false,
+            uninstalledExtensions,
+        });
+    }
+
+    private ExtensionDependencyImpact CreateDependencyImpact(string extensionId)
+    {
+        var extension = extensionManager.Extensions.FirstOrDefault(candidate => string.Equals(candidate.Id, extensionId, StringComparison.OrdinalIgnoreCase));
+        var installation = extensionManager.GetInstallation(extensionId);
+        var manifest = extensionManager.GetManifestFile(extensionId);
+
+        return new ExtensionDependencyImpact(
+            extensionId,
+            extension?.Name ?? manifest?.Name ?? extensionId,
+            installation?.Version ?? manifest?.Version ?? extension?.Version ?? string.Empty,
+            extensionManager.IsEnabled(extensionId),
+            manifest?.Kind ?? "extension",
+            installation?.Source ?? "unknown");
     }
 
     private static void RemoveReadOnlyAttributes(string rootPath)
@@ -1015,7 +1058,17 @@ public record InstallExtensionFromUrlRequest
 public record RegistryUninstallRequest
 {
     public required string ExtensionId { get; init; }
+    /// <summary>When true, uninstall extensions that depend on the requested extension too.</summary>
+    public bool UninstallDependents { get; init; }
 }
+
+public record ExtensionDependencyImpact(
+    string Id,
+    string Name,
+    string Version,
+    bool Enabled,
+    string Kind,
+    string Source);
 
 public record DependencyInfo(
     string Id,

@@ -16,6 +16,11 @@ interface Props {
 
 type PlayerBarMode = "default" | "always" | "never";
 
+function clampOptionalPercent(value: number | undefined) {
+  if (value == null || !Number.isFinite(value)) return undefined;
+  return Math.min(100, Math.max(0, value));
+}
+
 export function TagEditModal({ tag, open, onClose }: Props) {
   const queryClient = useQueryClient();
 
@@ -81,7 +86,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
       color: color.trim() || null,
       tagGroupId: tagGroupId ?? null,
       minOccurrenceSec: minOccurrenceSec ?? null,
-      minOccurrencePercent: minOccurrencePercent ?? null,
+      minOccurrencePercent: clampOptionalPercent(minOccurrencePercent) ?? null,
       ignoreAutoTag,
       showAsSegment: playerBarMode === "default" ? null : playerBarMode === "always",
       segmentColorOverride: playerBarMode === "always" ? (segmentColorOverride.trim() || null) : null,
@@ -134,7 +139,7 @@ export function TagEditModal({ tag, open, onClose }: Props) {
           <NumberInput value={minOccurrenceSec} onChange={setMinOccurrenceSec} min={0} />
         </Field>
         <Field label="Min Percent" fieldProvenance={tag.fieldProvenance} fieldKey="minOccurrencePercent">
-          <NumberInput value={minOccurrencePercent} onChange={setMinOccurrencePercent} min={0} max={100} />
+          <NumberInput value={minOccurrencePercent} onChange={(value) => setMinOccurrencePercent(clampOptionalPercent(value))} min={0} max={100} />
         </Field>
       </div>
 

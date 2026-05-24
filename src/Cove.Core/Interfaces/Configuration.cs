@@ -221,7 +221,6 @@ public class RatingSystemOptions
 public class ScrapingConfig
 {
     public List<string> ScraperDirectories { get; set; } = [CoveDefaultPaths.GetDataSubdirectory("scrapers")];
-    public List<PackageSource> ScraperPackageSources { get; set; } = [];
     public List<MetadataServerInstance> MetadataServers { get; set; } = [];
     public List<ScraperPreference> ScraperPreferences { get; set; } = [];
     public IdentifyDefaultsConfig IdentifyDefaults { get; set; } = new();
@@ -231,6 +230,7 @@ public class ScrapingConfig
 
 public class ScraperPreference
 {
+    public string EntityType { get; set; } = string.Empty;
     public string Site { get; set; } = string.Empty;
     public string ScraperId { get; set; } = string.Empty;
 }
@@ -258,12 +258,6 @@ public class MetadataBatchDefaultsConfig
     public bool RefreshAlreadyTagged { get; set; }
     public bool CreateParentStudios { get; set; } = true;
     public List<string> ExcludeFields { get; set; } = [];
-}
-
-public class PackageSource
-{
-    public string Name { get; set; } = string.Empty;
-    public string Url { get; set; } = string.Empty;
 }
 
 public class MetadataServerInstance

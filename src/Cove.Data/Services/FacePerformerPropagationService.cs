@@ -10,8 +10,8 @@ namespace Cove.Data.Services;
 
 public sealed class FacePerformerPropagationService(CoveContext db, IFieldProvenanceService? fieldProvenanceService = null)
 {
-    private const string ExtensionId = "cove.ai.faces";
-    private const string SourceKey = "ext:ai.faces";
+    private const string ExtensionDataOwner = "cove.face-performer-propagation";
+    private const string SourceKey = "face-performer-propagation";
     private const string AssignmentKeyPrefix = "performer-assignment:";
 
     private readonly CoveContext _db = db;
@@ -103,7 +103,7 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
     private async Task RemoveAssignmentsAsync(int faceId, int performerId, CancellationToken cancellationToken)
     {
         var assignments = await _db.ExtensionData
-            .Where(item => item.ExtensionId == ExtensionId && item.Key.StartsWith(AssignmentKeyPrefix))
+            .Where(item => item.Key.StartsWith(AssignmentKeyPrefix))
             .ToListAsync(cancellationToken);
 
         var parsedAssignments = assignments
@@ -143,19 +143,17 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
         var performerIds = new HashSet<int>();
         var assignmentKeys = await _db.ExtensionData
             .AsNoTracking()
-            .Where(item => item.ExtensionId == ExtensionId && item.Key.StartsWith(AssignmentKeyPrefix))
+            .Where(item => item.Key.StartsWith(AssignmentKeyPrefix))
             .Select(item => item.Key)
             .ToListAsync(cancellationToken);
 
         assignmentKeys.AddRange(_db.ExtensionData.Local
-            .Where(item => item.ExtensionId == ExtensionId
-                && item.Key.StartsWith(AssignmentKeyPrefix)
+            .Where(item => item.Key.StartsWith(AssignmentKeyPrefix)
                 && _db.Entry(item).State != EntityState.Deleted)
             .Select(item => item.Key));
 
         var deletedAssignmentKeys = _db.ExtensionData.Local
-            .Where(item => item.ExtensionId == ExtensionId
-                && item.Key.StartsWith(AssignmentKeyPrefix)
+            .Where(item => item.Key.StartsWith(AssignmentKeyPrefix)
                 && _db.Entry(item).State == EntityState.Deleted)
             .Select(item => item.Key)
             .ToHashSet(StringComparer.Ordinal);
@@ -249,12 +247,13 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
             assignedAt = DateTime.UtcNow,
         });
 
-        var existing = await _db.ExtensionData.FindAsync([ExtensionId, key], cancellationToken);
+        var existing = await _db.ExtensionData
+            .FirstOrDefaultAsync(item => item.Key == key, cancellationToken);
         if (existing is null)
         {
             _db.ExtensionData.Add(new ExtensionData
             {
-                ExtensionId = ExtensionId,
+                ExtensionId = ExtensionDataOwner,
                 Key = key,
                 Value = value,
             });
@@ -271,8 +270,7 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
         var hostKind = FormatHostKind(host.Kind);
         var suffix = string.Create(CultureInfo.InvariantCulture, $":{performerId}:{hostKind}:{host.HostId}");
         return await _db.ExtensionData.AnyAsync(
-            item => item.ExtensionId == ExtensionId
-                    && item.Key.StartsWith(AssignmentKeyPrefix)
+            item => item.Key.StartsWith(AssignmentKeyPrefix)
                     && item.Key.EndsWith(suffix),
             cancellationToken);
     }
@@ -319,7 +317,7 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
     private static string ResolveSourceKey(FaceHostRef host, string? faceSourceKey)
     {
         var sourceKey = !string.IsNullOrWhiteSpace(host.SourceKey) ? host.SourceKey : faceSourceKey;
-        if (string.IsNullOrWhiteSpace(sourceKey) || string.Equals(sourceKey, ExtensionId, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(sourceKey))
             return SourceKey;
 
         return sourceKey.Trim();

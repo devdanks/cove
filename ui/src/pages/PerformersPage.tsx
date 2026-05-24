@@ -281,14 +281,13 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
     disambiguation: "",
     gender: "",
     details: "",
-    favorite: false,
     ignoreAutoTag: false,
   });
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [createAnother, setCreateAnother] = useState(false);
 
   const resetForm = () => {
-    setForm({ name: "", disambiguation: "", gender: "", details: "", favorite: false, ignoreAutoTag: false });
+    setForm({ name: "", disambiguation: "", gender: "", details: "", ignoreAutoTag: false });
     setCustomFields({});
   };
 
@@ -311,7 +310,6 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
       disambiguation: form.disambiguation || undefined,
       gender: form.gender || undefined,
       details: form.details || undefined,
-      favorite: form.favorite || undefined,
       ignoreAutoTag: form.ignoreAutoTag || undefined,
       customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     });
@@ -332,15 +330,6 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
         <TextArea value={form.details} onChange={(v) => setForm({ ...form, details: v })} rows={3} />
       </Field>
       <div className="flex items-center gap-4 mb-4">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.favorite}
-            onChange={(e) => setForm({ ...form, favorite: e.target.checked })}
-            className="rounded bg-card border-border"
-          />
-          Favorite
-        </label>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"

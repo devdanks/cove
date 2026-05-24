@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { system } from "../api/client";
 import { authStore, hasPermission } from "../auth/authStore";
 import type { CoveConfig, SystemStatus } from "../api/types";
+import { normalizeShortcutSequence } from "../keyboard/keybindings";
 
 const defaultMenuItems = ["scenes", "audios", "texts", "images", "performers", "galleries", "studios", "tags", "groups"];
 const defaultIdentifyDefaults = {
@@ -43,7 +44,7 @@ function normalizeKeybindingOverrides(overrides: Record<string, string> | null |
 
   return Object.fromEntries(
     Object.entries(overrides)
-      .map(([key, value]) => [key.trim(), value.trim()] as const)
+      .map(([key, value]) => [key.trim(), normalizeShortcutSequence(value)] as const)
       .filter(([key, value]) => key.length > 0 && value.length > 0),
   );
 }
@@ -112,10 +113,17 @@ function normalizeConfig(config: CoveConfig, userKeybindingOverrides?: Record<st
       metadataServers: config.scraping.metadataServers ?? [],
       scraperPreferences: (config.scraping.scraperPreferences ?? [])
         .map((preference) => ({
+          entityType: preference.entityType?.trim().toLowerCase() || undefined,
           site: preference.site?.trim().toLowerCase() ?? "",
           scraperId: preference.scraperId?.trim() ?? "",
         }))
-        .filter((preference) => preference.site !== "" && preference.scraperId !== ""),
+        .filter((preference, index, items) => {
+          if (preference.site === "" || preference.scraperId === "") {
+            return false;
+          }
+
+          return items.findIndex((candidate) => (candidate.entityType ?? "") === (preference.entityType ?? "") && candidate.site === preference.site) === index;
+        }),
       identifyDefaults: {
         createTags: identifyDefaults.createTags ?? true,
         createPerformers: identifyDefaults.createPerformers ?? true,

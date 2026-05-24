@@ -1,436 +1,157 @@
 import { useQuery } from "@tanstack/react-query";
-import { system, scenes, performers, images as imagesApi, studios, tags as tagsApi } from "../api/client";
-import type { Scene, Performer, Image, Studio, Tag } from "../api/types";
-import {
-  Film, Users, Tag as TagIcon, Building2, Images, FolderOpen, Layers, HardDrive,
-  Clock, Play, ChevronLeft, ChevronRight, Star, Calendar, TrendingUp,
-} from "lucide-react";
-import { useRef, useState, useCallback } from "react";
-import { createRouteLinkProps } from "../components/cardNavigation";
-import { getImageDisplayTitle } from "../utils/imageDisplay";
+import { Activity, BarChart3, Brain, Building2, CheckCircle2, Database, Eye, FileText, Film, Fingerprint, HardDrive, Headphones, Heart, ImageIcon, Images, Layers, ScanSearch, Sparkles, Tags, Users } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { system } from "../api/client";
+import type { Stats } from "../api/types";
+import { formatDuration, formatFileSize } from "../components/shared";
+import type { Route } from "../router/location";
 
-interface StatsPageProps {
-  onNavigate?: (route: any) => void;
+type MetricTone = "cyan" | "emerald" | "amber" | "rose" | "violet" | "sky" | "slate";
+
+interface MetricCardProps {
+  label: string;
+  value: string;
+  detail?: string;
+  icon: LucideIcon;
+  tone?: MetricTone;
 }
 
-export function StatsPage({ onNavigate }: StatsPageProps) {
-  const { data: stats, isLoading } = useQuery({
-    queryKey: ["stats"],
-    queryFn: system.stats,
-  });
+const toneClasses: Record<MetricTone, string> = {
+  cyan: "border-cyan-500/30 bg-cyan-500/10 text-cyan-300",
+  emerald: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  amber: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+  rose: "border-rose-500/30 bg-rose-500/10 text-rose-300",
+  violet: "border-violet-500/30 bg-violet-500/10 text-violet-300",
+  sky: "border-sky-500/30 bg-sky-500/10 text-sky-300",
+  slate: "border-border bg-card text-secondary",
+};
 
-  const { data: recentScenes } = useQuery({
-    queryKey: ["recent-scenes"],
-    queryFn: () => scenes.find({ perPage: 16, sort: "created_at", direction: "desc" }),
-  });
-
-  const { data: recentPerformers } = useQuery({
-    queryKey: ["recent-performers"],
-    queryFn: () => performers.find({ perPage: 16, sort: "created_at", direction: "desc" }),
-  });
-
-  const { data: recentImages } = useQuery({
-    queryKey: ["recent-images"],
-    queryFn: () => imagesApi.find({ perPage: 16, sort: "updated_at", direction: "desc" }),
-  });
-
-  // Additional recommendation rows
-  const { data: recentlyPlayed } = useQuery({
-    queryKey: ["recently-played-scenes"],
-    queryFn: () => scenes.find({ perPage: 16, sort: "last_played_at", direction: "desc" }),
-  });
-
-  const { data: mostPlayed } = useQuery({
-    queryKey: ["most-played-scenes"],
-    queryFn: () => scenes.find({ perPage: 16, sort: "play_count", direction: "desc" }),
-  });
-
-  const { data: recentlyReleased } = useQuery({
-    queryKey: ["recently-released-scenes"],
-    queryFn: () => scenes.find({ perPage: 16, sort: "date", direction: "desc" }),
-  });
-
-  const { data: topRated } = useQuery({
-    queryKey: ["top-rated-scenes"],
-    queryFn: () => scenes.find({ perPage: 16, sort: "rating", direction: "desc" }),
-  });
-
-  const { data: recentStudios } = useQuery({
-    queryKey: ["recent-studios"],
-    queryFn: () => studios.find({ perPage: 16, sort: "created_at", direction: "desc" }),
-  });
+export function StatsPage(_props?: { onNavigate?: (route: Route) => void }) {
+  const { data: stats, isLoading, error } = useQuery({ queryKey: ["stats"], queryFn: system.stats });
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" />
-      </div>
-    );
+    return <div className="p-6 text-secondary">Loading stats...</div>;
   }
 
-  if (!stats) return null;
+  if (error) {
+    return <div className="p-6 text-red-300">Failed to load stats: {(error as Error).message}</div>;
+  }
 
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-  };
+  if (!stats) {
+    return <div className="p-6 text-secondary">No stats available.</div>;
+  }
 
-  const formatDuration = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    if (h > 0) return `${h.toLocaleString()}h ${m}m`;
-    return `${m}m`;
-  };
+  const totalEntities = stats.sceneCount + stats.imageCount + stats.galleryCount + stats.performerCount + stats.studioCount + stats.tagCount + stats.groupCount + stats.audioCount + stats.textCount;
 
-  const statCards = [
-    { label: "Scenes", value: stats.sceneCount, icon: Film, color: "text-blue-400", bg: "bg-blue-400/10", page: "scenes" },
-    { label: "Images", value: stats.imageCount, icon: Images, color: "text-green-400", bg: "bg-green-400/10", page: "images" },
-    { label: "Galleries", value: stats.galleryCount, icon: FolderOpen, color: "text-yellow-400", bg: "bg-yellow-400/10", page: "galleries" },
-    { label: "Performers", value: stats.performerCount, icon: Users, color: "text-pink-400", bg: "bg-pink-400/10", page: "performers" },
-    { label: "Studios", value: stats.studioCount, icon: Building2, color: "text-purple-400", bg: "bg-purple-400/10", page: "studios" },
-    { label: "Tags", value: stats.tagCount, icon: TagIcon, color: "text-orange-400", bg: "bg-orange-400/10", page: "tags" },
-    { label: "Groups", value: stats.groupCount, icon: Layers, color: "text-cyan-400", bg: "bg-cyan-400/10", page: "groups" },
-    { label: "Total Size", value: formatBytes(stats.totalFileSize), icon: HardDrive, color: "text-secondary", bg: "bg-secondary/10" },
+  return (
+    <div className="space-y-8 p-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Stats</h1>
+          <p className="mt-1 text-sm text-secondary">{formatCount(totalEntities)} total entities</p>
+        </div>
+        <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-secondary">
+          <BarChart3 className="h-4 w-4 text-accent" />
+          Library totals
+        </div>
+      </div>
+
+      <MetricSection title="Entities" icon={Database} metrics={entityMetrics(stats)} />
+      <MetricSection title="Files" icon={HardDrive} metrics={fileMetrics(stats)} />
+      <MetricSection title="Playback" icon={Activity} metrics={engagementMetrics(stats)} />
+      <MetricSection title="AI Data" icon={Sparkles} metrics={aiMetrics(stats)} />
+      <MetricSection title="Engagement" icon={Heart} metrics={likeMetrics(stats)} />
+    </div>
+  );
+}
+
+function MetricSection({ title, icon: Icon, metrics }: { title: string; icon: LucideIcon; metrics: MetricCardProps[] }) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Icon className="h-5 w-5 text-accent" />
+        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {metrics.map((metric) => <MetricCard key={`${title}-${metric.label}`} {...metric} />)}
+      </div>
+    </section>
+  );
+}
+
+function MetricCard({ label, value, detail, icon: Icon, tone = "slate" }: MetricCardProps) {
+  return (
+    <div className="rounded-lg border border-border bg-surface p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="min-w-0 text-sm font-medium text-secondary">{label}</div>
+        <div className={`shrink-0 rounded-md border p-2 ${toneClasses[tone]}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+      </div>
+      <div className="truncate text-2xl font-semibold text-foreground">{value}</div>
+      {detail ? <div className="mt-1 truncate text-xs text-muted">{detail}</div> : null}
+    </div>
+  );
+}
+
+function entityMetrics(stats: Stats): MetricCardProps[] {
+  return [
+    { label: "Scenes", value: formatCount(stats.sceneCount), icon: Film, tone: "cyan" },
+    { label: "Images", value: formatCount(stats.imageCount), icon: ImageIcon, tone: "emerald" },
+    { label: "Audios", value: formatCount(stats.audioCount), icon: Headphones, tone: "amber" },
+    { label: "Texts", value: formatCount(stats.textCount), icon: FileText, tone: "rose" },
+    { label: "Galleries", value: formatCount(stats.galleryCount), icon: Images, tone: "sky" },
+    { label: "Performers", value: formatCount(stats.performerCount), icon: Users, tone: "violet" },
+    { label: "Studios", value: formatCount(stats.studioCount), icon: Building2, tone: "cyan" },
+    { label: "Tags", value: formatCount(stats.tagCount), icon: Tags, tone: "emerald" },
+    { label: "Groups", value: formatCount(stats.groupCount), icon: Layers, tone: "amber" },
   ];
-
-  return (
-    <div className="space-y-8">
-      {/* Stats Grid */}
-      <div>
-        <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {statCards.map((card) => (
-            <button
-              key={card.label}
-              onClick={() => card.page && onNavigate?.({ page: card.page })}
-              className={`bg-surface rounded-lg p-4 text-left transition-colors ${card.page ? "hover:bg-card cursor-pointer" : "cursor-default"}`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${card.bg}`}>
-                  <card.icon className={`w-5 h-5 ${card.color}`} />
-                </div>
-                <div>
-                  <div className="text-xl font-bold">{typeof card.value === "number" ? card.value.toLocaleString() : card.value}</div>
-                  <div className="text-xs text-muted">{card.label}</div>
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Playback stats */}
-      {stats.totalPlayDuration > 0 && (
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-surface rounded-lg p-4 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-indigo-400/10">
-              <Clock className="w-5 h-5 text-indigo-400" />
-            </div>
-            <div>
-              <div className="text-xl font-bold">{formatDuration(stats.totalPlayDuration)}</div>
-              <div className="text-xs text-muted">Total Play Duration</div>
-            </div>
-          </div>
-          <div className="bg-surface rounded-lg p-4 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-emerald-400/10">
-              <Play className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-xl font-bold">{stats.sceneCount > 0 ? formatDuration(stats.totalPlayDuration / stats.sceneCount) : "0m"}</div>
-              <div className="text-xs text-muted">Avg Play Time / Scene</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recently Added Scenes */}
-      {recentScenes && recentScenes.items.length > 0 && (
-        <Carousel
-          title="Recently Added Scenes"
-          onSeeAll={() => onNavigate?.({ page: "scenes" })}
-        >
-          {recentScenes.items.map((scene) => (
-            <SceneCard key={scene.id} scene={scene} onNavigate={onNavigate} />
-          ))}
-        </Carousel>
-      )}
-
-      {/* Recently Added Performers */}
-      {recentPerformers && recentPerformers.items.length > 0 && (
-        <Carousel
-          title="Recently Added Performers"
-          onSeeAll={() => onNavigate?.({ page: "performers" })}
-        >
-          {recentPerformers.items.map((p) => (
-            <PerformerCard key={p.id} performer={p} onNavigate={onNavigate} />
-          ))}
-        </Carousel>
-      )}
-
-      {/* Recently Added Images */}
-      {recentImages && recentImages.items.length > 0 && (
-        <Carousel
-          title="Recently Added Images"
-          onSeeAll={() => onNavigate?.({ page: "images" })}
-        >
-          {recentImages.items.map((img) => (
-            <ImageCard key={img.id} image={img} onNavigate={onNavigate} />
-          ))}
-        </Carousel>
-      )}
-
-      {/* Recently Released Scenes (by scene date) */}
-      {recentlyReleased && recentlyReleased.items.filter(s => s.date).length > 0 && (
-        <Carousel
-          title="Recently Released"
-          onSeeAll={() => onNavigate?.({ page: "scenes" })}
-        >
-          {recentlyReleased.items.filter(s => s.date).map((scene) => (
-            <SceneCard key={scene.id} scene={scene} onNavigate={onNavigate} />
-          ))}
-        </Carousel>
-      )}
-
-      {/* Recently Played */}
-      {recentlyPlayed && recentlyPlayed.items.length > 0 && (
-        <Carousel
-          title="Recently Played"
-          onSeeAll={() => onNavigate?.({ page: "scenes" })}
-        >
-          {recentlyPlayed.items.map((scene) => (
-            <SceneCard key={scene.id} scene={scene} onNavigate={onNavigate} />
-          ))}
-        </Carousel>
-      )}
-
-      {/* Most Played */}
-      {mostPlayed && mostPlayed.items.length > 0 && (
-        <Carousel
-          title="Most Played"
-          onSeeAll={() => onNavigate?.({ page: "scenes" })}
-        >
-          {mostPlayed.items.map((scene) => (
-            <SceneCard key={scene.id} scene={scene} onNavigate={onNavigate} />
-          ))}
-        </Carousel>
-      )}
-
-      {/* Top Rated */}
-      {topRated && topRated.items.length > 0 && (
-        <Carousel
-          title="Top Rated"
-          onSeeAll={() => onNavigate?.({ page: "scenes" })}
-        >
-          {topRated.items.map((scene) => (
-            <SceneCard key={scene.id} scene={scene} onNavigate={onNavigate} />
-          ))}
-        </Carousel>
-      )}
-
-      {/* Recently Added Studios */}
-      {recentStudios && recentStudios.items.length > 0 && (
-        <Carousel
-          title="Recently Added Studios"
-          onSeeAll={() => onNavigate?.({ page: "studios" })}
-        >
-          {recentStudios.items.map((studio) => (
-            <StudioCard key={studio.id} studio={studio} onNavigate={onNavigate} />
-          ))}
-        </Carousel>
-      )}
-    </div>
-  );
 }
 
-// ===== Carousel Component =====
-function Carousel({ title, onSeeAll, children }: { title: string; onSeeAll?: () => void; children: React.ReactNode }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(true);
-
-  const checkScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 0);
-    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
-  }, []);
-
-  const scroll = (dir: "left" | "right") => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const amount = el.clientWidth * 0.8;
-    el.scrollBy({ left: dir === "left" ? -amount : amount, behavior: "smooth" });
-    setTimeout(checkScroll, 350);
-  };
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => scroll("left")}
-            disabled={!canScrollLeft}
-            className="p-1 rounded hover:bg-card disabled:opacity-30 disabled:cursor-default transition-colors"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => scroll("right")}
-            disabled={!canScrollRight}
-            className="p-1 rounded hover:bg-card disabled:opacity-30 disabled:cursor-default transition-colors"
-          >
-            <ChevronRight className="w-5 h-5" />
-          </button>
-          {onSeeAll && (
-            <button onClick={onSeeAll} className="text-xs text-accent hover:text-accent-hover ml-2">
-              See All
-            </button>
-          )}
-        </div>
-      </div>
-      <div
-        ref={scrollRef}
-        onScroll={checkScroll}
-        className="flex gap-3 overflow-x-auto scrollbar-hide snap-x snap-mandatory pb-2"
-        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-      >
-        {children}
-      </div>
-    </div>
-  );
+function fileMetrics(stats: Stats): MetricCardProps[] {
+  return [
+    { label: "Total File Size", value: formatFileSize(stats.totalFileSize), icon: HardDrive, tone: "slate" },
+    { label: "Scene Files", value: formatFileSize(stats.sceneFileSize), detail: formatDuration(stats.sceneDuration), icon: Film, tone: "cyan" },
+    { label: "Image Files", value: formatFileSize(stats.imageFileSize), icon: ImageIcon, tone: "emerald" },
+    { label: "Audio Files", value: formatFileSize(stats.audioFileSize), detail: formatDuration(stats.audioDuration), icon: Headphones, tone: "amber" },
+    { label: "Text Files", value: formatFileSize(stats.textFileSize), icon: FileText, tone: "rose" },
+  ];
 }
 
-// ===== Scene Card =====
-function SceneCard({ scene, onNavigate }: { scene: Scene; onNavigate?: (r: { page: string; id?: number }) => void }) {
-  const formatDur = (s?: number) => {
-    if (!s) return "";
-    const files = scene.files;
-    const dur = files?.[0]?.duration ?? 0;
-    if (dur <= 0) return "";
-    const h = Math.floor(dur / 3600);
-    const m = Math.floor((dur % 3600) / 60);
-    const sec = Math.floor(dur % 60);
-    return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}` : `${m}:${sec.toString().padStart(2, "0")}`;
-  };
-
-  const duration = scene.files?.[0]?.duration;
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: scene.id }, () => onNavigate?.({ page: "scene", id: scene.id }));
-
-  return (
-    <a
-      {...linkProps}
-      className="flex-shrink-0 w-56 snap-start group text-left"
-    >
-      <div className="relative aspect-video rounded-lg overflow-hidden bg-card mb-2">
-        <img
-          src={scenes.screenshotUrl(scene.id)}
-          alt={scene.title || ""}
-          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-          loading="lazy"
-        />
-        {duration && duration > 0 && (
-          <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
-            {formatDur(duration)}
-          </span>
-        )}
-      </div>
-      <div className="text-sm font-medium truncate group-hover:text-accent transition-colors">
-        {scene.title || scene.files?.[0]?.basename || `Scene ${scene.id}`}
-      </div>
-      <div className="text-xs text-muted truncate">
-        {scene.date || new Date(scene.createdAt).toLocaleDateString()}
-        {scene.performers.length > 0 && ` · ${scene.performers.map((p) => p.name).join(", ")}`}
-      </div>
-    </a>
-  );
+function engagementMetrics(stats: Stats): MetricCardProps[] {
+  return [
+    { label: "Scene Plays", value: formatCount(stats.scenePlayCount), detail: `${formatCount(stats.sceneCompleteCount)} completed`, icon: Film, tone: "cyan" },
+    { label: "Audio Plays", value: formatCount(stats.audioPlayCount), detail: `${formatCount(stats.audioCompleteCount)} completed`, icon: Headphones, tone: "amber" },
+    { label: "Text Reads", value: formatCount(stats.textReadCount), detail: `${formatCount(stats.textCompleteCount)} completed`, icon: FileText, tone: "rose" },
+    { label: "Image Views", value: formatCount(stats.imageViewCount), detail: `${formatCount(stats.imageCompleteCount)} completed`, icon: Eye, tone: "emerald" },
+    { label: "Scene Watch Time", value: formatDuration(stats.sceneConsumedSeconds), icon: CheckCircle2, tone: "sky" },
+    { label: "Audio Listen Time", value: formatDuration(stats.audioConsumedSeconds), icon: Activity, tone: "violet" },
+    { label: "Text Read Time", value: formatDuration(stats.textConsumedSeconds), icon: FileText, tone: "slate" },
+    { label: "Image View Time", value: formatDuration(stats.imageConsumedSeconds), icon: ImageIcon, tone: "emerald" },
+  ];
 }
 
-// ===== Performer Card =====
-function PerformerCard({ performer, onNavigate }: { performer: Performer; onNavigate?: (r: { page: string; id?: number }) => void }) {
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, () => onNavigate?.({ page: "performer", id: performer.id }));
-
-  return (
-    <a
-      {...linkProps}
-      className="flex-shrink-0 w-36 snap-start group text-left"
-    >
-      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-card mb-2">
-        {performer.imagePath ? (
-          <img
-            src={performer.imagePath}
-            alt={performer.name}
-            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-            loading="lazy"
-          />
-        ) : (
-          <div className="flex items-center justify-center w-full h-full">
-            <Users className="w-10 h-10 text-muted" />
-          </div>
-        )}
-      </div>
-      <div className="text-sm font-medium truncate group-hover:text-accent transition-colors">
-        {performer.name}
-      </div>
-      {performer.disambiguation && (
-        <div className="text-xs text-muted truncate">{performer.disambiguation}</div>
-      )}
-    </a>
-  );
+function aiMetrics(stats: Stats): MetricCardProps[] {
+  return [
+    { label: "AI Runs", value: formatCount(stats.aiRunCount), icon: Sparkles, tone: "violet" },
+    { label: "Segments", value: formatCount(stats.segmentCount), icon: Layers, tone: "cyan" },
+    { label: "Embeddings", value: formatCount(stats.embeddingCount), icon: Brain, tone: "sky" },
+    { label: "Detections", value: formatCount(stats.detectionCount), icon: ScanSearch, tone: "amber" },
+    { label: "Tag Applications", value: formatCount(stats.tagApplicationCount), icon: Tags, tone: "emerald" },
+    { label: "Faces", value: formatCount(stats.faceCount), icon: Fingerprint, tone: "rose" },
+    { label: "Face Appearances", value: formatCount(stats.faceAppearanceCount), icon: Eye, tone: "slate" },
+  ];
 }
 
-// ===== Image Card =====
-function ImageCard({ image, onNavigate }: { image: Image; onNavigate?: (r: { page: string; id?: number }) => void }) {
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "image", id: image.id }, () => onNavigate?.({ page: "image", id: image.id }));
-  const displayTitle = getImageDisplayTitle(image);
-
-  return (
-    <a
-      {...linkProps}
-      className="flex-shrink-0 w-44 snap-start group text-left"
-    >
-      <div className="relative aspect-square rounded-lg overflow-hidden bg-card mb-2">
-        <img
-          src={imagesApi.thumbnailUrl(image.id)}
-          alt={displayTitle}
-          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-          loading="lazy"
-        />
-      </div>
-      <div className="text-sm font-medium truncate group-hover:text-accent transition-colors">
-        {displayTitle}
-      </div>
-    </a>
-  );
+function likeMetrics(stats: Stats): MetricCardProps[] {
+  return [
+    { label: "Likes", value: formatCount(stats.totalLikes), icon: Heart, tone: "rose" },
+    { label: "Derived Likes", value: formatCount(stats.totalDerivedLikes), icon: Activity, tone: "amber" },
+    { label: "Favorites", value: formatCount(stats.totalFavorites), icon: CheckCircle2, tone: "emerald" },
+    { label: "Consumed Time", value: formatDuration(stats.totalPlayDuration), icon: BarChart3, tone: "sky" },
+  ];
 }
 
-// ===== Studio Card =====
-function StudioCard({ studio, onNavigate }: { studio: Studio; onNavigate?: (r: { page: string; id?: number }) => void }) {
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "studio", id: studio.id }, () => onNavigate?.({ page: "studio", id: studio.id }));
-
-  return (
-    <a
-      {...linkProps}
-      className="flex-shrink-0 w-40 snap-start group text-left"
-    >
-      <div className="relative aspect-video rounded-lg overflow-hidden bg-card mb-2 flex items-center justify-center">
-        {studio.imagePath ? (
-          <img
-            src={studio.imagePath}
-            alt={studio.name}
-            className="w-full h-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
-            loading="lazy"
-          />
-        ) : (
-          <Building2 className="w-10 h-10 text-muted" />
-        )}
-      </div>
-      <div className="text-sm font-medium truncate group-hover:text-accent transition-colors">
-        {studio.name}
-      </div>
-    </a>
-  );
+function formatCount(value: number) {
+  return Math.round(value || 0).toLocaleString();
 }

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Film, Image as ImageIcon, Sparkles } from "lucide-react";
-import { aiVisual } from "../api/client";
+import { useVisualSimilarityApi } from "../hooks/useVisualSimilarityApi";
 import type { AiVisualSimilarImage, AiVisualSimilarScene } from "../api/types";
 import { formatDuration } from "./shared";
 import { EntityCardGrid } from "./EntityCardGrid";
@@ -14,11 +14,17 @@ interface PanelProps {
 }
 
 export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {
+  const visualSimilarity = useVisualSimilarityApi();
   const similarScenes = useQuery({
-    queryKey: ["ai-visual", "scene", sceneId, "similar-scenes"],
-    queryFn: () => aiVisual.similarScenesForScene(sceneId, { perPage: SIMILAR_PER_PAGE }),
+    queryKey: ["visual-similarity", "scene", sceneId, "similar-scenes"],
+    queryFn: () => visualSimilarity!.similarScenesForScene(sceneId, { perPage: SIMILAR_PER_PAGE }),
+    enabled: visualSimilarity != null,
     retry: false,
   });
+
+  if (!visualSimilarity) {
+    return <UnavailablePanel />;
+  }
 
   if (similarScenes.isError) {
     return <UnavailablePanel />;
@@ -33,16 +39,23 @@ export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps &
 }
 
 export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps & { imageId: number }) {
+  const visualSimilarity = useVisualSimilarityApi();
   const similarScenes = useQuery({
-    queryKey: ["ai-visual", "image", imageId, "similar-scenes"],
-    queryFn: () => aiVisual.similarScenesForImage(imageId, { perPage: SIMILAR_PER_PAGE }),
+    queryKey: ["visual-similarity", "image", imageId, "similar-scenes"],
+    queryFn: () => visualSimilarity!.similarScenesForImage(imageId, { perPage: SIMILAR_PER_PAGE }),
+    enabled: visualSimilarity != null,
     retry: false,
   });
   const similarImages = useQuery({
-    queryKey: ["ai-visual", "image", imageId, "similar-images"],
-    queryFn: () => aiVisual.similarImagesForImage(imageId, { perPage: SIMILAR_PER_PAGE }),
+    queryKey: ["visual-similarity", "image", imageId, "similar-images"],
+    queryFn: () => visualSimilarity!.similarImagesForImage(imageId, { perPage: SIMILAR_PER_PAGE }),
+    enabled: visualSimilarity != null,
     retry: false,
   });
+
+  if (!visualSimilarity) {
+    return <UnavailablePanel />;
+  }
 
   if (similarScenes.isError && similarImages.isError) {
     return <UnavailablePanel />;
@@ -60,14 +73,19 @@ export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps &
 type SegmentSimilarityInterval = { startSec: number; endSec?: number };
 
 export function SegmentVisualSimilarityPanel({ sceneId, startSec, endSec, intervals, onNavigate }: PanelProps & { sceneId: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
+  const visualSimilarity = useVisualSimilarityApi();
   const queryIntervals = normalizeIntervals(intervals, startSec, endSec);
   const intervalKey = queryIntervals.map((interval) => `${interval.startSec}:${interval.endSec ?? ""}`).join("|");
   const similarScenes = useQuery({
-    queryKey: ["ai-visual", "scene", sceneId, "segment-similar-scenes", intervalKey],
-    queryFn: () => aiVisual.similarScenesForSceneSegment(sceneId, { intervals: queryIntervals, perPage: SIMILAR_PER_PAGE }),
+    queryKey: ["visual-similarity", "scene", sceneId, "segment-similar-scenes", intervalKey],
+    queryFn: () => visualSimilarity!.similarScenesForSceneSegment(sceneId, { intervals: queryIntervals, perPage: SIMILAR_PER_PAGE }),
     retry: false,
-    enabled: queryIntervals.length > 0,
+    enabled: visualSimilarity != null && queryIntervals.length > 0,
   });
+
+  if (!visualSimilarity) {
+    return <UnavailablePanel />;
+  }
 
   if (similarScenes.isError) {
     return <UnavailablePanel />;

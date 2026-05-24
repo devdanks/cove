@@ -56,7 +56,7 @@ export function TagProvenanceHover({ provenance, sourceLabel = "Tag", children, 
       <span className="sr-only"><TagProvenancePopupContent provenance={provenance} title={`${sourceLabel} Sources`} /></span>
       {showProvenance && typeof document !== "undefined" ? createPortal(
         <span
-          className="pointer-events-none fixed z-50 max-h-[min(70vh,24rem)] w-72 overflow-y-auto rounded-xl border border-border bg-surface/95 p-3 text-left shadow-2xl backdrop-blur"
+          className="pointer-events-none fixed z-[200] max-h-[min(70vh,24rem)] w-72 overflow-y-auto rounded-xl border border-border bg-surface/95 p-3 text-left shadow-2xl backdrop-blur"
           style={{ left: popupPosition.left, top: popupPosition.top }}
         >
           <TagProvenancePopupContent provenance={provenance} title={`${sourceLabel} Sources`} />

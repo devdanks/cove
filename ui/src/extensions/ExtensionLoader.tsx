@@ -20,10 +20,12 @@ import { supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences
 import { Music, Puzzle, type LucideIcon } from "lucide-react";
 import type {
   ExtensionManifest,
+  ExtensionFeatureDef,
   ExtensionThemeDef,
   ExtensionTabContribution,
   ExtensionPageOverride,
   ExtensionDialogOverride,
+  ExtensionSettingsTab,
   ExtensionSettingsPanel,
   ExtensionComponentStyleDef,
   ExtensionLayoutStyleDef,
@@ -92,6 +94,12 @@ interface ExtensionState {
   getPageOverride: (targetPage: string) => ExtensionPageOverride | undefined;
   /** Dialog override for a specific dialog ID (highest priority wins) */
   getDialogOverride: (dialogId: string) => ExtensionDialogOverride | undefined;
+  /** Feature capabilities contributed by extensions */
+  features: ExtensionFeatureDef[];
+  /** Resolve a feature capability by stable key */
+  getFeature: (key: string) => ExtensionFeatureDef | undefined;
+  /** Settings tabs contributed by extensions */
+  settingsTabs: ExtensionSettingsTab[];
   /** Settings panels contributed by extensions */
   settingsPanels: ExtensionSettingsPanel[];
   /** Get settings panels for a specific settings tab (e.g. "library", "interface") */
@@ -123,6 +131,9 @@ const ExtensionContext = createContext<ExtensionState>({
   getTabsForPage: () => [],
   getPageOverride: () => undefined,
   getDialogOverride: () => undefined,
+  features: [],
+  getFeature: () => undefined,
+  settingsTabs: [],
   settingsPanels: [],
   getSettingsPanelsForTab: () => [],
   actions: [],
@@ -612,15 +623,26 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
 
   const availableComponentStyles = manifest?.componentStyles ?? [];
   const availableLayoutStyles = manifest?.layoutStyles ?? [];
+  const features = manifest?.features ?? [];
+  const settingsTabs = [...(manifest?.settingsTabs ?? [])].sort((a, b) => a.order - b.order);
   const settingsPanels = manifest?.settingsPanels ?? [];
   const actions = manifest?.actions ?? [];
 
+  const getFeature = useCallback(
+    (key: string) => {
+      const normalizedKey = key.toLowerCase();
+      return features.find((feature) => feature.key.toLowerCase() === normalizedKey);
+    },
+    [features]
+  );
+
   const getSettingsPanelsForTab = useCallback(
     (tab: string, section?: string) => {
+      const normalizedTab = tab.toLowerCase();
       return settingsPanels
         .filter((p) => {
           const resolvedTargetTab = p.targetTab ?? "extensions";
-          if (resolvedTargetTab !== tab) return false;
+          if (resolvedTargetTab.toLowerCase() !== normalizedTab) return false;
           if (section == null) return !p.targetSection;
           return p.targetSection === section;
         })
@@ -662,6 +684,9 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         getTabsForPage,
         getPageOverride,
         getDialogOverride,
+        features,
+        getFeature,
+        settingsTabs,
         settingsPanels,
         getSettingsPanelsForTab,
         actions,

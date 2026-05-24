@@ -1,0 +1,248 @@
+name: Build pgvector Payload
+
+on:
+  workflow_dispatch:
+    inputs:
+      pgvector_version:
+        description: pgvector source release version
+        required: true
+        default: '0.8.2'
+      postgres_major:
+        description: PostgreSQL major version
+        required: true
+        default: '18'
+      postgres_version:
+        description: PostgreSQL full version used for portable Windows build inputs
+        required: true
+        default: '18.3'
+      release_tag:
+        description: Optional payload release tag override
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  POSTGRES_WINDOWS_URL: https://sbp.enterprisedb.com/getfile.jsp?fileid=1260146
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      pgvector_version: ${{ steps.values.outputs.pgvector_version }}
+      postgres_major: ${{ steps.values.outputs.postgres_major }}
+      postgres_version: ${{ steps.values.outputs.postgres_version }}
+      release_tag: ${{ steps.values.outputs.release_tag }}
+    steps:
+      - id: values
+        shell: bash
+        run: |
+          PGVECTOR_VERSION='${{ inputs.pgvector_version }}'
+          POSTGRES_MAJOR='${{ inputs.postgres_major }}'
+          POSTGRES_VERSION='${{ inputs.postgres_version }}'
+          RELEASE_TAG='${{ inputs.release_tag }}'
+
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG="pgvector-payload-v${PGVECTOR_VERSION}-pg${POSTGRES_MAJOR}"
+          fi
+
+          echo "pgvector_version=$PGVECTOR_VERSION" >> "$GITHUB_OUTPUT"
+          echo "postgres_major=$POSTGRES_MAJOR" >> "$GITHUB_OUTPUT"
+          echo "postgres_version=$POSTGRES_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      PGVECTOR_VERSION: ${{ needs.metadata.outputs.pgvector_version }}
+      POSTGRES_MAJOR: ${{ needs.metadata.outputs.postgres_major }}
+      POSTGRES_VERSION: ${{ needs.metadata.outputs.postgres_version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download pgvector source
+        shell: pwsh
+        run: |
+          $sourceArchive = Join-Path $env:RUNNER_TEMP "pgvector.tar.gz"
+          $sourceRoot = Join-Path $env:RUNNER_TEMP "pgvector-src"
+          Invoke-WebRequest -Uri "https://github.com/pgvector/pgvector/archive/refs/tags/v$env:PGVECTOR_VERSION.tar.gz" -OutFile $sourceArchive
+          New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
+          tar -xzf $sourceArchive -C $sourceRoot --strip-components 1
+          "PGVECTOR_SOURCE=$sourceRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install PostgreSQL build inputs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archivePath = Join-Path $env:RUNNER_TEMP "postgresql.zip"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "postgresql"
+          Invoke-WebRequest -Uri $env:POSTGRES_WINDOWS_URL -OutFile $archivePath
+          Expand-Archive -Path $archivePath -DestinationPath $extractRoot -Force
+
+          $pgConfig = Get-ChildItem -Path $extractRoot -Recurse -File -Filter pg_config.exe | Select-Object -First 1
+          if ($null -eq $pgConfig) {
+            throw "Could not find pg_config.exe in downloaded PostgreSQL $env:POSTGRES_VERSION archive."
+          }
+
+          $pgRoot = Split-Path -Parent (Split-Path -Parent $pgConfig.FullName)
+          "PGROOT=$pgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install PostgreSQL build inputs (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg make gcc
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y "postgresql-server-dev-${POSTGRES_MAJOR}" "postgresql-client-${POSTGRES_MAJOR}"
+          echo "PG_CONFIG=/usr/lib/postgresql/${POSTGRES_MAJOR}/bin/pg_config" >> "$GITHUB_ENV"
+
+      - name: Install PostgreSQL build inputs (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew update
+          brew install "postgresql@${POSTGRES_MAJOR}"
+          PG_PREFIX="$(brew --prefix "postgresql@${POSTGRES_MAJOR}")"
+          echo "PG_CONFIG=${PG_PREFIX}/bin/pg_config" >> "$GITHUB_ENV"
+
+      - name: Build and install pgvector (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsPath)) {
+            throw "Could not find Visual Studio C++ build tools on the runner."
+          }
+
+          cmd /c "`"$vsPath\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 && set" | ForEach-Object {
+            if ($_ -match '^(.*?)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+            }
+          }
+
+          Set-Location $env:PGVECTOR_SOURCE
+          & nmake /F Makefile.win "PGROOT=$env:PGROOT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & nmake /F Makefile.win install "PGROOT=$env:PGROOT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build and install pgvector (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_ROOT="$RUNNER_TEMP/pgvector-install"
+          mkdir -p "$INSTALL_ROOT"
+          cd "$PGVECTOR_SOURCE"
+          make PG_CONFIG="$PG_CONFIG" OPTFLAGS=""
+          make install PG_CONFIG="$PG_CONFIG" DESTDIR="$INSTALL_ROOT"
+          echo "PGVECTOR_INSTALL_ROOT=$INSTALL_ROOT" >> "$GITHUB_ENV"
+
+      - name: Package payload
+        shell: pwsh
+        run: |
+          $sourceRoot = if ($env:RUNNER_OS -eq 'Windows') { $env:PGROOT } else { $env:PGVECTOR_INSTALL_ROOT }
+          ./scripts/package-pgvector-payload.ps1 `
+            -Rid '${{ matrix.rid }}' `
+            -SourceRoot $sourceRoot `
+            -OutputDir payload `
+            -PgMajor $env:POSTGRES_MAJOR `
+            -PgvectorVersion $env:PGVECTOR_VERSION
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pgvector-payload-${{ matrix.rid }}
+          path: payload/*
+          retention-days: 7
+
+  publish:
+    needs: [metadata, build]
+    runs-on: ubuntu-latest
+    env:
+      PGVECTOR_VERSION: ${{ needs.metadata.outputs.pgvector_version }}
+      POSTGRES_MAJOR: ${{ needs.metadata.outputs.postgres_major }}
+      RELEASE_TAG: ${{ needs.metadata.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: payload-artifacts
+
+      - name: Generate payload manifest
+        shell: pwsh
+        run: |
+          $assets = [ordered]@{}
+          $prefix = "pgvector-$env:PGVECTOR_VERSION-pg$env:POSTGRES_MAJOR-"
+          $suffix = ".tar.gz"
+
+          Get-ChildItem -Path payload-artifacts -Recurse -File -Filter '*.tar.gz' | Sort-Object Name | ForEach-Object {
+            if (-not $_.Name.StartsWith($prefix) -or -not $_.Name.EndsWith($suffix)) {
+              throw "Unexpected payload archive name '$($_.Name)'. Expected ${prefix}<rid>${suffix}."
+            }
+
+            $rid = $_.Name.Substring($prefix.Length, $_.Name.Length - $prefix.Length - $suffix.Length)
+            $shaPath = "$($_.FullName).sha256"
+            if (-not (Test-Path $shaPath)) {
+              throw "Missing checksum file $shaPath"
+            }
+
+            $sha256 = ((Get-Content -Path $shaPath -Raw) -split '\s+')[0].Trim().ToLowerInvariant()
+            $assets[$rid] = [ordered]@{
+              fileName = $_.Name
+              url = "https://github.com/${{ github.repository }}/releases/download/$env:RELEASE_TAG/$($_.Name)"
+              sha256 = $sha256
+            }
+          }
+
+          foreach ($requiredRid in @('win-x64', 'linux-x64', 'osx-arm64')) {
+            if (-not $assets.Contains($requiredRid)) {
+              throw "The payload manifest is missing required RID '$requiredRid'."
+            }
+          }
+
+          $manifest = [ordered]@{
+            schema = 1
+            postgresMajor = $env:POSTGRES_MAJOR
+            pgvectorVersion = $env:PGVECTOR_VERSION
+            releaseTag = $env:RELEASE_TAG
+            assets = $assets
+          }
+
+          New-Item -ItemType Directory -Path release-files -Force | Out-Null
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content -Path release-files/pgvector-payload-manifest.json -Encoding UTF8
+          Get-ChildItem -Path payload-artifacts -Recurse -File |
+            Where-Object { $_.Name -like '*.tar.gz' -or $_.Name -like '*.sha256' } |
+            Copy-Item -Destination release-files
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.metadata.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: pgvector payload ${{ needs.metadata.outputs.pgvector_version }} for PostgreSQL ${{ needs.metadata.outputs.postgres_major }}
+          body: |
+            Native pgvector payloads consumed by Cove native release builds.
+
+            The manifest asset contains the URL and SHA-256 for each runtime identifier.
+          files: release-files/*
+          make_latest: false

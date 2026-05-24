@@ -1,5 +1,5 @@
 import { Film, Headphones, FileText, Users, Building2, Tags, Image, ImageIcon, Layers, Settings, BarChart3, Activity, HelpCircle, Menu, X, Fingerprint, Bookmark } from "lucide-react";
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { JobDrawer, useJobCount } from "./JobDrawer";
 import { GlobalSearch } from "./GlobalSearch";
 import { useRouteRegistry } from "../router/RouteRegistry";
@@ -8,6 +8,7 @@ import { useExtensions } from "../extensions/ExtensionLoader";
 import { useAuth } from "../auth/AuthContext";
 import { canShowNavPage, type NavPage } from "../auth/visibility";
 import { openTutorialStoryboard } from "./TutorialStoryboardDialog";
+import { buildRouteUrl, type Route } from "../router/location";
 
 interface NavbarProps {
   currentPage: string;
@@ -40,6 +41,10 @@ const DETAIL_PARENT_PAGE: Record<string, string> = {
   tag: "tags",
   group: "groups",
 };
+
+function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>) {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;
+}
 
 export function Navbar({ currentPage, navigate }: NavbarProps) {
   const [jobDrawerOpen, setJobDrawerOpen] = useState(false);
@@ -83,14 +88,20 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
     ? enabledMenuItems.map((page) => allItemsMap.get(page)).filter(Boolean) as (typeof navItems[number] | typeof extensionNavItems[number])[]
     : Array.from(allItemsMap.values());
 
+  const handleAnchorNavigate = (event: MouseEvent<HTMLAnchorElement>, route: Route) => {
+    if (!shouldHandleClientNavigation(event)) return;
+    event.preventDefault();
+    navigate(route);
+  };
+
   return (
     <nav className="cove-navbar bg-nav sticky top-0 z-50 shadow-lg shadow-black/30" role="navigation" aria-label="Main navigation">
       <div className="w-full px-4">
         <div className="flex min-w-0 items-center h-12">
           {/* Logo */}
           <a
-            href="/"
-            onClick={(e) => { e.preventDefault(); navigate({ page: "home" }); }}
+            href={buildRouteUrl({ page: "home" })}
+            onClick={(event) => handleAnchorNavigate(event, { page: "home" })}
             className="flex items-center gap-2 mr-6 shrink-0 cursor-pointer"
           >
             <svg viewBox="0 0 347.11 91.99" className="h-8 text-accent" fill="currentColor" aria-hidden="true" style={{ width: "auto" }}>
@@ -115,8 +126,8 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
             {allNavItems.map(({ page, label, icon: Icon }) => (
               <a
                 key={page}
-                href={`#/${page}`}
-                onClick={(e) => { e.preventDefault(); navigate({ page }); }}
+                href={buildRouteUrl({ page })}
+                onClick={(event) => handleAnchorNavigate(event, { page })}
                 aria-current={activePage === page ? "page" : undefined}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
                   activePage === page
@@ -151,8 +162,8 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
             )}
             {canViewStats ? (
               <a
-                href="#/stats"
-                onClick={(e) => { e.preventDefault(); navigate({ page: "stats" }); }}
+                href={buildRouteUrl({ page: "stats" })}
+                onClick={(event) => handleAnchorNavigate(event, { page: "stats" })}
                 className={`p-2 rounded cursor-pointer ${
                   currentPage === "stats" ? "text-accent" : "text-secondary hover:text-foreground"
                 }`}
@@ -170,8 +181,8 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
             </button>
             {canViewSettings ? (
               <a
-                href="#/settings"
-                onClick={(e) => { e.preventDefault(); navigate({ page: "settings" }); }}
+                href={buildRouteUrl({ page: "settings" })}
+                onClick={(event) => handleAnchorNavigate(event, { page: "settings" })}
                 className={`p-2 rounded cursor-pointer ${
                   currentPage === "settings" ? "text-accent" : "text-secondary hover:text-foreground"
                 }`}

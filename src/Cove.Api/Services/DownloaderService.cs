@@ -183,11 +183,21 @@ public class DownloaderService(
         var tempDirectory = Path.Combine(_tempRoot, SanitizePathSegment(registration.Descriptor.Id), Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(tempDirectory);
 
+        logger.LogInformation(
+            "Starting downloader {DownloaderId} for {Entity} URL {Url}. Quality: {QualityId}",
+            request.DownloaderId,
+            request.Entity,
+            request.Url,
+            request.QualityId);
+
         var host = new DownloaderHost(tempDirectory, httpClientFactory, loggerFactory, progress);
         using var downloadSlotLease = await AcquireDownloadSlotAsync(progress, ct);
         var result = await registration.Provider.DownloadAsync(request, host, ct);
         if (result == null)
+        {
+            logger.LogDebug("Downloader {DownloaderId} returned no result for {Entity} URL {Url}", request.DownloaderId, request.Entity, request.Url);
             return null;
+        }
 
         var localPath = Path.IsPathRooted(result.LocalPath)
             ? result.LocalPath
@@ -195,6 +205,14 @@ public class DownloaderService(
 
         if (!File.Exists(localPath))
             throw new InvalidOperationException($"Downloader {registration.Descriptor.Id} completed without producing a file at {localPath}");
+
+        logger.LogDebug(
+            "Downloader {DownloaderId} completed for {Entity} URL {Url}. File: {LocalPath}. Original filename: {OriginalFilename}",
+            request.DownloaderId,
+            request.Entity,
+            request.Url,
+            localPath,
+            result.OriginalFilename);
 
         return result with { LocalPath = localPath };
     }
@@ -216,6 +234,13 @@ public class DownloaderService(
             return (null, null);
 
         var libraryPath = MoveDownloadedFileToLibrary(result, request.Entity, request.DownloaderId, request.Url);
+        logger.LogDebug(
+            "Moved download for {DownloaderId} {Entity} URL {Url} into library path {LibraryPath}",
+            request.DownloaderId,
+            request.Entity,
+            request.Url,
+            libraryPath);
+
         using var scope = serviceScopeFactory.CreateScope();
         var scanService = scope.ServiceProvider.GetRequiredService<IScanService>();
 
@@ -237,6 +262,13 @@ public class DownloaderService(
             {
                 await AttachDownloadedUrlAsync(request.Entity, importedEntityId.Value, request.SourceUrl, ct);
             }
+
+            logger.LogInformation(
+                "Imported {Entity} download from {Url} into entity {EntityId} using downloader {DownloaderId}",
+                request.Entity,
+                request.Url,
+                importedEntityId.Value,
+                request.DownloaderId);
         }
 
         if (autoApplyMetadata && importedEntityId.HasValue)

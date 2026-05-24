@@ -7,7 +7,11 @@ namespace Cove.Api.Middleware;
 public sealed class DatabaseUnavailableMiddleware
 {
     public const int RetryAfterSeconds = 5;
+    private static readonly TimeSpan WarningLogInterval = TimeSpan.FromSeconds(15);
     private readonly RequestDelegate _next;
+    private readonly object _warningLock = new();
+    private DateTime _nextWarningAtUtc = DateTime.MinValue;
+    private int _suppressedWarnings;
 
     public DatabaseUnavailableMiddleware(RequestDelegate next) => _next = next;
 
@@ -23,16 +27,40 @@ public sealed class DatabaseUnavailableMiddleware
                 throw;
 
             var reason = ex.GetBaseException().Message;
-            logger.LogWarning("Database temporarily unavailable while handling {Method} {Path}: {Reason}",
-                context.Request.Method,
-                context.Request.Path.Value,
-                reason);
+            var (shouldLogWarning, suppressedWarnings) = ShouldLogWarning();
+            if (shouldLogWarning)
+            {
+                logger.LogWarning("Database temporarily unavailable while handling {Method} {Path}: {Reason}. Suppressed {SuppressedCount} similar warning(s) in the last {IntervalSeconds} seconds.",
+                    context.Request.Method,
+                    context.Request.Path.Value,
+                    reason,
+                    suppressedWarnings,
+                    (int)WarningLogInterval.TotalSeconds);
+            }
             logger.LogDebug(ex, "Transient database connection failure handled at request boundary.");
 
             context.Response.Clear();
             context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             context.Response.Headers.RetryAfter = RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             await context.Response.WriteAsJsonAsync(CreateResponse(), context.RequestAborted);
+        }
+    }
+
+    private (bool ShouldLog, int SuppressedWarnings) ShouldLogWarning()
+    {
+        lock (_warningLock)
+        {
+            var now = DateTime.UtcNow;
+            if (now < _nextWarningAtUtc)
+            {
+                _suppressedWarnings++;
+                return (false, 0);
+            }
+
+            var suppressed = _suppressedWarnings;
+            _suppressedWarnings = 0;
+            _nextWarningAtUtc = now.Add(WarningLogInterval);
+            return (true, suppressed);
         }
     }
 

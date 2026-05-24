@@ -94,6 +94,7 @@ describe("batchDownloads", () => {
         allowDuplicateDownloads: false,
         generate: expect.any(Object),
       }),
+      preflightBeforeQueue: false,
     });
   });
 

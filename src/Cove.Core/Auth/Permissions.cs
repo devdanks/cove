@@ -298,4 +298,5 @@ public sealed record PermissionDefinition(
     string Description,
     bool Dangerous = false,
     string[]? Implies = null,
-    string Source = "core");
+    string Source = "core",
+    bool GrantToAdminsByDefault = false);

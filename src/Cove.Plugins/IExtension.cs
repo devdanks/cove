@@ -153,7 +153,10 @@ public record ExtensionJobDefinition(
     string Name,
     string? Description = null,
     bool SupportsParameters = false
-);
+)
+{
+    public bool ShowInTaskList { get; init; }
+}
 
 /// <summary>
 /// Extension that subscribes to entity lifecycle events (pre/post CRUD).
@@ -320,7 +323,9 @@ public record ExtensionAction(
     string? HandlerName = null,
     int Order = 100,
     /// <summary>Only show in these pages (empty = show everywhere applicable).</summary>
-    string[]? Pages = null
+    string[]? Pages = null,
+    /// <summary>When true, the host should skip its default queued-action success alert.</summary>
+    bool SuppressSuccessAlert = false
 )
 {
     /// <summary>Permission required to show and invoke this action.</summary>
@@ -356,6 +361,8 @@ public class ExtensionManifestFile
     public List<ExtensionSettingManifest> Settings { get; set; } = [];
     /// <summary>The DLL filename containing the IExtension implementation.</summary>
     public string? EntryDll { get; set; }
+    /// <summary>Assembly names that must be unified across extension load contexts.</summary>
+    public List<string> SharedAssemblies { get; set; } = [];
     /// <summary>Relative path to the frontend JS bundle (ESM module).</summary>
     public string? JsBundle { get; set; }
     /// <summary>Relative path to the frontend CSS file.</summary>
@@ -504,11 +511,13 @@ public class UIManifest
     public List<UISlotContribution> Slots { get; set; } = [];
     public List<UITabContribution> Tabs { get; set; } = [];
     public List<UIPaneContribution> Panes { get; set; } = [];
+    public List<UIFeatureDefinition> Features { get; set; } = [];
     public List<UIComponentOverride> ComponentOverrides { get; set; } = [];
     public List<UISelectorOverride> SelectorOverrides { get; set; } = [];
     public List<UIThemeDefinition> Themes { get; set; } = [];
     public List<UIComponentStyleDef> ComponentStyles { get; set; } = [];
     public List<UILayoutStyleDef> LayoutStyles { get; set; } = [];
+    public List<UISettingsTab> SettingsTabs { get; set; } = [];
     public List<UISettingsPanel> SettingsPanels { get; set; } = [];
     public List<UIPageOverride> PageOverrides { get; set; } = [];
     public List<UIDialogOverride> DialogOverrides { get; set; } = [];
@@ -599,6 +608,13 @@ public record UIPaneContribution(
     int Order = 100
 );
 
+/// <summary>Feature capability metadata exposed to the host UI.</summary>
+public record UIFeatureDefinition(
+    string Key,
+    string ExtensionId,
+    Dictionary<string, string>? Options = null
+);
+
 /// <summary>Override a host component by stable key (selectors, cards, toolbars, list rows, etc.).</summary>
 public record UIComponentOverride(
     /// <summary>Host-defined component key (e.g. "scene.selector", "performer.card", "search.bar").</summary>
@@ -642,6 +658,22 @@ public record UILayoutStyleDef(
     string Id,
     string Name,
     string? Description = null
+);
+
+/// <summary>
+/// A dedicated tab rendered in the host's Extensions settings group.
+/// The key also acts as the route segment after /settings/.
+/// </summary>
+public record UISettingsTab(
+    string Key,
+    string Label,
+    string ExtensionId,
+    int Order = 100,
+    string? Icon = null,
+    string? ParentTabKey = null,
+    string? Description = null,
+    string[]? SearchKeywords = null,
+    string[]? Aliases = null
 );
 
 /// <summary>A settings panel contributed by an extension. Appears in the Extensions settings tab by default, or in a specific tab or tab section when targeted.</summary>
@@ -693,11 +725,13 @@ public class UIRegistry
     private readonly List<UISlotContribution> _slots = [];
     private readonly List<UITabContribution> _tabs = [];
     private readonly List<UIPaneContribution> _panes = [];
+    private readonly List<UIFeatureDefinition> _features = [];
     private readonly List<UIComponentOverride> _componentOverrides = [];
     private readonly List<UISelectorOverride> _selectorOverrides = [];
     private readonly List<UIThemeDefinition> _themes = [];
     private readonly List<UIComponentStyleDef> _componentStyles = [];
     private readonly List<UILayoutStyleDef> _layoutStyles = [];
+    private readonly List<UISettingsTab> _settingsTabs = [];
     private readonly List<UISettingsPanel> _settingsPanels = [];
     private readonly List<UIPageOverride> _pageOverrides = [];
     private readonly List<UIDialogOverride> _dialogOverrides = [];
@@ -708,11 +742,13 @@ public class UIRegistry
     public IReadOnlyList<UISlotContribution> Slots => _slots;
     public IReadOnlyList<UITabContribution> Tabs => _tabs;
     public IReadOnlyList<UIPaneContribution> Panes => _panes;
+    public IReadOnlyList<UIFeatureDefinition> Features => _features;
     public IReadOnlyList<UIComponentOverride> ComponentOverrides => _componentOverrides;
     public IReadOnlyList<UISelectorOverride> SelectorOverrides => _selectorOverrides;
     public IReadOnlyList<UIThemeDefinition> Themes => _themes;
     public IReadOnlyList<UIComponentStyleDef> ComponentStyles => _componentStyles;
     public IReadOnlyList<UILayoutStyleDef> LayoutStyles => _layoutStyles;
+    public IReadOnlyList<UISettingsTab> SettingsTabs => _settingsTabs;
     public IReadOnlyList<UISettingsPanel> SettingsPanels => _settingsPanels;
     public IReadOnlyList<UIPageOverride> PageOverrides => _pageOverrides;
     public IReadOnlyList<UIDialogOverride> DialogOverrides => _dialogOverrides;
@@ -723,11 +759,13 @@ public class UIRegistry
     public void RegisterSlot(UISlotContribution slot) => _slots.Add(slot);
     public void RegisterTab(UITabContribution tab) => _tabs.Add(tab);
     public void RegisterPane(UIPaneContribution pane) => _panes.Add(pane);
+    public void RegisterFeature(UIFeatureDefinition feature) => _features.Add(feature);
     public void RegisterComponentOverride(UIComponentOverride ov) => _componentOverrides.Add(ov);
     public void RegisterSelectorOverride(UISelectorOverride ov) => _selectorOverrides.Add(ov);
     public void RegisterTheme(UIThemeDefinition theme) => _themes.Add(theme);
     public void RegisterComponentStyle(UIComponentStyleDef style) => _componentStyles.Add(style);
     public void RegisterLayoutStyle(UILayoutStyleDef layout) => _layoutStyles.Add(layout);
+    public void RegisterSettingsTab(UISettingsTab tab) => _settingsTabs.Add(tab);
     public void RegisterSettingsPanel(UISettingsPanel panel) => _settingsPanels.Add(panel);
     public void RegisterPageOverride(UIPageOverride ov) => _pageOverrides.Add(ov);
     public void RegisterDialogOverride(UIDialogOverride ov) => _dialogOverrides.Add(ov);
@@ -740,11 +778,13 @@ public class UIRegistry
         Slots = [.. _slots],
         Tabs = [.. _tabs],
         Panes = [.. _panes],
+        Features = [.. _features],
         ComponentOverrides = [.. _componentOverrides],
         SelectorOverrides = [.. _selectorOverrides],
         Themes = [.. _themes],
         ComponentStyles = [.. _componentStyles],
         LayoutStyles = [.. _layoutStyles],
+        SettingsTabs = [.. _settingsTabs],
         SettingsPanels = [.. _settingsPanels],
         PageOverrides = [.. _pageOverrides],
         DialogOverrides = [.. _dialogOverrides],

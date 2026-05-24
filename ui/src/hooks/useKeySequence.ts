@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useMemo, useRef, useCallback } from "react";
+import { normalizeShortcutEvent, normalizeShortcutSequence } from "../keyboard/keybindings";
 
 type KeyBinding = {
   keys: string; // e.g. "g s", "d d", "r 5", "e", "Space"
@@ -16,6 +17,12 @@ type KeyBinding = {
 export function useKeySequence(bindings: KeyBinding[], enabled = true) {
   const bufferRef = useRef<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const normalizedBindings = useMemo(
+    () => bindings
+      .map((binding) => ({ ...binding, normalizedKeys: normalizeShortcutSequence(binding.keys) }))
+      .filter((binding) => binding.normalizedKeys.length > 0),
+    [bindings]
+  );
 
   const clearBuffer = useCallback(() => {
     bufferRef.current = [];
@@ -29,16 +36,8 @@ export function useKeySequence(bindings: KeyBinding[], enabled = true) {
       const tag = (e.target as HTMLElement)?.tagName;
       const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 
-      // Normalize key name
-      let key = e.key;
-      if (key === " ") key = "Space";
-
-      // Build modifier prefix
-      const mods: string[] = [];
-      if (e.ctrlKey || e.metaKey) mods.push("Ctrl");
-      if (e.altKey) mods.push("Alt");
-      if (e.shiftKey && key.length > 1) mods.push("Shift"); // Only for special keys, not letters
-      const fullKey = [...mods, key].join("+");
+      const fullKey = normalizeShortcutEvent(e);
+      if (!fullKey) return;
 
       // Push to buffer
       bufferRef.current.push(fullKey);
@@ -47,9 +46,9 @@ export function useKeySequence(bindings: KeyBinding[], enabled = true) {
       const bufferStr = bufferRef.current.join(" ");
 
       // Check for exact match
-      const match = bindings.find((b) => {
+      const match = normalizedBindings.find((b) => {
         if (inInput && !b.global) return false;
-        return b.keys === bufferStr;
+        return b.normalizedKeys === bufferStr;
       });
 
       if (match) {
@@ -61,9 +60,9 @@ export function useKeySequence(bindings: KeyBinding[], enabled = true) {
       }
 
       // Check if buffer could still be a prefix of any binding
-      const couldMatch = bindings.some((b) => {
+      const couldMatch = normalizedBindings.some((b) => {
         if (inInput && !b.global) return false;
-        return b.keys.startsWith(bufferStr);
+        return b.normalizedKeys.startsWith(`${bufferStr} `);
       });
 
       if (couldMatch) {
@@ -78,5 +77,5 @@ export function useKeySequence(bindings: KeyBinding[], enabled = true) {
       window.removeEventListener("keydown", handler);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [bindings, enabled, clearBuffer]);
+  }, [normalizedBindings, enabled, clearBuffer]);
 }

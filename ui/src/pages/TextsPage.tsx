@@ -182,7 +182,6 @@ function TextCreateModal({ open, onClose, onCreated }: { open: boolean; onClose:
   const [details, setDetails] = useState("");
   const [studioId, setStudioId] = useState<number | undefined>(undefined);
   const [urls, setUrls] = useState<string[]>([""]);
-  const [organized, setOrganized] = useState(false);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [createAnother, setCreateAnother] = useState(false);
 
@@ -197,7 +196,6 @@ function TextCreateModal({ open, onClose, onCreated }: { open: boolean; onClose:
     setDetails("");
     setStudioId(undefined);
     setUrls([""]);
-    setOrganized(false);
     setCustomFields({});
   };
 
@@ -207,7 +205,6 @@ function TextCreateModal({ open, onClose, onCreated }: { open: boolean; onClose:
     date: date || undefined,
     details: details.trim() || undefined,
     studioId,
-    organized,
     urls: mergeUrlLists(urls, extraUrls),
     customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
   });
@@ -307,10 +304,6 @@ function TextCreateModal({ open, onClose, onCreated }: { open: boolean; onClose:
       <Field label="Details"><TextArea value={details} onChange={setDetails} placeholder="Text notes" rows={3} /></Field>
       <Field label="Studio"><StudioSelector value={studioId} onChange={setStudioId} /></Field>
       <Field label="URLs"><StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" /></Field>
-      <label className="mb-4 flex items-center gap-2 text-sm text-secondary">
-        <input type="checkbox" checked={organized} onChange={(event) => setOrganized(event.target.checked)} className="rounded border-border bg-card" />
-        Organized
-      </label>
       <Field label="Custom Fields"><CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="text" /></Field>
       {visibleError ? (
         <div className="mb-4 rounded border border-red-700 bg-red-900/50 p-2 text-sm text-red-300">

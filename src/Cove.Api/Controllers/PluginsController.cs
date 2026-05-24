@@ -98,6 +98,11 @@ public class PluginsController(
         if (ext is IJobExtension jobExt)
         {
             var jobDef = jobExt.Jobs.FirstOrDefault(j => j.Id == dto.TaskName);
+            if (jobDef == null)
+                return NotFound($"Task '{dto.TaskName}' was not found for plugin '{dto.PluginId}'.");
+            if (!jobDef.ShowInTaskList)
+                return NotFound($"Task '{dto.TaskName}' is not exposed on the extension tasks page.");
+
             var label = jobDef?.Name ?? dto.TaskName;
             var netJobId = jobService.Enqueue($"plugin:{dto.PluginId}", $"{ext.Name}: {label}", async (progress, ct) =>
             {
@@ -107,14 +112,7 @@ public class PluginsController(
             return Ok(new { jobId = netJobId });
         }
 
-        var fallbackJobId = jobService.Enqueue($"plugin:{dto.PluginId}", $"Running {dto.PluginId}/{dto.TaskName}", async (progress, ct) =>
-        {
-            progress.Report(0, "Running plugin task...");
-            await Task.CompletedTask;
-            progress.Report(1, "Done");
-        }, exclusive: false);
-
-        return Ok(new { jobId = fallbackJobId });
+        return BadRequest($"Plugin '{dto.PluginId}' does not expose runnable tasks.");
     }
 
     [HttpPost("settings")]
@@ -268,10 +266,12 @@ public class PluginsController(
     {
         // If the extension defines typed jobs, expose those
         if (ext is IJobExtension jobExt && jobExt.Jobs.Count > 0)
-            return jobExt.Jobs.Select(j => new PluginTaskDto(j.Id, j.Name)).ToList();
+            return jobExt.Jobs
+                .Where(j => j.ShowInTaskList)
+                .Select(j => new PluginTaskDto(j.Id, j.Name))
+                .ToList();
 
-        // Default fallback task for any extension
-        return [new PluginTaskDto("run", $"Run {ext.Name}")];
+        return [];
     }
 
     private List<PluginDto> DiscoverPythonPlugins(string pluginDir)
@@ -299,7 +299,7 @@ public class PluginsController(
             var description = $"Python plugin: {id}";
             var version = "0.0.1";
             string? url = null;
-            var tasks = new List<PluginTaskDto> { new("run", $"Run {id}") };
+            var tasks = new List<PluginTaskDto>();
             var settingsSchema = new List<PluginSettingSchemaDto>();
 
             try

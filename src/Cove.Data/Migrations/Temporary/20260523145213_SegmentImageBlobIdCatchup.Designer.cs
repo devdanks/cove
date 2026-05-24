@@ -9,15 +9,14 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
-using Pgvector;
 
 #nullable disable
 
-namespace Cove.Data.Migrations
+namespace Cove.Data.Migrations.Temporary
 {
     [DbContext(typeof(CoveContext))]
-    [Migration("20260516223910_V1_0")]
-    partial class V1_0
+    [Migration("20260523145213_SegmentImageBlobIdCatchup")]
+    partial class SegmentImageBlobIdCatchup
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -26,8 +25,6 @@ namespace Cove.Data.Migrations
             modelBuilder
                 .HasAnnotation("ProductVersion", "10.0.5")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
-
-            modelBuilder.HasPostgresExtension("vector");
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
@@ -1214,9 +1211,9 @@ namespace Cove.Data.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Vector>("Vector")
+                    b.Property<string>("Vector")
                         .IsRequired()
-                        .HasColumnType("vector");
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -2420,13 +2417,13 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
-                    b.Property<string>("ImageOverrideBlobId")
-                        .HasColumnType("text");
-
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
 
                     b.Property<string>("Measurements")
                         .HasColumnType("text");
@@ -2838,6 +2835,11 @@ namespace Cove.Data.Migrations
                     b.Property<int?>("InteractiveSpeed")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("IsVr")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<long>("MaxBitRate")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
@@ -2879,11 +2881,6 @@ namespace Cove.Data.Migrations
 
                     b.Property<bool>("Organized")
                         .HasColumnType("boolean");
-
-                    b.Property<bool>("IsVr")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false);
 
                     b.Property<int?>("ParentSceneId")
                         .HasColumnType("integer");
@@ -2933,6 +2930,8 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("HasSquareFiles");
 
+                    b.HasIndex("IsVr");
+
                     b.HasIndex("MaxBitRate");
 
                     b.HasIndex("MaxDuration");
@@ -2952,8 +2951,6 @@ namespace Cove.Data.Migrations
                     b.HasIndex("MinPath");
 
                     b.HasIndex("Organized");
-
-                    b.HasIndex("IsVr");
 
                     b.HasIndex("ParentSceneId");
 
@@ -3259,6 +3256,9 @@ namespace Cove.Data.Migrations
                     b.Property<int>("HostType")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ImageBlobId")
+                        .HasColumnType("text");
+
                     b.Property<string>("Kind")
                         .HasColumnType("text");
 
@@ -3460,13 +3460,13 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
-                    b.Property<string>("ImageOverrideBlobId")
-                        .HasColumnType("text");
-
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3658,13 +3658,13 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
-                    b.Property<string>("ImageOverrideBlobId")
-                        .HasColumnType("text");
-
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
 
                     b.Property<double?>("MinOccurrencePercent")
                         .HasColumnType("double precision");
@@ -3730,8 +3730,6 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("Favorite");
 
-                    b.HasIndex("Organized");
-
                     b.HasIndex("GalleryCount");
 
                     b.HasIndex("GroupCount");
@@ -3740,6 +3738,8 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("Name")
                         .IsUnique();
+
+                    b.HasIndex("Organized");
 
                     b.HasIndex("PerformerCount");
 

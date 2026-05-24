@@ -2,6 +2,7 @@ import { auth } from "../api/client";
 import { authStore } from "../auth/authStore";
 import type { AuthUser } from "../auth/authStore";
 import type { RatingSystemOptions, UserPlaybackPreferences, UserThemePreferences, UserTrackingPreferences, UserUiPreferences } from "../api/types";
+import { normalizeShortcutSequence } from "../keyboard/keybindings";
 
 const SAVE_DEBOUNCE_MS = 250;
 
@@ -16,7 +17,7 @@ function normalizeKeybindingOverrides(overrides: Record<string, string> | null |
 
   const normalized = Object.fromEntries(
     Object.entries(overrides)
-      .map(([key, value]) => [key.trim(), value.trim()] as const)
+      .map(([key, value]) => [key.trim(), normalizeShortcutSequence(value)] as const)
       .filter(([key, value]) => key.length > 0 && value.length > 0),
   );
 
@@ -138,11 +139,9 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     : undefined;
   const tracking = normalizeTrackingPreferences(preferences?.tracking, legacyTrackingEnabled);
   const includeCompilationGroups = preferences?.scenes?.includeCompilationGroups;
-  const excludeVr = preferences?.scenes?.excludeVr;
-  const scenes = typeof includeCompilationGroups === "boolean" || typeof excludeVr === "boolean"
+  const scenes = typeof includeCompilationGroups === "boolean"
     ? {
         ...(typeof includeCompilationGroups === "boolean" ? { includeCompilationGroups } : {}),
-        ...(typeof excludeVr === "boolean" ? { excludeVr } : {}),
       }
     : null;
   const playback = normalizePlaybackPreferences(preferences?.playback);

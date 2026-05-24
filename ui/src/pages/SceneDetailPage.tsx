@@ -5,7 +5,7 @@ import {
   Pencil, Plus, Trash2, Search, Eye, EyeOff, ArrowLeft, ThumbsUp,
   Check, ChevronLeft, ChevronRight, ChevronDown, MoreVertical,
   Gauge, Clapperboard, FolderOpen, Layers, Clock, List,
-  RefreshCw, Camera, Image, Merge, ExternalLink, Download, X, Sparkles,
+  RefreshCw, Camera, Image, Merge, ExternalLink, Download, X, Sparkles, Volume2,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -34,6 +34,7 @@ import { PerformerTile } from "../components/EntityCards";
 import { trackInteraction } from "../utils/interactionTracking";
 import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
 import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { SceneAudioSimilarityPanel } from "../components/AudioSimilarityPanel";
 import { EntityReferenceMultiSelector, EntityReferenceSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
 
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
@@ -152,7 +153,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const { hasPermission, user } = useAuth();
   const { config } = useAppConfig();
   const { queue, currentId: queueCurrentId, hasPrev, hasNext, prevId, nextId, currentPosition, queueLength, queueItems, goToIndex, clearQueue, autoplay: queueAutoplay, toggleAutoplay } = useSceneQueue();
-  const { getTabsForPage, resolveComponent: resolveExtComponent } = useExtensions();
+  const { getTabsForPage, resolveComponent: resolveExtComponent, getFeature } = useExtensions();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
@@ -368,11 +369,13 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const resolvedSpans = resolvedSpansResponse?.spans ?? [];
   const activeProfileId = selectedProfileId ?? resolvedSpansResponse?.profileId;
   const activeProfileName = displayProfiles.find((profile) => profile.id === activeProfileId)?.name ?? "Resolved";
+  const hasAudioSimilarity = getFeature("audio-similarity") != null;
 
   const tabs = filterItemsByPermission([
     { key: "details", label: "Details" },
     { key: "segments", label: `Segments${segments.length ? ` (${segments.length})` : ""}` },
     { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
+    ...(hasAudioSimilarity ? [{ key: "audio-similar", label: "Audio Similar", icon: <Volume2 className="h-4 w-4" /> }] : []),
     { key: "filters", label: "Filters" },
     { key: "file-info", label: `File Info${scene?.files.length && scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },
     { key: "history", label: "History" },
@@ -596,6 +599,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     </div>
   ) : activeTab === "similar" ? (
     <SceneVisualSimilarityPanel sceneId={scene.id} onNavigate={onNavigate} />
+  ) : activeTab === "audio-similar" ? (
+    <SceneAudioSimilarityPanel sceneId={scene.id} onNavigate={onNavigate} />
   ) : activeTab === "filters" ? (
     <VideoFiltersTab filters={videoFilters} onChange={setVideoFilters} />
   ) : activeTab === "file-info" && scene.files.length > 0 ? (

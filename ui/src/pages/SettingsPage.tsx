@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as signalR from "@microsoft/signalr";
 import {
   ChevronDown,
   ChevronUp,
@@ -39,7 +40,6 @@ import { customFields, system, jobs, metadata, database, stashMigration, plugins
 import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, StashAiImportResult, UserRow } from "../api/client";
 import type {
   JobInfo,
-  PackageSource,
   Plugin,
   RatingSystemOptions,
   RatingStarPrecision,
@@ -54,6 +54,8 @@ import type {
   CustomFieldType,
   DownloaderDescriptor,
   DownloaderPathOverrideConfig,
+  DependencyInfo,
+  ExtensionDependencyImpact,
   IdentifyDefaultsConfig,
   MetadataServerValidationResult,
   TagGroup,
@@ -75,15 +77,69 @@ import {
 } from "../utils/batchDownloads";
 import { useAuth } from "../auth/AuthContext";
 import { UsersTab, RolesTab, AuditTab, ContentRulesTab, ApiTokensTab, ShareLinksTab } from "./settings/AdminSections";
-import { isLimitedPrimarySettingsTabVisible } from "./settings/tabVisibility";
 import { defaultRatingSystemOptions, normalizeRatingOptions } from "../components/Rating";
 import { readStoredRatingOptionsOverride, writeStoredRatingOptionsOverride } from "../utils/ratingPreferences";
 import { readAuthenticatedUserThemePreferences, supportsServerBackedUiPreferences, updateAuthenticatedUserUiPreferences } from "../utils/userUiPreferences";
-import { KEYBINDING_GROUPS, keybindingDefault } from "../keyboard/keybindings";
+import { writeStoredKeybindingOverrides } from "../hooks/useResolvedKeybindingOverrides";
+import { KEYBINDING_GROUPS, keybindingDefault, normalizeShortcutEvent, normalizeShortcutSequence } from "../keyboard/keybindings";
 import { openTutorialStoryboard } from "../components/TutorialStoryboardDialog";
 import { customFieldDefinitionsQueryKey } from "../hooks/useCustomFieldDefinitions";
 
-type SettingsTab = "tasks" | "library" | "interface" | "keyboard-shortcuts" | "user-settings" | "display-profiles" | "ai-data" | "security" | "users" | "roles" | "content-rules" | "api-tokens" | "share-links" | "audit" | "metadata-providers" | "extensions" | "logs" | "system" | "changelog" | "about";
+type LegacySettingsTab = "tasks" | "library" | "interface" | "user-settings" | "display-profiles" | "ai-data" | "security" | "metadata-providers" | "extensions" | "system" | "about";
+type BuiltInSettingsTab =
+  | LegacySettingsTab
+  | "my-account"
+  | "my-appearance-theme"
+  | "my-theme"
+  | "my-playback-viewers"
+  | "my-lists-wall"
+  | "keyboard-shortcuts"
+  | "my-activity-history"
+  | "library-paths-storage"
+  | "library-scanning"
+  | "library-custom-fields"
+  | "library-display-profiles"
+  | "operations-jobs"
+  | "operations-scan-generate"
+  | "operations-downloads"
+  | "operations-duplicates"
+  | "operations-maintenance"
+  | "operations-backup-restore"
+  | "operations-extension-tasks"
+  | "data-sources-scrapers"
+  | "data-sources-metadata-servers"
+  | "data-sources-identify-batch-defaults"
+  | "data-sources-downloader-paths"
+  | "data-sources-auto-tagging"
+  | "data-sources-ai-data"
+  | "extensions-installed"
+  | "extensions-registry"
+  | "extensions-customizations"
+  | "security-authentication"
+  | "users"
+  | "roles"
+  | "content-rules"
+  | "api-tokens"
+  | "share-links"
+  | "audit"
+  | "server-host-network"
+  | "server-ffmpeg-transcoding"
+  | "system-info-about"
+  | "system-info-runtime-status"
+  | "logs";
+type SettingsTab = BuiltInSettingsTab | string;
+type SettingsTabDefinition = {
+  key: SettingsTab;
+  label: string;
+  icon: typeof FolderOpen;
+  order?: number;
+  parentTabKey?: SettingsTab;
+  description?: string;
+  searchKeywords?: string[];
+};
+type BuiltInSettingsTabDefinition = SettingsTabDefinition & { key: BuiltInSettingsTab };
+type SettingsTabGroupKey = "my-settings" | "library" | "operations" | "data-sources" | "extensions" | "security-access" | "server" | "system-info";
+type SettingsTabGroupDefinition = { key: SettingsTabGroupKey; label: string; icon: typeof FolderOpen; tabs: BuiltInSettingsTab[] };
 
 type ResolvedTrackingPreferences = {
   enabled: boolean;
@@ -114,24 +170,43 @@ function resolveTrackingPreferences(preferences?: UserTrackingPreferences | null
   };
 }
 
-const primaryTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
-  { key: "tasks", label: "Tasks", icon: PlayCircle },
-  { key: "library", label: "Library", icon: FolderOpen },
-  { key: "interface", label: "Interface", icon: Monitor },
+const primaryTabs: BuiltInSettingsTabDefinition[] = [
+  { key: "my-account", label: "Account", icon: UserCog },
+  { key: "my-appearance-theme", label: "Interface", icon: Monitor },
+  { key: "my-theme", label: "Theme", icon: Monitor },
+  { key: "my-playback-viewers", label: "Playback & Viewers", icon: PlayCircle },
+  { key: "my-lists-wall", label: "Lists & Cards", icon: Layers },
   { key: "keyboard-shortcuts", label: "Keyboard Shortcuts", icon: Keyboard },
-  { key: "user-settings", label: "User Settings", icon: UserCog },
-  { key: "display-profiles", label: "Display Profiles", icon: Layers },
-  { key: "ai-data", label: "AI Data", icon: Database },
-  { key: "metadata-providers", label: "Metadata Providers", icon: SearchCode },
-  { key: "extensions", label: "Extensions", icon: Plug },
+  { key: "my-activity-history", label: "Activity & History", icon: History },
+  { key: "library-paths-storage", label: "Paths & Storage", icon: FolderOpen },
+  { key: "library-scanning", label: "Scanning & Assets", icon: SearchCode },
+  { key: "library-custom-fields", label: "Custom Fields", icon: Layers },
+  { key: "library-display-profiles", label: "Display Profiles", icon: Layers },
+  { key: "operations-jobs", label: "Jobs", icon: PlayCircle },
+  { key: "operations-scan-generate", label: "Scan & Generate", icon: RefreshCw },
+  { key: "operations-downloads", label: "Downloads", icon: Download },
+  { key: "operations-duplicates", label: "Duplicates", icon: Search },
+  { key: "operations-maintenance", label: "Maintenance", icon: HardDrive },
+  { key: "operations-backup-restore", label: "Backup & Restore", icon: Upload },
+  { key: "operations-extension-tasks", label: "Extension Tasks", icon: Plug },
+  { key: "data-sources-scrapers", label: "Scrapers", icon: SearchCode },
+  { key: "data-sources-metadata-servers", label: "Metadata Servers", icon: Server },
+  { key: "data-sources-identify-batch-defaults", label: "Identify & Batch Defaults", icon: FileText },
+  { key: "data-sources-downloader-paths", label: "Downloader Paths", icon: Download },
+  { key: "data-sources-auto-tagging", label: "Auto Tagging", icon: Layers },
+  { key: "data-sources-ai-data", label: "AI Data", icon: Database },
+  { key: "extensions-installed", label: "Installed Extensions", icon: Plug, order: 10 },
+  { key: "extensions-registry", label: "Registry / Discover", icon: Search, order: 90 },
+  { key: "extensions-customizations", label: "Customizations (CSS / JS)", icon: FileText, order: 100 },
+  { key: "server-host-network", label: "Host & Network", icon: Server },
+  { key: "server-ffmpeg-transcoding", label: "FFmpeg & Transcoding", icon: HardDrive },
+  { key: "system-info-about", label: "About", icon: Info },
+  { key: "system-info-runtime-status", label: "Runtime Status", icon: Server },
   { key: "logs", label: "Logs", icon: ScrollText },
-  { key: "system", label: "System", icon: Server },
-  { key: "changelog", label: "Changelog", icon: History },
-  { key: "about", label: "About", icon: Info },
 ];
 
-const authTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] = [
-  { key: "security", label: "Security", icon: Shield },
+const authTabs: BuiltInSettingsTabDefinition[] = [
+  { key: "security-authentication", label: "Authentication", icon: Shield },
   { key: "users", label: "Users", icon: Users },
   { key: "roles", label: "Roles", icon: KeyRound },
   { key: "content-rules", label: "Content rules", icon: Shield },
@@ -140,36 +215,313 @@ const authTabs: { key: SettingsTab; label: string; icon: typeof FolderOpen }[] =
   { key: "audit", label: "Audit log", icon: FileText },
 ];
 
-const tabs = [...primaryTabs, ...authTabs];
-const authTabKeys = new Set(authTabs.map((tab) => tab.key));
-const tabDescriptions: Record<SettingsTab, string> = {
-  tasks: "Scan, generate, and maintenance operations.",
-  library: "Content locations, generated assets, and scan rules.",
-  interface: "Language, custom title, navigation, and rating presentation.",
+const tabs: BuiltInSettingsTabDefinition[] = [...primaryTabs, ...authTabs];
+const tabByKey = new Map<BuiltInSettingsTab, BuiltInSettingsTabDefinition>(tabs.map((tab) => [tab.key, tab]));
+const settingsTabGroups: SettingsTabGroupDefinition[] = [
+  { key: "my-settings", label: "My Settings", icon: UserCog, tabs: ["my-account", "my-appearance-theme", "my-theme", "my-playback-viewers", "my-lists-wall", "keyboard-shortcuts", "my-activity-history"] },
+  { key: "library", label: "Library", icon: FolderOpen, tabs: ["library-paths-storage", "library-scanning", "library-custom-fields", "library-display-profiles"] },
+  { key: "operations", label: "Operations", icon: PlayCircle, tabs: ["operations-jobs", "operations-scan-generate", "operations-downloads", "operations-duplicates", "operations-maintenance", "operations-backup-restore", "operations-extension-tasks"] },
+  { key: "data-sources", label: "Data Sources & Data", icon: SearchCode, tabs: ["data-sources-scrapers", "data-sources-metadata-servers", "data-sources-identify-batch-defaults", "data-sources-downloader-paths", "data-sources-auto-tagging", "data-sources-ai-data"] },
+  { key: "extensions", label: "Extensions", icon: Plug, tabs: ["extensions-installed", "extensions-registry", "extensions-customizations"] },
+  { key: "security-access", label: "Security & Access", icon: Shield, tabs: authTabs.map((tab) => tab.key) },
+  { key: "server", label: "Server", icon: Server, tabs: ["server-host-network", "server-ffmpeg-transcoding"] },
+  { key: "system-info", label: "System Info", icon: Info, tabs: ["system-info-about", "system-info-runtime-status", "logs"] },
+];
+const settingsGroupKeyByTab = new Map<BuiltInSettingsTab, SettingsTabGroupKey>(
+  settingsTabGroups.flatMap((group) => group.tabs.map((tab) => [tab, group.key] as const)),
+);
+const settingsTabCanonicalPaths: Partial<Record<BuiltInSettingsTab, string>> = {
+  "my-account": "/settings/my/account",
+  "my-appearance-theme": "/settings/my/interface",
+  "my-theme": "/settings/my/theme",
+  "my-playback-viewers": "/settings/my/playback-viewers",
+  "my-lists-wall": "/settings/my/lists",
+  "keyboard-shortcuts": "/settings/my/keyboard-shortcuts",
+  "my-activity-history": "/settings/my/activity-history",
+  "library-paths-storage": "/settings/library/paths-storage",
+  "library-scanning": "/settings/library/scanning",
+  "library-custom-fields": "/settings/library/custom-fields",
+  "library-display-profiles": "/settings/library/display-profiles",
+  "operations-jobs": "/settings/operations/jobs",
+  "operations-scan-generate": "/settings/operations/scan-generate",
+  "operations-downloads": "/settings/operations/downloads",
+  "operations-duplicates": "/settings/operations/duplicates",
+  "operations-maintenance": "/settings/operations/maintenance",
+  "operations-backup-restore": "/settings/operations/backup-restore",
+  "operations-extension-tasks": "/settings/operations/extension-tasks",
+  "data-sources-scrapers": "/settings/data-sources/scrapers",
+  "data-sources-metadata-servers": "/settings/data-sources/metadata-servers",
+  "data-sources-identify-batch-defaults": "/settings/data-sources/identify-batch-defaults",
+  "data-sources-downloader-paths": "/settings/data-sources/downloader-paths",
+  "data-sources-auto-tagging": "/settings/data-sources/auto-tagging",
+  "data-sources-ai-data": "/settings/data-sources/ai-data",
+  "extensions-installed": "/settings/extensions/installed",
+  "extensions-registry": "/settings/extensions/registry",
+  "extensions-customizations": "/settings/extensions/customizations",
+  "security-authentication": "/settings/security-access/authentication",
+  users: "/settings/security-access/users",
+  roles: "/settings/security-access/roles-permissions",
+  "content-rules": "/settings/security-access/content-rules",
+  "api-tokens": "/settings/security-access/api-tokens",
+  "share-links": "/settings/security-access/share-links",
+  audit: "/settings/security-access/audit-log",
+  "server-host-network": "/settings/server/host-network",
+  "server-ffmpeg-transcoding": "/settings/server/ffmpeg-transcoding",
+  "system-info-about": "/settings/system-info/about",
+  "system-info-runtime-status": "/settings/system-info/runtime-status",
+  logs: "/settings/system-info/logs",
+};
+const settingsPathAliases: Partial<Record<string, SettingsTab>> = {
+  tasks: "operations-jobs",
+  library: "library-paths-storage",
+  interface: "my-appearance-theme",
+  "user-settings": "my-account",
+  "display-profiles": "library-display-profiles",
+  "ai-data": "data-sources-ai-data",
+  security: "security-authentication",
+  "metadata-providers": "data-sources-scrapers",
+  extensions: "extensions-installed",
+  system: "server-host-network",
+  about: "system-info-about",
+  my: "my-account",
+  "my-settings": "my-account",
+  "my/account": "my-account",
+  "my/appearance-theme": "my-appearance-theme",
+  "my/appearance": "my-appearance-theme",
+  "my/interface": "my-appearance-theme",
+  "my/theme": "my-theme",
+  "my/playback-viewers": "my-playback-viewers",
+  "my/lists-wall": "my-lists-wall",
+  "my/lists": "my-lists-wall",
+  "my/keyboard-shortcuts": "keyboard-shortcuts",
+  "my/activity-history": "my-activity-history",
+  "library/paths-storage": "library-paths-storage",
+  "library/scanning": "library-scanning",
+  "library/generated-assets": "library-scanning",
+  "library/custom-fields": "library-custom-fields",
+  "library/display-profiles": "library-display-profiles",
+  operations: "operations-jobs",
+  "operations/jobs": "operations-jobs",
+  "operations/scan-generate": "operations-scan-generate",
+  "operations/downloads": "operations-downloads",
+  "operations/download-from-file": "operations-downloads",
+  "operations/duplicates": "operations-duplicates",
+  "operations/duplicate-finder": "operations-duplicates",
+  "operations/maintenance": "operations-maintenance",
+  "operations/backup-restore": "operations-backup-restore",
+  "operations/extension-tasks": "operations-extension-tasks",
+  "data-sources": "data-sources-scrapers",
+  "data-sources/scrapers": "data-sources-scrapers",
+  "data-sources/metadata-servers": "data-sources-metadata-servers",
+  "data-sources/identify-batch-defaults": "data-sources-identify-batch-defaults",
+  "data-sources/downloader-paths": "data-sources-downloader-paths",
+  "data-sources/auto-tagging": "data-sources-auto-tagging",
+  "data-sources/auto-tag": "data-sources-auto-tagging",
+  "data-sources/ai-data": "data-sources-ai-data",
+  "extensions/installed": "extensions-installed",
+  "extensions/registry": "extensions-registry",
+  "extensions/discover": "extensions-registry",
+  "extensions/customizations": "extensions-customizations",
+  "extensions/custom-css": "extensions-customizations",
+  "extensions/custom-javascript": "extensions-customizations",
+  "security-access": "security-authentication",
+  "security-access/authentication": "security-authentication",
+  "security-access/users": "users",
+  "security-access/roles-permissions": "roles",
+  "security-access/content-rules": "content-rules",
+  "security-access/api-tokens": "api-tokens",
+  "security-access/share-links": "share-links",
+  "security-access/audit-log": "audit",
+  server: "server-host-network",
+  "server/host-network": "server-host-network",
+  "server/ffmpeg-transcoding": "server-ffmpeg-transcoding",
+  "server/preview-generation": "library-scanning",
+  "server/logging": "logs",
+  "server/runtime-shutdown": "system-info-runtime-status",
+  "system-info": "system-info-about",
+  "system-info/about": "system-info-about",
+  "system-info/runtime-status": "system-info-runtime-status",
+  "system-info/changelog": "system-info-about",
+  "system-info/logs": "logs",
+  changelog: "system-info-about",
+  "runtime-shutdown": "system-info-runtime-status",
+  "server-runtime-shutdown": "system-info-runtime-status",
+};
+const tabDescriptions: Partial<Record<BuiltInSettingsTab, string>> = {
+  "my-account": "Account details and sign-in controls.",
+  "my-appearance-theme": "Language, title, favicon, rating presentation, and interface preferences.",
+  "my-theme": "Theme, palette, layout, and visual effect preferences.",
+  "my-playback-viewers": "Scene player, previews, feed, vertical viewer, and lightbox preferences.",
+  "my-lists-wall": "Navigation, list display, wall behavior, and card media fit.",
   "keyboard-shortcuts": "Shortcut overrides and the full keyboard reference.",
-  "user-settings": "Preferences that follow the current user or shared profile.",
-  "display-profiles": "Manage resolved-span display profiles and the rules attached to each profile.",
-  "ai-data": "Inspect and safely purge AI-produced embeddings, detections, segments, tag sources, and face-owned data.",
-  security: "Authentication requirements and anonymous share-link access.",
+  "my-activity-history": "Activity and engagement preferences for the current account.",
+  "library-paths-storage": "Content roots and file extension handling.",
+  "library-scanning": "Scan rules, generated asset paths, and preview generation defaults.",
+  "library-custom-fields": "Typed metadata fields stored in the library database.",
+  "library-display-profiles": "Manage resolved-span display profiles and the rules attached to each profile.",
+  "operations-jobs": "Current queue and recent job history.",
+  "operations-scan-generate": "Scan library roots and generate supporting media artifacts.",
+  "operations-downloads": "Import a URL list from a text file and queue downloads.",
+  "operations-duplicates": "Open duplicate detection and cleanup tools.",
+  "operations-maintenance": "Clean orphaned records, generated files, imports, and database statistics.",
+  "operations-backup-restore": "Database/config backup, restore, import/export, and wipe operations.",
+  "operations-extension-tasks": "Run tasks provided by enabled extensions.",
+  "data-sources-scrapers": "Legacy YAML scraper directories, scraper preferences, and discovered scrapers.",
+  "data-sources-metadata-servers": "MetadataServer endpoint configuration and validation.",
+  "data-sources-identify-batch-defaults": "Defaults for Identify and MetadataServer batch dialogs.",
+  "data-sources-downloader-paths": "Downloader save-path overrides.",
+  "data-sources-auto-tagging": "Queue Auto Tag across the library using current tag names, aliases, and path patterns.",
+  "data-sources-ai-data": "Inspect and safely purge AI-produced embeddings, detections, segments, tag sources, and face-owned data.",
+  "extensions-installed": "Manage extensions loaded into this instance.",
+  "extensions-registry": "Browse and install extensions from the registry or URL packages.",
+  "extensions-customizations": "Inject custom CSS and JavaScript into the application.",
+  "security-authentication": "Authentication requirements and anonymous share-link access.",
   users: "Manage local user accounts and their role assignments.",
   roles: "Define roles and the permissions they grant. Built-in roles are read-only.",
   "content-rules": "Restrict what each role can see or modify per entity kind. Deny rules override allow.",
   "api-tokens": "Long-lived personal access tokens. Scope is intersected with your own permissions.",
   "share-links": "Anonymous, time-limited, optionally password-gated read-only links.",
   audit: "Authentication, authorization, and admin action history.",
-  "metadata-providers": "Scraper directories, package source URLs, configured MetadataServer endpoints, and discovered Cove-compatible scrapers.",
-  extensions: "Manage extensions, themes, and settings.",
-  logs: "Recent application logs from the current host.",
-  system: "Host, port, and task concurrency. Server changes take effect after restart.",
-  changelog: "Release history and version information.",
-  about: "Runtime status and effective config locations.",
+  "server-host-network": "Host, port, and runtime listener settings.",
+  "server-ffmpeg-transcoding": "FFmpeg binaries, hardware acceleration, and transcode options.",
+  "system-info-about": "Version, project information, and release history.",
+  "system-info-runtime-status": "Effective runtime values and shutdown control.",
+  logs: "Live application logs and server log output settings.",
 };
+
+const settingsSearchKeywords: Partial<Record<BuiltInSettingsTab, string[]>> = {
+  "my-appearance-theme": ["appearance", "language", "title", "favicon", "ratings", "rating system", "troubleshooting"],
+  "my-theme": ["theme", "palette", "colors", "custom colors", "style", "layout", "visual effects"],
+  "my-playback-viewers": ["autoplay", "resume", "preview clip", "feed", "vertical viewer", "lightbox", "slideshow", "ab loop"],
+  "my-lists-wall": ["lists", "cards", "wall", "navigation", "menu", "image fit", "video preview fit", "cover", "contain"],
+  "library-scanning": ["scan", "scanning", "generated assets", "generated path", "cache path", "preview generation", "thumbnails", "md5"],
+  "operations-scan-generate": ["scan", "generate", "covers", "thumbnails", "previews", "sprites", "phash", "md5"],
+  "operations-downloads": ["download", "download from file", "url file", "batch download", "import urls"],
+  "operations-duplicates": ["duplicates", "duplicate finder", "exact duplicate", "cleanup"],
+  "operations-maintenance": ["clean", "clean generated", "orphaned", "optimize", "vacuum", "analyse", "import ai tag data"],
+  "operations-backup-restore": ["backup", "restore", "export", "import", "config backup", "wipe", "danger zone"],
+  "data-sources-auto-tagging": ["auto tag", "auto tagging", "tags", "aliases", "path patterns"],
+  "data-sources-downloader-paths": ["downloader", "save path", "path override", "site override"],
+  "system-info-about": ["about", "version", "release history", "changelog", "setup tour"],
+  "system-info-runtime-status": ["runtime", "status", "shutdown", "database", "config file", "app directory"],
+  logs: ["logs", "tail", "server log level", "filter", "trace", "debug"],
+};
+
+const extensionSettingsTabIcons: Record<string, typeof FolderOpen> = {
+  database: Database,
+  download: Download,
+  filetext: FileText,
+  folderopen: FolderOpen,
+  harddrive: HardDrive,
+  history: History,
+  info: Info,
+  keyboard: Keyboard,
+  keyround: KeyRound,
+  layers: Layers,
+  monitor: Monitor,
+  playcircle: PlayCircle,
+  plug: Plug,
+  scrolltext: ScrollText,
+  search: Search,
+  searchcode: SearchCode,
+  server: Server,
+  shield: Shield,
+  upload: Upload,
+  usercog: UserCog,
+  users: Users,
+};
+
+function resolveExtensionSettingsTabIcon(iconName?: string): typeof FolderOpen {
+  if (!iconName) {
+    return Plug;
+  }
+
+  const normalized = iconName.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return extensionSettingsTabIcons[normalized] ?? Plug;
+}
 
 const SETTINGS_TAB_QUERY_KEY = "tab";
 const TASK_SCAN_OPTIONS_KEY = "cove-settings-scan-options";
 const TASK_GENERATE_OPTIONS_KEY = "cove-settings-generate-options";
 const TASK_DOWNLOAD_IMPORT_OPTIONS_KEY = "cove-settings-download-import-options";
 const TASK_DOWNLOAD_IMPORT_CACHE_KEY = "cove-settings-download-import-cache";
+const KEYBINDING_CAPTURE_COMMIT_MS = 850;
+
+const fieldDescriptionFallbacks: Record<string, string> = {
+  "Max parallel tasks (-1 = all CPU threads)": "Caps concurrent background work. Use -1 to let Cove scale to available CPU threads.",
+  "Exclude videos": "Skip video files under this library path during scans.",
+  "Exclude images": "Skip image files under this library path during scans.",
+  "Exclude audio": "Skip audio files under this library path during scans.",
+  "Generated path": "Directory where Cove writes generated covers, thumbnails, previews, sprites, and similar assets.",
+  "Cache path": "Directory for transient cache files that can be regenerated.",
+  "Preview preset": "FFmpeg preset used when Cove creates generated video previews.",
+  "Max concurrent downloads": "Limits how many downloader jobs can actively fetch media at the same time.",
+  "Site override (optional)": "Restricts this downloader path override to a specific normalized site key.",
+  "Save path": "Destination folder used by matching downloader jobs.",
+  "Video extensions": "File extensions treated as videos during library scans.",
+  "Image extensions": "File extensions treated as images during library scans.",
+  "Gallery extensions": "Archive or gallery file extensions discovered during scans.",
+  "Calculate MD5 checksums during scan": "Computes MD5 hashes while scanning so exact duplicate checks have stable file fingerprints.",
+  "Exclude patterns": "Path fragments or glob-like patterns ignored during library scans.",
+  "Excluded image patterns": "Image-specific path patterns ignored during scans.",
+  "Excluded gallery patterns": "Gallery-specific path patterns ignored during scans.",
+  "Create galleries from folders": "Treat image folders as gallery entities when scans discover grouped image sets.",
+  "Write image thumbnails": "Generate thumbnail files for images while scanning or generating assets.",
+  "Create image clips from videos": "Allow scans to create still-image clip records derived from video files.",
+  "Delete file default": "Default state for delete dialogs that can also remove source media files.",
+  "Delete generated default": "Default state for delete dialogs that can also remove generated Cove assets.",
+  "Gallery cover regex": "Regular expression used to pick a preferred gallery cover image from gallery file names.",
+  "Rating system": "Controls whether ratings are shown as stars or decimal values.",
+  "Star precision": "Controls how finely star ratings can be adjusted.",
+  "Default player start (%)": "Starts scene playback at this percentage for long enough videos.",
+  "Use default start only for videos longer than (seconds)": "Keeps short videos starting from the beginning even when a start percentage is set.",
+  "Wall show title": "Shows item titles on wall cards.",
+  "Wall playback": "Controls how wall cards start or preview video playback.",
+  "Playback source": "Chooses whether feed-style cards use generated previews or original video playback.",
+  "Play sound by default in Feed and Vertical Viewer": "Controls whether feed and vertical-viewer videos start muted or with audio.",
+  "Full video start (%)": "Starts full-video feed playback at this percentage for long enough videos.",
+  "Use start % only for videos longer than (seconds)": "Keeps shorter feed videos starting at the beginning.",
+  "Slideshow delay (ms)": "Delay between images while slideshow mode advances automatically.",
+  "Enable CSS customization": "Allows custom CSS from settings to be injected into the app shell.",
+  "Custom CSS": "CSS injected into the app when CSS customization is enabled.",
+  "Enable JavaScript customization": "Allows custom JavaScript from settings to run in the app shell.",
+  "Custom JavaScript": "JavaScript injected into the app when JavaScript customization is enabled.",
+  "Authentication required": "Requires users to sign in before accessing protected Cove APIs and pages.",
+  "Allow anonymous share links": "Allows generated share links to grant anonymous read-only access when valid.",
+  "Name": "Friendly display name for this entry.",
+  "Endpoint": "Base URL used when Cove connects to this service.",
+  "Max req/min": "Per-minute request cap used to avoid overwhelming this metadata server.",
+  "Existing linked entities": "Controls whether batch metadata operations keep or overwrite existing linked entities.",
+  "Max auto-apply duration difference (seconds)": "Maximum duration mismatch allowed when Identify auto-applies a match.",
+  "Max auto-apply pHash distance": "Maximum perceptual-hash distance allowed when Identify auto-applies a match.",
+  "Allow Identify to create new performers": "Lets Identify create performer records when applying metadata.",
+  "Allow Identify to create new studios": "Lets Identify create studio records when applying metadata.",
+  "Allow Identify to create new tags": "Lets Identify create tag records when applying metadata.",
+  "Host": "Network interface the Cove API binds to after restart.",
+  "Port": "HTTP port the Cove API listens on after restart.",
+  "Enable hardware acceleration (FFmpeg in-process)": "Allows Cove's in-process FFmpeg work to use configured hardware acceleration when available.",
+  "FFmpeg path": "Optional absolute path to the FFmpeg executable.",
+  "FFprobe path": "Optional absolute path to the FFprobe executable.",
+  "Max transcode size": "Maximum output size used for generated transcodes.",
+  "Max streaming transcode size": "Maximum output size used for live streaming transcodes.",
+  "Hardware acceleration": "Hardware acceleration backend passed to FFmpeg transcode jobs.",
+  "Transcode input args": "Additional FFmpeg input arguments for generated transcodes.",
+  "Transcode output args": "Additional FFmpeg output arguments for generated transcodes.",
+  "Live transcode input args": "Additional FFmpeg input arguments for live streaming transcodes.",
+  "Live transcode output args": "Additional FFmpeg output arguments for live streaming transcodes.",
+  "Enable engagement history": "Records viewing and engagement events for history, activity, and derived recommendations.",
+  "Minimum scene view seconds": "Minimum scene watch time before Cove records a view.",
+  "Scene completion ratio": "Fraction of a scene that must be watched before Cove records completion.",
+  "Minimum image view seconds": "Minimum image detail-view time before Cove records a view.",
+  "Minimum session length for derived likes": "Minimum viewing-session duration before Cove derives engagement from it.",
+  "Session idle timeout seconds": "Idle time after which Cove starts a new engagement session.",
+  "Segment thumbnails": "Generate still thumbnails for resolved segments.",
+  "Animated segment previews": "Generate animated previews for resolved segments.",
+};
+
+function getSettingHelpText(label: string, description?: string) {
+  return description ?? fieldDescriptionFallbacks[label] ?? `Changes the ${label.toLowerCase()} setting.`;
+}
 
 const DEFAULT_SCAN_OPTIONS: ScanOptions = {
   scanGenerateCovers: true,
@@ -196,18 +548,37 @@ const DEFAULT_GENERATE_OPTIONS: GenerateOptions = {
   overwrite: false,
 };
 
-function isSettingsTab(value: string | null): value is SettingsTab {
-  return tabs.some((tab) => tab.key === value);
-}
-
-function readSettingsTabFromUrl(): SettingsTab {
+function readSettingsTabFromUrl(extraAliases: Partial<Record<string, SettingsTab>> = {}): SettingsTab {
+  const aliases = { ...settingsPathAliases, ...extraAliases };
   const pathParts = window.location.pathname.split("/").filter(Boolean);
-  if (pathParts[0] === "settings" && isSettingsTab(pathParts[1] ?? null)) {
-    return pathParts[1] as SettingsTab;
+  if (pathParts[0] === "settings") {
+    for (let length = Math.min(pathParts.length - 1, 4); length >= 1; length--) {
+      const routeKey = pathParts.slice(1, 1 + length).join("/").toLowerCase();
+      const routeTab = aliases[routeKey];
+      if (routeTab) {
+        return routeTab;
+      }
+    }
+
+    const routeKey = pathParts.slice(1).join("/").toLowerCase();
+    if (routeKey) {
+      return aliases[routeKey] ?? routeKey;
+    }
   }
 
-  const tab = new URLSearchParams(window.location.search).get(SETTINGS_TAB_QUERY_KEY);
-  return isSettingsTab(tab) ? tab : "library";
+  const tab = new URLSearchParams(window.location.search).get(SETTINGS_TAB_QUERY_KEY)?.trim().toLowerCase();
+  if (tab) {
+    return aliases[tab] ?? tab;
+  }
+
+  return "library-paths-storage";
+}
+
+function createDefaultSettingsGroupOpenState(activeTab: SettingsTab): Record<SettingsTabGroupKey, boolean> {
+  const activeGroup = settingsGroupKeyByTab.get(activeTab as BuiltInSettingsTab);
+  return Object.fromEntries(
+    settingsTabGroups.map((group) => [group.key, group.key === activeGroup || group.key === "my-settings" || group.key === "system-info"]),
+  ) as Record<SettingsTabGroupKey, boolean>;
 }
 
 export function resolveVisibleSettingsTab(
@@ -275,6 +646,95 @@ function arePathSelectionsEqual(left: string[] | undefined, right: string[] | un
   return left.every((value, index) => value === right[index]);
 }
 
+type ExtensionDependencyCandidate = {
+  id: string;
+  name: string;
+  version?: string;
+  enabled?: boolean;
+  kind?: string;
+  source?: string;
+  dependencies: Record<string, string>;
+};
+
+type PendingExtensionInstall = {
+  extensionId: string;
+  version: string;
+  name?: string;
+  dependencies: DependencyInfo[];
+};
+
+type PendingExtensionUninstall = {
+  id: string;
+  name: string;
+  source: "native" | "legacy";
+  dependents: ExtensionDependencyImpact[];
+  confirmedDependents?: boolean;
+};
+
+function getTransitiveExtensionDependents<T extends ExtensionDependencyCandidate>(extensions: T[], extensionId: string): T[] {
+  const dependentsByDependency = new Map<string, T[]>();
+  const requestedId = extensionId.toLowerCase();
+
+  for (const extension of extensions) {
+    if (extension.id.toLowerCase() === requestedId) continue;
+    for (const dependencyId of Object.keys(extension.dependencies ?? {})) {
+      const key = dependencyId.toLowerCase();
+      dependentsByDependency.set(key, [...(dependentsByDependency.get(key) ?? []), extension]);
+    }
+  }
+
+  const result: T[] = [];
+  const seen = new Set<string>([requestedId]);
+
+  const visit = (dependencyId: string) => {
+    const directDependents = [...(dependentsByDependency.get(dependencyId.toLowerCase()) ?? [])]
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const dependent of directDependents) {
+      const dependentKey = dependent.id.toLowerCase();
+      if (seen.has(dependentKey)) continue;
+      seen.add(dependentKey);
+      visit(dependent.id);
+      result.push(dependent);
+    }
+  };
+
+  visit(extensionId);
+  return result;
+}
+
+function toExtensionDependencyImpact(extension: ExtensionDependencyCandidate): ExtensionDependencyImpact {
+  return {
+    id: extension.id,
+    name: extension.name,
+    version: extension.version ?? "",
+    enabled: extension.enabled ?? false,
+    kind: extension.kind ?? "extension",
+    source: extension.source ?? "unknown",
+  };
+}
+
+function summarizeExtensionNames(extensions: Array<{ id: string; name?: string }>): string {
+  const labels = extensions.map((extension) => extension.name || extension.id);
+  if (labels.length <= 4) return labels.join(", ");
+  return `${labels.slice(0, 4).join(", ")}, and ${labels.length - 4} more`;
+}
+
+function formatDependencyInstallMessage(pending: PendingExtensionInstall): string {
+  const dependencySummary = summarizeExtensionNames(pending.dependencies);
+  const extensionName = pending.name || pending.extensionId;
+  return `Install ${extensionName} and its required dependencies: ${dependencySummary}?`;
+}
+
+function formatDependentUninstallMessage(target: PendingExtensionUninstall): string {
+  if (target.source !== "native" || target.dependents.length === 0) {
+    return `Uninstall ${target.name}?`;
+  }
+
+  const dependentSummary = summarizeExtensionNames(target.dependents);
+  return `Uninstall ${target.name} and dependent extension${target.dependents.length === 1 ? "" : "s"}: ${dependentSummary}? If you cancel, nothing will be uninstalled.`;
+}
+
 const languageOptions = [
   { value: "en-US", label: "English (United States)" },
   { value: "en-GB", label: "English (United Kingdom)" },
@@ -325,10 +785,6 @@ function emptyPath(): CovePathConfig {
 
 function emptyDownloaderPathOverride(): DownloaderPathOverrideConfig {
   return { downloaderId: "", site: "", path: "" };
-}
-
-function emptyPackageSource(): PackageSource {
-  return { name: "", url: "" };
 }
 
 function emptyMetadataServer(): MetadataServer {
@@ -528,9 +984,6 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
     },
     scraping: {
       scraperDirectories: config.scraping.scraperDirectories.map((value) => value.trim()).filter(Boolean),
-      scraperPackageSources: config.scraping.scraperPackageSources
-        .map((source) => ({ name: source.name.trim(), url: source.url.trim() }))
-        .filter((source) => source.url !== ""),
       metadataServers: config.scraping.metadataServers
         .map((box) => ({
           name: box.name.trim(),
@@ -541,6 +994,7 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
         .filter((box) => box.endpoint !== ""),
       scraperPreferences: (config.scraping.scraperPreferences ?? [])
         .map((preference) => ({
+          entityType: preference.entityType?.trim().toLowerCase() || undefined,
           site: preference.site.trim().toLowerCase(),
           scraperId: preference.scraperId.trim(),
         }))
@@ -549,7 +1003,7 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
             return false;
           }
 
-          return items.findIndex((candidate) => candidate.site === preference.site) === index;
+          return items.findIndex((candidate) => (candidate.entityType ?? "") === (preference.entityType ?? "") && candidate.site === preference.site) === index;
         }),
       identifyDefaults: {
         ...defaultIdentifyDefaults(),
@@ -567,21 +1021,71 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
 export function SettingsPage() {
   const { config, status, configLoading, statusLoading } = useAppConfig();
   const { authEnabled, user, hasPermission } = useAuth();
-  const { getSettingsPanelsForTab, resolveComponent } = useExtensions();
+  const {
+    getSettingsPanelsForTab,
+    resolveComponent,
+    settingsTabs: contributedSettingsTabs,
+    loaded: extensionsLoaded,
+  } = useExtensions();
   const canWriteSystemSettings = hasPermission("system.settings.write");
   const canShutdownSystem = hasPermission("system.shutdown");
   const canReadSegments = hasPermission("segments.read");
   const canWriteSegments = hasPermission("segments.write");
+  const canReadJobs = hasPermission("jobs.read");
   const libraryExtensionsPanels = getSettingsPanelsForTab("library", "extensions");
   const libraryStandalonePanels = getSettingsPanelsForTab("library");
+  const extensionSettingsPathAliases = useMemo<Partial<Record<string, SettingsTab>>>(() => {
+    return Object.fromEntries(
+      contributedSettingsTabs.flatMap((tab) => {
+        const resolvedKey = tab.key.toLowerCase();
+        return [resolvedKey, ...(tab.aliases ?? []).map((alias) => alias.toLowerCase())]
+          .map((alias) => [alias, resolvedKey] as const);
+      }),
+    );
+  }, [contributedSettingsTabs]);
+  const extensionSettingsTabs = useMemo<SettingsTabDefinition[]>(() => {
+    return contributedSettingsTabs
+      .map((tab) => ({
+        key: tab.key.toLowerCase(),
+        label: tab.label,
+        icon: resolveExtensionSettingsTabIcon(tab.icon),
+        order: tab.order,
+        parentTabKey: tab.parentTabKey?.toLowerCase(),
+        description: tab.description,
+        searchKeywords: tab.searchKeywords ?? [],
+      }))
+      .sort((left, right) => (left.order ?? 100) - (right.order ?? 100) || left.label.localeCompare(right.label));
+  }, [contributedSettingsTabs]);
+  const extensionSettingsTabByKey = useMemo(
+    () => new Map(extensionSettingsTabs.map((tab) => [tab.key, tab] as const)),
+    [extensionSettingsTabs],
+  );
+  const allTabs = useMemo(() => [...tabs, ...extensionSettingsTabs], [extensionSettingsTabs]);
+  const allTabByKey = useMemo(
+    () => new Map(allTabs.map((tab) => [tab.key, tab] as const)),
+    [allTabs],
+  );
+  const resolvedSettingsGroupKeyByTab = useMemo(() => {
+    const nextMap = new Map<SettingsTab, SettingsTabGroupKey>(settingsGroupKeyByTab);
+    extensionSettingsTabs.forEach((tab) => nextMap.set(tab.key, "extensions"));
+    return nextMap;
+  }, [extensionSettingsTabs]);
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => readSettingsTabFromUrl());
-  const [authGroupOpen, setAuthGroupOpen] = useState(() => authTabKeys.has(readSettingsTabFromUrl()));
+  const [settingsSearch, setSettingsSearch] = useState("");
+  const [openSettingsGroups, setOpenSettingsGroups] = useState<Record<SettingsTabGroupKey, boolean>>(() =>
+    createDefaultSettingsGroupOpenState(readSettingsTabFromUrl()),
+  );
   const [draftState, setDraft] = useState<CoveConfig | null>(null);
   const [customFieldDraftState, setCustomFieldDraft] = useState<CustomFieldDefinition[] | null>(null);
+  const [capturingKeybindingId, setCapturingKeybindingId] = useState<string | null>(null);
+  const [capturedKeybindingParts, setCapturedKeybindingParts] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captureCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const capturingKeybindingIdRef = useRef<string | null>(null);
+  const capturedKeybindingPartsRef = useRef<string[]>([]);
   const savingRef = useRef(false);
   const [metadataServerValidation, setMetadataServerValidation] = useState<Record<string, MetadataServerValidationResult>>({});
 
@@ -594,7 +1098,7 @@ export function SettingsPage() {
   const securityUsersQ = useQuery<UserRow[]>({
     queryKey: ["admin", "users", "security"],
     queryFn: usersApi.list,
-    enabled: activeTab === "security" && hasPermission("users.read"),
+    enabled: activeTab === "security-authentication" && hasPermission("users.read"),
   });
 
   const revokeSessionsMutation = useMutation({
@@ -611,41 +1115,79 @@ export function SettingsPage() {
   const { data: availableScrapers = [] } = useQuery({
     queryKey: ["system-scrapers"],
     queryFn: system.listScrapers,
-    enabled: canWriteSystemSettings && activeTab === "metadata-providers",
+    enabled: canWriteSystemSettings && activeTab === "data-sources-scrapers",
   });
 
   const { data: availableDownloaders = [] } = useQuery({
     queryKey: ["system-downloaders"],
     queryFn: system.listDownloaders,
-    enabled: canWriteSystemSettings && activeTab === "library",
+    enabled: canWriteSystemSettings && activeTab === "data-sources-downloader-paths",
   });
 
-  const sceneScraperPreferenceGroups = useMemo(() => {
+  const { data: availablePluginTasks = [] } = useQuery({
+    queryKey: ["plugins", "tasks"],
+    queryFn: pluginsApi.getTasks,
+    enabled: canWriteSystemSettings,
+  });
+
+  const scraperPreferenceGroups = useMemo(() => {
     const groups = new Map<string, ScraperSummary[]>();
 
     for (const scraper of availableScrapers) {
-      if (scraper.entityType.toLowerCase() !== "scene") {
-        continue;
-      }
-
-      const sites = new Set(scraper.urls.map((pattern) => getScraperSiteKey(pattern)).filter(Boolean));
+      const entityType = scraper.entityType.toLowerCase();
+      const sites = new Set([
+        ...scraper.urls.map((pattern) => getScraperSiteKey(pattern)),
+        ...(scraper.preferenceSites ?? []).map((site) => getScraperSiteKey(site)),
+      ].filter((site) => site && site !== "*"));
       for (const site of sites) {
-        const siteScrapers = groups.get(site) ?? [];
+        const groupKey = `${entityType}\u001f${site}`;
+        const siteScrapers = groups.get(groupKey) ?? [];
         if (!siteScrapers.some((candidate) => candidate.id === scraper.id)) {
           siteScrapers.push(scraper);
         }
-        groups.set(site, siteScrapers);
+        groups.set(groupKey, siteScrapers);
       }
     }
 
     return [...groups.entries()]
-      .map(([site, scrapers]) => ({
-        site,
-        scrapers: [...scrapers].sort((left, right) => left.name.localeCompare(right.name)),
-      }))
+      .map(([groupKey, scrapers]) => {
+        const [entityType, site] = groupKey.split("\u001f", 2);
+        return {
+          entityType,
+          site,
+          scrapers: [...scrapers].sort((left, right) => left.name.localeCompare(right.name)),
+        };
+      })
       .filter((group) => group.scrapers.length > 1)
-      .sort((left, right) => left.site.localeCompare(right.site));
+      .sort((left, right) => left.entityType.localeCompare(right.entityType) || left.site.localeCompare(right.site));
   }, [availableScrapers]);
+
+  const updateScraperPreference = (entityType: string, site: string, scraperId: string) => {
+    updateDraft((current) => ({
+      ...current,
+      scraping: {
+        ...current.scraping,
+        scraperPreferences: scraperId
+          ? [
+              ...current.scraping.scraperPreferences.filter((preference) =>
+                preference.site !== site || ((preference.entityType ?? "").toLowerCase() !== entityType && (preference.entityType ?? "") !== ""),
+              ),
+              { entityType, site, scraperId },
+            ]
+          : current.scraping.scraperPreferences.filter((preference) =>
+              preference.site !== site || ((preference.entityType ?? "").toLowerCase() !== entityType && (preference.entityType ?? "") !== ""),
+            ),
+      },
+    }));
+  };
+
+  const getSelectedScraperPreferenceId = (entityType: string, site: string) => {
+    return draftState?.scraping.scraperPreferences.find((preference) =>
+      preference.site === site && (preference.entityType?.toLowerCase() ?? "") === entityType,
+    )?.scraperId
+      ?? draftState?.scraping.scraperPreferences.find((preference) => preference.site === site && !preference.entityType)?.scraperId
+      ?? "";
+  };
 
   useEffect(() => {
     if (!config) {
@@ -662,9 +1204,6 @@ export function SettingsPage() {
       nextDraft.covePaths = [emptyPath()];
     }
     nextDraft.downloaderPathOverrides = nextDraft.downloaderPathOverrides ?? [];
-    if (nextDraft.scraping.scraperPackageSources.length === 0) {
-      nextDraft.scraping.scraperPackageSources = [emptyPackageSource()];
-    }
     if (nextDraft.scraping.scraperDirectories.length === 0) {
       nextDraft.scraping.scraperDirectories = [""];
     }
@@ -698,7 +1237,7 @@ export function SettingsPage() {
   }, [canWriteSystemSettings, customFieldDefinitionsLoading, loadedCustomFieldDefinitions]);
 
   useEffect(() => {
-    const handleLocationChange = () => setActiveTab(readSettingsTabFromUrl());
+    const handleLocationChange = () => setActiveTab(readSettingsTabFromUrl(extensionSettingsPathAliases));
     window.addEventListener("popstate", handleLocationChange);
     window.addEventListener(LOCATION_CHANGE_EVENT, handleLocationChange);
 
@@ -706,15 +1245,36 @@ export function SettingsPage() {
       window.removeEventListener("popstate", handleLocationChange);
       window.removeEventListener(LOCATION_CHANGE_EVENT, handleLocationChange);
     };
+  }, [extensionSettingsPathAliases]);
+
+  useEffect(() => {
+    if (!extensionsLoaded) {
+      return;
+    }
+
+    setActiveTab((current) => {
+      const nextTab = readSettingsTabFromUrl(extensionSettingsPathAliases);
+      return current === nextTab ? current : nextTab;
+    });
+  }, [extensionSettingsPathAliases, extensionsLoaded]);
+
+  useEffect(() => () => {
+    if (captureCommitTimerRef.current) {
+      clearTimeout(captureCommitTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
+    if (!extensionsLoaded && !tabByKey.has(activeTab as BuiltInSettingsTab)) {
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     params.delete(SETTINGS_TAB_QUERY_KEY);
-    const pathname = activeTab === "library" ? "/settings" : `/settings/${activeTab}`;
+    const pathname = settingsTabCanonicalPaths[activeTab as BuiltInSettingsTab] ?? `/settings/${activeTab}`;
 
     navigateToUrl(buildCurrentUrl(pathname, params), { replace: true });
-  }, [activeTab]);
+  }, [activeTab, extensionsLoaded]);
 
   const saveMutation = useMutation({
     mutationFn: (nextConfig: CoveConfig) => system.saveConfig(nextConfig),
@@ -748,10 +1308,10 @@ export function SettingsPage() {
     onError: (err: Error) => setError(err.message),
   });
 
-  const { data: scrapers = [], isLoading: scrapersLoading } = useQuery({
+  const { data: scrapers = [], isLoading: scrapersLoading, error: scrapersError } = useQuery({
     queryKey: ["system-scrapers"],
     queryFn: system.listScrapers,
-    enabled: canWriteSystemSettings && activeTab === "metadata-providers",
+    enabled: canWriteSystemSettings && activeTab === "data-sources-scrapers",
   });
 
   const reloadScrapersMutation = useMutation({
@@ -787,7 +1347,7 @@ export function SettingsPage() {
   const visibleAuthTabs = useMemo(() => {
     return authTabs.filter((tab) => {
       switch (tab.key) {
-        case "security":
+        case "security-authentication":
           return hasPermission("system.settings.write");
         case "users":
           return hasPermission("users.read");
@@ -806,27 +1366,103 @@ export function SettingsPage() {
     });
   }, [authEnabled, hasPermission, user]);
 
-  const visiblePrimaryTabs = useMemo(
-    () => (canWriteSystemSettings
-      ? primaryTabs
-      : primaryTabs.filter((tab) => isLimitedPrimarySettingsTabVisible(tab.key, canReadSegments))),
-    [canReadSegments, canWriteSystemSettings],
+  const visiblePrimaryTabs = useMemo(() => {
+    return primaryTabs.filter((tab) => {
+      switch (tab.key) {
+        case "my-account":
+        case "my-appearance-theme":
+        case "my-theme":
+        case "keyboard-shortcuts":
+        case "system-info-about":
+        case "system-info-runtime-status":
+          return true;
+        case "my-playback-viewers":
+        case "my-lists-wall":
+        case "my-activity-history":
+          return canWriteSystemSettings;
+        case "logs":
+          return canWriteSystemSettings;
+        case "library-display-profiles":
+          return canReadSegments;
+        case "operations-jobs":
+          return canWriteSystemSettings || canReadJobs;
+        case "operations-extension-tasks":
+          return canWriteSystemSettings && availablePluginTasks.length > 0;
+        default:
+          return canWriteSystemSettings;
+      }
+    });
+  }, [availablePluginTasks.length, canReadJobs, canReadSegments, canWriteSystemSettings]);
+
+  const visibleExtensionSettingsTabs = useMemo(
+    () => canWriteSystemSettings ? extensionSettingsTabs : [],
+    [canWriteSystemSettings, extensionSettingsTabs],
   );
 
-  const visibleTabs = useMemo(() => [...visiblePrimaryTabs, ...visibleAuthTabs], [visibleAuthTabs, visiblePrimaryTabs]);
+  const visibleTabs = useMemo(
+    () => [...visiblePrimaryTabs, ...visibleExtensionSettingsTabs, ...visibleAuthTabs],
+    [visibleAuthTabs, visibleExtensionSettingsTabs, visiblePrimaryTabs],
+  );
+  const visibleSettingsGroups = useMemo(() => {
+    const visibleTabKeys = new Set(visibleTabs.map((tab) => tab.key));
+
+    return settingsTabGroups
+      .map((group) => {
+        const builtInGroupTabs = group.tabs
+          .filter((tabKey) => visibleTabKeys.has(tabKey))
+          .map((tabKey) => tabByKey.get(tabKey))
+          .filter((tab): tab is BuiltInSettingsTabDefinition => !!tab);
+
+        const mergedTabs = group.key === "extensions"
+          ? [...builtInGroupTabs, ...visibleExtensionSettingsTabs]
+            .sort((left, right) => (left.order ?? 100) - (right.order ?? 100) || left.label.localeCompare(right.label))
+          : builtInGroupTabs;
+
+        return {
+          ...group,
+          tabs: mergedTabs,
+        };
+      })
+      .filter((group) => group.tabs.length > 0);
+  }, [visibleExtensionSettingsTabs, visibleTabs]);
+
+  const settingsSearchResults = useMemo(() => {
+    const query = settingsSearch.trim().toLowerCase();
+    if (!query) return [];
+
+    return visibleTabs
+      .map((tab) => {
+        const groupKey = resolvedSettingsGroupKeyByTab.get(tab.key);
+        const groupLabel = settingsTabGroups.find((group) => group.key === groupKey)?.label ?? "Settings";
+        const searchable = [
+          groupLabel,
+          tab.label,
+          tab.description ?? tabDescriptions[tab.key as BuiltInSettingsTab],
+          ...(tab.searchKeywords ?? settingsSearchKeywords[tab.key as BuiltInSettingsTab] ?? []),
+        ].filter(Boolean).join(" ").toLowerCase();
+        return searchable.includes(query) ? { tab, groupLabel } : null;
+      })
+      .filter((result): result is { tab: SettingsTabDefinition; groupLabel: string } => !!result)
+      .slice(0, 8);
+  }, [resolvedSettingsGroupKeyByTab, settingsSearch, visibleTabs]);
 
   useEffect(() => {
-    if (authTabKeys.has(activeTab)) {
-      setAuthGroupOpen(true);
+    const activeGroup = resolvedSettingsGroupKeyByTab.get(activeTab);
+    if (activeGroup) {
+      setOpenSettingsGroups((current) => ({ ...current, [activeGroup]: true }));
     }
-  }, [activeTab]);
+  }, [activeTab, resolvedSettingsGroupKeyByTab]);
 
   useEffect(() => {
-    const nextTab = resolveVisibleSettingsTab(activeTab, visibleTabs, canWriteSystemSettings ? "library" : "about");
+    if (!extensionsLoaded && !tabByKey.has(activeTab as BuiltInSettingsTab)) {
+      return;
+    }
+
+    const nextTab = resolveVisibleSettingsTab(activeTab, visibleTabs, canWriteSystemSettings ? "library-paths-storage" : "system-info-about");
     if (nextTab !== activeTab) {
       setActiveTab(nextTab);
     }
-  }, [activeTab, canWriteSystemSettings, visibleTabs]);
+  }, [activeTab, canWriteSystemSettings, extensionsLoaded, visibleTabs]);
 
   // Debounced auto-save: triggers 800ms after draft changes
   useEffect(() => {
@@ -857,16 +1493,149 @@ export function SettingsPage() {
     setDraft((current) => (current ? updater(current) : current));
   };
 
+  const clearKeybindingCaptureTimer = () => {
+    if (captureCommitTimerRef.current) {
+      clearTimeout(captureCommitTimerRef.current);
+      captureCommitTimerRef.current = null;
+    }
+  };
+
+  const stopKeybindingCapture = () => {
+    clearKeybindingCaptureTimer();
+    capturingKeybindingIdRef.current = null;
+    capturedKeybindingPartsRef.current = [];
+    setCapturingKeybindingId(null);
+    setCapturedKeybindingParts([]);
+  };
+
+  const startKeybindingCapture = (id: string) => {
+    clearKeybindingCaptureTimer();
+    capturingKeybindingIdRef.current = id;
+    capturedKeybindingPartsRef.current = [];
+    setCapturingKeybindingId(id);
+    setCapturedKeybindingParts([]);
+  };
+
+  const persistKeybindingOverrides = (overrides: Record<string, string>) => {
+    const normalizedOverrides = Object.fromEntries(
+      Object.entries(overrides)
+        .map(([key, value]) => [key.trim(), normalizeShortcutSequence(value)] as const)
+        .filter(([key, value]) => key.length > 0 && value.length > 0),
+    );
+
+    const persistedToAccount = updateAuthenticatedUserUiPreferences((current) => ({
+      ...(current ?? {}),
+      keybindingOverrides: Object.keys(normalizedOverrides).length > 0 ? normalizedOverrides : null,
+    }));
+
+    if (!persistedToAccount) {
+      writeStoredKeybindingOverrides(normalizedOverrides);
+    }
+  };
+
   const updateKeybindingOverride = (id: string, value: string) => {
     updateDraft((current) => {
       const nextOverrides = { ...(current.ui.keybindingOverrides ?? {}) };
-      const trimmed = value.trim();
-      if (!trimmed || trimmed === keybindingDefault(id)) {
+      const normalized = normalizeShortcutSequence(value);
+      const defaultShortcut = normalizeShortcutSequence(keybindingDefault(id));
+      if (!normalized || normalized === defaultShortcut) {
         delete nextOverrides[id];
       } else {
-        nextOverrides[id] = trimmed;
+        nextOverrides[id] = normalized;
       }
+      persistKeybindingOverrides(nextOverrides);
       return { ...current, ui: { ...current.ui, keybindingOverrides: nextOverrides } };
+    });
+  };
+
+  const commitCapturedKeybindingOverride = (id: string, parts: string[]) => {
+    const shortcut = normalizeShortcutSequence(parts.join(" "));
+    if (shortcut) {
+      updateKeybindingOverride(id, shortcut);
+    }
+    stopKeybindingCapture();
+  };
+
+  const scheduleCapturedKeybindingCommit = (id: string, parts: string[]) => {
+    clearKeybindingCaptureTimer();
+    captureCommitTimerRef.current = setTimeout(() => {
+      if (capturingKeybindingIdRef.current === id) {
+        commitCapturedKeybindingOverride(id, parts);
+      }
+    }, KEYBINDING_CAPTURE_COMMIT_MS);
+  };
+
+  const captureKeybindingOverride = (id: string, event: ReactKeyboardEvent<HTMLElement>) => {
+    if (capturingKeybindingId !== id) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      stopKeybindingCapture();
+      return;
+    }
+
+    if (event.key === "Enter") {
+      if (capturedKeybindingPartsRef.current.length > 0) {
+        commitCapturedKeybindingOverride(id, capturedKeybindingPartsRef.current);
+      } else {
+        stopKeybindingCapture();
+      }
+      return;
+    }
+
+    if (event.key === "Backspace" || event.key === "Delete") {
+      clearKeybindingCaptureTimer();
+      capturedKeybindingPartsRef.current = [];
+      setCapturedKeybindingParts([]);
+      return;
+    }
+
+    const shortcut = normalizeShortcutEvent(event);
+    if (!shortcut) {
+      return;
+    }
+
+    const nextParts = [...capturedKeybindingPartsRef.current, shortcut].slice(0, 2);
+    capturedKeybindingPartsRef.current = nextParts;
+    setCapturedKeybindingParts(nextParts);
+    if (nextParts.length >= 2) {
+      commitCapturedKeybindingOverride(id, nextParts);
+    } else {
+      scheduleCapturedKeybindingCommit(id, nextParts);
+    }
+  };
+
+  const renderExtensionSettingsPanels = (
+    tabKey: SettingsTab,
+    emptyTitle: string,
+    emptyDescription: string,
+  ) => {
+    const panels = getSettingsPanelsForTab(tabKey);
+
+    if (panels.length === 0) {
+      return (
+        <SectionCard title={emptyTitle} description={emptyDescription}>
+          <p className="text-sm text-secondary">No installed AI extension contributes settings to this page yet.</p>
+        </SectionCard>
+      );
+    }
+
+    return panels.map((panel) => {
+      const Component = resolveComponent(panel.componentName);
+      if (!Component) return null;
+      return (
+        <SectionCard
+          key={panel.id}
+          title={panel.label}
+          description={`Settings provided by ${panel.extensionId}.`}
+        >
+          <Component />
+        </SectionCard>
+      );
     });
   };
 
@@ -949,69 +1718,115 @@ export function SettingsPage() {
   const draft = draftState as CoveConfig;
   const customFieldDraft = customFieldDraftState ?? [];
   const hasInvalidPersistedCustomFields = customFieldDraft.some((definition) => definition.id != null && !canSyncCustomFieldDefinition(definition));
-  const resolvedActiveTab = resolveVisibleSettingsTab(activeTab, visibleTabs, canWriteSystemSettings ? "library" : "about");
-  const activeTabMeta = visibleTabs.find((tab) => tab.key === resolvedActiveTab) ?? tabs.find((tab) => tab.key === resolvedActiveTab);
-  const activeTabDescription = resolvedActiveTab === "interface" && !canWriteSystemSettings
-    ? "Theme and rating display preferences stored locally in this browser."
-    : tabDescriptions[resolvedActiveTab];
+  const resolvedActiveTab = resolveVisibleSettingsTab(activeTab, visibleTabs, canWriteSystemSettings ? "library-paths-storage" : "system-info-about");
+  const activeTabMeta = visibleTabs.find((tab) => tab.key === resolvedActiveTab) ?? allTabByKey.get(resolvedActiveTab);
+  const activeExtensionSettingsTab = extensionSettingsTabByKey.get(resolvedActiveTab);
+  const activeTabDescription = resolvedActiveTab === "my-appearance-theme" && !canWriteSystemSettings
+    ? "Rating and personal display preferences stored in this browser or account."
+    : resolvedActiveTab === "my-theme" && !canWriteSystemSettings
+    ? "Theme preferences stored in this browser or account."
+    : activeExtensionSettingsTab?.description ?? tabDescriptions[resolvedActiveTab as BuiltInSettingsTab] ?? "Settings and runtime controls.";
 
   return (
     <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="h-fit rounded-2xl border border-border bg-surface p-2 lg:sticky lg:top-16">
+      <aside className="rounded-2xl border border-border bg-surface p-2 lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
         <div className="mb-2 px-3 py-2">
           <h1 className="text-lg font-semibold text-foreground">Settings</h1>
-          <p className="mt-1 text-sm text-secondary">
-            {canWriteSystemSettings
-              ? "System configuration, auth administration, and runtime controls."
-              : "Personal appearance, User Settings, release notes, and account-level tools."}
-          </p>
         </div>
-        <nav className="space-y-1">
-          {visiblePrimaryTabs.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                resolvedActiveTab === key
-                  ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--color-border)]"
-                  : "text-secondary hover:bg-card hover:text-foreground"
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{label}</span>
-            </button>
-          ))}
-
-          {visibleAuthTabs.length > 0 ? (
-            <div className="pt-2">
-              <button
-                onClick={() => setAuthGroupOpen((current) => !current)}
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-secondary transition-colors hover:bg-card hover:text-foreground"
-              >
-                <Shield className="h-4 w-4" />
-                <span className="flex-1">Security & Access</span>
-                {authGroupOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </button>
-              {authGroupOpen ? (
-                <div className="mt-1 space-y-1 border-l border-border/60 pl-3 ml-3">
-                  {visibleAuthTabs.map(({ key, label, icon: Icon }) => (
-                    <button
-                      key={key}
-                      onClick={() => setActiveTab(key)}
-                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                        resolvedActiveTab === key
-                          ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--color-border)]"
-                          : "text-secondary hover:bg-card hover:text-foreground"
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      <span>{label}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+        <div className="mb-3 px-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              type="search"
+              value={settingsSearch}
+              onChange={(event) => setSettingsSearch(event.target.value)}
+              placeholder="Search settings"
+              aria-label="Search settings"
+              className="w-full rounded-xl border border-border bg-card py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
+            />
+          </div>
+          {settingsSearch.trim() ? (
+            <div className="mt-2 space-y-1 rounded-xl border border-border bg-background p-1">
+              {settingsSearchResults.length > 0 ? (
+                settingsSearchResults.map(({ tab, groupLabel }) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(tab.key);
+                      setSettingsSearch("");
+                    }}
+                    className="flex w-full flex-col rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-card hover:text-foreground"
+                  >
+                    <span className="font-medium text-foreground">{tab.label}</span>
+                    <span className="text-xs text-muted">{groupLabel}</span>
+                  </button>
+                ))
+              ) : (
+                <p className="px-3 py-2 text-xs text-muted">No settings found.</p>
+              )}
             </div>
           ) : null}
+        </div>
+        <nav className="space-y-1">
+          {visibleSettingsGroups.map(({ key: groupKey, label, icon: GroupIcon, tabs: groupTabs }) => {
+            const isOpen = openSettingsGroups[groupKey] ?? false;
+            const rootTabs = groupTabs.filter((tab) => !tab.parentTabKey || !groupTabs.some((candidate) => candidate.key === tab.parentTabKey));
+            return (
+              <div key={groupKey} className="pt-1 first:pt-0">
+                <button
+                  onClick={() => setOpenSettingsGroups((current) => ({ ...current, [groupKey]: !isOpen }))}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-secondary transition-colors hover:bg-card hover:text-foreground"
+                >
+                  <GroupIcon className="h-4 w-4" />
+                  <span className="flex-1">{label}</span>
+                  {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+                {isOpen ? (
+                  <div className="mt-1 space-y-1 border-l border-border/60 pl-3 ml-3">
+                    {rootTabs.map(({ key, label, icon: Icon }) => {
+                        const childTabs = groupTabs.filter((tab) => tab.parentTabKey === key);
+                        const isParentActive = childTabs.some((tab) => tab.key === resolvedActiveTab);
+
+                        return (
+                          <div key={key}>
+                            <button
+                              onClick={() => setActiveTab(key)}
+                              className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                                resolvedActiveTab === key || isParentActive
+                                  ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--color-border)]"
+                                  : "text-secondary hover:bg-card hover:text-foreground"
+                              }`}
+                            >
+                              <Icon className="h-4 w-4" />
+                              <span>{label}</span>
+                            </button>
+                            {childTabs.length > 0 ? (
+                              <div className="mt-1 ml-6 space-y-1 border-l border-border/60 pl-3">
+                                {childTabs.map(({ key: childKey, label: childLabel, icon: ChildIcon }) => (
+                                  <button
+                                    key={childKey}
+                                    onClick={() => setActiveTab(childKey)}
+                                    className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                                      resolvedActiveTab === childKey
+                                        ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--color-border)]"
+                                        : "text-secondary hover:bg-card hover:text-foreground"
+                                    }`}
+                                  >
+                                    <ChildIcon className="h-4 w-4" />
+                                    <span>{childLabel}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </nav>
       </aside>
 
@@ -1029,10 +1844,23 @@ export function SettingsPage() {
           </div>
         </section>
 
-        {resolvedActiveTab === "tasks" && <TasksPanel />}
+        {["operations-jobs", "operations-scan-generate", "operations-downloads", "operations-duplicates", "operations-maintenance", "operations-backup-restore", "operations-extension-tasks", "data-sources-auto-tagging"].includes(resolvedActiveTab) && <TasksPanel activeTab={resolvedActiveTab} />}
 
-        {resolvedActiveTab === "library" && (
+        {resolvedActiveTab === "operations-jobs" && canWriteSystemSettings && (
+          <SectionCard title="Job Limits" description="Control how many background jobs Cove can run at the same time.">
+            <NumberField
+              label="Max parallel tasks (-1 = all CPU threads)"
+              value={draft.maxParallelTasks}
+              min={-1}
+              max={128}
+              onChange={(value) => updateDraft((current) => ({ ...current, maxParallelTasks: value ?? current.maxParallelTasks }))}
+            />
+          </SectionCard>
+        )}
+
+        {(["library-paths-storage", "library-scanning", "data-sources-downloader-paths"] as SettingsTab[]).includes(resolvedActiveTab) && (
           <>
+            {resolvedActiveTab === "library-paths-storage" && (
             <SectionCard title="Library Paths" description="Add the content roots the scanner should process.">
               <div className="space-y-3">
                 {draft.covePaths.map((path, index) => (
@@ -1115,8 +1943,11 @@ export function SettingsPage() {
                 </button>
               </div>
             </SectionCard>
+            )}
 
-            <SectionCard title="Generated Assets" description="Control where generated and cached media artifacts are written.">
+            {resolvedActiveTab === "library-scanning" && (
+            <>
+            <SectionCard title="Generated Asset Paths" description="Control where generated and cached media artifacts are written.">
               <div className="grid gap-4 md:grid-cols-2">
                 <TextField
                   label="Generated path"
@@ -1131,6 +1962,75 @@ export function SettingsPage() {
                   placeholder="D:\\Cove\\cache"
                 />
               </div>
+            </SectionCard>
+
+            <SectionCard title="Preview Generation" description="Server-side settings used when Cove creates preview clips.">
+              <div className="space-y-4">
+                <SelectField
+                  label="Preview preset"
+                  value={draft.previewPreset}
+                  onChange={(value) => updateDraft((d) => ({ ...d, previewPreset: value }))}
+                  options={[
+                    { value: "ultrafast", label: "Ultrafast" },
+                    { value: "veryfast", label: "Very Fast" },
+                    { value: "fast", label: "Fast" },
+                    { value: "medium", label: "Medium" },
+                    { value: "slow", label: "Slow" },
+                    { value: "slower", label: "Slower" },
+                    { value: "veryslow", label: "Very Slow" },
+                  ]}
+                />
+                <CheckboxLabel
+                  label="Include audio in previews"
+                  description="Keep the audio track in generated preview files when the source has audio."
+                  checked={draft.previewAudio === "true"}
+                  onChange={(checked) => updateDraft((d) => ({ ...d, previewAudio: checked ? "true" : "false" }))}
+                />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <NumberField
+                    label="Preview clip length (seconds)"
+                    description="Duration of each source slice used when building a generated preview clip."
+                    value={draft.ui.previewSegmentDuration}
+                    min={0}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, previewSegmentDuration: value ?? d.ui.previewSegmentDuration } }))}
+                  />
+                  <NumberField
+                    label="Preview slices per clip"
+                    description="How many slices Cove stitches together for each generated preview clip."
+                    value={draft.ui.previewSegments}
+                    min={0}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, previewSegments: value ?? d.ui.previewSegments } }))}
+                  />
+                  <TextField
+                    label="Skip from start"
+                    description="Seconds or percent to avoid at the beginning of source videos when choosing preview slices."
+                    value={draft.ui.previewExcludeStart}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, previewExcludeStart: value } }))}
+                    placeholder="0 or 10%"
+                  />
+                  <TextField
+                    label="Skip from end"
+                    description="Seconds or percent to avoid at the end of source videos when choosing preview slices."
+                    value={draft.ui.previewExcludeEnd}
+                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, previewExcludeEnd: value } }))}
+                    placeholder="0 or 10%"
+                  />
+                </div>
+              </div>
+            </SectionCard>
+            </>
+            )}
+
+            {resolvedActiveTab === "data-sources-downloader-paths" && (
+            <>
+            <SectionCard title="Downloader Limits" description="Control how many downloader imports may run at the same time.">
+              <NumberField
+                label="Max concurrent downloads"
+                value={draft.maxConcurrentDownloads}
+                min={1}
+                max={16}
+                onChange={(value) => updateDraft((current) => ({ ...current, maxConcurrentDownloads: value ?? current.maxConcurrentDownloads }))}
+              />
             </SectionCard>
 
             <SectionCard title="Downloader Paths" description="Override where downloader imports land for a specific downloader or for a downloader/site combination.">
@@ -1218,7 +2118,10 @@ export function SettingsPage() {
                 </button>
               </div>
             </SectionCard>
+            </>
+            )}
 
+            {resolvedActiveTab === "library-paths-storage" && (
             <SectionCard title="Extensions" description="One extension per line. These values are persisted directly into the backend config.">
               <div className="grid gap-4 lg:grid-cols-3">
                 <TextAreaField
@@ -1258,7 +2161,9 @@ export function SettingsPage() {
                 </div>
               )}
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "library-scanning" && (
             <SectionCard title="Scan Rules" description="Hashing and exclude patterns applied during scan operations.">
               <div className="space-y-4">
                 <CheckboxLabel
@@ -1275,7 +2180,9 @@ export function SettingsPage() {
                 />
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "library-scanning" && (
             <SectionCard title="Library Behavior" description="Additional library options aligned with Cove's library settings.">
               <div className="space-y-4">
                 <div className="grid gap-4 lg:grid-cols-2">
@@ -1329,7 +2236,8 @@ export function SettingsPage() {
                 />
               </div>
             </SectionCard>
-            {libraryStandalonePanels.map((panel) => {
+            )}
+            {resolvedActiveTab === "library-paths-storage" && libraryStandalonePanels.map((panel) => {
               const Component = resolveComponent(panel.componentName);
               if (!Component) return null;
               return (
@@ -1341,25 +2249,29 @@ export function SettingsPage() {
           </>
         )}
 
-        {resolvedActiveTab === "interface" && (
+        {(["my-appearance-theme", "my-theme", "my-playback-viewers", "my-lists-wall", "library-custom-fields", "extensions-customizations"] as SettingsTab[]).includes(resolvedActiveTab) && (
           canWriteSystemSettings ? (
             <>
+            {resolvedActiveTab === "my-appearance-theme" && (
             <SectionCard title="Basic Interface" description="Persisted UI preferences used across the app shell.">
               <div className="grid gap-4 md:grid-cols-2">
                 <SelectField
                   label="Language"
+                  description="Default interface language for the app shell."
                   value={draft.interface.language ?? "en-US"}
                   onChange={(value) => updateDraft((current) => ({ ...current, interface: { ...current.interface, language: value } }))}
                   options={languageOptions}
                 />
                 <TextField
                   label="Custom title"
+                  description="Browser title shown for this Cove instance."
                   value={draft.ui.title ?? ""}
                   onChange={(value) => updateDraft((current) => ({ ...current, ui: { ...current.ui, title: value || undefined } }))}
                   placeholder="Cove"
                 />
                 <TextField
                   label="Favicon path"
+                  description="Path or uploaded asset used as the browser tab icon."
                   value={draft.ui.faviconPath ?? ""}
                   onChange={(value) => updateDraft((current) => ({ ...current, ui: { ...current.ui, faviconPath: value || undefined } }))}
                   placeholder="/favicon.ico"
@@ -1384,6 +2296,7 @@ export function SettingsPage() {
                 </div>
                 <CheckboxLabel
                   label="Troubleshooting mode"
+                  description="Temporarily enables more verbose diagnostics and disables custom CSS/JS injection."
                   checked={draft.ui.troubleshootingModeEnabled}
                   onChange={(checked) => updateDraft((current) => ({
                     ...current,
@@ -1398,7 +2311,9 @@ export function SettingsPage() {
                 />
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "library-custom-fields" && (
             <SectionCard title="Custom Fields" description="Define typed metadata fields for entities that need extra structured values.">
               <div className="space-y-4">
                 {hasInvalidPersistedCustomFields ? (
@@ -1503,7 +2418,9 @@ export function SettingsPage() {
                 </button>
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "my-lists-wall" && (
             <SectionCard title="Navigation" description="Drag to reorder, toggle to show/hide. Changes apply immediately after save.">
               <div className="space-y-4">
                 <NavReorderList
@@ -1516,17 +2433,11 @@ export function SettingsPage() {
                     }))
                   }
                 />
-                <button
-                  type="button"
-                  onClick={() => openTutorialStoryboard("getting-started")}
-                  className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-secondary transition-colors hover:border-accent hover:text-foreground"
-                >
-                  <BookOpen className="h-4 w-4" />
-                  Replay setup tour
-                </button>
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "my-appearance-theme" && (
             <SectionCard title="Ratings" description="Stored ratings remain 1-100 internally. This changes how they are displayed and edited in the UI.">
               <div className="grid gap-4 md:grid-cols-2">
                 <SelectField
@@ -1567,26 +2478,32 @@ export function SettingsPage() {
                 )}
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "my-playback-viewers" && (
             <SectionCard title="Scene Player" description="Playback behavior for the built-in video player.">
               <div className="space-y-3">
                 <CheckboxLabel
-                  label="Autostart video"
+                  label="Auto-play scenes when opened"
+                  description="Start playback automatically when you open a scene detail page."
                   checked={draft.ui.autostartVideo}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, autostartVideo: checked } }))}
                 />
                 <CheckboxLabel
-                  label="Autostart video on play selected"
+                  label="Auto-play when opened with Play Selected"
+                  description="Honor the auto-play setting when launching via the Play Selected action from a list."
                   checked={draft.ui.autostartVideoOnPlaySelected}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, autostartVideoOnPlaySelected: checked } }))}
                 />
                 <CheckboxLabel
-                  label="Autoplay on list click"
+                  label="Auto-play when clicking a scene in a list"
+                  description="Start playback immediately when you click a scene row in a list view."
                   checked={draft.ui.autoplayOnListClick}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, autoplayOnListClick: checked } }))}
                 />
                 <CheckboxLabel
-                  label="Always resume playback"
+                  label="Always resume from last position"
+                  description="If you've watched part of a scene, resume from where you left off instead of starting at 0."
                   checked={draft.ui.alwaysResumeOnPlayback}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, alwaysResumeOnPlayback: checked } }))}
                 />
@@ -1606,58 +2523,42 @@ export function SettingsPage() {
                   />
                 </div>
                 <CheckboxLabel
-                  label="Continue playlist default"
+                  label="Auto-advance to the next item in a list"
+                  description="When a scene finishes, automatically play the next item in the active list or playlist."
                   checked={draft.ui.continuePlaylistDefault}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, continuePlaylistDefault: checked } }))}
                 />
                 <CheckboxLabel
-                  label="Show A-B loop controls"
+                  label="Show A-B loop controls in the player"
+                  description="Adds the A-B loop buttons to the player toolbar for repeating a selected range."
                   checked={draft.ui.showAbLoopControls}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, showAbLoopControls: checked } }))}
                 />
                 <NumberField
-                  label="Max loop duration (seconds)"
+                  label="Maximum A-B loop length (seconds)"
+                  description="Hard cap on how long an A-B loop can run before it stops. 0 = no cap."
                   value={draft.ui.maxLoopDuration}
                   min={0}
                   onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, maxLoopDuration: value ?? 0 } }))}
                 />
               </div>
             </SectionCard>
+            )}
 
-            <SectionCard title="Preview" description="Preview generation and playback settings.">
-              <div className="space-y-4">
+            {resolvedActiveTab === "my-playback-viewers" && (
+            <SectionCard title="List Previews" description="Playback behavior for generated preview clips in list-style browsing surfaces.">
+              <div className="space-y-3">
                 <CheckboxLabel
-                  label="Sound on preview"
+                  label="Play audio in preview clips"
+                  description="When a generated preview clip is played inline, allow its audio track by default."
                   checked={draft.ui.soundOnPreview}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, soundOnPreview: checked } }))}
                 />
-                <div className="grid gap-4 md:grid-cols-2">
-                  <NumberField
-                    label="Preview segment duration (seconds)"
-                    value={draft.ui.previewSegmentDuration}
-                    min={0}
-                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, previewSegmentDuration: value ?? d.ui.previewSegmentDuration } }))}
-                  />
-                  <NumberField
-                    label="Preview segments"
-                    value={draft.ui.previewSegments}
-                    min={0}
-                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, previewSegments: value ?? d.ui.previewSegments } }))}
-                  />
-                  <TextField
-                    label="Preview exclude start"
-                    value={draft.ui.previewExcludeStart}
-                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, previewExcludeStart: value } }))}
-                  />
-                  <TextField
-                    label="Preview exclude end"
-                    value={draft.ui.previewExcludeEnd}
-                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, previewExcludeEnd: value } }))}
-                  />
-                </div>
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "my-lists-wall" && (
             <SectionCard title="Wall" description="Wall view display options.">
               <div className="space-y-4">
                 <CheckboxLabel
@@ -1676,6 +2577,7 @@ export function SettingsPage() {
                 />
                 <SelectField
                   label="Wall preview type"
+                  description="Media source used for wall tiles when Cove has multiple preview formats."
                   value={draft.ui.wallPreviewType ?? "video"}
                   onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, wallPreviewType: value } }))}
                   options={[
@@ -1684,29 +2586,38 @@ export function SettingsPage() {
                     { value: "image", label: "Static Image" },
                   ]}
                 />
-                <div className="grid gap-4 md:grid-cols-2">
-                  <SelectField
-                    label="Image fit"
-                    value={draft.ui.imageObjectFit ?? "cover"}
-                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, imageObjectFit: value } }))}
-                    options={[
-                      { value: "cover", label: "Cover" },
-                      { value: "contain", label: "Contain" },
-                    ]}
-                  />
-                  <SelectField
-                    label="Video preview fit"
-                    value={draft.ui.videoObjectFit ?? "cover"}
-                    onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, videoObjectFit: value } }))}
-                    options={[
-                      { value: "cover", label: "Cover" },
-                      { value: "contain", label: "Contain" },
-                    ]}
-                  />
-                </div>
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "my-lists-wall" && (
+            <SectionCard title="Card Media Fit" description="How still images and generated video previews fill cards across list and wall views.">
+              <div className="grid gap-4 md:grid-cols-2">
+                <SelectField
+                  label="Image card fit"
+                  description="Cover fills each card by cropping; contain keeps the full image visible with empty space when needed."
+                  value={draft.ui.imageObjectFit ?? "cover"}
+                  onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, imageObjectFit: value } }))}
+                  options={[
+                    { value: "cover", label: "Cover" },
+                    { value: "contain", label: "Contain" },
+                  ]}
+                />
+                <SelectField
+                  label="Video preview card fit"
+                  description="Cover crops generated video previews to fill cards; contain keeps the whole frame visible."
+                  value={draft.ui.videoObjectFit ?? "cover"}
+                  onChange={(value) => updateDraft((d) => ({ ...d, ui: { ...d.ui, videoObjectFit: value } }))}
+                  options={[
+                    { value: "cover", label: "Cover" },
+                    { value: "contain", label: "Contain" },
+                  ]}
+                />
+              </div>
+            </SectionCard>
+            )}
+
+            {resolvedActiveTab === "my-playback-viewers" && (
             <SectionCard title="Feed & Vertical Viewer" description="Choose what autoplays in the scene feed-style views.">
               <div className="space-y-4">
                 <SelectField
@@ -1740,7 +2651,9 @@ export function SettingsPage() {
                 </div>
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "my-playback-viewers" && (
             <SectionCard title="Lightbox" description="Lightbox and slideshow behavior.">
               <div className="space-y-4">
                 <CheckboxLabel
@@ -1756,7 +2669,10 @@ export function SettingsPage() {
                 />
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "extensions-customizations" && (
+            <>
             <SectionCard title="Custom CSS" description="Inject custom CSS into the application.">
               <div className="space-y-4">
                 <CheckboxLabel
@@ -1794,11 +2710,15 @@ export function SettingsPage() {
                 )}
               </div>
             </SectionCard>
+            </>
+            )}
 
-            <ThemeSelector />
+            {resolvedActiveTab === "my-theme" && <ThemeSelector />}
             </>
           ) : (
-            <LocalInterfacePanel serverRatingOptions={draftState?.ui.ratingSystemOptions} />
+            resolvedActiveTab === "my-theme"
+              ? <ThemeSelector />
+              : <LocalInterfacePanel serverRatingOptions={draftState?.ui.ratingSystemOptions} />
           )
         )}
 
@@ -1811,15 +2731,56 @@ export function SettingsPage() {
                     <div key={group.group} className="space-y-3">
                       <div className="text-xs font-semibold uppercase tracking-wide text-muted">{group.group}</div>
                       <div className="grid gap-3 md:grid-cols-2">
-                        {group.definitions.map((definition) => (
-                          <TextField
-                            key={definition.id}
-                            label={definition.label}
-                            value={draft.ui.keybindingOverrides?.[definition.id] ?? definition.keys}
-                            onChange={(value) => updateKeybindingOverride(definition.id, value)}
-                            placeholder={definition.keys}
-                          />
-                        ))}
+                        {group.definitions.map((definition) => {
+                          const defaultShortcut = normalizeShortcutSequence(definition.keys);
+                          const value = normalizeShortcutSequence(draft.ui.keybindingOverrides?.[definition.id] ?? defaultShortcut);
+                          const isCapturing = capturingKeybindingId === definition.id;
+                          const isCustomized = value !== defaultShortcut;
+                          const capturedValue = isCapturing ? capturedKeybindingParts.join(" ") : "";
+
+                          return (
+                            <div key={definition.id} className="rounded-xl border border-border bg-card p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-medium text-foreground">{definition.label}</div>
+                                  <div className="mt-1 text-xs text-secondary">Default: {defaultShortcut}</div>
+                                </div>
+                                {isCustomized ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateKeybindingOverride(definition.id, "")}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted hover:border-accent hover:text-accent"
+                                    aria-label={`Reset ${definition.label}`}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                ) : null}
+                              </div>
+                              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                <input
+                                  value={value}
+                                  onChange={(event) => updateKeybindingOverride(definition.id, event.target.value)}
+                                  placeholder={definition.keys}
+                                  className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm text-foreground focus:border-accent focus:outline-none"
+                                  aria-label={`${definition.label} shortcut`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => startKeybindingCapture(definition.id)}
+                                  onKeyDown={(event) => captureKeybindingOverride(definition.id, event)}
+                                  className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                                    isCapturing
+                                      ? "border-accent bg-accent/15 text-accent"
+                                      : "border-border text-secondary hover:border-accent hover:text-accent"
+                                  }`}
+                                >
+                                  <Keyboard className="h-4 w-4" />
+                                  {isCapturing ? (capturedValue || "Recording") : "Record"}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -1832,19 +2793,37 @@ export function SettingsPage() {
                   </button>
                 </div>
               </SectionCard>
-            ) : null}
+            ) : (
+              <SectionCard title="Keyboard Shortcuts" description="Current shortcut reference.">
+                <div className="space-y-5">
+                  {KEYBINDING_GROUPS.map((group) => (
+                    <div key={group.group} className="space-y-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted">{group.group}</div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {group.definitions.map((definition) => (
+                          <div key={definition.id} className="rounded-lg border border-border bg-card px-3 py-2">
+                            <div className="text-sm font-medium text-foreground">{definition.label}</div>
+                            <div className="mt-1 text-xs text-secondary">{definition.keys}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            )}
           </>
         )}
 
-        {resolvedActiveTab === "user-settings" && <UserSettingsPanel />}
+        {(["my-account", "my-activity-history", "my-lists-wall"] as SettingsTab[]).includes(resolvedActiveTab) && <UserSettingsPanel activeTab={resolvedActiveTab} />}
 
-        {resolvedActiveTab === "display-profiles" && canReadSegments && (
+        {resolvedActiveTab === "library-display-profiles" && canReadSegments && (
           <DisplayProfilesSettingsPanel canWrite={canWriteSegments} />
         )}
 
-        {resolvedActiveTab === "ai-data" && <AiDataSettingsPanel />}
+        {resolvedActiveTab === "data-sources-ai-data" && <AiDataSettingsPanel />}
 
-        {resolvedActiveTab === "security" && (
+        {resolvedActiveTab === "security-authentication" && (
           <>
             <SectionCard title="Authentication" description="These values persist to config immediately.">
               <div className="space-y-4">
@@ -1875,7 +2854,7 @@ export function SettingsPage() {
                       type="button"
                       onClick={() => {
                         setActiveTab("users");
-                        navigateToUrl("/settings/users", { state: { page: "settings" } });
+                        navigateToUrl("/settings/security-access/users", { state: { page: "settings" } });
                       }}
                       className="inline-flex justify-center rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground hover:border-accent hover:text-accent"
                     >
@@ -1899,9 +2878,11 @@ export function SettingsPage() {
           </>
         )}
 
-        {resolvedActiveTab === "metadata-providers" && (
+        {(["data-sources-scrapers", "data-sources-metadata-servers", "data-sources-identify-batch-defaults"] as SettingsTab[]).includes(resolvedActiveTab) && (
           <>
-            <SectionCard title="Scraper Directories" description="Directories are scanned recursively for Cove-compatible YAML scraper definitions.">
+            {resolvedActiveTab === "data-sources-scrapers" && (
+            <>
+            <SectionCard title="Legacy YAML Scraper Directories" description="New scrapers ship as extensions. This list is scanned only for legacy YAML scraper definitions that have not been packaged yet.">
               <div className="space-y-3">
                 {draft.scraping.scraperDirectories.map((directory, index) => (
                   <div key={index} className="flex flex-col gap-2 md:flex-row md:items-center">
@@ -1958,119 +2939,32 @@ export function SettingsPage() {
               </div>
             </SectionCard>
 
-            <SectionCard title="Package Sources" description="Source URLs are stored now so scraper package installation can layer on top of the same config later.">
-              <div className="space-y-3">
-                {draft.scraping.scraperPackageSources.map((source, index) => (
-                  <div key={index} className="grid gap-3 rounded-xl border border-border bg-card p-3 lg:grid-cols-[1fr_2fr_auto]">
-                    <TextField
-                      label="Source name"
-                      value={source.name}
-                      onChange={(value) =>
-                        updateDraft((current) => ({
-                          ...current,
-                          scraping: {
-                            ...current.scraping,
-                            scraperPackageSources: current.scraping.scraperPackageSources.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, name: value } : item,
-                            ),
-                          },
-                        }))
-                      }
-                      placeholder="Official"
-                    />
-                    <TextField
-                      label="Source URL"
-                      value={source.url}
-                      onChange={(value) =>
-                        updateDraft((current) => ({
-                          ...current,
-                          scraping: {
-                            ...current.scraping,
-                            scraperPackageSources: current.scraping.scraperPackageSources.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, url: value } : item,
-                            ),
-                          },
-                        }))
-                      }
-                      placeholder="https://example.com/packages.yaml"
-                    />
-                    <div className="flex items-end">
-                      <button
-                        onClick={() =>
-                          updateDraft((current) => ({
-                            ...current,
-                            scraping: {
-                              ...current.scraping,
-                              scraperPackageSources:
-                                current.scraping.scraperPackageSources.length > 1
-                                  ? current.scraping.scraperPackageSources.filter((_, itemIndex) => itemIndex !== index)
-                                  : [emptyPackageSource()],
-                            },
-                          }))
-                        }
-                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-2 text-xs text-red-300 hover:border-red-500 hover:text-red-200"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" /> Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                <button
-                  onClick={() =>
-                    updateDraft((current) => ({
-                      ...current,
-                      scraping: {
-                        ...current.scraping,
-                        scraperPackageSources: [...current.scraping.scraperPackageSources, emptyPackageSource()],
-                      },
-                    }))
-                  }
-                  className="inline-flex items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-sm text-secondary hover:text-foreground"
-                >
-                  <Plus className="h-4 w-4" /> Add package source
-                </button>
-              </div>
-            </SectionCard>
-
             <SectionCard
-              title="Preferred Scene Scrapers"
-              description="When multiple scene scrapers match the same site, pick the default one Cove should surface first in scrape dialogs."
+              title="Preferred Scrapers"
+              description="Pick the default scraper Cove should surface first for each entity type and site."
             >
-              {sceneScraperPreferenceGroups.length === 0 ? (
+              {scraperPreferenceGroups.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
-                  No overlapping scene scraper sites are available right now.
+                  No scraper ownership conflicts need a preferred scraper.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {sceneScraperPreferenceGroups.map((group) => {
-                    const selectedScraperId = draft.scraping.scraperPreferences.find((preference) => preference.site === group.site)?.scraperId ?? "";
+                  {scraperPreferenceGroups.map((group) => {
+                    const selectedScraperId = getSelectedScraperPreferenceId(group.entityType, group.site);
 
                     return (
-                      <div key={group.site} className="grid gap-3 rounded-xl border border-border bg-card p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
+                      <div key={`${group.entityType}-${group.site}`} className="grid gap-3 rounded-xl border border-border bg-card p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
                         <div>
-                          <div className="text-sm font-medium text-foreground">{group.site}</div>
+                          <div className="text-sm font-medium capitalize text-foreground">{group.entityType} · {group.site}</div>
                           <p className="mt-1 text-xs text-secondary">
-                            Applies when a scene URL resolves to this host.
+                            Applies when a {group.entityType} URL resolves to this host.
                           </p>
                         </div>
                         <div>
                           <label className="block text-xs font-medium uppercase tracking-[0.14em] text-muted">Preferred scraper</label>
                           <select
                             value={selectedScraperId}
-                            onChange={(event) =>
-                              updateDraft((current) => ({
-                                ...current,
-                                scraping: {
-                                  ...current.scraping,
-                                  scraperPreferences: event.target.value
-                                    ? [
-                                        ...current.scraping.scraperPreferences.filter((preference) => preference.site !== group.site),
-                                        { site: group.site, scraperId: event.target.value },
-                                      ]
-                                    : current.scraping.scraperPreferences.filter((preference) => preference.site !== group.site),
-                                },
-                              }))
-                            }
+                            onChange={(event) => updateScraperPreference(group.entityType, group.site, event.target.value)}
                             className="mt-2 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
                           >
                             <option value="">No preference</option>
@@ -2087,7 +2981,10 @@ export function SettingsPage() {
                 </div>
               )}
             </SectionCard>
+            </>
+            )}
 
+            {resolvedActiveTab === "data-sources-metadata-servers" && (
             <SectionCard title="Metadata Server Instances" description="Configure remote metadata-server GraphQL endpoints, validate credentials, and use them from entity detail pages.">
               <div className="space-y-3">
                 {draft.scraping.metadataServers.length === 0 && (
@@ -2221,85 +3118,94 @@ export function SettingsPage() {
                 </button>
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "data-sources-identify-batch-defaults" && (
+            <>
             <SectionCard title="Default Batch Options" description="Defaults used to prefill MetadataServer batch-tag dialogs.">
               <div className="space-y-4">
-                <label className="flex items-center gap-2 text-sm text-secondary">
-                  <input
-                    type="checkbox"
-                    checked={draft.scraping.metadataBatchDefaults.refreshAlreadyTagged}
-                    onChange={(event) =>
-                      updateDraft((current) => ({
-                        ...current,
-                        scraping: {
-                          ...current.scraping,
-                          metadataBatchDefaults: {
-                            ...current.scraping.metadataBatchDefaults,
-                            refreshAlreadyTagged: event.target.checked,
-                          },
-                        },
-                      }))
-                    }
-                    className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
-                  />
-                  Refresh entities that already have MetadataServer links
-                </label>
+                <div className="rounded-xl border border-border bg-card px-3 py-2 text-sm text-secondary">
+                  Default scraper choices are managed in the Scrapers tab above.
+                </div>
 
-                <label className="flex items-center gap-2 text-sm text-secondary">
-                  <input
-                    type="checkbox"
-                    checked={draft.scraping.metadataBatchDefaults.createParentStudios}
-                    onChange={(event) =>
-                      updateDraft((current) => ({
-                        ...current,
-                        scraping: {
-                          ...current.scraping,
-                          metadataBatchDefaults: {
-                            ...current.scraping.metadataBatchDefaults,
-                            createParentStudios: event.target.checked,
-                          },
+                <SelectField
+                  label="Existing linked entities"
+                  value={draft.scraping.metadataBatchDefaults.refreshAlreadyTagged ? "overwrite" : "keep"}
+                  onChange={(value) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      scraping: {
+                        ...current.scraping,
+                        metadataBatchDefaults: {
+                          ...current.scraping.metadataBatchDefaults,
+                          refreshAlreadyTagged: value === "overwrite",
                         },
-                      }))
-                    }
-                    className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
-                  />
-                  Create missing parent studios by default
-                </label>
+                      },
+                    }))
+                  }
+                  options={[
+                    { value: "keep", label: "Keep existing MetadataServer links" },
+                    { value: "overwrite", label: "Refresh already-linked entities" },
+                  ]}
+                />
+
+                <CheckboxLabel
+                  label="Create parent studios"
+                  description="When batch metadata references a studio parent that does not exist locally, create it automatically."
+                  checked={draft.scraping.metadataBatchDefaults.createParentStudios}
+                  onChange={(checked) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      scraping: {
+                        ...current.scraping,
+                        metadataBatchDefaults: {
+                          ...current.scraping.metadataBatchDefaults,
+                          createParentStudios: checked,
+                        },
+                      },
+                    }))
+                  }
+                />
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-foreground">Keep current fields by default</label>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {METADATA_BATCH_EXCLUDE_OPTIONS.map((option) => {
-                      const selected = draft.scraping.metadataBatchDefaults.excludeFields.includes(option.id);
-                      return (
-                        <label key={option.id} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm text-secondary">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={(event) =>
-                              updateDraft((current) => ({
-                                ...current,
-                                scraping: {
-                                  ...current.scraping,
-                                  metadataBatchDefaults: {
-                                    ...current.scraping.metadataBatchDefaults,
-                                    excludeFields: event.target.checked
-                                      ? [...current.scraping.metadataBatchDefaults.excludeFields, option.id]
-                                      : current.scraping.metadataBatchDefaults.excludeFields.filter((value) => value !== option.id),
-                                  },
-                                },
-                              }))
-                            }
-                            className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
-                          />
-                          {option.label}
-                        </label>
-                      );
-                    })}
+                  <div>
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted">Apply by default</div>
+                    <p className="mt-1 text-xs text-secondary">
+                      Checked fields are enabled when a MetadataServer batch dialog opens. Clear a field to preserve existing local values by default.
+                    </p>
                   </div>
-                  <p className="text-xs text-muted">
-                    Each batch dialog applies only the defaults relevant to the selected entity type.
-                  </p>
+                  <div className="grid gap-2 rounded-xl border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {METADATA_BATCH_EXCLUDE_OPTIONS.map((option) => (
+                      <CheckboxLabel
+                        key={option.id}
+                        label={option.label}
+                        checked={!draft.scraping.metadataBatchDefaults.excludeFields.includes(option.id)}
+                        onChange={(checked) =>
+                          updateDraft((current) => {
+                            const excludeFields = new Set(current.scraping.metadataBatchDefaults.excludeFields);
+                            if (checked) {
+                              excludeFields.delete(option.id);
+                            } else {
+                              excludeFields.add(option.id);
+                            }
+
+                            return {
+                              ...current,
+                              scraping: {
+                                ...current.scraping,
+                                metadataBatchDefaults: {
+                                  ...current.scraping.metadataBatchDefaults,
+                                  excludeFields: METADATA_BATCH_EXCLUDE_OPTIONS
+                                    .map((candidate) => candidate.id)
+                                    .filter((id) => excludeFields.has(id)),
+                                },
+                              },
+                            };
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             </SectionCard>
@@ -2400,7 +3306,10 @@ export function SettingsPage() {
                 </div>
               </div>
             </SectionCard>
+            </>
+            )}
 
+            {resolvedActiveTab === "data-sources-scrapers" && (
             <SectionCard title="Discovered Scrapers" description="Scraper definitions are loaded from the configured directories using the same YAML field names Cove expects.">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-secondary">Reload after changing directories or adding new scraper files.</p>
@@ -2418,9 +3327,13 @@ export function SettingsPage() {
                 <div className="flex items-center gap-2 text-sm text-secondary">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading scrapers...
                 </div>
+              ) : scrapersError ? (
+                <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200">
+                  Failed to load scrapers: {scrapersError instanceof Error ? scrapersError.message : "Unknown error"}
+                </div>
               ) : scrapers.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border p-4 text-sm text-secondary">
-                  No scraper definitions were found in the configured directories.
+                  No YAML or extension scraper definitions are currently loaded.
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -2430,6 +3343,7 @@ export function SettingsPage() {
                 </div>
               )}
             </SectionCard>
+            )}
           </>
         )}
 
@@ -2440,10 +3354,11 @@ export function SettingsPage() {
         {resolvedActiveTab === "share-links" && <ShareLinksTab />}
         {resolvedActiveTab === "audit" && <AuditTab />}
 
-        {resolvedActiveTab === "system" && (
+        {(["server-host-network", "server-ffmpeg-transcoding"] as SettingsTab[]).includes(resolvedActiveTab) && (
           <>
+            {resolvedActiveTab === "server-host-network" && (
             <SectionCard title="Server" description="Host and port are persisted immediately but require a restart to rebind the listener.">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-4 md:grid-cols-2">
                 <TextField
                   label="Host"
                   value={draft.host}
@@ -2454,20 +3369,6 @@ export function SettingsPage() {
                   value={draft.port}
                   min={1}
                   onChange={(value) => updateDraft((current) => ({ ...current, port: value ?? current.port }))}
-                />
-                <NumberField
-                  label="Max parallel tasks (-1 = all CPU threads)"
-                  value={draft.maxParallelTasks}
-                  min={-1}
-                  max={128}
-                  onChange={(value) => updateDraft((current) => ({ ...current, maxParallelTasks: value ?? current.maxParallelTasks }))}
-                />
-                <NumberField
-                  label="Max concurrent downloads"
-                  value={draft.maxConcurrentDownloads}
-                  min={1}
-                  max={16}
-                  onChange={(value) => updateDraft((current) => ({ ...current, maxConcurrentDownloads: value ?? current.maxConcurrentDownloads }))}
                 />
               </div>
               <div className="mt-4">
@@ -2482,7 +3383,10 @@ export function SettingsPage() {
                 </p>
               </div>
             </SectionCard>
+            )}
 
+            {resolvedActiveTab === "server-ffmpeg-transcoding" && (
+            <>
             <SectionCard title="FFmpeg" description="Paths to FFmpeg and FFprobe binaries. Leave blank to use system PATH.">
               <div className="grid gap-4 md:grid-cols-2">
                 <TextField
@@ -2551,68 +3455,125 @@ export function SettingsPage() {
                 </div>
               </div>
             </SectionCard>
+            </>
+            )}
+          </>
+        )}
 
-            <SectionCard title="Preview Generation" description="Settings for preview video generation during scanning.">
-              <div className="space-y-4">
-                <SelectField
-                  label="Preview preset"
-                  value={draft.previewPreset}
-                  onChange={(value) => updateDraft((d) => ({ ...d, previewPreset: value }))}
-                  options={[
-                    { value: "ultrafast", label: "Ultrafast" },
-                    { value: "veryfast", label: "Very Fast" },
-                    { value: "fast", label: "Fast" },
-                    { value: "medium", label: "Medium" },
-                    { value: "slow", label: "Slow" },
-                    { value: "slower", label: "Slower" },
-                    { value: "veryslow", label: "Very Slow" },
-                  ]}
-                />
-                <CheckboxLabel
-                  label="Include audio in previews"
-                  checked={draft.previewAudio === "true"}
-                  onChange={(checked) => updateDraft((d) => ({ ...d, previewAudio: checked ? "true" : "false" }))}
-                />
-              </div>
-            </SectionCard>
+        {resolvedActiveTab === "extensions-installed" && <ExtensionsPanel mode="installed" />}
+        {activeExtensionSettingsTab && (
+          <>
+            {renderExtensionSettingsPanels(
+              activeExtensionSettingsTab.key,
+              activeExtensionSettingsTab.label,
+              activeExtensionSettingsTab.description ?? `Settings provided by installed extensions for ${activeExtensionSettingsTab.label}.`,
+            )}
+          </>
+        )}
+        {resolvedActiveTab === "extensions-registry" && <ExtensionsPanel mode="registry" />}
 
-            <SectionCard title="Logging" description="Log level and output configuration. Changes take effect after restart.">
-              <div className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <SelectField
-                    label="Log level"
-                    value={draft.logLevel}
-                    onChange={(value) => updateDraft((d) => ({ ...d, logLevel: value }))}
-                    options={[
-                      { value: "Trace", label: "Trace" },
-                      { value: "Debug", label: "Debug" },
-                      { value: "Info", label: "Info" },
-                      { value: "Warning", label: "Warning" },
-                      { value: "Error", label: "Error" },
-                    ]}
-                  />
-                  <TextField
-                    label="Log file"
-                    value={draft.logFile ?? ""}
-                    onChange={(value) => updateDraft((d) => ({ ...d, logFile: value || undefined }))}
-                    placeholder="Leave blank for no file logging"
-                  />
-                </div>
+        {resolvedActiveTab === "logs" && canWriteSystemSettings && (
+          <SectionCard title="Log Output" description="Persisted log destination settings. File and stdout changes apply after restart.">
+            <div className="space-y-4">
+              <TextField
+                label="Log file"
+                description="Optional path for writing server logs to a file. Leave blank to disable file logging."
+                value={draft.logFile ?? ""}
+                onChange={(value) => updateDraft((d) => ({ ...d, logFile: value || undefined }))}
+                placeholder="Leave blank for no file logging"
+              />
+              <div className="grid gap-3 md:grid-cols-2">
                 <CheckboxLabel
-                  label="Log to stdout"
+                  label="Write logs to stdout"
+                  description="Send application logs to the process output stream."
                   checked={draft.logOut}
                   onChange={(checked) => updateDraft((d) => ({ ...d, logOut: checked }))}
                 />
                 <CheckboxLabel
                   label="Log access requests"
+                  description="Record HTTP request access entries in the server log."
                   checked={draft.logAccess}
                   onChange={(checked) => updateDraft((d) => ({ ...d, logAccess: checked }))}
                 />
               </div>
+            </div>
+          </SectionCard>
+        )}
+        {resolvedActiveTab === "logs" && <LogsPanel />}
+        {resolvedActiveTab === "system-info-about" && (
+          <>
+            <SectionCard title="About Cove" description="An organizer for your media library.">
+              <div className="flex items-start gap-6">
+                <div className="w-16 h-16 rounded-xl bg-accent/20 flex items-center justify-center shrink-0">
+                  <span className="text-3xl font-bold text-accent">S</span>
+                </div>
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-bold text-foreground">Cove</h2>
+                  {status && <p className="text-sm text-secondary">Version {status.version}</p>}
+                  <p className="text-sm text-muted max-w-lg">
+                    A self-hosted media organizer and video streaming app. Organize, tag, and browse your media library with ease.
+                  </p>
+                  <div className="flex gap-3 pt-1">
+                    <a href="https://github.com/yourcove/cove" target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">GitHub</a>
+                    <a href="https://docs.cove.app" target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">Documentation</a>
+                    <a href="https://discord.gg/EzM8764YVr" target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">Discord</a>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openTutorialStoryboard("getting-started")}
+                    className="inline-flex w-fit items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-secondary transition-colors hover:border-accent hover:text-foreground"
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    Replay setup tour
+                  </button>
+                </div>
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Release History" description="What's new in this version.">
+              <div className="space-y-6">
+                <div className="border-l-2 border-accent pl-4">
+                  <h3 className="text-lg font-semibold text-foreground">v0.0.1 - Cove</h3>
+                  <p className="text-xs text-muted mt-1">A modern media library organizer</p>
+                  <ul className="mt-3 space-y-2 text-sm text-secondary">
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> New React 19 frontend with Tailwind CSS</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> .NET 10 backend with PostgreSQL + pgvector</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Extension system with theme support</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Real-time job tracking via SignalR</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Custom fields on all entity types</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Full MetadataServer integration for scene tagger</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Video filters (brightness, contrast, saturation)</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Gallery and image management</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Performer, studio, tag, and group management</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Scene segments and detections with scrubber integration</li>
+                  </ul>
+                </div>
+              </div>
+            </SectionCard>
+          </>
+        )}
+
+        {resolvedActiveTab === "system-info-runtime-status" && (
+          <>
+            <SectionCard title="Runtime Status" description="Effective values reported by the running backend instance.">
+              {statusLoading && !status ? (
+                <div className="flex items-center gap-2 text-sm text-secondary">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading status...
+                </div>
+              ) : status ? (
+                <dl className="grid gap-4 md:grid-cols-2">
+                  <InfoPair label="Version" value={status.version} />
+                  <InfoPair label="Database" value={status.databasePath} />
+                  {status.configFile ? <InfoPair label="Config file" value={status.configFile} /> : null}
+                  {status.appDir ? <InfoPair label="App directory" value={status.appDir} /> : null}
+                </dl>
+              ) : (
+                <div className="text-sm text-secondary">Runtime status is unavailable.</div>
+              )}
             </SectionCard>
 
             {canShutdownSystem ? (
-              <SectionCard title="Runtime" description="Stop the current Cove server process after pending requests complete.">
+              <SectionCard title="Shutdown" description="Stop the current Cove server process after pending requests complete.">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="text-sm font-medium text-foreground">Shutdown server</h3>
@@ -2634,76 +3595,6 @@ export function SettingsPage() {
                 </div>
               </SectionCard>
             ) : null}
-          </>
-        )}
-
-        {resolvedActiveTab === "extensions" && <ExtensionsPanel />}
-
-        {resolvedActiveTab === "logs" && <LogsPanel />}
-
-        {resolvedActiveTab === "changelog" && (
-          <>
-            <SectionCard title="Changelog" description="What's new in this version.">
-              <div className="space-y-6">
-                <div className="border-l-2 border-accent pl-4">
-                  <h3 className="text-lg font-semibold text-foreground">v0.0.1 — Cove</h3>
-                  <p className="text-xs text-muted mt-1">A modern media library organizer</p>
-                  <ul className="mt-3 space-y-2 text-sm text-secondary">
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> New React 19 frontend with Tailwind CSS</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> .NET 10 backend with PostgreSQL + pgvector</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Extension system with theme support</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Real-time job tracking via SignalR</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Custom fields on all entity types</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Full MetadataServer integration for scene tagger</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Video filters (brightness, contrast, saturation)</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Gallery and image management</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Performer, studio, tag, and group management</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Scene segments and detections with scrubber integration</li>
-                  </ul>
-                </div>
-              </div>
-            </SectionCard>
-          </>
-        )}
-
-        {resolvedActiveTab === "about" && (
-          <>
-            <SectionCard title="About Cove" description="An organizer for your media library.">
-              <div className="flex items-start gap-6">
-                <div className="w-16 h-16 rounded-xl bg-accent/20 flex items-center justify-center shrink-0">
-                  <span className="text-3xl font-bold text-accent">S</span>
-                </div>
-                <div className="space-y-2">
-                  <h2 className="text-2xl font-bold text-foreground">Cove</h2>
-                  {status && <p className="text-sm text-secondary">Version {status.version}</p>}
-                  <p className="text-sm text-muted max-w-lg">
-                    A self-hosted media organizer and video streaming app. Organize, tag, and browse your media library with ease.
-                  </p>
-                  <div className="flex gap-3 pt-1">
-                    <a href="https://github.com/yourcove/cove" target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">GitHub</a>
-                    <a href="https://docs.cove.app" target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">Documentation</a>
-                    <a href="https://discord.gg/EzM8764YVr" target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">Discord</a>
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Runtime Status" description="Effective values reported by the running backend instance.">
-              {statusLoading && !status ? (
-                <div className="flex items-center gap-2 text-sm text-secondary">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading status...
-                </div>
-              ) : status ? (
-                <dl className="grid gap-4 md:grid-cols-2">
-                  <InfoPair label="Version" value={status.version} />
-                  <InfoPair label="Database" value={status.databasePath} />
-                  {status.configFile ? <InfoPair label="Config file" value={status.configFile} /> : null}
-                  {status.appDir ? <InfoPair label="App directory" value={status.appDir} /> : null}
-                </dl>
-              ) : (
-                <div className="text-sm text-secondary">Runtime status is unavailable.</div>
-              )}
-            </SectionCard>
 
             <SectionCard title="System Information" description="Browser and environment details.">
               <dl className="grid gap-4 md:grid-cols-2">
@@ -2729,7 +3620,6 @@ export function SettingsPage() {
                 <div className="text-sm text-secondary">Config summary requires system read access.</div>
               </SectionCard>
             )}
-
           </>
         )}
       </div>
@@ -2831,18 +3721,15 @@ function LocalInterfacePanel({
           </div>
         </div>
       </SectionCard>
-
-      <ThemeSelector />
     </>
   );
 }
 
-function UserSettingsPanel() {
+function UserSettingsPanel({ activeTab }: { activeTab: SettingsTab }) {
   const { authEnabled, user, logout } = useAuth();
   const accountBackedPreferences = supportsServerBackedUiPreferences(user);
   const sharedProfilePreferences = accountBackedPreferences && !authEnabled;
   const [trackingPreferences, setTrackingPreferences] = useState<ResolvedTrackingPreferences>(() => resolveTrackingPreferences(user?.uiPreferences?.tracking));
-  const [excludeVr, setExcludeVr] = useState(user?.uiPreferences?.scenes?.excludeVr ?? false);
   const [logoutPending, setLogoutPending] = useState(false);
 
   const handleLogout = async () => {
@@ -2857,7 +3744,6 @@ function UserSettingsPanel() {
 
   useEffect(() => {
     setTrackingPreferences(resolveTrackingPreferences(user?.uiPreferences?.tracking));
-    setExcludeVr(user?.uiPreferences?.scenes?.excludeVr ?? false);
   }, [user]);
 
   const updateTrackingPreferences = (patch: Partial<ResolvedTrackingPreferences>) => {
@@ -2870,18 +3756,6 @@ function UserSettingsPanel() {
     updateAuthenticatedUserUiPreferences((current) => ({
       ...(current ?? {}),
       tracking: nextTracking,
-    }));
-  };
-
-  const updateScenePreferences = (patch: { excludeVr?: boolean }) => {
-    const nextExcludeVr = patch.excludeVr ?? excludeVr;
-    setExcludeVr(nextExcludeVr);
-    updateAuthenticatedUserUiPreferences((current) => ({
-      ...(current ?? {}),
-      scenes: {
-        ...(current?.scenes ?? {}),
-        excludeVr: nextExcludeVr,
-      },
     }));
   };
 
@@ -2898,6 +3772,7 @@ function UserSettingsPanel() {
 
   return (
     <div className="space-y-5">
+      {activeTab === "my-account" && (
       <SectionCard title="Account" description="Current sign-in controls for this browser session.">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -2915,7 +3790,9 @@ function UserSettingsPanel() {
           </button>
         </div>
       </SectionCard>
+      )}
 
+      {activeTab === "my-activity-history" && (
       <SectionCard
         title={sharedProfilePreferences ? "Shared Engagement" : "Personal Engagement"}
         description={sharedProfilePreferences
@@ -2963,24 +3840,63 @@ function UserSettingsPanel() {
           </div>
         </div>
       </SectionCard>
-
-      <SectionCard title="Scene Lists" description="Defaults for browsing scene collections.">
-        <CheckboxLabel
-          label="Exclude VR"
-          checked={excludeVr}
-          onChange={(checked) => updateScenePreferences({ excludeVr: checked })}
-        />
-      </SectionCard>
+      )}
     </div>
   );
 }
 function LogsPanel() {
-  const [logLevel, setLogLevel] = useState("");
-  const { data: logEntries, isLoading, refetch } = useQuery({
-    queryKey: ["logs", logLevel],
-    queryFn: () => logsApi.recent(logLevel || undefined, 200),
-    refetchInterval: 5000,
+  const { config } = useAppConfig();
+  const { hasPermission } = useAuth();
+  const canWriteSystemSettings = hasPermission("system.settings.write");
+  const [clientFilter, setClientFilter] = useState("");
+  const [serverLogLevel, setServerLogLevel] = useState(config?.logLevel ?? "Info");
+  const [tailEntries, setTailEntries] = useState<LogEntry[]>([]);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const { data: initialLogEntries, isLoading } = useQuery({
+    queryKey: ["logs", "tail"],
+    queryFn: () => logsApi.recent(undefined, 200),
   });
+
+  const setLogLevelMutation = useMutation({
+    mutationFn: system.setLogLevel,
+    onSuccess: (result) => setServerLogLevel(result.level),
+    onError: (error: Error) => setStreamError(error.message),
+  });
+
+  useEffect(() => {
+    if (config?.logLevel) {
+      setServerLogLevel(config.logLevel);
+    }
+  }, [config?.logLevel]);
+
+  useEffect(() => {
+    if (initialLogEntries) {
+      setTailEntries(initialLogEntries.slice(-200));
+    }
+  }, [initialLogEntries]);
+
+  useEffect(() => {
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl("/hubs/logs")
+      .withAutomaticReconnect()
+      .build();
+
+    connection.on("LogReceived", (entry: LogEntry) => {
+      setTailEntries((current) => [...current, entry].slice(-200));
+    });
+
+    connection.start()
+      .then(() => setStreamError(null))
+      .catch((error) => setStreamError(error instanceof Error ? error.message : "Failed to connect to log stream."));
+
+    return () => {
+      void connection.stop();
+    };
+  }, []);
+
+  const filteredLogEntries = clientFilter
+    ? tailEntries.filter((entry) => normalizeLogLevel(entry.level) === clientFilter)
+    : tailEntries;
 
   const levelColor = (level: string) => {
     switch (level.toLowerCase()) {
@@ -2993,32 +3909,50 @@ function LogsPanel() {
   };
 
   return (
-    <SectionCard title="Logs" description="Recent log entries from the server.">
-      <div className="flex items-center gap-3 mb-4">
-        <label className="text-sm text-secondary">Log Level</label>
-        <select
-          value={logLevel}
-          onChange={(e) => setLogLevel(e.target.value)}
-          className="rounded border border-border bg-surface px-3 py-1.5 text-sm text-foreground"
-        >
-          <option value="">All</option>
-          <option value="Trace">Trace</option>
-          <option value="Debug">Debug</option>
-          <option value="Information">Info</option>
-          <option value="Warning">Warning</option>
-          <option value="Error">Error</option>
-        </select>
-        <button onClick={() => refetch()} className="flex items-center gap-1 rounded border border-border bg-surface px-3 py-1.5 text-sm text-secondary hover:text-foreground">
-          <RefreshCw className="h-3.5 w-3.5" /> Refresh
-        </button>
+    <SectionCard title="Logs" description="Live log tail from the server.">
+      <div className="mb-4 grid gap-3 md:grid-cols-2 md:items-end">
+        <SelectField
+          label="Filter"
+          description="Filter the log rows shown in this browser without changing what the server records."
+          value={clientFilter}
+          onChange={setClientFilter}
+          options={[
+            { value: "", label: "All" },
+            { value: "Verbose", label: "Trace" },
+            { value: "Debug", label: "Debug" },
+            { value: "Information", label: "Info" },
+            { value: "Warning", label: "Warning" },
+            { value: "Error", label: "Error" },
+            { value: "Fatal", label: "Critical" },
+          ]}
+        />
+        <SelectField
+          label="Server log level"
+          description="Change the live server log verbosity and persist the selected level to config."
+          value={serverLogLevel}
+          onChange={(value) => {
+            setServerLogLevel(value);
+            setLogLevelMutation.mutate(value);
+          }}
+          options={[
+            { value: "Trace", label: "Trace" },
+            { value: "Debug", label: "Debug" },
+            { value: "Info", label: "Info" },
+            { value: "Warning", label: "Warning" },
+            { value: "Error", label: "Error" },
+            { value: "Critical", label: "Critical" },
+          ]}
+          disabled={!canWriteSystemSettings || setLogLevelMutation.isPending}
+        />
       </div>
+      {streamError ? <p className="mb-3 text-sm text-red-300">{streamError}</p> : null}
       {isLoading ? (
         <div className="flex items-center gap-2 text-sm text-secondary">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading logs...
         </div>
-      ) : logEntries && logEntries.length > 0 ? (
+      ) : filteredLogEntries.length > 0 ? (
         <div className="max-h-[600px] overflow-y-auto rounded border border-border bg-background font-mono text-xs">
-          {logEntries.map((entry, i) => (
+          {filteredLogEntries.map((entry, i) => (
             <div key={i} className="flex gap-3 border-b border-border/50 px-3 py-1.5 hover:bg-surface">
               <span className="shrink-0 text-muted">{entry.timestamp}</span>
               <span className={`shrink-0 w-14 font-semibold ${levelColor(entry.level)}`}>{entry.level}</span>
@@ -3033,7 +3967,30 @@ function LogsPanel() {
   );
 }
 
-function TasksPanel() {
+function normalizeLogLevel(level: string) {
+  switch (level.toLowerCase()) {
+    case "trace":
+    case "verbose":
+      return "Verbose";
+    case "debug":
+      return "Debug";
+    case "info":
+    case "information":
+      return "Information";
+    case "warning":
+    case "warn":
+      return "Warning";
+    case "error":
+      return "Error";
+    case "critical":
+    case "fatal":
+      return "Fatal";
+    default:
+      return level;
+  }
+}
+
+function TasksPanel({ activeTab }: { activeTab: SettingsTab }) {
   const queryClient = useQueryClient();
   const { data: activeJobs, refetch: refetchJobs } = useQuery({
     queryKey: ["jobs"],
@@ -3090,11 +4047,20 @@ function TasksPanel() {
 
   return (
     <>
-      {jobQueue}
-      {jobHistory}
-      <LibraryTasksSection refetchJobs={refetchJobs} />
-      <DataManagementSection refetchJobs={refetchJobs} />
-      <ExtensionTasksSection refetchJobs={refetchJobs} />
+      {activeTab === "operations-jobs" && jobQueue}
+      {activeTab === "operations-jobs" && jobHistory}
+      {activeTab === "operations-jobs" && !jobQueue && !jobHistory ? (
+        <SectionCard title="Jobs" description="Currently running, queued, and recent jobs.">
+          <p className="text-sm text-secondary">No jobs are running or recently completed.</p>
+        </SectionCard>
+      ) : null}
+      {activeTab === "operations-scan-generate" && <LibraryTasksSection refetchJobs={refetchJobs} mode="scan-generate" />}
+      {activeTab === "operations-downloads" && <LibraryTasksSection refetchJobs={refetchJobs} mode="downloads" />}
+      {activeTab === "operations-duplicates" && <LibraryTasksSection refetchJobs={refetchJobs} mode="duplicates" />}
+      {activeTab === "data-sources-auto-tagging" && <LibraryTasksSection refetchJobs={refetchJobs} mode="auto-tagging" />}
+      {activeTab === "operations-maintenance" && <DataManagementSection refetchJobs={refetchJobs} mode="maintenance" />}
+      {activeTab === "operations-backup-restore" && <DataManagementSection refetchJobs={refetchJobs} mode="backup" />}
+      {activeTab === "operations-extension-tasks" && <ExtensionTasksSection refetchJobs={refetchJobs} />}
     </>
   );
 }
@@ -3221,7 +4187,9 @@ function JobQueueCard({ job, onCancel, onMoveUp, onMoveDown }: { job: JobInfo; o
 }
 
 // ---- Library Tasks ----
-function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
+type LibraryTaskSectionMode = "scan-generate" | "downloads" | "duplicates" | "auto-tagging";
+
+function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; mode: LibraryTaskSectionMode }) {
   const { config } = useAppConfig();
   const selectablePaths = useMemo(
     () => (config?.covePaths ?? []).map((path) => path.path.trim()).filter(Boolean),
@@ -3397,6 +4365,25 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
     },
   });
 
+  const sectionMeta: Record<LibraryTaskSectionMode, { title: string; description: string }> = {
+    "scan-generate": {
+      title: "Scan & Generate",
+      description: "Scan library roots and generate supporting files such as thumbnails, previews, sprites, hashes, and checksums.",
+    },
+    downloads: {
+      title: "Downloads",
+      description: "Read one URL per line from a text file and queue a backend batch download job.",
+    },
+    duplicates: {
+      title: "Duplicates",
+      description: "Open duplicate detection to compare exact duplicate scene files and choose what to remove.",
+    },
+    "auto-tagging": {
+      title: "Auto Tagging",
+      description: "Queue Auto Tag using current tag names, aliases, and path patterns across the library.",
+    },
+  };
+
   return (
     <>
     <ConfirmDialog
@@ -3411,8 +4398,10 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
         autoTagMut.mutate();
       }}
     />
-    <SectionCard title="Library Tasks" description="Scan for new content, generate supporting files, and auto-tag your library.">
+    <SectionCard title={sectionMeta[mode].title} description={sectionMeta[mode].description}>
       <div className="space-y-4">
+        {mode === "scan-generate" && (
+        <>
         {/* Scan */}
         <TaskCard
           label="Scan"
@@ -3461,14 +4450,6 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             )}
           </div>
         </TaskCard>
-
-        {/* Auto Tag */}
-        <TaskCard
-          label="Auto Tag"
-          description="Automatically tag content based on filenames and path patterns."
-          onRun={() => setShowAutoTagConfirm(true)}
-          isPending={autoTagMut.isPending}
-        />
 
         {/* Generate */}
         <TaskCard
@@ -3536,7 +4517,19 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             )}
           </div>
         </TaskCard>
+        </>
+        )}
 
+        {mode === "auto-tagging" && (
+        <TaskCard
+          label="Auto Tag"
+          description="Queue a job that applies tags using current tag names, aliases, and path patterns."
+          onRun={() => setShowAutoTagConfirm(true)}
+          isPending={autoTagMut.isPending}
+        />
+        )}
+
+        {mode === "duplicates" && (
         <TaskCard
           label="Duplicate Finder"
           description="Find exact duplicate scene files and choose which records or files to remove."
@@ -3544,7 +4537,9 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
           isPending={false}
           runLabel="Open"
         />
+        )}
 
+        {mode === "downloads" && (
         <TaskCard
           label="Download From File"
           description="Read one URL per line from a text file and queue one backend batch job to resolve, create, and download them."
@@ -3558,6 +4553,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
           <div className="space-y-3 pt-3 border-t border-border/50">
             <SelectField
               label="Entity type"
+              description="Choose what kind of library item each imported URL should create or download."
               value={downloadImportEntity}
               onChange={(value) => {
                 setDownloadImportEntity(value as DownloadSelectionEntity);
@@ -3584,6 +4580,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             {downloadImportEntity === "Scene" ? (
               <CheckboxLabel
                 label="Auto-apply scene metadata after download"
+                description="After scene downloads are queued, also queue metadata matching for the imported scene URLs."
                 checked={downloadImportAutoApplyMetadata}
                 onChange={(checked) => {
                   setDownloadImportAutoApplyMetadata(checked);
@@ -3593,6 +4590,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             ) : null}
             <CheckboxLabel
               label="Allow duplicate downloads for this batch"
+              description="Permit URLs that Cove would otherwise skip as duplicates in the current batch."
               checked={downloadImportAllowDuplicateDownloads}
               onChange={(checked) => {
                 setDownloadImportAllowDuplicateDownloads(checked);
@@ -3623,6 +4621,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
             </div>
           </div>
         </TaskCard>
+        )}
       </div>
     </SectionCard>
     </>
@@ -3630,7 +4629,7 @@ function LibraryTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
 }
 
 // ---- Data Management ----
-function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
+function DataManagementSection({ refetchJobs, mode }: { refetchJobs: () => void; mode: "maintenance" | "backup" }) {
   const queryClient = useQueryClient();
   const [cleanDryRun, setCleanDryRun] = useState(false);
   const [showCleanGenOpts, setShowCleanGenOpts] = useState(false);
@@ -3812,8 +4811,13 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
     : null;
 
   return (
-    <SectionCard title="Data Management" description="Clean orphaned data, manage generated files, export, and database operations.">
+    <SectionCard
+      title={mode === "maintenance" ? "Maintenance" : "Backup & Restore"}
+      description={mode === "maintenance" ? "Clean orphaned data, generated files, import AI tag data, and optimize the database." : "Export/import metadata, manage database or config backups, and wipe after snapshots are created."}
+    >
       <div className="space-y-4">
+        {mode === "maintenance" && (
+        <>
         {/* Clean */}
         <TaskCard
           label="Clean"
@@ -3845,7 +4849,11 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
             <CheckboxLabel label="Dry run" checked={!!cleanGenOpts.dryRun} onChange={(c) => setCleanGenOpts({ ...cleanGenOpts, dryRun: c })} />
           </div>
         </TaskCard>
+        </>
+        )}
 
+        {mode === "backup" && (
+        <>
         {/* Export */}
         <TaskCard
           label="Full Export"
@@ -3890,7 +4898,10 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
             <CheckboxLabel label="Overwrite existing entries" checked={importOverwrite} onChange={setImportOverwrite} />
           </div>
         </TaskCard>
+        </>
+        )}
 
+        {mode === "maintenance" && (
         <TaskCard
           label="Import AI Tag Data"
           description="Import stash-ai-server AI runs and raw tag segments after an existing Stash migration."
@@ -3932,9 +4943,12 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
             )}
           </div>
         </TaskCard>
+        )}
 
         {/* Database Operations */}
         <div className="grid gap-3 sm:grid-cols-2">
+          {mode === "backup" && (
+          <>
           <TaskCard
             label="Backup Database"
             description="Create a pg_dump backup of the PostgreSQL database."
@@ -3984,6 +4998,9 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
               />
             </div>
           </TaskCard>
+          </>
+          )}
+          {mode === "maintenance" && (
           <TaskCard
             label="Optimise Database"
             description="Run VACUUM ANALYSE to reclaim space and update query planner statistics."
@@ -3991,9 +5008,11 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
             isPending={optimizeMut.isPending}
             statusMessage={optimizeStatus}
           />
+          )}
         </div>
 
         {/* Config Backup / Restore */}
+        {mode === "backup" && (
         <div className="grid gap-3 sm:grid-cols-2">
           <TaskCard
             label="Backup Config"
@@ -4054,12 +5073,14 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
             </div>
           </TaskCard>
         </div>
+        )}
 
         {/* Wipe Database — danger zone */}
+        {mode === "backup" && (
         <div className="border border-red-900/50 rounded-lg p-4 bg-red-950/20">
           <h4 className="text-sm font-semibold text-red-400 mb-1">Danger Zone</h4>
           <p className="text-xs text-secondary mb-3">
-            Permanently deletes all scenes, performers, tags, studios, galleries, and groups from the database <strong>and</strong> resets your saved configuration (cove-config.json) to factory defaults so the setup wizard reappears. A snapshot of both the database and the config is taken first and saved to the backups folder, so you can restore them later from this Data Management page.
+            Permanently deletes all scenes, performers, tags, studios, galleries, and groups from the database <strong>and</strong> resets your saved configuration (cove-config.json) to factory defaults so the setup wizard reappears. A snapshot of both the database and the config is taken first and saved to the backups folder, so you can restore them later from this Backup & Restore page.
           </p>
           {lastWipeConfigBackup && (
             <p className="text-xs text-amber-300 mb-3">Last config snapshot from a wipe: {lastWipeConfigBackup}</p>
@@ -4103,6 +5124,7 @@ function DataManagementSection({ refetchJobs }: { refetchJobs: () => void }) {
             </div>
           )}
         </div>
+        )}
       </div>
     </SectionCard>
   );
@@ -4118,7 +5140,20 @@ function ExtensionTasksSection({ refetchJobs }: { refetchJobs: () => void }) {
 
   const enabledWithTasks = pluginList?.filter((p) => p.enabled && p.tasks.length > 0) ?? [];
 
-  if (enabledWithTasks.length === 0) return null;
+  if (enabledWithTasks.length === 0) {
+    return (
+      <SectionCard title="Extension Tasks" description="No installed extensions currently expose runnable tasks.">
+        <button
+          type="button"
+          onClick={() => navigateToUrl("/settings/extensions/installed", { state: { page: "settings" } })}
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-secondary hover:border-accent hover:text-foreground"
+        >
+          <Plug className="h-4 w-4" />
+          Installed extensions
+        </button>
+      </SectionCard>
+    );
+  }
 
   return (
     <SectionCard title="Extension Tasks" description="Run tasks provided by enabled extensions.">
@@ -4522,7 +5557,7 @@ function ThemeSelector() {
   ];
 
   return (
-    <SectionCard title="Theme & Appearance" description="Customize colors, styles, layout, and effects.">
+    <SectionCard title="Theme" description="Customize colors, styles, layout, and effects.">
       <div className="space-y-3">
         {/* --- Color Palette --- */}
         <CollapsibleSection title="Color Palette" subtitle={activeThemeId ? availableThemes.find((t) => t.id === activeThemeId)?.name ?? activeThemeId : "Default"} expanded={expandedSections.has("palette")} onToggle={() => toggleSection("palette")}>
@@ -4780,6 +5815,7 @@ function TextField({
   onBlur,
   placeholder,
   type = "text",
+  description,
 }: {
   label: string;
   value: string;
@@ -4787,9 +5823,10 @@ function TextField({
   onBlur?: () => void;
   placeholder?: string;
   type?: string;
+  description?: string;
 }) {
   return (
-    <label className="block text-sm">
+    <label className="block text-sm" title={getSettingHelpText(label, description)}>
       <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
       <input
         type={type}
@@ -4809,15 +5846,17 @@ function NumberField({
   onChange,
   min,
   max,
+  description,
 }: {
   label: string;
   value?: number;
   onChange: (value: number | undefined) => void;
   min?: number;
   max?: number;
+  description?: string;
 }) {
   return (
-    <label className="block text-sm">
+    <label className="block text-sm" title={getSettingHelpText(label, description)}>
       <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
       <input
         type="number"
@@ -4838,6 +5877,7 @@ function TextAreaField({
   onBlur,
   rows,
   placeholder,
+  description,
 }: {
   label: string;
   value: string;
@@ -4845,9 +5885,10 @@ function TextAreaField({
   onBlur?: () => void;
   rows: number;
   placeholder?: string;
+  description?: string;
 }) {
   return (
-    <label className="block text-sm">
+    <label className="block text-sm" title={getSettingHelpText(label, description)}>
       <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
       <textarea
         value={value}
@@ -4867,20 +5908,25 @@ function SelectField({
   onChange,
   onBlur,
   options,
+  disabled = false,
+  description,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
   options: { value: string; label: string }[];
+  disabled?: boolean;
+  description?: string;
 }) {
   return (
-    <label className="block text-sm">
+    <label className="block text-sm" title={getSettingHelpText(label, description)}>
       <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onBlur={onBlur}
+        disabled={disabled}
         className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
       >
         {options.map((option) => (
@@ -4950,9 +5996,9 @@ function NavReorderList({
   );
 }
 
-function CheckboxLabel({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+function CheckboxLabel({ label, checked, onChange, description }: { label: string; checked: boolean; onChange: (checked: boolean) => void; description?: string }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-secondary">
+    <label className="flex items-center gap-2 text-sm text-secondary" title={getSettingHelpText(label, description)}>
       <input
         type="checkbox"
         checked={checked}
@@ -5096,13 +6142,15 @@ function ExtensionSettingsForm({ extensionId, schema }: { extensionId: string; s
 }
 
 // ===== Extensions Panel — unified view of all extensions =====
-function ExtensionsPanel() {
+function ExtensionsPanel({ mode }: { mode: "installed" | "registry" }) {
   const { availableThemes, activeThemeId, setActiveTheme, getSettingsPanelsForTab, resolveComponent } = useExtensions();
   const settingsPanels = getSettingsPanelsForTab("extensions");
   const queryClient = useQueryClient();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [extensionToUninstall, setExtensionToUninstall] = useState<PendingExtensionUninstall | null>(null);
+  const [pendingDependencyInstall, setPendingDependencyInstall] = useState<PendingExtensionInstall | null>(null);
 
   // .NET extensions from the extension manager
   const { data: extList } = useQuery({
@@ -5147,9 +6195,20 @@ function ExtensionsPanel() {
   });
 
   const upgradeMut = useMutation({
-    mutationFn: (args: { id: string; version: string }) =>
-      import("../api/client").then(m => m.extensions.registryInstall(args.id, args.version, true)),
-    onSuccess: () => {
+    mutationFn: (args: { id: string; version: string; name?: string; installDependencies?: boolean }) =>
+      import("../api/client").then(m => m.extensions.registryInstall(args.id, args.version, args.installDependencies ?? false)),
+    onSuccess: (data, variables) => {
+      if (data.requiresDependencies && data.missingDependencies?.length) {
+        setPendingDependencyInstall({
+          extensionId: variables.id,
+          version: variables.version,
+          name: data.extension?.name ?? variables.name,
+          dependencies: data.missingDependencies,
+        });
+        return;
+      }
+
+      setPendingDependencyInstall(null);
       queryClient.invalidateQueries({ queryKey: ["extensions-list"] });
       queryClient.invalidateQueries({ queryKey: ["registry-search"] });
       queryClient.invalidateQueries({ queryKey: ["registry-updates"] });
@@ -5159,6 +6218,26 @@ function ExtensionsPanel() {
   const runJobMut = useMutation({
     mutationFn: (args: { id: string; jobId: string }) =>
       import("../api/client").then(m => m.extensions.runJob(args.id, args.jobId)),
+  });
+
+  const uninstallMut = useMutation<unknown, Error, PendingExtensionUninstall>({
+    mutationFn: (ext) =>
+      ext.source === "legacy"
+        ? pluginsApi.uninstallPackages([ext.id])
+        : import("../api/client").then(m => m.extensions.registryUninstall(ext.id, ext.confirmedDependents || ext.dependents.length > 0)),
+    onSuccess: (data, variables) => {
+      const result = data as { requiresDependents?: boolean; dependents?: ExtensionDependencyImpact[] } | undefined;
+      if (variables.source === "native" && result?.requiresDependents && Array.isArray(result.dependents)) {
+        setExtensionToUninstall({ ...variables, dependents: result.dependents });
+        return;
+      }
+
+      setExtensionToUninstall(null);
+      queryClient.invalidateQueries({ queryKey: ["extensions-list"] });
+      queryClient.invalidateQueries({ queryKey: ["plugins"] });
+      queryClient.invalidateQueries({ queryKey: ["registry-search"] });
+      queryClient.invalidateQueries({ queryKey: ["registry-updates"] });
+    },
   });
 
   // Merge all extensions into a unified list
@@ -5242,6 +6321,14 @@ function ExtensionsPanel() {
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [extList, legacyList]);
 
+  const nativeExtensions = useMemo(
+    () => allExtensions.filter((extension) => extension.source === "native"),
+    [allExtensions],
+  );
+
+  const getNativeDependents = (extensionId: string): ExtensionDependencyImpact[] =>
+    getTransitiveExtensionDependents(nativeExtensions, extensionId).map(toExtensionDependencyImpact);
+
   const installedUpdateMap = useMemo(
     () => new Map((registryUpdates ?? []).map(update => [update.extensionId, update])),
     [registryUpdates],
@@ -5283,7 +6370,55 @@ function ExtensionsPanel() {
 
   return (
     <>
-      {/* Installed Extensions */}
+      <ConfirmDialog
+        open={extensionToUninstall != null}
+        title="Uninstall Extension"
+        message={extensionToUninstall ? formatDependentUninstallMessage(extensionToUninstall) : "Uninstall this extension?"}
+        confirmLabel={extensionToUninstall?.source === "native" && extensionToUninstall.dependents.length > 0 ? "Uninstall All" : "Uninstall"}
+        destructive
+        isPending={uninstallMut.isPending}
+        errorMessage={uninstallMut.error instanceof Error ? uninstallMut.error.message : undefined}
+        onConfirm={() => {
+          if (extensionToUninstall) {
+            uninstallMut.mutate({
+              ...extensionToUninstall,
+              confirmedDependents: extensionToUninstall.source === "native" && extensionToUninstall.dependents.length > 0,
+            });
+          }
+        }}
+        onCancel={() => {
+          if (uninstallMut.isPending) return;
+          uninstallMut.reset();
+          setExtensionToUninstall(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingDependencyInstall != null}
+        title="Install Dependencies"
+        message={pendingDependencyInstall ? formatDependencyInstallMessage(pendingDependencyInstall) : "Install required dependencies?"}
+        confirmLabel="Install All"
+        destructive={false}
+        isPending={upgradeMut.isPending}
+        errorMessage={upgradeMut.error instanceof Error ? upgradeMut.error.message : undefined}
+        onConfirm={() => {
+          if (pendingDependencyInstall) {
+            upgradeMut.mutate({
+              id: pendingDependencyInstall.extensionId,
+              version: pendingDependencyInstall.version,
+              name: pendingDependencyInstall.name,
+              installDependencies: true,
+            });
+          }
+        }}
+        onCancel={() => {
+          if (upgradeMut.isPending) return;
+          upgradeMut.reset();
+          setPendingDependencyInstall(null);
+        }}
+      />
+
+      {mode === "installed" && (
       <SectionCard title="Installed Extensions" description="Manage extensions loaded into this instance.">
         {/* Search and filter bar */}
         <div className="flex items-center gap-3 mb-4">
@@ -5371,7 +6506,7 @@ function ExtensionsPanel() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          upgradeMut.mutate({ id: ext.id, version: update.latestVersion });
+                          upgradeMut.mutate({ id: ext.id, version: update.latestVersion, name: ext.name });
                         }}
                         disabled={upgradeMut.isPending}
                         className="px-3 py-1 text-xs rounded font-medium bg-yellow-600 text-white hover:bg-yellow-500 disabled:opacity-50 flex items-center gap-1"
@@ -5396,6 +6531,25 @@ function ExtensionsPanel() {
                         {ext.enabled ? "Enabled" : "Disabled"}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        uninstallMut.reset();
+                        setExtensionToUninstall({
+                          id: ext.id,
+                          name: ext.name,
+                          source: ext.source,
+                          dependents: ext.source === "native" ? getNativeDependents(ext.id) : [],
+                        });
+                      }}
+                      disabled={uninstallMut.isPending}
+                      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:opacity-50"
+                      title="Uninstall extension"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Uninstall
+                    </button>
                     <span className="text-secondary text-xs">{isExpanded ? "▲" : "▼"}</span>
                   </div>
                 </div>
@@ -5418,7 +6572,7 @@ function ExtensionsPanel() {
                           Update available: v{ext.version} to v{update.latestVersion}
                         </div>
                         <button
-                          onClick={() => upgradeMut.mutate({ id: ext.id, version: update.latestVersion })}
+                          onClick={() => upgradeMut.mutate({ id: ext.id, version: update.latestVersion, name: ext.name })}
                           disabled={upgradeMut.isPending}
                           className="px-3 py-1 text-xs rounded font-medium bg-yellow-600 text-white hover:bg-yellow-500 disabled:opacity-50 flex items-center gap-1"
                         >
@@ -5506,9 +6660,10 @@ function ExtensionsPanel() {
           })}
         </div>
       </SectionCard>
+      )}
 
       {/* Extension-contributed settings panels */}
-      {settingsPanels.length > 0 &&
+      {mode === "installed" && settingsPanels.length > 0 &&
         settingsPanels.map((panel) => {
           const Component = resolveComponent(panel.componentName);
           if (!Component) return null;
@@ -5524,7 +6679,7 @@ function ExtensionsPanel() {
         })}
 
       {/* Find and Install Extensions */}
-      <FindAndInstallExtensions />
+      {mode === "registry" && <FindAndInstallExtensions />}
     </>
   );
 }
@@ -5537,6 +6692,8 @@ function FindAndInstallExtensions() {
   const [selectedExtension, setSelectedExtension] = useState<import("../api/types").RegistryExtensionDetail | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string>("");
   const [pendingDeps, setPendingDeps] = useState<import("../api/types").DependencyInfo[] | null>(null);
+  const [pendingDependencyInstall, setPendingDependencyInstall] = useState<PendingExtensionInstall | null>(null);
+  const [extensionToUninstall, setExtensionToUninstall] = useState<PendingExtensionUninstall | null>(null);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [showUrlInstallForm, setShowUrlInstallForm] = useState(false);
   const [urlInstallUrl, setUrlInstallUrl] = useState("");
@@ -5567,15 +6724,22 @@ function FindAndInstallExtensions() {
   });
 
   const installMut = useMutation({
-    mutationFn: (args: { extensionId: string; version: string; installDependencies?: boolean }) =>
+    mutationFn: (args: { extensionId: string; version: string; name?: string; installDependencies?: boolean }) =>
       import("../api/client").then(m => m.extensions.registryInstall(args.extensionId, args.version, args.installDependencies)),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       setInstallError(null);
-      if (data.requiresDependencies && data.missingDependencies) {
+      if (data.requiresDependencies && data.missingDependencies?.length) {
         setPendingDeps(data.missingDependencies);
+        setPendingDependencyInstall({
+          extensionId: variables.extensionId,
+          version: variables.version,
+          name: data.extension?.name ?? variables.name,
+          dependencies: data.missingDependencies,
+        });
         return;
       }
       setPendingDeps(null);
+      setPendingDependencyInstall(null);
       queryClient.invalidateQueries({ queryKey: ["extensions-list"] });
       queryClient.invalidateQueries({ queryKey: ["registry-search"] });
       queryClient.invalidateQueries({ queryKey: ["registry-updates"] });
@@ -5600,16 +6764,25 @@ function FindAndInstallExtensions() {
   });
 
   const uninstallMut = useMutation({
-    mutationFn: (extensionId: string) =>
-      import("../api/client").then(m => m.extensions.registryUninstall(extensionId)),
-    onSuccess: () => {
+    mutationFn: (target: PendingExtensionUninstall) =>
+      import("../api/client").then(m => m.extensions.registryUninstall(target.id, target.confirmedDependents || target.dependents.length > 0)),
+    onSuccess: (data, variables) => {
+      if (data.requiresDependents && data.dependents?.length) {
+        setExtensionToUninstall({ ...variables, dependents: data.dependents });
+        return;
+      }
+
+      setExtensionToUninstall(null);
       queryClient.invalidateQueries({ queryKey: ["extensions-list"] });
       queryClient.invalidateQueries({ queryKey: ["registry-search"] });
     },
+    onError: (error) => setInstallError(error instanceof Error ? error.message : "Extension uninstall failed."),
   });
 
   const installedMap = new Map((installedList ?? []).map(e => [e.id, e]));
   const installedIds = new Set(installedMap.keys());
+  const getInstalledDependents = (extensionId: string): ExtensionDependencyImpact[] =>
+    getTransitiveExtensionDependents(installedList ?? [], extensionId).map(toExtensionDependencyImpact);
   const updateMap = new Map((updates ?? []).map(u => [u.extensionId, u]));
   const registryItems = searchResults?.items ?? [];
 
@@ -5634,7 +6807,7 @@ function FindAndInstallExtensions() {
               <div key={u.extensionId} className="flex items-center justify-between text-xs">
                 <span className="text-secondary">{u.extensionId}: v{u.currentVersion} → v{u.latestVersion}</span>
                 <button
-                  onClick={() => installMut.mutate({ extensionId: u.extensionId, version: u.latestVersion, installDependencies: true })}
+                  onClick={() => installMut.mutate({ extensionId: u.extensionId, version: u.latestVersion, name: u.extensionId })}
                   disabled={installMut.isPending}
                   className="px-2 py-0.5 bg-yellow-600 hover:bg-yellow-500 text-white rounded text-xs disabled:opacity-50"
                 >
@@ -5664,6 +6837,57 @@ function FindAndInstallExtensions() {
         onCancel={() => {
           if (urlInstallMut.isPending) return;
           setConfirmUrlInstall(false);
+          setInstallError(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingDependencyInstall != null}
+        title="Install Dependencies"
+        message={pendingDependencyInstall ? formatDependencyInstallMessage(pendingDependencyInstall) : "Install required dependencies?"}
+        confirmLabel="Install All"
+        destructive={false}
+        isPending={installMut.isPending}
+        errorMessage={installError}
+        onConfirm={() => {
+          if (pendingDependencyInstall) {
+            installMut.mutate({
+              extensionId: pendingDependencyInstall.extensionId,
+              version: pendingDependencyInstall.version,
+              name: pendingDependencyInstall.name,
+              installDependencies: true,
+            });
+          }
+        }}
+        onCancel={() => {
+          if (installMut.isPending) return;
+          installMut.reset();
+          setPendingDeps(null);
+          setPendingDependencyInstall(null);
+          setInstallError(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={extensionToUninstall != null}
+        title="Uninstall Extension"
+        message={extensionToUninstall ? formatDependentUninstallMessage(extensionToUninstall) : "Uninstall this extension?"}
+        confirmLabel={extensionToUninstall?.dependents.length ? "Uninstall All" : "Uninstall"}
+        destructive
+        isPending={uninstallMut.isPending}
+        errorMessage={installError}
+        onConfirm={() => {
+          if (extensionToUninstall) {
+            uninstallMut.mutate({
+              ...extensionToUninstall,
+              confirmedDependents: extensionToUninstall.dependents.length > 0,
+            });
+          }
+        }}
+        onCancel={() => {
+          if (uninstallMut.isPending) return;
+          uninstallMut.reset();
+          setExtensionToUninstall(null);
           setInstallError(null);
         }}
       />
@@ -5866,7 +7090,12 @@ function FindAndInstallExtensions() {
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() => installMut.mutate({ extensionId: selectedExtension.id, version: selectedVersion || selectedExtension.version, installDependencies: true })}
+                  onClick={() => installMut.mutate({
+                    extensionId: selectedExtension.id,
+                    version: selectedVersion || selectedExtension.version,
+                    name: selectedExtension.name,
+                    installDependencies: true,
+                  })}
                   disabled={installMut.isPending || pendingDeps.some(d => !d.available)}
                   className="px-3 py-1 text-xs bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50"
                 >
@@ -5894,7 +7123,7 @@ function FindAndInstallExtensions() {
           )}
           <div className="flex gap-2">
             <button
-              onClick={() => installMut.mutate({ extensionId: selectedExtension.id, version: selectedRequestedVersion, installDependencies: false })}
+              onClick={() => installMut.mutate({ extensionId: selectedExtension.id, version: selectedRequestedVersion, name: selectedExtension.name })}
               disabled={installMut.isPending}
               className="px-4 py-1.5 text-sm bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 flex items-center gap-1.5"
             >
@@ -5905,7 +7134,12 @@ function FindAndInstallExtensions() {
             </button>
             {selectedInstalledVersion ? (
               <button
-                onClick={() => uninstallMut.mutate(selectedExtension.id)}
+                onClick={() => setExtensionToUninstall({
+                  id: selectedExtension.id,
+                  name: selectedExtension.name,
+                  source: "native",
+                  dependents: getInstalledDependents(selectedExtension.id),
+                })}
                 disabled={uninstallMut.isPending}
                 className="px-4 py-1.5 text-sm bg-card border border-border text-muted hover:text-red-400 hover:border-red-500 rounded disabled:opacity-50 flex items-center gap-1.5"
               >
@@ -5968,7 +7202,7 @@ function FindAndInstallExtensions() {
                 <div className="flex gap-2 ml-3 flex-shrink-0">
                   {!isInstalled ? (
                     <button
-                      onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: ext.version, installDependencies: true }); }}
+                      onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: ext.version, name: ext.name }); }}
                       disabled={installMut.isPending}
                       className="px-3 py-1.5 text-xs bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 flex items-center gap-1"
                     >
@@ -5977,7 +7211,7 @@ function FindAndInstallExtensions() {
                     </button>
                   ) : update ? (
                     <button
-                      onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: update.latestVersion, installDependencies: true }); }}
+                      onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: update.latestVersion, name: ext.name }); }}
                       disabled={installMut.isPending}
                       className="px-3 py-1.5 text-xs bg-yellow-600 hover:bg-yellow-500 text-white rounded disabled:opacity-50 flex items-center gap-1"
                     >
@@ -5986,7 +7220,15 @@ function FindAndInstallExtensions() {
                     </button>
                   ) : (
                     <button
-                      onClick={(e) => { e.stopPropagation(); uninstallMut.mutate(ext.id); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExtensionToUninstall({
+                          id: ext.id,
+                          name: ext.name,
+                          source: "native",
+                          dependents: getInstalledDependents(ext.id),
+                        });
+                      }}
                       disabled={uninstallMut.isPending}
                       className="px-3 py-1.5 text-xs bg-card border border-border text-muted hover:text-red-400 hover:border-red-500 rounded disabled:opacity-50 flex items-center gap-1"
                     >

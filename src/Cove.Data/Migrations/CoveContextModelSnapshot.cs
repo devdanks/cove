@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
+using Pgvector;
 
 #nullable disable
 
@@ -22,6 +23,8 @@ namespace Cove.Data.Migrations
             modelBuilder
                 .HasAnnotation("ProductVersion", "10.0.5")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
+
+            modelBuilder.HasPostgresExtension("vector");
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
@@ -1208,9 +1211,9 @@ namespace Cove.Data.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("Vector")
+                    b.Property<Vector>("Vector")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("vector");
 
                     b.HasKey("Id");
 

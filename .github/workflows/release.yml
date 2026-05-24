@@ -76,6 +76,7 @@ jobs:
           -r ${{ matrix.rid }}
           --self-contained
           -p:PublishSingleFile=true
+          -p:SkipPgvectorPayloadStage=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=none
           -p:DebugSymbols=false
@@ -92,6 +93,10 @@ jobs:
           -p:DebugType=none
           -p:DebugSymbols=false
           -o publish/
+
+      - name: Stage bundled pgvector payload
+        shell: pwsh
+        run: ./scripts/stage-pgvector-payload.ps1 -Rid ${{ matrix.rid }} -OutputDir publish -PayloadRepository ${{ github.repository }}
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

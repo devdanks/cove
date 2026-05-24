@@ -7,7 +7,7 @@ namespace Cove.Sdk;
 /// Convenient base class for Cove extensions that provides sensible defaults
 /// and reduces boilerplate. Override only the methods you need.
 /// </summary>
-public abstract class CoveExtensionBase : IExtension
+public abstract class CoveExtensionBase : IUIExtension
 {
     public abstract string Id { get; }
     public abstract string Name { get; }
@@ -24,6 +24,15 @@ public abstract class CoveExtensionBase : IExtension
     /// Override to register services. Base implementation does nothing.
     /// </summary>
     public virtual void ConfigureServices(IServiceCollection services, ExtensionContext context) { }
+
+    /// <summary>
+    /// Override to contribute UI pages, settings tabs, settings panels, or other frontend manifest entries.
+    /// Default implementation returns an empty manifest.
+    /// </summary>
+    public virtual UIManifest GetUIManifest() => new();
+
+    /// <summary>Create a UIManifestBuilder pre-configured with this extension's ID.</summary>
+    protected UIManifestBuilder ManifestBuilder() => new(Id);
 
     /// <summary>
     /// Override to perform async initialization after DI container is built.

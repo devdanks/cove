@@ -1090,8 +1090,46 @@ public record AiDataPurgeResultDto(IReadOnlyDictionary<string, int> RemovedCount
 
 public record PaginatedResponse<T>(IReadOnlyList<T> Items, int TotalCount, int Page, int PerPage);
 
-public record StatsDto(int SceneCount, int ImageCount, int GalleryCount, int PerformerCount,
-    int StudioCount, int TagCount, int GroupCount, long TotalFileSize, double TotalPlayDuration);
+public record StatsDto(
+    int SceneCount,
+    int ImageCount,
+    int GalleryCount,
+    int PerformerCount,
+    int StudioCount,
+    int TagCount,
+    int GroupCount,
+    int AudioCount,
+    int TextCount,
+    int SegmentCount,
+    int FaceCount,
+    int FaceAppearanceCount,
+    int EmbeddingCount,
+    int DetectionCount,
+    int TagApplicationCount,
+    int AiRunCount,
+    long SceneFileSize,
+    long ImageFileSize,
+    long AudioFileSize,
+    long TextFileSize,
+    long TotalFileSize,
+    double SceneDuration,
+    double AudioDuration,
+    double TotalPlayDuration,
+    long ScenePlayCount,
+    long AudioPlayCount,
+    long TextReadCount,
+    long ImageViewCount,
+    long SceneCompleteCount,
+    long AudioCompleteCount,
+    long TextCompleteCount,
+    long ImageCompleteCount,
+    double SceneConsumedSeconds,
+    double AudioConsumedSeconds,
+    double TextConsumedSeconds,
+    double ImageConsumedSeconds,
+    long TotalLikes,
+    long TotalDerivedLikes,
+    long TotalFavorites);
 
 // ===== AUTH DTOs =====
 public record LoginRequest(string Username, string Password);
@@ -1296,7 +1334,6 @@ public record SecurityConfigDto
 public record ScrapingConfigDto
 {
     public List<string> ScraperDirectories { get; init; } = [];
-    public List<PackageSourceDto> ScraperPackageSources { get; init; } = [];
     public List<MetadataServerDto> MetadataServers { get; init; } = [];
     public List<ScraperPreferenceDto> ScraperPreferences { get; init; } = [];
     public IdentifyDefaultsConfigDto IdentifyDefaults { get; init; } = new();
@@ -1315,6 +1352,7 @@ public record ScrapeApplyDefaultsConfigDto
 
 public record ScraperPreferenceDto
 {
+    public string EntityType { get; init; } = "";
     public string Site { get; init; } = "";
     public string ScraperId { get; init; } = "";
 }
@@ -1333,12 +1371,6 @@ public record MetadataBatchDefaultsConfigDto
     public bool RefreshAlreadyTagged { get; init; }
     public bool CreateParentStudios { get; init; } = true;
     public List<string> ExcludeFields { get; init; } = [];
-}
-
-public record PackageSourceDto
-{
-    public string Name { get; init; } = "";
-    public string Url { get; init; } = "";
 }
 
 public record MetadataServerDto
@@ -1522,7 +1554,8 @@ public record ScraperSummaryDto(
     string EntityType,
     List<string> SupportedScrapes,
     List<string> Urls,
-    string SourcePath
+    string SourcePath,
+    List<string>? PreferenceSites = null
 );
 
 public record CreateScrapeAttemptDto(
@@ -1683,6 +1716,7 @@ public record DownloaderBatchStartRequestDto
 {
     public List<DownloaderBatchItemDto> Items { get; init; } = [];
     public DownloaderBatchFollowUpDto FollowUp { get; init; } = new();
+    public bool PreflightBeforeQueue { get; init; } = true;
 }
 
 // ===== PLAYBACK TRACKING DTOs =====

@@ -19,8 +19,11 @@ done
 su - postgres -c "psql -p 5432 -tc \"SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'\" | grep -q 1 || psql -p 5432 -c \"CREATE ROLE $DB_USER WITH LOGIN PASSWORD 'cove';\""
 su - postgres -c "psql -p 5432 -tc \"SELECT 1 FROM pg_database WHERE datname='$DB_NAME'\" | grep -q 1 || psql -p 5432 -c \"CREATE DATABASE $DB_NAME OWNER $DB_USER;\""
 
-# Enable pgvector extension
-su - postgres -c "psql -p 5432 -d $DB_NAME -c 'CREATE EXTENSION IF NOT EXISTS vector;'" 2>/dev/null || true
+# Enable pgvector extension. The all-in-one image must already contain the pgvector package.
+if ! su - postgres -c "psql -p 5432 -d $DB_NAME -c 'CREATE EXTENSION IF NOT EXISTS vector;'"; then
+    echo "[cove] ERROR: pgvector is not available in the bundled PostgreSQL image." >&2
+    exit 1
+fi
 
 echo "[cove] Starting Cove..."
 cd /opt/cove

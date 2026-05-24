@@ -9,6 +9,11 @@
          web assets pipeline spends most of the build scanning those JS chunks for Razor
          collocated modules Cove.Api does not use. Release/publish keeps the SDK pipeline. -->
     <StaticWebAssetsEnabled Condition="'$(Configuration)' == 'Debug'">false</StaticWebAssetsEnabled>
+    <PgvectorStagingScript>$(MSBuildProjectDirectory)\..\..\scripts\stage-pgvector-payload.ps1</PgvectorStagingScript>
+    <PgvectorShellExecutable Condition="'$(OS)' == 'Windows_NT'">powershell</PgvectorShellExecutable>
+    <PgvectorShellArguments Condition="'$(OS)' == 'Windows_NT'">-NoLogo -NoProfile -ExecutionPolicy Bypass -File</PgvectorShellArguments>
+    <PgvectorShellExecutable Condition="'$(OS)' != 'Windows_NT'">pwsh</PgvectorShellExecutable>
+    <PgvectorShellArguments Condition="'$(OS)' != 'Windows_NT'">-NoLogo -NoProfile -File</PgvectorShellArguments>
   </PropertyGroup>
 
   <!-- Publish as a self-contained single-file executable with wwwroot embedded -->
@@ -30,6 +35,14 @@
       <WwwrootFiles Include="wwwroot\**" />
     </ItemGroup>
     <Copy SourceFiles="@(WwwrootFiles)" DestinationFolder="$(OutputPath)wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="StageBundledPgvectorPayload"
+          AfterTargets="Publish"
+          Condition="'$(SkipPgvectorPayloadStage)' != 'true' and '$(RuntimeIdentifier)' != '' and Exists('$(PgvectorStagingScript)')">
+    <Message Text="Staging bundled pgvector payload for $(RuntimeIdentifier) into $(PublishDir)" Importance="high" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\.."
+          Command="&quot;$(PgvectorShellExecutable)&quot; $(PgvectorShellArguments) &quot;$(PgvectorStagingScript)&quot; -Rid &quot;$(RuntimeIdentifier)&quot; -OutputDir &quot;$(PublishDir)&quot;" />
   </Target>
 
   <ItemGroup>

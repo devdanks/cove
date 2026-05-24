@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -120,8 +121,8 @@ public class ThumbnailService(
     private static readonly TimeSpan ImageThumbnailFfmpegTimeout = TimeSpan.FromSeconds(30);
 
     // Preview generation defaults (matching original Cove)
-    private const int PreviewSegments = 12;
-    private const double PreviewSegmentDuration = 0.75;
+    private const int DefaultPreviewSegments = 12;
+    private const double DefaultPreviewSegmentDuration = 0.75;
     private const int PreviewWidth = 640;
     private const string PreviewPreset = "fast";
     private const int PreviewCrf = 21;
@@ -1106,38 +1107,50 @@ public class ThumbnailService(
         await sem.WaitAsync(ct);
         try
         {
-            var segmentCount = PreviewSegments;
-            var segmentDuration = PreviewSegmentDuration;
+            var segmentCount = Math.Clamp(config.Ui.PreviewSegments <= 0 ? DefaultPreviewSegments : config.Ui.PreviewSegments, 1, 100);
+            var segmentDuration = Math.Clamp(config.Ui.PreviewSegmentDuration <= 0 ? DefaultPreviewSegmentDuration : config.Ui.PreviewSegmentDuration, 0.1, 30d);
+            var preset = NormalizePreviewPreset(config.PreviewPreset);
+            var audioArg = string.Equals(config.PreviewAudio, "true", StringComparison.OrdinalIgnoreCase) ? string.Empty : "-an";
+            var excludeStart = ParsePreviewExclusion(config.Ui.PreviewExcludeStart, duration);
+            var excludeEnd = ParsePreviewExclusion(config.Ui.PreviewExcludeEnd, duration);
+            var usableStart = Math.Min(excludeStart, Math.Max(0, duration - 0.1));
+            var usableEnd = Math.Max(usableStart, duration - excludeEnd);
+            var usableDuration = usableEnd - usableStart;
+            if (usableDuration <= 0)
+                return;
+
             var decodeArgs = GetFfmpegDecodeArgs();
 
             // If video is too short for all segments, use a single full-video preview
-            if (duration < segmentDuration * segmentCount)
+            if (usableDuration < segmentDuration * segmentCount)
             {
+                var seekArgs = usableStart > 0 ? $"-ss {usableStart.ToString("F2", CultureInfo.InvariantCulture)}" : string.Empty;
+                var durationArgs = usableDuration < duration ? $"-t {usableDuration.ToString("F2", CultureInfo.InvariantCulture)}" : string.Empty;
                 await RunPreviewEncodeAsync(
                     ffmpegPath,
-                    $"{decodeArgs} -v error -y -i \"{filePath}\" -max_muxing_queue_size 1024 {{0}} -vf \"scale={PreviewWidth}:-2\" -pix_fmt yuv420p -profile:v high -level 4.2 -preset {PreviewPreset} -crf {PreviewCrf} -an \"{previewPath}\"",
+                    $"{decodeArgs} -v error -y {seekArgs} -i \"{filePath}\" {durationArgs} -max_muxing_queue_size 1024 {{0}} -vf \"scale={PreviewWidth}:-2\" -pix_fmt yuv420p -profile:v high -level 4.2 -preset {preset} -crf {PreviewCrf} {audioArg} \"{previewPath}\"",
                     previewPath,
                     TimeSpan.FromMinutes(5),
                     ct);
                 return;
             }
 
-            var interval = duration / segmentCount;
+            var interval = usableDuration / segmentCount;
             var chunkFiles = new List<string>();
 
             for (int i = 0; i < segmentCount; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                var seekTime = interval * i + interval * 0.5;
-                if (seekTime >= duration) seekTime = duration - segmentDuration;
-                if (seekTime < 0) seekTime = 0;
+                var seekTime = usableStart + interval * i + interval * 0.5;
+                if (seekTime + segmentDuration > usableEnd) seekTime = usableEnd - segmentDuration;
+                if (seekTime < usableStart) seekTime = usableStart;
 
                 var chunkPath = Path.Combine(tmpDir, $"chunk_{i:D3}.mp4");
                 chunkFiles.Add(chunkPath);
 
                 await RunPreviewEncodeAsync(
                     ffmpegPath,
-                    $"{decodeArgs} -v error -y -ss {seekTime:F2} -i \"{filePath}\" -t {segmentDuration:F2} -max_muxing_queue_size 1024 {{0}} -vf \"scale={PreviewWidth}:-2\" -pix_fmt yuv420p -profile:v high -level 4.2 -preset {PreviewPreset} -crf {PreviewCrf} -an \"{chunkPath}\"",
+                    $"{decodeArgs} -v error -y -ss {seekTime.ToString("F2", CultureInfo.InvariantCulture)} -i \"{filePath}\" -t {segmentDuration.ToString("F2", CultureInfo.InvariantCulture)} -max_muxing_queue_size 1024 {{0}} -vf \"scale={PreviewWidth}:-2\" -pix_fmt yuv420p -profile:v high -level 4.2 -preset {preset} -crf {PreviewCrf} {audioArg} \"{chunkPath}\"",
                     chunkPath,
                     TimeSpan.FromSeconds(60),
                     ct);
@@ -1175,6 +1188,37 @@ public class ThumbnailService(
         var args = string.Format(System.Globalization.CultureInfo.InvariantCulture, argsTemplate, $"-c:v {encoder}");
         await RunFfmpegAsync(ffmpegPath, args, timeout, ct);
     }
+
+    private static double ParsePreviewExclusion(string? value, double duration)
+    {
+        if (string.IsNullOrWhiteSpace(value) || duration <= 0)
+            return 0d;
+
+        var trimmed = value.Trim();
+        if (trimmed.EndsWith('%'))
+        {
+            var percentText = trimmed[..^1].Trim();
+            if (double.TryParse(percentText, NumberStyles.Float, CultureInfo.InvariantCulture, out var percent))
+                return Math.Clamp(duration * (percent / 100d), 0d, duration);
+        }
+
+        return double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
+            ? Math.Clamp(seconds, 0d, duration)
+            : 0d;
+    }
+
+    private static string NormalizePreviewPreset(string? preset)
+        => preset?.Trim().ToLowerInvariant() switch
+        {
+            "ultrafast" => "ultrafast",
+            "veryfast" => "veryfast",
+            "fast" => "fast",
+            "medium" => "medium",
+            "slow" => "slow",
+            "slower" => "slower",
+            "veryslow" => "veryslow",
+            _ => PreviewPreset,
+        };
 
     /// <summary>Generate a sprite sheet (JPEG grid) and VTT timeline file for a scene.
     /// Uses in-process FFmpeg decoding with seek-based extraction — 5-17× faster than

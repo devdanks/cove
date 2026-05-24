@@ -26,6 +26,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const [description, setDescription] = useState(group.description ?? "");
   const [urls, setUrls] = useState(group.urls.length > 0 ? group.urls : [""]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(group.tags.map((t) => t.id));
+  const [selectedParentGroupIds, setSelectedParentGroupIds] = useState<number[]>([]);
   const [kind, setKind] = useState<"static" | "dynamic">(group.kind ?? "static");
   const [querySourceKey, setQuerySourceKey] = useState(group.querySourceKey ?? FILTER_DYNAMIC_SOURCE_KEY);
   const [queryJson, setQueryJson] = useState(group.queryJson ?? defaultDynamicGroupFilterQueryJson());
@@ -36,6 +37,11 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const { data: dynamicSources = [] } = useQuery({
     queryKey: ["group-dynamic-sources"],
     queryFn: () => groups.dynamicSources(),
+    enabled: open,
+  });
+  const { data: containingGroups } = useQuery({
+    queryKey: ["group-containinggroups", group.id],
+    queryFn: () => groups.containingGroups(group.id),
     enabled: open,
   });
 
@@ -55,11 +61,39 @@ export function GroupEditModal({ group, open, onClose }: Props) {
     setShowInSceneLists(group.showInSceneLists ?? false);
   }, [dynamicSources, group]);
 
+  useEffect(() => {
+    if (!open || !containingGroups) return;
+    setSelectedParentGroupIds(containingGroups.map((parent) => parent.id));
+  }, [containingGroups, open]);
+
   const mutation = useMutation({
-    mutationFn: (data: GroupUpdate) => groups.update(group.id, data),
+    mutationFn: async (data: GroupUpdate) => {
+      const originalParentIds = new Set((containingGroups ?? []).map((parent) => parent.id));
+      const nextParentIds = new Set(selectedParentGroupIds);
+      const updated = await groups.update(group.id, data);
+
+      for (const parentId of nextParentIds) {
+        if (!originalParentIds.has(parentId)) {
+          await groups.addSubGroup(parentId, group.id);
+        }
+      }
+
+      for (const parentId of originalParentIds) {
+        if (!nextParentIds.has(parentId)) {
+          await groups.removeSubGroup(parentId, group.id);
+        }
+      }
+
+      return updated;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["group", group.id] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["group-containinggroups", group.id] });
+      const changedParentIds = new Set([...(containingGroups ?? []).map((parent) => parent.id), ...selectedParentGroupIds]);
+      for (const parentId of changedParentIds) {
+        queryClient.invalidateQueries({ queryKey: ["group-subgroups", parentId] });
+      }
       onClose();
     },
   });
@@ -166,6 +200,10 @@ export function GroupEditModal({ group, open, onClose }: Props) {
 
       <Field label="URLs" fieldProvenance={group.fieldProvenance} fieldKey="urls">
         <StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" />
+      </Field>
+
+      <Field label="Parent Groups" fieldProvenance={group.fieldProvenance} fieldKey="containingGroups">
+        <EntityReferenceMultiSelector entityType="group" values={selectedParentGroupIds} onChange={setSelectedParentGroupIds} placeholder="Search parent groups..." excludeIds={[group.id]} />
       </Field>
 
       {/* Tags */}

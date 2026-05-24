@@ -243,6 +243,11 @@ public sealed class TokenService : ITokenService
                 UserAgent = userAgent,
             };
         }
+        catch (SecurityTokenExpiredException)
+        {
+            _log.LogTrace("Bearer token rejected because it is expired");
+            return null;
+        }
         catch (SecurityTokenMalformedException ex)
         {
             _log.LogDebug(ex, "Bearer token rejected because it is malformed");

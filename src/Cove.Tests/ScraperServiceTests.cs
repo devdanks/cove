@@ -56,6 +56,18 @@ public class ScraperServiceTests
     }
 
     [Fact]
+    public void FindScrapersForUrl_MatchesExtensionPreferenceSites()
+    {
+        var service = CreateService(scraperProvider: new FakeDynamicScraperProvider());
+
+        var matches = service.FindScrapersForUrl("https://www.dynamic.example.com/watch/123", "scene");
+
+        var match = Assert.Single(matches);
+        Assert.Equal("fake.dynamic/scene", match.Id);
+        Assert.Equal(["dynamic.example.com"], match.PreferenceSites);
+    }
+
+    [Fact]
     public async Task ScrapeUrlAutoAsync_GenericTextPage_ExtractsMetadataAndBracketTags()
     {
         var service = CreateService(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -289,5 +301,31 @@ public class ScraperServiceTests
                 Title = "Specific Title",
                 TagNames = ["Fetish"],
             });
+    }
+
+    private sealed class FakeDynamicScraperProvider : IScraperProvider
+    {
+        private static readonly ScraperDescriptor Descriptor = new(
+            "fake.dynamic/scene",
+            "Fake Dynamic Scene",
+            ScraperEntity.Scene,
+            ScraperCapabilities.ByUrl,
+            [],
+            ScraperRiskLevel.NetworkOnly,
+            ["www.dynamic.example.com"]);
+
+        public string Id => "fake.dynamic";
+        public string Name => "Fake Dynamic";
+        public string Version => "1.0.0";
+        public string? Description => null;
+        public string? Author => null;
+        public string? Url => null;
+        public string? IconUrl => null;
+
+        public void ConfigureServices(IServiceCollection services, ExtensionContext context)
+        {
+        }
+
+        public IReadOnlyList<ScraperDescriptor> GetScrapers() => [Descriptor];
     }
 }

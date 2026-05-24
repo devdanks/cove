@@ -11,6 +11,7 @@ export type SceneScrapeScene = Pick<
 >;
 
 export interface ScraperPreference {
+  entityType?: string;
   site: string;
   scraperId: string;
 }
@@ -564,7 +565,12 @@ function getConfiguredScraperId(scrapers: ScraperSummary[], sceneUrl: string | u
     return "";
   }
 
-  const configuredScraperId = scraperPreferences.find((preference) => preference.site === site)?.scraperId;
+  const entityType = scrapers[0]?.entityType?.toLowerCase() ?? "";
+  const configuredScraperId = scraperPreferences.find((preference) =>
+    preference.site === site
+    && (preference.entityType?.toLowerCase() ?? "") === entityType
+  )?.scraperId
+    ?? scraperPreferences.find((preference) => preference.site === site && !preference.entityType)?.scraperId;
   return configuredScraperId && scrapers.some((scraper) => scraper.id === configuredScraperId) ? configuredScraperId : "";
 }
 

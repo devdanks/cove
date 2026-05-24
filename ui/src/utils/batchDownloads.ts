@@ -190,6 +190,7 @@ export async function queueImportedUrlDownloads(
   const response = await system.startBatchDownload({
     items: batchItems,
     followUp: buildBatchFollowUp(entity, normalizedOptions),
+    preflightBeforeQueue: false,
   });
 
   return { queuedCount: response.queuedCount, issues: [...issues, ...normalizeResponseIssues(response.issues)], jobId: response.jobId ?? undefined };

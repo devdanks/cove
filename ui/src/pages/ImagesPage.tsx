@@ -1,12 +1,12 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { aiVisual, entityEngagement, images } from "../api/client";
+import { entityEngagement, images } from "../api/client";
 import type { DeleteEntityOptions, EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
-import { useAiVisualAvailability } from "../hooks/useAiVisualAvailability";
+import { useVisualSimilarityApi } from "../hooks/useVisualSimilarityApi";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { ImageIcon, Trash2, Loader2, Edit, FolderOpen, Play, Search, ThumbsUp, Eye, Heart } from "lucide-react";
 import { IMAGE_CRITERIA } from "../components/FilterDialog";
@@ -70,7 +70,8 @@ export function ImagesPage({ onNavigate }: Props) {
       displayMode: "grid" as DisplayMode,
     };
   }, []);
-  const aiVisualAvailable = useAiVisualAvailability();
+  const visualSimilarity = useVisualSimilarityApi();
+  const visualSimilarityAvailable = visualSimilarity != null;
   const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode, searchMode, setSearchMode } = useListUrlState({
     resetKey: "images",
     defaultFilter: defaultState.filter,
@@ -78,7 +79,7 @@ export function ImagesPage({ onNavigate }: Props) {
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "wall", "tagger", "feed"] as const,
     defaultSearchMode: "text",
-    allowedSearchModes: aiVisualAvailable ? ["text", "visual"] : ["text"],
+    allowedSearchModes: visualSimilarityAvailable ? ["text", "visual"] : ["text"],
     allowInfinitePageSize: true,
   });
   const [showCreate, setShowCreate] = useState(false);
@@ -99,27 +100,27 @@ export function ImagesPage({ onNavigate }: Props) {
   const canEngageImage = canReadEntity("image", hasPermission) && (user?.kind === "user" || user?.kind === "system");
 
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const visualSearchActive = aiVisualAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
+  const visualSearchActive = visualSimilarityAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
   const infinitePageSize = filter.perPage === 0 || displayMode === "feed";
   const defaultInfiniteChunkSize = defaultState.filter.perPage && defaultState.filter.perPage > 0 ? defaultState.filter.perPage : 40;
   const infiniteChunkSize = displayMode === "feed" ? 8 : defaultInfiniteChunkSize;
-  const searchModeOptions = useMemo(() => aiVisualAvailable ? SEARCH_MODE_OPTIONS : SEARCH_MODE_OPTIONS.filter((mode) => mode.value === "text"), [aiVisualAvailable]);
+  const searchModeOptions = useMemo(() => visualSimilarityAvailable ? SEARCH_MODE_OPTIONS : SEARCH_MODE_OPTIONS.filter((mode) => mode.value === "text"), [visualSimilarityAvailable]);
   const sortOptions = useMemo(
-    () => aiVisualAvailable && searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SORT_OPTIONS] : SORT_OPTIONS,
-    [aiVisualAvailable, searchMode],
+    () => visualSimilarityAvailable && searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SORT_OPTIONS] : SORT_OPTIONS,
+    [visualSimilarityAvailable, searchMode],
   );
 
   useEffect(() => {
-    if (!aiVisualAvailable && searchMode === "visual") {
+    if (!visualSimilarityAvailable && searchMode === "visual") {
       setSearchMode("text");
       if (filter.sort === "visual_match") {
         setFilter({ ...filter, sort: defaultState.filter.sort, direction: defaultState.filter.direction ?? "desc", page: 1 });
       }
     }
-  }, [aiVisualAvailable, defaultState.filter.direction, defaultState.filter.sort, filter, searchMode, setFilter, setSearchMode]);
+  }, [defaultState.filter.direction, defaultState.filter.sort, filter, searchMode, setFilter, setSearchMode, visualSimilarityAvailable]);
 
   const handleSearchModeChange = useCallback((mode: string) => {
-    if (mode === "visual" && !aiVisualAvailable) {
+    if (mode === "visual" && !visualSimilarityAvailable) {
       return;
     }
 
@@ -141,7 +142,7 @@ export function ImagesPage({ onNavigate }: Props) {
     }
 
     setFilter({ ...filter, page: 1 });
-  }, [aiVisualAvailable, defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
+  }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode, visualSimilarityAvailable]);
 
   const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
     setDisplayMode(mode);
@@ -157,7 +158,7 @@ export function ImagesPage({ onNavigate }: Props) {
     chunkSize: infiniteChunkSize,
     queryPage: (nextFilter) => {
       if (visualSearchActive) {
-        return aiVisual.searchImages({
+        return visualSimilarity.searchImages({
           findFilter: nextFilter,
           objectFilter: hasObjectFilter ? objectFilter as ImageFilterCriteria : undefined,
         });
@@ -262,7 +263,7 @@ export function ImagesPage({ onNavigate }: Props) {
       isLoading={loading}
       searchMode={searchMode}
       searchModes={searchModeOptions}
-      searchPlaceholder={aiVisualAvailable && searchMode === "visual" ? "Search visuals..." : "Search images, tags, performers..."}
+      searchPlaceholder={visualSimilarityAvailable && searchMode === "visual" ? "Search visuals..." : "Search images, tags, performers..."}
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}

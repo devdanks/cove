@@ -226,7 +226,7 @@ public sealed class BootstrapAuthService : IHostedService
         EnsurePermissions(db, owner, ["*"]);
         EnsurePermissions(db, admin, [Permissions.ApiTokensWrite, Permissions.ShareLinksWrite, Permissions.AiDataRead, Permissions.AiDataClear]);
         EnsurePermissions(db, admin, livePermissions
-            .Where(IsDefaultAdminExtensionPermission)
+            .Where(definition => definition.GrantToAdminsByDefault)
             .Select(permission => permission.Key)
             .ToArray());
 
@@ -254,10 +254,6 @@ public sealed class BootstrapAuthService : IHostedService
             have.Add(key);
         }
     }
-
-    private static bool IsDefaultAdminExtensionPermission(PermissionDefinition definition)
-        => definition.Source.StartsWith("extension:cove.ai.", StringComparison.OrdinalIgnoreCase);
-
     private async Task EnsureOwnerUserAsync(CoveContext db, CancellationToken ct)
     {
         var hasUsers = await db.Users.AnyAsync(ct);

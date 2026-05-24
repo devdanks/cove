@@ -549,6 +549,14 @@ export interface AiVisualSimilarScene {
   endSec?: number;
 }
 
+export interface AiAudioSimilarScene {
+  scene: Scene;
+  distance: number;
+  sectionIndex: number;
+  startSec?: number;
+  endSec?: number;
+}
+
 export interface AiVisualSimilarImage {
   image: Image;
   distance: number;
@@ -1613,8 +1621,38 @@ export interface Stats {
   studioCount: number;
   tagCount: number;
   groupCount: number;
+  audioCount: number;
+  textCount: number;
+  segmentCount: number;
+  faceCount: number;
+  faceAppearanceCount: number;
+  embeddingCount: number;
+  detectionCount: number;
+  tagApplicationCount: number;
+  aiRunCount: number;
+  sceneFileSize: number;
+  imageFileSize: number;
+  audioFileSize: number;
+  textFileSize: number;
   totalFileSize: number;
+  sceneDuration: number;
+  audioDuration: number;
   totalPlayDuration: number;
+  scenePlayCount: number;
+  audioPlayCount: number;
+  textReadCount: number;
+  imageViewCount: number;
+  sceneCompleteCount: number;
+  audioCompleteCount: number;
+  textCompleteCount: number;
+  imageCompleteCount: number;
+  sceneConsumedSeconds: number;
+  audioConsumedSeconds: number;
+  textConsumedSeconds: number;
+  imageConsumedSeconds: number;
+  totalLikes: number;
+  totalDerivedLikes: number;
+  totalFavorites: number;
 }
 
 export interface SystemStatus {
@@ -1675,7 +1713,6 @@ export interface UserTrackingPreferences {
 
 export interface UserScenesPreferences {
   includeCompilationGroups?: boolean | null;
-  excludeVr?: boolean | null;
 }
 
 export interface UserPlaybackPreferences {
@@ -1797,11 +1834,6 @@ export interface SecurityConfig {
   newPassword?: string;
 }
 
-export interface PackageSource {
-  name: string;
-  url: string;
-}
-
 export interface MetadataServer {
   endpoint: string;
   apiKey: string;
@@ -1832,13 +1864,13 @@ export interface ScrapeApplyDefaultsConfig {
 }
 
 export interface ScraperPreference {
+  entityType?: string;
   site: string;
   scraperId: string;
 }
 
 export interface ScrapingConfig {
   scraperDirectories: string[];
-  scraperPackageSources: PackageSource[];
   metadataServers: MetadataServer[];
   scraperPreferences: ScraperPreference[];
   identifyDefaults: IdentifyDefaultsConfig;
@@ -1964,6 +1996,7 @@ export interface ScraperSummary {
   supportedScrapes: string[];
   urls: string[];
   sourcePath: string;
+  preferenceSites?: string[] | null;
 }
 
 export interface ScrapeAttempt {
@@ -2137,6 +2170,7 @@ export interface DownloaderBatchFollowUp {
 export interface DownloaderBatchStartRequest {
   items: DownloaderBatchItem[];
   followUp?: DownloaderBatchFollowUp;
+  preflightBeforeQueue?: boolean;
 }
 
 export interface DownloaderBatchIssue {
@@ -2901,9 +2935,11 @@ export interface ExtensionManifest {
   pages: ExtensionPageDef[];
   slots: ExtensionSlotContribution[];
   tabs: ExtensionTabContribution[];
+  features: ExtensionFeatureDef[];
   themes: ExtensionThemeDef[];
   componentStyles: ExtensionComponentStyleDef[];
   layoutStyles: ExtensionLayoutStyleDef[];
+  settingsTabs: ExtensionSettingsTab[];
   settingsPanels: ExtensionSettingsPanel[];
   pageOverrides: ExtensionPageOverride[];
   dialogOverrides: ExtensionDialogOverride[];
@@ -2967,6 +3003,12 @@ export interface ExtensionTabContribution {
   icon?: string;
 }
 
+export interface ExtensionFeatureDef {
+  key: string;
+  extensionId: string;
+  options?: Record<string, string>;
+}
+
 export interface ExtensionThemeDef {
   id: string;
   name: string;
@@ -2989,6 +3031,18 @@ export interface ExtensionLayoutStyleDef {
   id: string;
   name: string;
   description?: string;
+}
+
+export interface ExtensionSettingsTab {
+  key: string;
+  label: string;
+  extensionId: string;
+  order: number;
+  icon?: string;
+  parentTabKey?: string;
+  description?: string;
+  searchKeywords?: string[];
+  aliases?: string[];
 }
 
 export interface ExtensionSettingsPanel {
@@ -3027,6 +3081,7 @@ export interface ExtensionAction {
   handlerName?: string;
   order: number;
   pages?: string[];
+  suppressSuccessAlert?: boolean;
   requiredPermission?: string;
 }
 
@@ -3130,6 +3185,15 @@ export interface RegistryUpdateInfo {
   changelog?: string;
 }
 
+export interface RegistryInstallResult {
+  message?: string;
+  path?: string;
+  requiresDependencies?: boolean;
+  extension?: { id: string; name: string; version: string };
+  missingDependencies?: DependencyInfo[];
+  installedDependencies?: string[];
+}
+
 export interface DependencyInfo {
   id: string;
   versionConstraint: string;
@@ -3143,4 +3207,21 @@ export interface DependencyProblem {
   extensionId: string;
   dependencyId?: string;
   message: string;
+}
+
+export interface ExtensionDependencyImpact {
+  id: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  kind: string;
+  source: string;
+}
+
+export interface RegistryUninstallResult {
+  message?: string;
+  requiresDependents?: boolean;
+  extension?: ExtensionDependencyImpact;
+  dependents?: ExtensionDependencyImpact[];
+  uninstalledExtensions?: string[];
 }

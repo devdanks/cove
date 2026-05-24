@@ -332,20 +332,29 @@ public class FacesController(
         take = Math.Clamp(take, 1, 100);
         var windowStart = startedAt.Value.ToUniversalTime().AddMinutes(-1);
         var windowEnd = completedAt.Value.ToUniversalTime().AddMinutes(1);
-        var runs = await db.AiRuns
+        var runKeys = await db.AiRuns
             .AsNoTracking()
-            .Where(run => run.SourceKey == "ext:ai.core"
-                && run.Status == AiRunStatus.Completed
+            .Where(run => run.Status == AiRunStatus.Completed
                 && run.StartedAt >= windowStart
                 && (run.CompletedAt ?? run.StartedAt) <= windowEnd
                 && (run.TargetType == AiRunTargetType.Scene || run.TargetType == AiRunTargetType.Image))
             .OrderByDescending(run => run.CompletedAt ?? run.StartedAt)
-            .ToListAsync(cancellationToken);
+            .Select(run => run.RunKey)
+            .ToArrayAsync(cancellationToken);
 
-        var targets = runs
-            .Select(run => new { run.TargetType, run.TargetId })
+        if (runKeys.Length == 0)
+            return Ok(Array.Empty<FaceDto>());
+
+        var targets = await db.FaceAppearances
+            .AsNoTracking()
+            .Where(appearance => appearance.SourceRunId != null && runKeys.Contains(appearance.SourceRunId))
+            .Select(appearance => new
+            {
+                TargetType = appearance.HostType == FaceAppearanceHostType.Scene ? AiRunTargetType.Scene : AiRunTargetType.Image,
+                TargetId = appearance.HostId,
+            })
             .Distinct()
-            .ToArray();
+            .ToArrayAsync(cancellationToken);
         if (targets.Length != 1)
             return Ok(Array.Empty<FaceDto>());
 

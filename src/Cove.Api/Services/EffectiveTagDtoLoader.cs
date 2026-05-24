@@ -1,4 +1,5 @@
 using Cove.Api.Controllers;
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Data;
@@ -116,10 +117,9 @@ internal static class EffectiveTagDtoLoader
     private static bool HasEditableDirectSource(IReadOnlyCollection<TagProvenanceDto> provenance)
     {
         var hostLevelSources = provenance.Where(source => source.ContextType == null).ToArray();
-        return hostLevelSources.Length == 0 || hostLevelSources.Any(source => !IsAiSource(source.SourceKey));
+        return hostLevelSources.Length == 0 || hostLevelSources.Any(source => !IsExtensionSource(source.SourceKey));
     }
 
-    private static bool IsAiSource(string sourceKey)
-        => sourceKey.StartsWith("ext:ai.", StringComparison.OrdinalIgnoreCase)
-            || sourceKey.StartsWith("cove.ai.", StringComparison.OrdinalIgnoreCase);
+    private static bool IsExtensionSource(string sourceKey)
+        => SourceKeyConventions.IsExtensionSource(sourceKey);
 }

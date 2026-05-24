@@ -9,6 +9,7 @@ using Cove.Plugins;
 using System.Text.Json;
 using System.Linq.Expressions;
 using Pgvector;
+using Pgvector.EntityFrameworkCore;
 using NpgsqlTypes;
 
 namespace Cove.Data;
@@ -154,9 +155,10 @@ public partial class CoveContext : DbContext
             ext.ConfigureModel(modelBuilder);
         }
 
-        ConfigureVectorStorage(modelBuilder);
+        var isNpgsql = Database.ProviderName?.Contains("Npgsql", StringComparison.Ordinal) == true;
+        ConfigureVectorStorage(modelBuilder, isNpgsql);
 
-        if (Database.ProviderName?.Contains("Npgsql", StringComparison.Ordinal) == true)
+        if (isNpgsql)
         {
             ConfigureSearchVectors(modelBuilder);
             ConfigureAuthorizationFilters(modelBuilder);
@@ -237,7 +239,7 @@ public partial class CoveContext : DbContext
             .HasMethod("gin");
     }
 
-    private static void ConfigureVectorStorage(ModelBuilder modelBuilder)
+    private static void ConfigureVectorStorage(ModelBuilder modelBuilder, bool usePgvector)
     {
         var vectorConverter = new ValueConverter<Vector?, string?>(
             vector => vector == null ? null : SerializeVector(vector),
@@ -248,14 +250,26 @@ public partial class CoveContext : DbContext
             vector => vector == null ? 0 : GetVectorHash(vector),
             vector => vector == null ? null : CloneVector(vector));
 
+        if (usePgvector)
+        {
+            modelBuilder.HasPostgresExtension("vector");
+        }
+
         foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(entityType => entityType.GetProperties()))
         {
             if (property.ClrType != typeof(Vector))
                 continue;
 
-            property.SetValueConverter(vectorConverter);
             property.SetValueComparer(vectorComparer);
-            property.SetColumnType("text");
+            if (usePgvector)
+            {
+                property.SetColumnType("vector");
+            }
+            else
+            {
+                property.SetValueConverter(vectorConverter);
+                property.SetColumnType("text");
+            }
         }
     }
 

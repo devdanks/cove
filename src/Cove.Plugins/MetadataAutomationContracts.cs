@@ -49,7 +49,30 @@ public sealed record ScraperDescriptor(
     ScraperEntity Entity,
     ScraperCapabilities Capabilities,
     IReadOnlyList<string> SupportedUrls,
-    ScraperRiskLevel Risk = ScraperRiskLevel.NetworkOnly);
+    ScraperRiskLevel Risk,
+    IReadOnlyList<string>? PreferenceSites)
+{
+    public ScraperDescriptor(
+        string Id,
+        string Name,
+        ScraperEntity Entity,
+        ScraperCapabilities Capabilities,
+        IReadOnlyList<string> SupportedUrls)
+        : this(Id, Name, Entity, Capabilities, SupportedUrls, ScraperRiskLevel.NetworkOnly, null)
+    {
+    }
+
+    public ScraperDescriptor(
+        string Id,
+        string Name,
+        ScraperEntity Entity,
+        ScraperCapabilities Capabilities,
+        IReadOnlyList<string> SupportedUrls,
+        ScraperRiskLevel Risk)
+        : this(Id, Name, Entity, Capabilities, SupportedUrls, Risk, null)
+    {
+    }
+}
 
 public sealed record ScraperRequest<TInput>(
     string ScraperId,

@@ -1,5 +1,6 @@
 using System.Text.Json;
 
+using Cove.Core.Common;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
@@ -265,7 +266,7 @@ public sealed class AiDataPurgeService(
 
         var query = _db.ReadSet<AiRun>().AsNoTracking();
 
-        if (!string.IsNullOrWhiteSpace(selector.SourceKey) && selector.SourceKey.Equals("ext:ai.core", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(selector.SourceKey) && await AiRunSourceExistsAsync(selector.SourceKey, cancellationToken))
             query = query.Where(run => run.SourceKey == selector.SourceKey);
 
         if (!string.IsNullOrWhiteSpace(selector.SourceRunId))
@@ -1027,6 +1028,11 @@ public sealed class AiDataPurgeService(
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
     }
 
+    private async Task<bool> AiRunSourceExistsAsync(string sourceKey, CancellationToken cancellationToken)
+        => await _db.ReadSet<AiRun>()
+            .AsNoTracking()
+            .AnyAsync(run => run.SourceKey == sourceKey, cancellationToken);
+
     private static AiDataSelector Normalize(AiDataSelectorDto selector)
     {
         var kinds = (selector.Kinds ?? [])
@@ -1191,8 +1197,7 @@ public sealed class AiDataPurgeService(
 
     private static bool ShouldSelectAiRunsForSource(string? sourceKey)
         => string.IsNullOrWhiteSpace(sourceKey)
-           || sourceKey.Equals("ext:ai.core", StringComparison.OrdinalIgnoreCase)
-           || sourceKey.StartsWith("ext:ai.", StringComparison.OrdinalIgnoreCase);
+           || SourceKeyConventions.IsExtensionSource(sourceKey);
 
     private sealed record AiDataSelector(
         string? SourceKey,

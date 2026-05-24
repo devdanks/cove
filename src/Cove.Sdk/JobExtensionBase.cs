@@ -33,7 +33,29 @@ public abstract class JobExtensionBase : CoveExtensionBase, IJobExtension
         string? description = null,
         bool supportsParameters = false)
     {
-        _jobs.Add(new ExtensionJobDefinition(id, name, description, supportsParameters));
+        AddJob(id, name, handler, description, supportsParameters, showInTaskList: false);
+    }
+
+    protected void Job(
+        string id,
+        string name,
+        Func<IReadOnlyDictionary<string, string>?, IJobProgress, CancellationToken, Task> handler,
+        string? description,
+        bool supportsParameters,
+        bool showInTaskList)
+    {
+        AddJob(id, name, handler, description, supportsParameters, showInTaskList);
+    }
+
+    private void AddJob(
+        string id,
+        string name,
+        Func<IReadOnlyDictionary<string, string>?, IJobProgress, CancellationToken, Task> handler,
+        string? description,
+        bool supportsParameters,
+        bool showInTaskList)
+    {
+        _jobs.Add(new ExtensionJobDefinition(id, name, description, supportsParameters) { ShowInTaskList = showInTaskList });
         _runners[id] = handler;
     }
 

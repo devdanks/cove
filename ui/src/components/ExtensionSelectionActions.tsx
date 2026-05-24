@@ -73,7 +73,7 @@ function shouldSuppressResultToast(result: unknown): boolean {
 }
 
 function shouldSuppressQueuedAlert(action: ExtensionAction, result: unknown): boolean {
-  if (/^run ai$/i.test(action.label) || action.extensionId === "cove.ai.core") {
+  if (action.suppressSuccessAlert) {
     return true;
   }
 

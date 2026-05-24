@@ -293,6 +293,98 @@ public class ExtensionManager
         }
     }
 
+    /// <summary>
+    /// Returns installed extensions that depend on the supplied extension, with transitive dependents first.
+    /// </summary>
+    public IReadOnlyList<string> GetDependentExtensionIds(string extensionId, bool enabledOnly = false)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return [];
+
+        var requestedId = extensionId.Trim();
+        var dependentsByDependency = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var candidateId in GetKnownExtensionIds())
+        {
+            if (string.Equals(candidateId, requestedId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (enabledOnly && !IsEnabled(candidateId))
+                continue;
+
+            foreach (var dependencyId in GetDeclaredDependencies(candidateId).Keys)
+            {
+                if (string.IsNullOrWhiteSpace(dependencyId))
+                    continue;
+
+                if (!dependentsByDependency.TryGetValue(dependencyId, out var dependents))
+                {
+                    dependents = [];
+                    dependentsByDependency[dependencyId] = dependents;
+                }
+
+                if (!dependents.Contains(candidateId, StringComparer.OrdinalIgnoreCase))
+                    dependents.Add(candidateId);
+            }
+        }
+
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { requestedId };
+
+        void Visit(string dependencyId)
+        {
+            if (!dependentsByDependency.TryGetValue(dependencyId, out var directDependents))
+                return;
+
+            foreach (var dependentId in directDependents.OrderBy(id => id, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!seen.Add(dependentId))
+                    continue;
+
+                Visit(dependentId);
+                result.Add(dependentId);
+            }
+        }
+
+        Visit(requestedId);
+        return result;
+    }
+
+    /// <summary>
+    /// Returns installed dependencies for the supplied extension, with dependencies before dependents.
+    /// </summary>
+    public IReadOnlyList<string> GetDependencyExtensionIds(string extensionId)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return [];
+
+        var knownIds = GetKnownExtensionIds().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>();
+        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Visit(string id)
+        {
+            if (!visiting.Add(id))
+                return;
+
+            foreach (var dependencyId in GetDeclaredDependencies(id).Keys.OrderBy(depId => depId, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!knownIds.Contains(dependencyId) || visited.Contains(dependencyId))
+                    continue;
+
+                Visit(dependencyId);
+                if (visited.Add(dependencyId))
+                    result.Add(dependencyId);
+            }
+
+            visiting.Remove(id);
+        }
+
+        Visit(extensionId.Trim());
+        return result;
+    }
+
     // ========================================================================
     // LIFECYCLE
     // ========================================================================
@@ -570,11 +662,13 @@ public class ExtensionManager
             manifest.Slots.AddRange(extManifest.Slots);
             manifest.Tabs.AddRange(extManifest.Tabs);
             manifest.Panes.AddRange(extManifest.Panes);
+            manifest.Features.AddRange(extManifest.Features);
             manifest.ComponentOverrides.AddRange(extManifest.ComponentOverrides);
             manifest.SelectorOverrides.AddRange(extManifest.SelectorOverrides);
             manifest.Themes.AddRange(extManifest.Themes);
             manifest.ComponentStyles.AddRange(extManifest.ComponentStyles);
             manifest.LayoutStyles.AddRange(extManifest.LayoutStyles);
+            manifest.SettingsTabs.AddRange(extManifest.SettingsTabs);
             manifest.SettingsPanels.AddRange(extManifest.SettingsPanels);
             manifest.PageOverrides.AddRange(extManifest.PageOverrides);
             manifest.DialogOverrides.AddRange(extManifest.DialogOverrides);
@@ -637,20 +731,50 @@ public class ExtensionManager
     /// <summary>Check if an extension is enabled.</summary>
     public bool IsEnabled(string id) => _installations.TryGetValue(id, out var inst) ? inst.Enabled : true;
 
-    /// <summary>Enable an extension by ID. Persists the state to DB.</summary>
-    public async Task EnableExtensionAsync(string id, CancellationToken ct = default)
+    /// <summary>Enable an extension and any installed extensions it depends on. Persists the state to DB.</summary>
+    public async Task<IReadOnlyList<string>> EnableExtensionAsync(string id, CancellationToken ct = default)
     {
-        var inst = EnsureInstallationRecord(id);
-        if (inst != null) inst.Enabled = true;
-        await PersistInstallationStateAsync(id, ct);
+        var enabledIds = new List<string>();
+        var idsToEnable = GetDependencyExtensionIds(id)
+            .Append(id)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var extensionId in idsToEnable)
+        {
+            var inst = EnsureInstallationRecord(extensionId);
+            if (inst == null)
+                continue;
+
+            inst.Enabled = true;
+            inst.UpdatedAt = DateTime.UtcNow;
+            await PersistInstallationStateAsync(extensionId, ct);
+            enabledIds.Add(extensionId);
+        }
+
+        return enabledIds;
     }
 
-    /// <summary>Disable an extension by ID. Persists the state to DB.</summary>
-    public async Task DisableExtensionAsync(string id, CancellationToken ct = default)
+    /// <summary>Disable an extension and any enabled extensions that depend on it. Persists the state to DB.</summary>
+    public async Task<IReadOnlyList<string>> DisableExtensionAsync(string id, CancellationToken ct = default)
     {
-        var inst = EnsureInstallationRecord(id);
-        if (inst != null) inst.Enabled = false;
-        await PersistInstallationStateAsync(id, ct);
+        var disabledIds = new List<string>();
+        var idsToDisable = new[] { id }
+            .Concat(GetDependentExtensionIds(id, enabledOnly: true))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var extensionId in idsToDisable)
+        {
+            var inst = EnsureInstallationRecord(extensionId);
+            if (inst == null)
+                continue;
+
+            inst.Enabled = false;
+            inst.UpdatedAt = DateTime.UtcNow;
+            await PersistInstallationStateAsync(extensionId, ct);
+            disabledIds.Add(extensionId);
+        }
+
+        return disabledIds;
     }
 
     /// <summary>Update persisted install metadata for extensions installed after startup.</summary>
@@ -1131,6 +1255,33 @@ public class ExtensionManager
         return install;
     }
 
+    private IReadOnlyList<string> GetKnownExtensionIds() => _installations.Keys
+        .Concat(_extensionMap.Keys)
+        .Concat(_manifestFiles.Keys)
+        .Where(id => !string.IsNullOrWhiteSpace(id))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private IReadOnlyDictionary<string, string> GetDeclaredDependencies(string id)
+    {
+        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var manifest = GetManifestFile(id);
+        if (manifest != null)
+        {
+            foreach (var dependency in manifest.Dependencies)
+                dependencies[dependency.Key] = dependency.Value;
+        }
+
+        if (_extensionMap.TryGetValue(id, out var extension))
+        {
+            foreach (var dependency in extension.Dependencies)
+                dependencies[dependency.Key] = dependency.Value;
+        }
+
+        return dependencies;
+    }
+
     private void RemoveExtensionFromMemory(string id)
     {
         _initializedExtensions.Remove(id);
@@ -1288,11 +1439,7 @@ public class ExtensionManager
 
 internal sealed class ExtensionLoadContext : AssemblyLoadContext
 {
-    private static readonly HashSet<string> SharedAssemblyNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "AI.Extensions.Abstractions",
-    };
-
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new() { PropertyNameCaseInsensitive = true };
     private static readonly object SharedAssemblyGate = new();
     private static readonly Dictionary<string, string> PreferredSharedAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
 
@@ -1311,7 +1458,7 @@ internal sealed class ExtensionLoadContext : AssemblyLoadContext
         if (defaultAssembly != null)
             return defaultAssembly;
 
-        if (SharedAssemblyNames.Contains(assemblyName.Name ?? string.Empty))
+        if (assemblyName.Name is string sharedAssemblyName && PreferredSharedAssemblyPaths.ContainsKey(sharedAssemblyName))
         {
             var sharedAssembly = TryLoadSharedAssembly(assemblyName);
             if (sharedAssembly != null)
@@ -1330,7 +1477,7 @@ internal sealed class ExtensionLoadContext : AssemblyLoadContext
 
     internal static void PreloadSharedAssemblies(string extensionsRoot, IEnumerable<string> extensionDirectories)
     {
-        foreach (var assemblyName in SharedAssemblyNames)
+        foreach (var assemblyName in DiscoverSharedAssemblyNames(extensionDirectories))
         {
             var preferredSourcePath = extensionDirectories
                 .Select(dir => Path.Combine(dir, $"{assemblyName}.dll"))
@@ -1357,6 +1504,39 @@ internal sealed class ExtensionLoadContext : AssemblyLoadContext
 
             _ = TryLoadSharedAssembly(new AssemblyName(assemblyName));
         }
+    }
+
+    private static IReadOnlyList<string> DiscoverSharedAssemblyNames(IEnumerable<string> extensionDirectories)
+    {
+        var sharedAssemblies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dir in extensionDirectories)
+        {
+            var manifestPath = Path.Combine(dir, "extension.json");
+            if (!File.Exists(manifestPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                var manifestJson = File.ReadAllText(manifestPath);
+                var manifest = JsonSerializer.Deserialize<ExtensionManifestFile>(manifestJson, ManifestJsonOptions);
+                foreach (var assemblyName in manifest?.SharedAssemblies ?? [])
+                {
+                    if (!string.IsNullOrWhiteSpace(assemblyName))
+                    {
+                        sharedAssemblies.Add(assemblyName.Trim());
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore malformed manifests here; discovery will report them later.
+            }
+        }
+
+        return [.. sharedAssemblies];
     }
 
     private static Assembly? TryLoadSharedAssembly(AssemblyName assemblyName)

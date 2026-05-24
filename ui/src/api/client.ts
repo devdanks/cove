@@ -20,6 +20,7 @@ import type {
   AiDataPurgeResult,
   AiDataSelector,
   AiDataSummary,
+  AiAudioSimilarScene,
   AiVisualSimilarImage,
   AiVisualSimilarScene,
   AffinityHostType,
@@ -99,6 +100,8 @@ import type {
   RegistrySearchResult,
   RegistryExtensionDetail,
   RegistryUpdateInfo,
+  RegistryInstallResult,
+  RegistryUninstallResult,
   DependencyInfo,
   DownloaderPreflightRequest,
   DownloaderPreflightResponse,
@@ -641,20 +644,33 @@ export const aiData = {
   purge: (request_: AiDataPurgeRequest) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(request_) }),
 };
 
-export const aiVisual = {
-  searchScenes: (req: FilteredQueryRequest<SceneFilterCriteria>) =>
-    request<PaginatedResponse<Scene>>("/ext/ai-visual/scenes/search", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
-  searchImages: (req: FilteredQueryRequest<ImageFilterCriteria>) =>
-    request<PaginatedResponse<Image>>("/ext/ai-visual/images/search", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
-  similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>
-    request<{ items: AiVisualSimilarScene[] }>(`/ext/ai-visual/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
-  similarScenesForImage: (imageId: number, params?: { perPage?: number }) =>
-    request<{ items: AiVisualSimilarScene[] }>(`/ext/ai-visual/images/${imageId}/similar-scenes${buildQuery(params)}`),
-  similarImagesForImage: (imageId: number, params?: { perPage?: number }) =>
-    request<{ items: AiVisualSimilarImage[] }>(`/ext/ai-visual/images/${imageId}/similar-images${buildQuery(params)}`),
-  similarScenesForSceneSegment: (sceneId: number, data: { intervals: Array<{ startSec: number; endSec?: number }>; perPage?: number }) =>
-    request<{ items: AiVisualSimilarScene[] }>(`/ext/ai-visual/scenes/${sceneId}/similar-scenes/segment`, { method: "POST", body: JSON.stringify(data) }),
-};
+export function createVisualSimilarityClient(apiBasePath: string) {
+  const normalizedBasePath = apiBasePath.endsWith("/") ? apiBasePath.slice(0, -1) : apiBasePath;
+
+  return {
+    searchScenes: (req: FilteredQueryRequest<SceneFilterCriteria>) =>
+      request<PaginatedResponse<Scene>>(`${normalizedBasePath}/scenes/search`, { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
+    searchImages: (req: FilteredQueryRequest<ImageFilterCriteria>) =>
+      request<PaginatedResponse<Image>>(`${normalizedBasePath}/images/search`, { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
+    similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>
+      request<{ items: AiVisualSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
+    similarScenesForImage: (imageId: number, params?: { perPage?: number }) =>
+      request<{ items: AiVisualSimilarScene[] }>(`${normalizedBasePath}/images/${imageId}/similar-scenes${buildQuery(params)}`),
+    similarImagesForImage: (imageId: number, params?: { perPage?: number }) =>
+      request<{ items: AiVisualSimilarImage[] }>(`${normalizedBasePath}/images/${imageId}/similar-images${buildQuery(params)}`),
+    similarScenesForSceneSegment: (sceneId: number, data: { intervals: Array<{ startSec: number; endSec?: number }>; perPage?: number }) =>
+      request<{ items: AiVisualSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes/segment`, { method: "POST", body: JSON.stringify(data) }),
+  };
+}
+
+export function createAudioSimilarityClient(apiBasePath: string) {
+  const normalizedBasePath = apiBasePath.endsWith("/") ? apiBasePath.slice(0, -1) : apiBasePath;
+
+  return {
+    similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>
+      request<{ items: AiAudioSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
+  };
+}
 
 // ===== Studios =====
 export const studios = {
@@ -940,6 +956,8 @@ export const system = {
   getConfig: () => request<CoveConfig>("/system/config"),
   saveConfig: (config: CoveConfig) =>
     request<CoveConfig>("/system/config", { method: "PUT", body: JSON.stringify(config) }),
+  setLogLevel: (level: string) =>
+    request<{ level: string }>("/system/log-level", { method: "PATCH", body: JSON.stringify({ level }) }),
   uploadFavicon: async (file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -1310,7 +1328,7 @@ export const extensions = {
   registryGetCategories: () => request<string[]>("/extensions/registry/categories"),
   /** Registry: install an extension. */
   registryInstall: (extensionId: string, version: string, installDependencies = false) =>
-    request<{ message?: string; path?: string; requiresDependencies?: boolean; missingDependencies?: DependencyInfo[]; installedDependencies?: string[] }>("/extensions/registry/install", {
+    request<RegistryInstallResult>("/extensions/registry/install", {
       method: "POST",
       body: JSON.stringify({ extensionId, version, installDependencies }),
     }),
@@ -1324,10 +1342,10 @@ export const extensions = {
   registryResolveDependencies: (extensionId: string) =>
     request<DependencyInfo[]>(`/extensions/registry/${extensionId}/dependencies`),
   /** Registry: uninstall an extension. */
-  registryUninstall: (extensionId: string) =>
-    request<{ message: string }>("/extensions/registry/uninstall", {
+  registryUninstall: (extensionId: string, uninstallDependents = false) =>
+    request<RegistryUninstallResult>("/extensions/registry/uninstall", {
       method: "POST",
-      body: JSON.stringify({ extensionId }),
+      body: JSON.stringify({ extensionId, uninstallDependents }),
     }),
 };
 

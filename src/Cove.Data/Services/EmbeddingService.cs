@@ -2,6 +2,7 @@ using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Pgvector;
+using Pgvector.EntityFrameworkCore;
 
 namespace Cove.Data.Services;
 
@@ -34,6 +35,23 @@ public sealed class EmbeddingService(CoveContext db, IEnumerable<ITextEncoder> e
 
         var embeddings = ApplyFilters(db.Embeddings.AsNoTracking(), options)
             .Where(embedding => embedding.Dim == dimensions);
+
+        if (db.Database.ProviderName?.Contains("Npgsql", StringComparison.Ordinal) == true)
+        {
+            var ranked = await embeddings
+                .OrderBy(embedding => embedding.Vector.CosineDistance(query))
+                .Take(k)
+                .Select(embedding => new
+                {
+                    Embedding = embedding,
+                    Distance = embedding.Vector.CosineDistance(query),
+                })
+                .ToListAsync(cancellationToken);
+
+            return ranked
+                .Select(item => new EmbeddingSearchResult(item.Embedding, (float)item.Distance))
+                .ToList();
+        }
 
         var candidates = await embeddings.ToListAsync(cancellationToken);
         return candidates

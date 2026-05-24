@@ -378,7 +378,7 @@ function GalleryCreateModal({ open, onClose, onCreated }: { open: boolean; onClo
         <TextInput value={form.code} onChange={(v) => setForm({ ...form, code: v })} />
       </Field>
       <Field label="Date">
-        <TextInput value={form.date} onChange={(v) => setForm({ ...form, date: v })} placeholder="YYYY-MM-DD" />
+        <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} className="w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none" />
       </Field>
       <Field label="Photographer">
         <TextInput value={form.photographer} onChange={(v) => setForm({ ...form, photographer: v })} />

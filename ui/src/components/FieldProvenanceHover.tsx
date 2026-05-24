@@ -64,7 +64,7 @@ export function FieldProvenanceHover({
       <span className="sr-only"><FieldProvenancePopupContent entries={entries} title={`${label} Sources`} /></span>
       {showProvenance && typeof document !== "undefined" ? createPortal(
         <span
-          className="pointer-events-none fixed z-50 max-h-[min(70vh,26rem)] w-80 overflow-y-auto rounded-xl border border-border bg-surface/95 p-3 text-left shadow-2xl backdrop-blur"
+          className="pointer-events-none fixed z-[200] max-h-[min(70vh,26rem)] w-80 overflow-y-auto rounded-xl border border-border bg-surface/95 p-3 text-left shadow-2xl backdrop-blur"
           style={{ left: popupPosition.left, top: popupPosition.top }}
         >
           <FieldProvenancePopupContent entries={entries} title={`${label} Sources`} />

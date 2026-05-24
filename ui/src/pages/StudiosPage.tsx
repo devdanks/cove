@@ -4,6 +4,7 @@ import { studios } from "../api/client";
 import type { EntityEngagement, Studio, StudioCreate, StudioFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
+import { EntityReferenceSelector } from "../components/EntityReferenceSelector";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { Building2, Merge } from "lucide-react";
@@ -219,15 +220,15 @@ function StudioCreateModal({ open, onClose, onCreated }: { open: boolean; onClos
   const [form, setForm] = useState({
     name: "",
     details: "",
-    favorite: false,
     ignoreAutoTag: false,
-    organized: false,
   });
+  const [parentId, setParentId] = useState<number | undefined>(undefined);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [createAnother, setCreateAnother] = useState(false);
 
   const resetForm = () => {
-    setForm({ name: "", details: "", favorite: false, ignoreAutoTag: false, organized: false });
+    setForm({ name: "", details: "", ignoreAutoTag: false });
+    setParentId(undefined);
     setCustomFields({});
   };
 
@@ -248,9 +249,8 @@ function StudioCreateModal({ open, onClose, onCreated }: { open: boolean; onClos
     mutation.mutate({
       name,
       details: form.details || undefined,
-      favorite: form.favorite || undefined,
       ignoreAutoTag: form.ignoreAutoTag || undefined,
-      organized: form.organized || undefined,
+      parentId,
       customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     });
   };
@@ -263,16 +263,10 @@ function StudioCreateModal({ open, onClose, onCreated }: { open: boolean; onClos
       <Field label="Details">
         <TextArea value={form.details} onChange={(v) => setForm({ ...form, details: v })} rows={3} />
       </Field>
+      <Field label="Parent Studio">
+        <EntityReferenceSelector entityType="studio" value={parentId} onChange={setParentId} placeholder="Search parent studios..." />
+      </Field>
       <div className="flex items-center gap-4 mb-4">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.favorite}
-            onChange={(e) => setForm({ ...form, favorite: e.target.checked })}
-            className="rounded bg-card border-border"
-          />
-          Favorite
-        </label>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -281,15 +275,6 @@ function StudioCreateModal({ open, onClose, onCreated }: { open: boolean; onClos
             className="rounded bg-card border-border"
           />
           Ignore Auto Tag
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.organized}
-            onChange={(e) => setForm({ ...form, organized: e.target.checked })}
-            className="rounded bg-card border-border"
-          />
-          Organized
         </label>
       </div>
       <Field label="Custom Fields">

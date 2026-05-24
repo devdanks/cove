@@ -22,6 +22,7 @@ import { DynamicGroupFilterEditor, FILTER_DYNAMIC_SOURCE_KEY, defaultDynamicGrou
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
+import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 
 const SORT_OPTIONS = [
   { value: "sort_order", label: "Manual Order" },
@@ -298,17 +299,31 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     queryJson: defaultDynamicGroupFilterQueryJson(),
   });
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
+  const [parentGroupIds, setParentGroupIds] = useState<number[]>([]);
   const [createAnother, setCreateAnother] = useState(false);
 
   const resetForm = () => {
     setForm({ name: "", date: "", director: "", description: "", kind: "static", querySourceKey: defaultDynamicSourceKey, queryJson: defaultDynamicGroupFilterQueryJson() });
+    setParentGroupIds([]);
     setCustomFields({});
   };
 
   const mutation = useMutation({
-    mutationFn: (data: GroupCreate) => groups.create(data),
+    mutationFn: async ({ data, parentIds }: { data: GroupCreate; parentIds: number[] }) => {
+      const created = await groups.create(data);
+      if (created?.id) {
+        for (const parentId of parentIds) {
+          await groups.addSubGroup(parentId, created.id);
+        }
+      }
+      return created;
+    },
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["groups"] });
+      for (const parentId of parentGroupIds) {
+        qc.invalidateQueries({ queryKey: ["group-subgroups", parentId] });
+      }
+      if (created?.id) qc.invalidateQueries({ queryKey: ["group-containinggroups", created.id] });
       resetForm();
       if (createAnother) return;
       onClose();
@@ -320,14 +335,17 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     const name = form.name.trim();
     if (!name) return;
     mutation.mutate({
-      name,
-      date: form.date || undefined,
-      director: form.director || undefined,
-      description: form.description || undefined,
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
-      kind: form.kind,
-      querySourceKey: form.kind === "dynamic" ? form.querySourceKey : undefined,
-      queryJson: form.kind === "dynamic" && form.querySourceKey === FILTER_DYNAMIC_SOURCE_KEY ? form.queryJson : undefined,
+      data: {
+        name,
+        date: form.date || undefined,
+        director: form.director || undefined,
+        description: form.description || undefined,
+        customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+        kind: form.kind,
+        querySourceKey: form.kind === "dynamic" ? form.querySourceKey : undefined,
+        queryJson: form.kind === "dynamic" && form.querySourceKey === FILTER_DYNAMIC_SOURCE_KEY ? form.queryJson : undefined,
+      },
+      parentIds: parentGroupIds,
     });
   };
 
@@ -369,13 +387,16 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         <DynamicGroupFilterEditor queryJson={form.queryJson} onChange={(queryJson) => setForm({ ...form, queryJson })} />
       ) : null}
       <Field label="Date">
-        <TextInput value={form.date} onChange={(v) => setForm({ ...form, date: v })} placeholder="YYYY-MM-DD" />
+        <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} className="w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none" />
       </Field>
       <Field label="Director">
         <TextInput value={form.director} onChange={(v) => setForm({ ...form, director: v })} />
       </Field>
       <Field label="Description">
         <TextArea value={form.description} onChange={(v) => setForm({ ...form, description: v })} rows={3} />
+      </Field>
+      <Field label="Parent Groups">
+        <EntityReferenceMultiSelector entityType="group" values={parentGroupIds} onChange={setParentGroupIds} placeholder="Search parent groups..." />
       </Field>
       <Field label="Custom Fields">
         <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="group" />

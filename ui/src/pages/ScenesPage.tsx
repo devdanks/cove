@@ -1,12 +1,12 @@
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { aiVisual, entityEngagement, entityImages, scenes, tags, performers, galleries } from "../api/client";
+import { entityEngagement, entityImages, scenes } from "../api/client";
 import type { BoolCriterion, EntityEngagement, FindFilter, Group, Scene, SceneCreate, SceneFilterCriteria, SceneListEntry } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
-import { useAiVisualAvailability } from "../hooks/useAiVisualAvailability";
+import { useVisualSimilarityApi } from "../hooks/useVisualSimilarityApi";
 import { SceneTagger } from "../components/SceneTagger";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
@@ -36,6 +36,7 @@ import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundErro
 import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
 import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
 import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
+import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 import {
   formatBatchDownloadSummary,
   getBatchDownloadOptionsStorageKey,
@@ -103,7 +104,8 @@ export function ScenesPage({ onNavigate }: Props) {
       displayMode: "grid" as DisplayMode,
     };
   }, []);
-  const aiVisualAvailable = useAiVisualAvailability();
+  const visualSimilarity = useVisualSimilarityApi();
+  const visualSimilarityAvailable = visualSimilarity != null;
   const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode, searchMode, setSearchMode } = useListUrlState({
     resetKey: "scenes",
     defaultFilter: defaultState.filter,
@@ -111,7 +113,7 @@ export function ScenesPage({ onNavigate }: Props) {
     defaultDisplayMode: defaultState.displayMode,
     allowedDisplayModes: ["grid", "list", "wall", "tagger", "feed", "vertical"] as const,
     defaultSearchMode: "text",
-    allowedSearchModes: aiVisualAvailable ? ["text", "visual"] : ["text"],
+    allowedSearchModes: visualSimilarityAvailable ? ["text", "visual"] : ["text"],
     allowInfinitePageSize: true,
   });
   const [showCreate, setShowCreate] = useState(false);
@@ -273,17 +275,9 @@ export function ScenesPage({ onNavigate }: Props) {
     return { ...objectFilter, [INCLUDE_COMPILATIONS_FILTER_KEY]: { value: includeValue } satisfies BoolCriterion };
   }, [objectFilter]);
 
-  const effectiveObjectFilter = useMemo(() => {
-    if (user?.uiPreferences?.scenes?.excludeVr !== true || normalizedObjectFilter[IS_VR_FILTER_KEY]) {
-      return normalizedObjectFilter;
-    }
-
-    return { ...normalizedObjectFilter, [IS_VR_FILTER_KEY]: { value: false } satisfies BoolCriterion };
-  }, [normalizedObjectFilter, user?.uiPreferences?.scenes?.excludeVr]);
-
   const backendObjectFilter = useMemo(() => Object.fromEntries(
-    Object.entries(effectiveObjectFilter).filter(([key]) => key !== INCLUDE_COMPILATIONS_FILTER_KEY),
-  ), [effectiveObjectFilter]);
+    Object.entries(normalizedObjectFilter).filter(([key]) => key !== INCLUDE_COMPILATIONS_FILTER_KEY),
+  ), [normalizedObjectFilter]);
   const hasObjectFilter = Object.keys(backendObjectFilter).length > 0;
   const compilationBlockingObjectFilter = useMemo(() => Object.fromEntries(
     Object.entries(backendObjectFilter).filter(([key, value]) => key !== IS_VR_FILTER_KEY || getBoolCriterionValue(value) !== false),
@@ -291,7 +285,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const hasCompilationBlockingObjectFilter = Object.keys(compilationBlockingObjectFilter).length > 0;
   const sceneVrFilterValue = getBoolCriterionValue(backendObjectFilter[IS_VR_FILTER_KEY]);
   const compilationQueryExtra = useMemo(() => sceneVrFilterValue === false ? { isVr: false } : undefined, [sceneVrFilterValue]);
-  const visualSearchActive = aiVisualAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
+  const visualSearchActive = visualSimilarityAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
   const infinitePageSize = filter.perPage === 0 || infiniteOnlyDisplayMode;
   const defaultInfiniteChunkSize = defaultState.filter.perPage && defaultState.filter.perPage > 0 ? defaultState.filter.perPage : 40;
   const infiniteChunkSize = displayMode === "vertical" ? 6 : displayMode === "feed" ? 10 : defaultInfiniteChunkSize;
@@ -305,23 +299,23 @@ export function ScenesPage({ onNavigate }: Props) {
       setFilter({ ...filter, page: 1, perPage: 0 });
     }
   }, [filter, infiniteOnlyDisplayMode, setFilter]);
-  const searchModeOptions = useMemo(() => aiVisualAvailable ? SEARCH_MODE_OPTIONS : SEARCH_MODE_OPTIONS.filter((mode) => mode.value === "text"), [aiVisualAvailable]);
+  const searchModeOptions = useMemo(() => visualSimilarityAvailable ? SEARCH_MODE_OPTIONS : SEARCH_MODE_OPTIONS.filter((mode) => mode.value === "text"), [visualSimilarityAvailable]);
   const sortOptions = useMemo(
-    () => aiVisualAvailable && searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SCENE_SORT_OPTIONS] : SCENE_SORT_OPTIONS,
-    [aiVisualAvailable, searchMode],
+    () => visualSimilarityAvailable && searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SCENE_SORT_OPTIONS] : SCENE_SORT_OPTIONS,
+    [visualSimilarityAvailable, searchMode],
   );
 
   useEffect(() => {
-    if (!aiVisualAvailable && searchMode === "visual") {
+    if (!visualSimilarityAvailable && searchMode === "visual") {
       setSearchMode("text");
       if (filter.sort === "visual_match") {
         setFilter({ ...filter, sort: defaultState.filter.sort, direction: defaultState.filter.direction ?? "desc", page: 1 });
       }
     }
-  }, [aiVisualAvailable, defaultState.filter.direction, defaultState.filter.sort, filter, searchMode, setFilter, setSearchMode]);
+  }, [defaultState.filter.direction, defaultState.filter.sort, filter, searchMode, setFilter, setSearchMode, visualSimilarityAvailable]);
 
   const handleSearchModeChange = useCallback((mode: string) => {
-    if (mode === "visual" && !aiVisualAvailable) {
+    if (mode === "visual" && !visualSimilarityAvailable) {
       return;
     }
 
@@ -343,7 +337,7 @@ export function ScenesPage({ onNavigate }: Props) {
     }
 
     setFilter({ ...filter, page: 1 });
-  }, [aiVisualAvailable, defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode]);
+  }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode, visualSimilarityAvailable]);
 
   const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
     setDisplayMode(mode);
@@ -365,7 +359,7 @@ export function ScenesPage({ onNavigate }: Props) {
     queryKey: ["scenes", filter, backendObjectFilter, searchMode],
     queryFn: () => {
       if (visualSearchActive) {
-        return aiVisual.searchScenes({
+        return visualSimilarity.searchScenes({
           findFilter: filter,
           objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
         });
@@ -391,7 +385,7 @@ export function ScenesPage({ onNavigate }: Props) {
     queryFn: (page, perPage) => {
       const nextFilter = { ...filter, page, perPage };
       if (visualSearchActive) {
-        return aiVisual.searchScenes({
+        return visualSimilarity.searchScenes({
           findFilter: nextFilter,
           objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
         });
@@ -509,8 +503,8 @@ export function ScenesPage({ onNavigate }: Props) {
     setSelectAllMatchingPending(true);
     try {
       const ids = await fetchAllMatchingIds<Scene>(filter, (nextFilter) => {
-        if (visualSearchActive) {
-          return aiVisual.searchScenes({
+        if (visualSearchActive && visualSimilarity) {
+          return visualSimilarity.searchScenes({
             findFilter: nextFilter,
             objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
           });
@@ -524,7 +518,7 @@ export function ScenesPage({ onNavigate }: Props) {
     } finally {
       setSelectAllMatchingPending(false);
     }
-  }, [backendObjectFilter, filter, hasObjectFilter, selectIds, visualSearchActive]);
+  }, [backendObjectFilter, filter, hasObjectFilter, selectIds, visualSearchActive, visualSimilarity]);
 
   // When sort changes to random, generate a new seed for reproducibility
   const handleFilterChange = useCallback((next: typeof filter) => {
@@ -623,7 +617,7 @@ export function ScenesPage({ onNavigate }: Props) {
       isLoading={loading}
       searchMode={searchMode}
       searchModes={searchModeOptions}
-      searchPlaceholder={aiVisualAvailable && searchMode === "visual" ? "Search visuals..." : "Search scenes, tags, performers..."}
+      searchPlaceholder={visualSimilarityAvailable && searchMode === "visual" ? "Search visuals..." : "Search scenes, tags, performers..."}
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}
@@ -1001,7 +995,6 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   const [date, setDate] = useState("");
   const [details, setDetails] = useState("");
   const [director, setDirector] = useState("");
-  const [organized, setOrganized] = useState(false);
   const [isVr, setIsVr] = useState(false);
   const [urls, setUrls] = useState<string[]>([""]);
   const [studioId, setStudioId] = useState<number | undefined>(undefined);
@@ -1012,31 +1005,9 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   const [url, setUrl] = useState("");
   const { urlDownloadMode, setUrlDownloadMode, scrapeMetadata, setScrapeMetadata } = useFileBackedCreatePreferences("Scene");
   const [noDownloaderFound, setNoDownloaderFound] = useState(false);
-
-  const [tagSearch, setTagSearch] = useState("");
-  const [selectedTags, setSelectedTags] = useState<{ id: number; name: string }[]>([]);
-  const [performerSearch, setPerformerSearch] = useState("");
-  const [selectedPerformers, setSelectedPerformers] = useState<{ id: number; name: string }[]>([]);
-  const [gallerySearch, setGallerySearch] = useState("");
-  const [selectedGalleries, setSelectedGalleries] = useState<{ id: number; title: string }[]>([]);
-
-  const { data: tagResults } = useQuery({
-    queryKey: ["tags-search", tagSearch],
-    queryFn: () => tags.find({ q: tagSearch, perPage: 20, sort: "name", direction: "asc" }),
-    enabled: tagSearch.length > 0,
-  });
-
-  const { data: performerResults } = useQuery({
-    queryKey: ["performers-search", performerSearch],
-    queryFn: () => performers.find({ q: performerSearch, perPage: 20, sort: "name", direction: "asc" }),
-    enabled: performerSearch.length > 0,
-  });
-
-  const { data: galleryResults } = useQuery({
-    queryKey: ["galleries-search", gallerySearch],
-    queryFn: () => galleries.find({ q: gallerySearch, perPage: 20, sort: "title", direction: "asc" }),
-    enabled: gallerySearch.length > 0,
-  });
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>([]);
+  const [selectedGalleryIds, setSelectedGalleryIds] = useState<number[]>([]);
 
   const resetForm = () => {
     setTitle("");
@@ -1044,7 +1015,6 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     setDate("");
     setDetails("");
     setDirector("");
-    setOrganized(false);
     setIsVr(false);
     setUrls([""]);
     setStudioId(undefined);
@@ -1053,12 +1023,9 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     setFilePath("");
     setUrl("");
     setNoDownloaderFound(false);
-    setSelectedTags([]);
-    setSelectedPerformers([]);
-    setSelectedGalleries([]);
-    setTagSearch("");
-    setPerformerSearch("");
-    setGallerySearch("");
+    setSelectedTagIds([]);
+    setSelectedPerformerIds([]);
+    setSelectedGalleryIds([]);
   };
 
   const createMut = useMutation({
@@ -1108,13 +1075,12 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     date: date || undefined,
     details: details || undefined,
     director: director || undefined,
-    organized,
     isVr,
     studioId,
     urls: mergeUrlLists(urls, extraUrls),
-    tagIds: selectedTags.map((t) => t.id),
-    performerIds: selectedPerformers.map((p) => p.id),
-    galleryIds: selectedGalleries.map((g) => g.id),
+    tagIds: selectedTagIds,
+    performerIds: selectedPerformerIds,
+    galleryIds: selectedGalleryIds,
     customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
   });
 
@@ -1213,15 +1179,6 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
-            checked={organized}
-            onChange={(e) => setOrganized(e.target.checked)}
-            className="rounded bg-card border-border"
-          />
-          Organized
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
             checked={isVr}
             onChange={(e) => setIsVr(e.target.checked)}
             className="rounded bg-card border-border"
@@ -1230,101 +1187,20 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         </label>
       </div>
 
-      <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
-      </Field>
-
       <Field label="Tags">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedTags.map((t) => (
-            <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/20 text-accent">
-              {t.name}
-              <button onClick={() => setSelectedTags(selectedTags.filter((x) => x.id !== t.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
-        <input
-          type="text"
-          value={tagSearch}
-          onChange={(e) => setTagSearch(e.target.value)}
-          placeholder="Search tags..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {tagSearch && (tagResults?.items?.length ?? 0) > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {(tagResults?.items ?? []).filter((t) => !selectedTags.some((x) => x.id === t.id)).slice(0, 10).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { setSelectedTags([...selectedTags, { id: t.id, name: t.name }]); setTagSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {t.name}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="tag" values={selectedTagIds} onChange={setSelectedTagIds} placeholder="Search tags..." />
       </Field>
 
       <Field label="Performers">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedPerformers.map((p) => (
-            <span key={p.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent/10 text-accent-hover">
-              {p.name}
-              <button onClick={() => setSelectedPerformers(selectedPerformers.filter((x) => x.id !== p.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
-        <input
-          type="text"
-          value={performerSearch}
-          onChange={(e) => setPerformerSearch(e.target.value)}
-          placeholder="Search performers..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {performerSearch && (performerResults?.items?.length ?? 0) > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {(performerResults?.items ?? []).filter((p) => !selectedPerformers.some((x) => x.id === p.id)).slice(0, 10).map((p) => (
-              <button
-                key={p.id}
-                onClick={() => { setSelectedPerformers([...selectedPerformers, { id: p.id, name: p.name }]); setPerformerSearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." />
       </Field>
 
       <Field label="Galleries">
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedGalleries.map((g) => (
-            <span key={g.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-900 text-emerald-300">
-              {g.title}
-              <button onClick={() => setSelectedGalleries(selectedGalleries.filter((x) => x.id !== g.id))} className="hover:text-white">×</button>
-            </span>
-          ))}
-        </div>
-        <input
-          type="text"
-          value={gallerySearch}
-          onChange={(e) => setGallerySearch(e.target.value)}
-          placeholder="Search galleries..."
-          className="w-full bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent mb-1"
-        />
-        {gallerySearch && (galleryResults?.items?.length ?? 0) > 0 && (
-          <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
-            {(galleryResults?.items ?? []).filter((g) => !selectedGalleries.some((x) => x.id === g.id)).slice(0, 10).map((g) => (
-              <button
-                key={g.id}
-                onClick={() => { setSelectedGalleries([...selectedGalleries, { id: g.id, title: g.title || "Untitled" }]); setGallerySearch(""); }}
-                className="block w-full text-left px-3 py-1.5 text-sm text-secondary hover:bg-card-hover"
-              >
-                {g.title || "Untitled"}
-              </button>
-            ))}
-          </div>
-        )}
+        <EntityReferenceMultiSelector entityType="gallery" values={selectedGalleryIds} onChange={setSelectedGalleryIds} placeholder="Search galleries..." />
+      </Field>
+
+      <Field label="Custom Fields">
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
       </Field>
 
       <CreateModalActions
