@@ -644,8 +644,13 @@ export const aiData = {
   purge: (request_: AiDataPurgeRequest) => request<AiDataPurgeResult>("/ai-data/purge", { method: "POST", body: JSON.stringify(request_) }),
 };
 
+function normalizeExtensionApiBasePath(apiBasePath: string): string {
+  const normalizedPath = normalizeApiPath(apiBasePath);
+  return normalizedPath.endsWith("/") ? normalizedPath.slice(0, -1) : normalizedPath;
+}
+
 export function createVisualSimilarityClient(apiBasePath: string) {
-  const normalizedBasePath = apiBasePath.endsWith("/") ? apiBasePath.slice(0, -1) : apiBasePath;
+  const normalizedBasePath = normalizeExtensionApiBasePath(apiBasePath);
 
   return {
     searchScenes: (req: FilteredQueryRequest<SceneFilterCriteria>) =>
@@ -664,7 +669,7 @@ export function createVisualSimilarityClient(apiBasePath: string) {
 }
 
 export function createAudioSimilarityClient(apiBasePath: string) {
-  const normalizedBasePath = apiBasePath.endsWith("/") ? apiBasePath.slice(0, -1) : apiBasePath;
+  const normalizedBasePath = normalizeExtensionApiBasePath(apiBasePath);
 
   return {
     similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>

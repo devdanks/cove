@@ -8,9 +8,41 @@ import { EntityCardGrid } from "./EntityCardGrid";
 import { ImageTile, SceneCard } from "./EntityCards";
 
 const SIMILAR_PER_PAGE = 8;
+const AVAILABILITY_PER_PAGE = 1;
 
 interface PanelProps {
   onNavigate: (route: any) => void;
+}
+
+export function useSceneVisualSimilarityAvailable(sceneId?: number) {
+  const visualSimilarity = useVisualSimilarityApi();
+  const preview = useQuery({
+    queryKey: ["visual-similarity", "scene", sceneId, "similar-scenes", "preview"],
+    queryFn: () => visualSimilarity!.similarScenesForScene(sceneId!, { perPage: AVAILABILITY_PER_PAGE }),
+    enabled: visualSimilarity != null && typeof sceneId === "number" && sceneId > 0,
+    retry: false,
+  });
+
+  return visualSimilarity != null && (preview.data?.items.length ?? 0) > 0;
+}
+
+export function useImageVisualSimilarityAvailable(imageId?: number) {
+  const visualSimilarity = useVisualSimilarityApi();
+  const similarScenesPreview = useQuery({
+    queryKey: ["visual-similarity", "image", imageId, "similar-scenes", "preview"],
+    queryFn: () => visualSimilarity!.similarScenesForImage(imageId!, { perPage: AVAILABILITY_PER_PAGE }),
+    enabled: visualSimilarity != null && typeof imageId === "number" && imageId > 0,
+    retry: false,
+  });
+  const similarImagesPreview = useQuery({
+    queryKey: ["visual-similarity", "image", imageId, "similar-images", "preview"],
+    queryFn: () => visualSimilarity!.similarImagesForImage(imageId!, { perPage: AVAILABILITY_PER_PAGE }),
+    enabled: visualSimilarity != null && typeof imageId === "number" && imageId > 0,
+    retry: false,
+  });
+
+  return visualSimilarity != null
+    && ((similarScenesPreview.data?.items.length ?? 0) > 0 || (similarImagesPreview.data?.items.length ?? 0) > 0);
 }
 
 export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {
@@ -71,6 +103,20 @@ export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps &
 }
 
 type SegmentSimilarityInterval = { startSec: number; endSec?: number };
+
+export function useSegmentVisualSimilarityAvailable({ sceneId, startSec, endSec, intervals }: { sceneId?: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
+  const visualSimilarity = useVisualSimilarityApi();
+  const queryIntervals = normalizeIntervals(intervals, startSec, endSec);
+  const intervalKey = queryIntervals.map((interval) => `${interval.startSec}:${interval.endSec ?? ""}`).join("|");
+  const preview = useQuery({
+    queryKey: ["visual-similarity", "scene", sceneId, "segment-similar-scenes", "preview", intervalKey],
+    queryFn: () => visualSimilarity!.similarScenesForSceneSegment(sceneId!, { intervals: queryIntervals, perPage: AVAILABILITY_PER_PAGE }),
+    enabled: visualSimilarity != null && typeof sceneId === "number" && sceneId > 0 && queryIntervals.length > 0,
+    retry: false,
+  });
+
+  return visualSimilarity != null && (preview.data?.items.length ?? 0) > 0;
+}
 
 export function SegmentVisualSimilarityPanel({ sceneId, startSec, endSec, intervals, onNavigate }: PanelProps & { sceneId: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
   const visualSimilarity = useVisualSimilarityApi();

@@ -8,7 +8,7 @@ import { canWriteEntity } from "../auth/visibility";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { SceneCard } from "../components/EntityCards";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
-import { SegmentVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { SegmentVisualSimilarityPanel, useSegmentVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { ProvenanceBadge, TagBadge } from "../components/shared";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -316,12 +316,17 @@ function ResolvedSpanPlayerCard({
     </div>
   );
 
+  const hasVisualSimilarity = useSegmentVisualSimilarityAvailable({
+    sceneId: detail.sceneId,
+    intervals: intervals.map((interval) => ({ startSec: interval.startSec, endSec: interval.endSec })),
+  });
+
   const tabs = useMemo(() => [
     { key: "overview", label: "Overview", icon: <Info className="h-4 w-4" /> },
     { key: "context", label: "Context", icon: <Network className="h-4 w-4" /> },
-    { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
+    ...(hasVisualSimilarity ? [{ key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> }] : []),
     { key: "intervals", label: "Intervals", icon: <ListVideo className="h-4 w-4" />, count: intervals.length },
-  ], [intervals.length]);
+  ], [hasVisualSimilarity, intervals.length]);
 
   const intervalsContent = (
     <div className="space-y-2">

@@ -33,8 +33,8 @@ import { CoverImageDialog } from "../components/CoverImageDialog";
 import { PerformerTile } from "../components/EntityCards";
 import { trackInteraction } from "../utils/interactionTracking";
 import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
-import { SceneVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
-import { SceneAudioSimilarityPanel } from "../components/AudioSimilarityPanel";
+import { SceneVisualSimilarityPanel, useSceneVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
+import { SceneAudioSimilarityPanel, useSceneAudioSimilarityAvailable } from "../components/AudioSimilarityPanel";
 import { EntityReferenceMultiSelector, EntityReferenceSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
 
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
@@ -369,12 +369,13 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const resolvedSpans = resolvedSpansResponse?.spans ?? [];
   const activeProfileId = selectedProfileId ?? resolvedSpansResponse?.profileId;
   const activeProfileName = displayProfiles.find((profile) => profile.id === activeProfileId)?.name ?? "Resolved";
-  const hasAudioSimilarity = getFeature("audio-similarity") != null;
+  const hasVisualSimilarity = useSceneVisualSimilarityAvailable(id);
+  const hasAudioSimilarity = useSceneAudioSimilarityAvailable(id);
 
   const tabs = filterItemsByPermission([
     { key: "details", label: "Details" },
     { key: "segments", label: `Segments${segments.length ? ` (${segments.length})` : ""}` },
-    { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
+    ...(hasVisualSimilarity ? [{ key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> }] : []),
     ...(hasAudioSimilarity ? [{ key: "audio-similar", label: "Audio Similar", icon: <Volume2 className="h-4 w-4" /> }] : []),
     { key: "filters", label: "Filters" },
     { key: "file-info", label: `File Info${scene?.files.length && scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },

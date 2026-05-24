@@ -8,9 +8,22 @@ import { EntityCardGrid } from "./EntityCardGrid";
 import { SceneCard } from "./EntityCards";
 
 const SIMILAR_PER_PAGE = 8;
+const AVAILABILITY_PER_PAGE = 1;
 
 interface PanelProps {
   onNavigate: (route: any) => void;
+}
+
+export function useSceneAudioSimilarityAvailable(sceneId?: number) {
+  const audioSimilarity = useAudioSimilarityApi();
+  const preview = useQuery({
+    queryKey: ["audio-similarity", "scene", sceneId, "similar-scenes", "preview"],
+    queryFn: () => audioSimilarity!.similarScenesForScene(sceneId!, { perPage: AVAILABILITY_PER_PAGE }),
+    enabled: audioSimilarity != null && typeof sceneId === "number" && sceneId > 0,
+    retry: false,
+  });
+
+  return audioSimilarity != null && (preview.data?.items.length ?? 0) > 0;
 }
 
 export function SceneAudioSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {

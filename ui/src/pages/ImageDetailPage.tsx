@@ -19,7 +19,7 @@ import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibili
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import type { FaceHostFace, TagApplication } from "../api/types";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
-import { ImageVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { ImageVisualSimilarityPanel, useImageVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
 import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { ImageEditPanel } from "./ImageEditModal";
 
@@ -119,16 +119,17 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const imageLikeCount = imageEngagement?.likeCount ?? 0;
   const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
   const displayTitle = image ? getImageDisplayTitle(image) : `Image ${id}`;
+  const hasVisualSimilarity = useImageVisualSimilarityAvailable(id);
   const tabs = useMemo(() => {
     const nextTabs = [
       { key: "details", label: "Details" },
       ...(canReadFiles ? [{ key: "file-info", label: "File Info", count: image?.files.length ?? 0 }] : []),
-      { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
+      ...(hasVisualSimilarity ? [{ key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> }] : []),
       ...(imageFaces.length > 0 ? [{ key: "detections", label: "Faces", count: imageFaces.length }] : []),
       ...(canWriteImage ? [{ key: "edit", label: "Edit" }] : []),
     ];
     return nextTabs;
-  }, [canReadFiles, canWriteImage, image?.files.length, imageFaces.length]);
+  }, [canReadFiles, canWriteImage, hasVisualSimilarity, image?.files.length, imageFaces.length]);
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {

@@ -14,7 +14,7 @@ import { CoverImageDialog } from "../components/CoverImageDialog";
 import { formatDate, ProvenanceBadge, TagBadge } from "../components/shared";
 import { EntityReferenceSelector } from "../components/EntityReferenceSelector";
 import { useBackNavigation } from "../hooks/useBackNavigation";
-import { SegmentVisualSimilarityPanel } from "../components/VisualSimilarityPanel";
+import { SegmentVisualSimilarityPanel, useSegmentVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
 import { buildSubSceneCreate } from "../utils/subSceneCreation";
 
 interface Props {
@@ -413,14 +413,19 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
     && (segment.endSec != null || (playbackScene?.files[0]?.duration ?? 0) > segment.startSec);
   const canSetSegmentCover = !!segment && segment.hostType === "scene" && canWriteSegments && canReadScenes;
   const coverActionPending = setSegmentCoverMutation.isPending;
+  const hasVisualSimilarity = useSegmentVisualSimilarityAvailable({
+    sceneId: segment?.hostType === "scene" ? segment.hostId : undefined,
+    startSec: segment?.startSec,
+    endSec: segment?.endSec ?? undefined,
+  });
   const tabs = useMemo(() => {
     return [
       { key: "overview", label: "Overview" },
       { key: "context", label: "Context", icon: <Network className="h-4 w-4" /> },
-      { key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> },
+      ...(hasVisualSimilarity ? [{ key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> }] : []),
       { key: "metadata", label: canWriteSegments ? "Edit" : "Metadata" },
     ];
-  }, [canWriteSegments]);
+  }, [canWriteSegments, hasVisualSimilarity]);
   const segmentKeyboardShortcuts = useMemo(() => {
     if (!segment) {
       return [];
