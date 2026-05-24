@@ -64,7 +64,7 @@ public sealed class Phase12SchemaParityTests
     private static CoveContext CreateContext(int port, string databaseName)
     {
         var options = new DbContextOptionsBuilder<CoveContext>()
-            .UseNpgsql(BuildConnectionString(port, databaseName))
+            .UseNpgsql(BuildConnectionString(port, databaseName), npgsqlOptions => npgsqlOptions.UseVector())
             .Options;
 
         return new CoveContext(options);

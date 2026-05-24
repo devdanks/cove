@@ -867,6 +867,7 @@ public class EmbeddingConfiguration : IEntityTypeConfiguration<Embedding>
     {
         builder.ToTable("embeddings");
         builder.HasKey(embedding => embedding.Id);
+        builder.Property(embedding => embedding.Vector);
         builder.Property(embedding => embedding.Kind).IsRequired().HasMaxLength(200);
         builder.Property(embedding => embedding.KindFamily).HasMaxLength(200);
         builder.Property(embedding => embedding.SourceKey).IsRequired().HasMaxLength(200);

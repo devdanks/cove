@@ -87,7 +87,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
         }
 
         var options = new DbContextOptionsBuilder<CoveContext>()
-            .UseNpgsql(DatabaseConnectionString)
+            .UseNpgsql(DatabaseConnectionString, npgsqlOptions => npgsqlOptions.UseVector())
             .EnableDetailedErrors()
             .Options;
 
