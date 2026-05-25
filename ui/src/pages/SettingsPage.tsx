@@ -1073,6 +1073,7 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => readSettingsTabFromUrl());
   const [settingsSearch, setSettingsSearch] = useState("");
+  const [settingsNavOpen, setSettingsNavOpen] = useState(false);
   const [openSettingsGroups, setOpenSettingsGroups] = useState<Record<SettingsTabGroupKey, boolean>>(() =>
     createDefaultSettingsGroupOpenState(readSettingsTabFromUrl()),
   );
@@ -1726,13 +1727,29 @@ export function SettingsPage() {
     : resolvedActiveTab === "my-theme" && !canWriteSystemSettings
     ? "Theme preferences stored in this browser or account."
     : activeExtensionSettingsTab?.description ?? tabDescriptions[resolvedActiveTab as BuiltInSettingsTab] ?? "Settings and runtime controls.";
+  const selectSettingsTab = (key: SettingsTab) => {
+    setActiveTab(key);
+    setSettingsNavOpen(false);
+  };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="rounded-2xl border border-border bg-surface p-2 lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
-        <div className="mb-2 px-3 py-2">
+    <div className="grid min-w-0 gap-4 lg:gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <aside className="min-w-0 rounded-2xl border border-border bg-surface p-2 lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
+        <button
+          type="button"
+          onClick={() => setSettingsNavOpen((open) => !open)}
+          className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left lg:hidden"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-foreground">Settings</span>
+            <span className="block truncate text-xs text-secondary">{activeTabMeta?.label}</span>
+          </span>
+          {settingsNavOpen ? <ChevronUp className="h-4 w-4 shrink-0 text-secondary" /> : <ChevronDown className="h-4 w-4 shrink-0 text-secondary" />}
+        </button>
+        <div className="mb-2 hidden px-3 py-2 lg:block">
           <h1 className="text-lg font-semibold text-foreground">Settings</h1>
         </div>
+        <div className={[settingsNavOpen ? "block" : "hidden", "lg:block"].join(" ")}>
         <div className="mb-3 px-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
@@ -1753,7 +1770,7 @@ export function SettingsPage() {
                     key={tab.key}
                     type="button"
                     onClick={() => {
-                      setActiveTab(tab.key);
+                      selectSettingsTab(tab.key);
                       setSettingsSearch("");
                     }}
                     className="flex w-full flex-col rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-card hover:text-foreground"
@@ -1791,7 +1808,7 @@ export function SettingsPage() {
                         return (
                           <div key={key}>
                             <button
-                              onClick={() => setActiveTab(key)}
+                              onClick={() => selectSettingsTab(key)}
                               className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
                                 resolvedActiveTab === key || isParentActive
                                   ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--color-border)]"
@@ -1806,7 +1823,7 @@ export function SettingsPage() {
                                 {childTabs.map(({ key: childKey, label: childLabel, icon: ChildIcon }) => (
                                   <button
                                     key={childKey}
-                                    onClick={() => setActiveTab(childKey)}
+                                    onClick={() => selectSettingsTab(childKey)}
                                     className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
                                       resolvedActiveTab === childKey
                                         ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--color-border)]"
@@ -1828,10 +1845,11 @@ export function SettingsPage() {
             );
           })}
         </nav>
+        </div>
       </aside>
 
-      <div className="space-y-5">
-        <section className="rounded-2xl border border-border bg-surface p-5 shadow-lg shadow-black/20">
+      <div className="min-w-0 space-y-5">
+        <section className="min-w-0 rounded-2xl border border-border bg-surface p-4 shadow-lg shadow-black/20 sm:p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-xl font-semibold text-foreground">{activeTabMeta?.label}</h2>
@@ -6893,7 +6911,7 @@ function FindAndInstallExtensions() {
       />
 
       {/* Search and filter */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
           <input
@@ -6901,14 +6919,14 @@ function FindAndInstallExtensions() {
             placeholder="Search the extension registry..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-sm bg-card border border-border rounded focus:outline-none focus:border-accent"
+            className="min-h-10 w-full rounded border border-border bg-card py-2 pl-8 pr-3 text-sm focus:border-accent focus:outline-none sm:min-h-0 sm:py-1.5"
           />
         </div>
         {registryCategories && registryCategories.length > 0 && (
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="px-3 py-1.5 text-sm bg-card border border-border rounded focus:outline-none focus:border-accent"
+            className="min-h-10 rounded border border-border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none sm:min-h-0 sm:w-auto sm:py-1.5"
           >
             <option value="">All Categories</option>
             {registryCategories.map(c => (
@@ -6921,7 +6939,7 @@ function FindAndInstallExtensions() {
             type="button"
             title="More extension actions"
             onClick={() => setShowMoreActions((open) => !open)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded border border-border bg-card text-secondary hover:text-foreground"
+            className="inline-flex h-10 w-10 items-center justify-center rounded border border-border bg-card text-secondary hover:text-foreground sm:h-8 sm:w-8"
           >
             <MoreHorizontal className="h-4 w-4" />
           </button>
@@ -6976,12 +6994,12 @@ function FindAndInstallExtensions() {
               value={urlInstallUrl}
               onChange={(e) => setUrlInstallUrl(e.target.value)}
               placeholder="https://example.com/extension.zip"
-              className="min-w-0 rounded border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-accent"
+              className="min-h-10 min-w-0 rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none sm:min-h-0 sm:py-1.5"
             />
             <button
               type="submit"
               disabled={!urlInstallUrl.trim() || urlInstallMut.isPending}
-              className="inline-flex items-center justify-center gap-1 rounded bg-card-hover px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center justify-center gap-1 rounded bg-card-hover px-3 py-2 text-sm font-medium text-foreground hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-1.5 sm:text-xs"
             >
               {urlInstallMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
               Install
@@ -7121,11 +7139,11 @@ function FindAndInstallExtensions() {
               {installError}
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => installMut.mutate({ extensionId: selectedExtension.id, version: selectedRequestedVersion, name: selectedExtension.name })}
               disabled={installMut.isPending}
-              className="px-4 py-1.5 text-sm bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 flex items-center gap-1.5"
+                className="flex min-h-10 items-center gap-1.5 rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50 sm:min-h-0 sm:py-1.5"
             >
               {installMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               {!selectedInstalledVersion
@@ -7141,7 +7159,7 @@ function FindAndInstallExtensions() {
                   dependents: getInstalledDependents(selectedExtension.id),
                 })}
                 disabled={uninstallMut.isPending}
-                className="px-4 py-1.5 text-sm bg-card border border-border text-muted hover:text-red-400 hover:border-red-500 rounded disabled:opacity-50 flex items-center gap-1.5"
+                className="flex min-h-10 items-center gap-1.5 rounded border border-border bg-card px-4 py-2 text-sm text-muted hover:border-red-500 hover:text-red-400 disabled:opacity-50 sm:min-h-0 sm:py-1.5"
               >
                 {uninstallMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                 {selectedExtension.kind === "bundle" ? "Uninstall Bundle" : "Uninstall"}
@@ -7168,7 +7186,7 @@ function FindAndInstallExtensions() {
             return (
               <div
                 key={ext.id}
-                className="flex items-center justify-between bg-card border border-border rounded-xl px-4 py-3 cursor-pointer hover:bg-card-hover/30 transition-colors"
+                className="flex cursor-pointer flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:bg-card-hover/30 sm:flex-row sm:items-center sm:justify-between"
                 onClick={() => viewDetail(ext.id)}
               >
                 <div className="min-w-0 flex-1">
@@ -7199,12 +7217,12 @@ function FindAndInstallExtensions() {
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2 ml-3 flex-shrink-0">
+                <div className="flex w-full flex-wrap gap-2 sm:ml-3 sm:w-auto sm:flex-shrink-0">
                   {!isInstalled ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: ext.version, name: ext.name }); }}
                       disabled={installMut.isPending}
-                      className="px-3 py-1.5 text-xs bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 flex items-center gap-1"
+                      className="flex min-h-10 items-center gap-1 rounded bg-accent px-3 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50 sm:min-h-0 sm:py-1.5 sm:text-xs"
                     >
                       {installMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
                       Install
@@ -7213,7 +7231,7 @@ function FindAndInstallExtensions() {
                     <button
                       onClick={(e) => { e.stopPropagation(); installMut.mutate({ extensionId: ext.id, version: update.latestVersion, name: ext.name }); }}
                       disabled={installMut.isPending}
-                      className="px-3 py-1.5 text-xs bg-yellow-600 hover:bg-yellow-500 text-white rounded disabled:opacity-50 flex items-center gap-1"
+                      className="flex min-h-10 items-center gap-1 rounded bg-yellow-600 px-3 py-2 text-sm text-white hover:bg-yellow-500 disabled:opacity-50 sm:min-h-0 sm:py-1.5 sm:text-xs"
                     >
                       {installMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                       Update
@@ -7230,7 +7248,7 @@ function FindAndInstallExtensions() {
                         });
                       }}
                       disabled={uninstallMut.isPending}
-                      className="px-3 py-1.5 text-xs bg-card border border-border text-muted hover:text-red-400 hover:border-red-500 rounded disabled:opacity-50 flex items-center gap-1"
+                      className="flex min-h-10 items-center gap-1 rounded border border-border bg-card px-3 py-2 text-sm text-muted hover:border-red-500 hover:text-red-400 disabled:opacity-50 sm:min-h-0 sm:py-1.5 sm:text-xs"
                     >
                       {uninstallMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                       Uninstall

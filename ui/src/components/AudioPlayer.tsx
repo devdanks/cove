@@ -72,6 +72,17 @@ function setPreservePitch(audio: PitchAwareAudio, value: boolean) {
 
 type WebkitAudioWindow = Window & { webkitAudioContext?: typeof AudioContext };
 
+function shouldUseNativeAudioOutput() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
+  return /iPad|iPhone|iPod/.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1);
+}
+
 class GranularPitchShifter {
   readonly input: GainNode;
   readonly output: GainNode;
@@ -247,8 +258,8 @@ function ControlFlyout({
     };
   }, [pinned]);
 
-  const toggleOpen = (_button: HTMLButtonElement) => {
-    setPinned(true);
+  const toggleOpen = () => {
+    setPinned((current) => (pointerInside || focusInside ? true : !current));
     setDismissedUntilLeave(false);
   };
 
@@ -257,11 +268,17 @@ function ControlFlyout({
       ref={rootRef}
       className="relative"
       data-audio-control={label.toLowerCase()}
-      onPointerEnter={() => {
+      onPointerEnter={(event) => {
+        if (event.pointerType === "touch") {
+          return;
+        }
         setPointerInside(true);
         setDismissedUntilLeave(false);
       }}
-      onPointerLeave={() => {
+      onPointerLeave={(event) => {
+        if (event.pointerType === "touch") {
+          return;
+        }
         setPointerInside(false);
         setDismissedUntilLeave(false);
       }}
@@ -281,7 +298,7 @@ function ControlFlyout({
         aria-expanded={open}
         onPointerDown={(event) => {
           event.preventDefault();
-          toggleOpen(event.currentTarget);
+          toggleOpen();
         }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") {
@@ -289,12 +306,12 @@ function ControlFlyout({
           }
 
           event.preventDefault();
-          toggleOpen(event.currentTarget);
+          toggleOpen();
         }}
       >
         {icon}
       </button>
-      <div className={["absolute bottom-full right-0 z-20 w-64 pb-2 transition", open ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-1 opacity-0"].join(" ")}>
+      <div className={["fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+1rem)] z-50 w-auto max-w-[calc(100vw-1.5rem)] pb-0 transition sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:w-64 sm:max-w-none sm:pb-2", open ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-1 opacity-0"].join(" ")}>
         <div className="rounded-lg border border-border bg-surface p-3 text-foreground shadow-lg">
           <div className="mb-2 flex items-center justify-between gap-3 text-xs font-medium text-secondary">
             <span>{label}</span>
@@ -392,6 +409,7 @@ export function AudioPlayer({
     return Number.isFinite(parsed) ? clamp(Math.round(parsed), -12, 12) : 0;
   });
   const [remotePlaybackAvailable, setRemotePlaybackAvailable] = useState(false);
+  const nativeAudioOutput = useMemo(() => shouldUseNativeAudioOutput(), []);
 
   const trackingTarget = useMemo(() => {
     if (!trackingEnabled) {
@@ -401,9 +419,23 @@ export function AudioPlayer({
     return playbackTracking ?? null;
   }, [playbackTracking, trackingEnabled]);
 
+  const disposePitchGraph = useCallback(() => {
+    const graph = pitchGraphRef.current;
+    if (!graph) {
+      return;
+    }
+
+    graph.source.disconnect();
+    graph.shifter.disconnect();
+    pitchGraphRef.current = null;
+    if (graph.context.state !== "closed") {
+      void graph.context.close().catch(() => {});
+    }
+  }, []);
+
   const ensurePitchGraph = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio || typeof window === "undefined") {
+    if (!audio || nativeAudioOutput || typeof window === "undefined") {
       return null;
     }
 
@@ -427,21 +459,11 @@ export function AudioPlayer({
     } catch {
       return null;
     }
-  }, []);
+  }, [nativeAudioOutput]);
 
   useEffect(() => () => {
-    const graph = pitchGraphRef.current;
-    if (!graph) {
-      return;
-    }
-
-    graph.source.disconnect();
-    graph.shifter.disconnect();
-    pitchGraphRef.current = null;
-    if (graph.context.state !== "closed") {
-      void graph.context.close().catch(() => {});
-    }
-  }, []);
+    disposePitchGraph();
+  }, [disposePitchGraph]);
 
   const flushInterval = useCallback((state: string, mode: "default" | "keepalive" = "default") => {
     const audio = audioRef.current;
@@ -514,11 +536,18 @@ export function AudioPlayer({
     audio.defaultPlaybackRate = rate;
     audio.playbackRate = rate;
     setPreservePitch(audio, true);
-    const graph = ensurePitchGraph();
+    if (nativeAudioOutput) {
+      disposePitchGraph();
+      audio.dataset.pitchShiftSemitones = String(pitchSemitones);
+      audio.dataset.pitchShiftActive = "false";
+      return;
+    }
+
+    const graph = pitchSemitones !== 0 ? ensurePitchGraph() : pitchGraphRef.current;
     graph?.shifter.setPitch(pitchSemitones);
     audio.dataset.pitchShiftSemitones = String(pitchSemitones);
     audio.dataset.pitchShiftActive = graph && pitchSemitones !== 0 ? "true" : "false";
-  }, [ensurePitchGraph, pitchSemitones, rate]);
+  }, [disposePitchGraph, ensurePitchGraph, nativeAudioOutput, pitchSemitones, rate]);
 
   useEffect(() => {
     clipEndedHandled.current = false;
@@ -541,10 +570,16 @@ export function AudioPlayer({
       audio.defaultPlaybackRate = rate;
       audio.playbackRate = rate;
       setPreservePitch(audio, true);
-      const graph = ensurePitchGraph();
-      graph?.shifter.setPitch(pitchSemitones);
-      audio.dataset.pitchShiftSemitones = String(pitchSemitones);
-      audio.dataset.pitchShiftActive = graph && pitchSemitones !== 0 ? "true" : "false";
+      if (nativeAudioOutput) {
+        disposePitchGraph();
+        audio.dataset.pitchShiftSemitones = String(pitchSemitones);
+        audio.dataset.pitchShiftActive = "false";
+      } else {
+        const graph = pitchSemitones !== 0 ? ensurePitchGraph() : pitchGraphRef.current;
+        graph?.shifter.setPitch(pitchSemitones);
+        audio.dataset.pitchShiftSemitones = String(pitchSemitones);
+        audio.dataset.pitchShiftActive = graph && pitchSemitones !== 0 ? "true" : "false";
+      }
       setMeasuredDuration(nextDuration);
       lastLoadedSourceRef.current = `${streamUrl}|${format || "audio"}`;
       if (nextTime != null && nextTime >= 0 && resumeAppliedRef.current !== resumeKey) {
@@ -562,7 +597,7 @@ export function AudioPlayer({
     return () => {
       audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
     };
-  }, [clip?.end, clip?.start, duration, ensurePitchGraph, format, pitchSemitones, rate, resumeTime, streamUrl]);
+  }, [clip?.end, clip?.start, disposePitchGraph, duration, ensurePitchGraph, format, nativeAudioOutput, pitchSemitones, rate, resumeTime, streamUrl]);
 
   useEffect(() => {
     if (!autostart) {
@@ -613,8 +648,12 @@ export function AudioPlayer({
       return;
     }
 
+    pendingAutostartRef.current = false;
     audio.pause();
-  }, []);
+    setPlaying(false);
+    flushInterval("paused");
+    intervalStart.current = null;
+  }, [flushInterval]);
 
   const seekBy = useCallback((delta: number) => {
     const audio = audioRef.current;
@@ -688,7 +727,7 @@ export function AudioPlayer({
         {...({ "x-webkit-airplay": "allow" } as Record<string, string>)}
         onPlay={() => {
           const audio = audioRef.current;
-          const graph = ensurePitchGraph();
+          const graph = pitchGraphRef.current ?? (pitchSemitones !== 0 && !nativeAudioOutput ? ensurePitchGraph() : null);
           if (graph?.context.state === "suspended") {
             void graph.context.resume().catch(() => {});
           }
@@ -846,23 +885,25 @@ export function AudioPlayer({
               </div>
             </ControlFlyout>
 
-            <ControlFlyout label="Pitch" value={formatPitch(pitchSemitones)} icon={<SlidersHorizontal className="h-4 w-4" />}>
-              <input
-                type="range"
-                min={-12}
-                max={12}
-                step={1}
-                value={pitchSemitones}
-                onChange={(event) => commitPitch(Number(event.currentTarget.value))}
-                className="w-full accent-accent"
-                aria-label="Pitch adjustment"
-              />
-              <div className="mt-2 flex items-center justify-between text-[11px] text-secondary">
-                <span>-12 st</span>
-                <button type="button" onClick={() => commitPitch(0)} className="text-accent transition hover:text-accent-hover">0 st</button>
-                <span>+12 st</span>
-              </div>
-            </ControlFlyout>
+            {!nativeAudioOutput ? (
+              <ControlFlyout label="Pitch" value={formatPitch(pitchSemitones)} icon={<SlidersHorizontal className="h-4 w-4" />}>
+                <input
+                  type="range"
+                  min={-12}
+                  max={12}
+                  step={1}
+                  value={pitchSemitones}
+                  onChange={(event) => commitPitch(Number(event.currentTarget.value))}
+                  className="w-full accent-accent"
+                  aria-label="Pitch adjustment"
+                />
+                <div className="mt-2 flex items-center justify-between text-[11px] text-secondary">
+                  <span>-12 st</span>
+                  <button type="button" onClick={() => commitPitch(0)} className="text-accent transition hover:text-accent-hover">0 st</button>
+                  <span>+12 st</span>
+                </div>
+              </ControlFlyout>
+            ) : null}
 
             {remotePlaybackAvailable ? (
               <button

@@ -23,7 +23,7 @@ export function EngagementBar({
         title={favoriteTitle}
         disabled={favoritePending}
         onClick={() => onFavoriteChange(!favorite)}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 ${favorite ? "border-accent/60 bg-accent/10 text-foreground" : "border-border text-secondary"}`}
+        className={`inline-flex min-h-9 min-w-9 items-center justify-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:min-w-0 sm:justify-start ${favorite ? "border-accent/60 bg-accent/10 text-foreground" : "border-border text-secondary"}`}
       >
         <Heart className={["h-3.5 w-3.5", favorite ? "fill-current text-red-300" : "text-muted"].join(" ")} />
       </button>
@@ -31,7 +31,7 @@ export function EngagementBar({
       <span
         aria-label={favorite ? "Favorite" : "Not favorite"}
         title={favorite ? "Favorite" : "Not favorite"}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${favorite ? "border-accent/60 bg-accent/10 text-foreground" : "border-border text-secondary"}`}
+        className={`inline-flex min-h-9 min-w-9 items-center justify-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium sm:min-h-0 sm:min-w-0 sm:justify-start ${favorite ? "border-accent/60 bg-accent/10 text-foreground" : "border-border text-secondary"}`}
       >
         <Heart className={["h-3.5 w-3.5", favorite ? "fill-current text-red-300" : "text-muted"].join(" ")} />
       </span>
@@ -66,7 +66,7 @@ export function EngagementBar({
 
       {additionalMetrics.map((metric) => {
         const baseClass = [
-          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition",
+          "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition sm:min-h-0",
           metric.active
             ? "border-accent/60 bg-accent/10 text-foreground"
             : "border-border text-secondary",

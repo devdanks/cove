@@ -938,7 +938,7 @@ export function ListPage({
   return (
     <div className="space-y-0">
       {/* Toolbar - matches standard FilteredListToolbar */}
-      <div className="mx-1 mt-1 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/90 px-2.5 py-2 shadow-sm shadow-black/20">
+      <div className="mx-1 mt-1 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/90 px-3 py-3 shadow-sm shadow-black/20 sm:px-2.5 sm:py-2">
         {/* Title + count + byline */}
         <div className="mr-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pr-2">
           <h1 className="text-sm font-semibold text-foreground whitespace-nowrap">{title}</h1>
@@ -952,14 +952,14 @@ export function ListPage({
         </div>
 
         {/* Search */}
-        <form onSubmit={handleSearch} className="flex shrink-0 items-center gap-1" style={{ width: searchModes && searchModes.length > 1 ? "22rem" : "18rem", maxWidth: "100%" }}>
+        <form onSubmit={handleSearch} className={["flex w-full shrink-0 items-center gap-1", searchModes && searchModes.length > 1 ? "sm:w-[22rem]" : "sm:w-[18rem]"].join(" ")}>
           {searchModes && searchModes.length > 1 && onSearchModeChange && (
             <select
               value={searchMode ?? searchModes[0]?.value ?? "text"}
               onChange={(e) => {
                 onSearchModeChange(e.target.value);
               }}
-              className="min-h-[30px] max-w-[5.75rem] rounded-lg border border-border bg-card/70 px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-accent"
+              className="min-h-10 max-w-[6.5rem] rounded-lg border border-border bg-card/70 px-2 py-2 text-sm text-foreground focus:border-accent focus:outline-none sm:min-h-[30px] sm:max-w-[5.75rem] sm:py-1.5 sm:text-xs"
               aria-label="Search mode"
               title="Search mode"
             >
@@ -977,7 +977,7 @@ export function ListPage({
               placeholder={searchPlaceholder ?? "Search names, titles, tags..."}
               aria-label="Search list"
               data-list-search="true"
-              className="w-full rounded-lg border border-border bg-card/70 pl-7 pr-7 py-1.5 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
+              className="min-h-10 w-full rounded-lg border border-border bg-card/70 py-2 pl-8 pr-8 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none sm:min-h-0 sm:py-1.5 sm:pl-7 sm:pr-7 sm:text-xs"
             />
             {searchText.trim().length > 0 ? (
               <button
@@ -1063,7 +1063,7 @@ export function ListPage({
             {availableDisplayModes.includes("grid") && (
               <button
                 onClick={() => onDisplayModeChange("grid")}
-                className={`rounded-md p-1.5 ${displayMode === "grid" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                className={`${toolbarIconButtonClass} ${displayMode === "grid" ? "bg-background/60 text-accent shadow-sm" : ""}`}
                 title="Grid"
               >
                 <LayoutGrid className="w-3.5 h-3.5" />
@@ -1072,7 +1072,7 @@ export function ListPage({
             {availableDisplayModes.includes("list") && (
               <button
                 onClick={() => onDisplayModeChange("list")}
-                className={`rounded-md p-1.5 ${displayMode === "list" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                className={`${toolbarIconButtonClass} ${displayMode === "list" ? "bg-background/60 text-accent shadow-sm" : ""}`}
                 title="List"
               >
                 <List className="w-3.5 h-3.5" />
@@ -1081,7 +1081,7 @@ export function ListPage({
             {availableDisplayModes.includes("wall") && (
               <button
                 onClick={() => onDisplayModeChange("wall")}
-                className={`rounded-md p-1.5 ${displayMode === "wall" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                className={`${toolbarIconButtonClass} ${displayMode === "wall" ? "bg-background/60 text-accent shadow-sm" : ""}`}
                 title="Wall"
               >
                 <Grid3X3 className="w-3.5 h-3.5" />
@@ -1090,7 +1090,7 @@ export function ListPage({
             {availableDisplayModes.includes("tagger") && (
               <button
                 onClick={() => onDisplayModeChange("tagger")}
-                className={`rounded-md p-1.5 ${displayMode === "tagger" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                className={`${toolbarIconButtonClass} ${displayMode === "tagger" ? "bg-background/60 text-accent shadow-sm" : ""}`}
                 title="Tagger"
               >
                 <Columns3 className="w-3.5 h-3.5" />
@@ -1099,7 +1099,7 @@ export function ListPage({
             {availableDisplayModes.includes("graph") && (
               <button
                 onClick={() => onDisplayModeChange("graph")}
-                className={`rounded-md p-1.5 ${displayMode === "graph" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                className={`${toolbarIconButtonClass} ${displayMode === "graph" ? "bg-background/60 text-accent shadow-sm" : ""}`}
                 title="Graph/Tree"
               >
                 <Share2 className="w-3.5 h-3.5" />
@@ -1108,7 +1108,7 @@ export function ListPage({
             {availableDisplayModes.includes("byGroup") && (
               <button
                 onClick={() => onDisplayModeChange("byGroup")}
-                className={`rounded-md p-1.5 ${displayMode === "byGroup" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                className={`${toolbarIconButtonClass} ${displayMode === "byGroup" ? "bg-background/60 text-accent shadow-sm" : ""}`}
                 title="By Group"
               >
                 <FolderTree className="w-3.5 h-3.5" />
@@ -1117,7 +1117,7 @@ export function ListPage({
             {availableDisplayModes.includes("feed") && (
               <button
                 onClick={() => onDisplayModeChange("feed")}
-                className={`rounded-md p-1.5 ${displayMode === "feed" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                className={`${toolbarIconButtonClass} ${displayMode === "feed" ? "bg-background/60 text-accent shadow-sm" : ""}`}
                 title="Feed"
               >
                 <Rows3 className="w-3.5 h-3.5" />
@@ -1126,7 +1126,7 @@ export function ListPage({
             {availableDisplayModes.includes("vertical") && (
               <button
                 onClick={() => onDisplayModeChange("vertical")}
-                className={`rounded-md p-1.5 ${displayMode === "vertical" ? "bg-background/60 text-accent shadow-sm" : "text-secondary hover:bg-card/80 hover:text-foreground"}`}
+                className={`${toolbarIconButtonClass} ${displayMode === "vertical" ? "bg-background/60 text-accent shadow-sm" : ""}`}
                 title="Vertical Viewer"
               >
                 <MonitorPlay className="w-3.5 h-3.5" />
@@ -1152,7 +1152,7 @@ export function ListPage({
 
           {/* Zoom slider (standard card size slider) */}
           {displayMode === "grid" && (
-            <div className="flex items-center gap-1 pl-1">
+            <div className="hidden items-center gap-1 pl-1 md:flex">
               <ZoomOut className="w-3 h-3 text-muted" />
               <input
                 type="range"
@@ -1169,7 +1169,7 @@ export function ListPage({
           )}
 
           {displayMode === "wall" && wallColumnCount != null && onWallColumnCountChange && (
-            <div className="flex items-center gap-1 pl-1">
+            <div className="hidden items-center gap-1 pl-1 md:flex">
               <ZoomOut className="w-3 h-3 text-muted" />
               <input
                 type="range"
@@ -1195,7 +1195,7 @@ export function ListPage({
           {onNew && (
             <button
               onClick={onNew}
-              className="rounded-lg bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover"
+              className="inline-flex min-h-10 items-center rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover sm:min-h-0 sm:py-1 sm:text-xs"
             >
               + New
             </button>
@@ -1328,7 +1328,7 @@ export function ListPage({
 
       {/* Pagination top */}
       {showPagingControls && totalPages > 1 && (
-        <div className="flex items-center justify-center gap-1 py-1 mx-1 mt-1">
+        <div className="mx-1 mt-1 flex flex-wrap items-center justify-center gap-1 py-1">
           <PaginationControls page={page} totalPages={totalPages} goTo={goTo} />
         </div>
       )}
@@ -1357,7 +1357,7 @@ export function ListPage({
 
       {/* Pagination bottom */}
       {showPagingControls && totalPages > 1 && (
-        <div className="flex items-center justify-center gap-1 py-4">
+        <div className="flex flex-wrap items-center justify-center gap-1 py-4">
           <PaginationControls page={page} totalPages={totalPages} goTo={goTo} />
         </div>
       )}
@@ -1405,10 +1405,10 @@ function PaginationControls({ page, totalPages, goTo }: { page: number; totalPag
 
   return (
     <>
-      <button onClick={() => goTo(1)} disabled={page <= 1} className="p-1 rounded hover:bg-card disabled:opacity-30 disabled:cursor-not-allowed text-secondary hover:text-foreground">
+      <button onClick={() => goTo(1)} disabled={page <= 1} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded text-secondary hover:bg-card hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 sm:min-h-0 sm:min-w-0 sm:p-1">
         <ChevronsLeft className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => goTo(page - 1)} disabled={page <= 1} className="p-1 rounded hover:bg-card disabled:opacity-30 disabled:cursor-not-allowed text-secondary hover:text-foreground">
+      <button onClick={() => goTo(page - 1)} disabled={page <= 1} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded text-secondary hover:bg-card hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 sm:min-h-0 sm:min-w-0 sm:p-1">
         <ChevronLeft className="w-3.5 h-3.5" />
       </button>
       {getPageNumbers(page, totalPages).map((p, i) =>
@@ -1418,7 +1418,7 @@ function PaginationControls({ page, totalPages, goTo }: { page: number; totalPag
           <button
             key={p}
             onClick={() => goTo(p)}
-            className={`min-w-[28px] h-7 rounded text-xs font-medium ${
+            className={`h-10 min-w-10 rounded text-sm font-medium sm:h-7 sm:min-w-[28px] sm:text-xs ${
               p === page ? "bg-accent text-white" : "text-secondary hover:bg-card hover:text-foreground"
             }`}
           >
@@ -1426,10 +1426,10 @@ function PaginationControls({ page, totalPages, goTo }: { page: number; totalPag
           </button>
         )
       )}
-      <button onClick={() => goTo(page + 1)} disabled={page >= totalPages} className="p-1 rounded hover:bg-card disabled:opacity-30 disabled:cursor-not-allowed text-secondary hover:text-foreground">
+      <button onClick={() => goTo(page + 1)} disabled={page >= totalPages} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded text-secondary hover:bg-card hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 sm:min-h-0 sm:min-w-0 sm:p-1">
         <ChevronRight className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => goTo(totalPages)} disabled={page >= totalPages} className="p-1 rounded hover:bg-card disabled:opacity-30 disabled:cursor-not-allowed text-secondary hover:text-foreground">
+      <button onClick={() => goTo(totalPages)} disabled={page >= totalPages} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded text-secondary hover:bg-card hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 sm:min-h-0 sm:min-w-0 sm:p-1">
         <ChevronsRight className="w-3.5 h-3.5" />
       </button>
       {totalPages > 7 && (
@@ -1441,11 +1441,11 @@ function PaginationControls({ page, totalPages, goTo }: { page: number; totalPag
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onBlur={handleSubmit}
-              className="w-12 h-7 rounded border border-border bg-input text-center text-xs text-foreground focus:outline-none focus:border-accent"
+              className="h-10 w-14 rounded border border-border bg-input text-center text-sm text-foreground focus:border-accent focus:outline-none sm:h-7 sm:w-12 sm:text-xs"
             />
           </form>
         ) : (
-          <button onClick={() => { setInputValue(String(page)); setEditing(true); }} className="ml-1 h-7 px-2 rounded text-xs text-muted hover:text-foreground hover:bg-card border border-border" title="Go to page…">
+          <button onClick={() => { setInputValue(String(page)); setEditing(true); }} className="ml-1 min-h-10 rounded border border-border px-3 text-sm text-muted hover:bg-card hover:text-foreground sm:h-7 sm:min-h-0 sm:px-2 sm:text-xs" title="Go to page…">
             Go to…
           </button>
         )

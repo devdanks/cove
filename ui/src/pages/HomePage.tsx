@@ -322,7 +322,7 @@ function RecommendationRowShell({
         <h2 className="text-base font-semibold text-foreground">{header}</h2>
         <button
           onClick={() => onNavigate({ page: viewAllPage })}
-          className="text-xs text-muted hover:text-accent"
+          className="inline-flex min-h-9 items-center rounded-md px-2 text-sm text-muted hover:text-accent sm:min-h-0 sm:px-0 sm:text-xs"
         >
           View All
         </button>
@@ -373,8 +373,11 @@ function RecommendationRowShell({
                 const el = scrollRef.current;
                 if (el) el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" });
               }}
-              className={`w-6 h-1 rounded-full transition-colors ${i === currentPage ? "bg-foreground" : "bg-muted/40"}`}
-            />
+              className="flex h-8 w-8 items-center justify-center rounded-full sm:h-1 sm:w-6"
+              aria-label={`Go to carousel page ${i + 1}`}
+            >
+              <span className={`h-1.5 w-6 rounded-full transition-colors sm:h-full sm:w-full ${i === currentPage ? "bg-foreground" : "bg-muted/40"}`} />
+            </button>
           ))}
         </div>
       )}

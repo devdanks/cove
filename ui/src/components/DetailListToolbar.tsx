@@ -81,7 +81,7 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
 
   return (
     <>
-      <div className="mx-auto mb-2 flex max-w-7xl flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/90 px-2.5 py-2 text-sm shadow-sm shadow-black/20">
+      <div className="mx-auto mb-2 flex max-w-7xl flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/90 px-3 py-3 text-sm shadow-sm shadow-black/20 sm:px-2.5 sm:py-2">
         <div className="mr-auto flex min-w-0 items-center gap-2 pr-2">
           <span className="text-xs text-muted">
             {totalCount > 0 ? `${start}–${end} of ${totalCount.toLocaleString()}` : "0 items"}
@@ -89,7 +89,7 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
         </div>
 
         {showSearch && (
-          <form onSubmit={(e) => { e.preventDefault(); onFilterChange({ ...filter, q: searchText || undefined, page: 1 }); }} className="flex w-full max-w-[18rem] shrink-0 items-center gap-1">
+          <form onSubmit={(event) => { event.preventDefault(); onFilterChange({ ...filter, q: searchText || undefined, page: 1 }); }} className="flex w-full shrink-0 items-center gap-1 sm:max-w-[18rem]">
             <div className="relative min-w-0 flex-1">
               <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
               <input
@@ -98,7 +98,7 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
                 onChange={(e) => setSearchText(e.target.value)}
                 onBlur={() => { if (searchText !== (filter.q ?? "")) onFilterChange({ ...filter, q: searchText || undefined, page: 1 }); }}
                 placeholder="Search…"
-                className="min-h-[30px] w-full rounded-lg border border-border bg-card/70 py-1.5 pl-7 pr-2 text-xs text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
+                className="min-h-10 w-full rounded-lg border border-border bg-card/70 py-2 pl-8 pr-2 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none sm:min-h-[30px] sm:py-1.5 sm:pl-7 sm:text-xs"
               />
             </div>
           </form>
@@ -198,7 +198,7 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
       )}
 
       {showPagingControls && !infinitePageSize && totalPages > 1 && (
-        <div className="mx-auto mb-4 flex max-w-7xl items-center justify-center gap-1 py-1">
+        <div className="mx-auto mb-4 flex max-w-7xl flex-wrap items-center justify-center gap-1 py-1">
           <button disabled={page <= 1} onClick={() => goTo(1)}
             className={`${toolbarIconButtonClass} disabled:cursor-not-allowed disabled:opacity-30`}>
             <ChevronsLeft className="w-3.5 h-3.5" />

@@ -160,7 +160,7 @@ function MediaDetailLayoutRoot({
   };
 
   const tabsNav = hasTabs ? (
-    <div className="flex w-11 shrink-0 flex-col border-r border-border bg-background/70 py-2">
+    <div className="hidden w-11 shrink-0 flex-col border-r border-border bg-background/70 py-2 lg:flex">
       {canCollapseSidebar ? (
         <>
           <button
@@ -246,6 +246,44 @@ function MediaDetailLayoutRoot({
     </div>
   ) : null;
 
+  const mobileTabsNav = hasTabs ? (
+    <div className="border-b border-border bg-background/70 lg:hidden">
+      <nav
+        className="flex gap-1 overflow-x-auto px-3 py-2"
+        aria-label="Detail tabs"
+        role="tablist"
+        aria-orientation="horizontal"
+      >
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              disabled={tab.disabled}
+              onClick={() => handleTabChange(tab.key)}
+              className={[
+                "inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+                isActive
+                  ? "border-accent/50 bg-accent/15 text-accent"
+                  : "border-border/70 bg-card/60 text-secondary hover:border-muted hover:text-foreground",
+                tab.disabled ? "cursor-not-allowed opacity-50" : "",
+              ].filter(Boolean).join(" ")}
+            >
+              {renderTabIcon(tab)}
+              <span className="max-w-[8rem] truncate">{tab.label}</span>
+              {typeof tab.count === "number" ? (
+                <span className="rounded-full bg-background px-1.5 py-0.5 text-xs text-muted">{tab.count}</span>
+              ) : null}
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  ) : null;
+
   const contentNode = isLoading ? (
     <DetailSkeleton showMedia={false} />
   ) : error ? (
@@ -273,6 +311,7 @@ function MediaDetailLayoutRoot({
     <div
       className={[
         "relative w-full shrink-0 border-b border-border bg-background/40 transition-[width] duration-150",
+        media ? "order-2 lg:order-1" : "",
         media ? (
           sidebarCollapsed
             ? "lg:w-11 lg:min-w-11 lg:max-w-11 lg:border-b-0 lg:border-r lg:max-h-[calc(100vh-49px)]"
@@ -285,18 +324,19 @@ function MediaDetailLayoutRoot({
       <div className={["flex min-h-0 overflow-hidden", media ? "h-full" : "max-h-[calc(100vh-49px)]"].join(" ")}>
         {tabsNav}
         <div className={["min-w-0 flex-1 overflow-y-auto", sidebarCollapsed ? "lg:hidden" : ""].join(" ")}>
-          <div className="px-6 pt-4 pb-2 sm:pl-7 lg:pl-8">
+          {mobileTabsNav}
+          <div className="px-4 pt-4 pb-2 sm:pl-7 sm:pr-6 lg:pl-8">
             {onGoBack ? (
               <button
                 type="button"
                 onClick={onGoBack}
-                className="mb-3 flex items-center gap-1 text-sm text-secondary transition hover:text-foreground"
+                className="mb-3 inline-flex min-h-9 items-center gap-1 rounded-md pr-2 text-sm text-secondary transition hover:text-foreground sm:flex sm:min-h-0 sm:rounded-none sm:pr-0"
               >
                 <ArrowLeft className="h-4 w-4" /> {backLabel}
               </button>
             ) : null}
             {headerImage ? <div className="mb-2">{headerImage}</div> : null}
-            <h3 className="mt-1 break-words text-[1.5rem] font-semibold leading-snug text-foreground">{title}</h3>
+            <h3 className="mt-1 break-words text-xl font-semibold leading-snug text-foreground sm:text-[1.5rem]">{title}</h3>
             {subtitle ? <div className="mt-1 text-sm text-secondary">{subtitle}</div> : null}
             {engagement || headerActions.length > 0 ? (
               <div className="mt-3 flex items-center justify-between gap-2">
@@ -309,7 +349,7 @@ function MediaDetailLayoutRoot({
               </div>
             ) : null}
           </div>
-          <div className="px-6 py-4 sm:pl-7 lg:pl-8">{contentNode}</div>
+          <div className="px-4 py-4 sm:pl-7 sm:pr-6 lg:pl-8">{contentNode}</div>
         </div>
       </div>
     </div>
@@ -321,6 +361,7 @@ function MediaDetailLayoutRoot({
     <div
       className={[
         "flex min-w-0 min-h-0 flex-1 flex-col",
+        media ? "order-1 lg:order-2" : "",
         isCompactMedia ? "overflow-visible p-4 sm:p-6 lg:p-8" : "overflow-hidden",
         hasFramedMedia ? "items-center justify-center bg-black/95 p-3 sm:p-4" : "",
         isCompactMedia ? "" : mediaAspectRatio === "square" ? "min-h-[70vw]" : "min-h-[45vh]",

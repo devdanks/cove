@@ -377,7 +377,7 @@ export function InteractiveRating({ value, onChange, readOnly = false }: { value
                 const nextDisplayValue = getValueFromPointer(event, star);
                 onChange?.(nextDisplayValue === displayValue ? undefined : convertFromRatingFormat(nextDisplayValue, options));
               }}
-              className="relative text-accent transition-transform hover:scale-110"
+              className="relative inline-flex h-9 w-9 items-center justify-center text-accent transition-transform hover:scale-110 sm:h-auto sm:w-auto"
               title="Set rating"
             >
               <Star className="h-5 w-5 text-muted" />
@@ -404,7 +404,7 @@ export function InteractiveRating({ value, onChange, readOnly = false }: { value
         value={value}
         onChange={onChange ?? (() => {})}
         options={options}
-        inputClassName="w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"
+        inputClassName="min-h-10 w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none sm:min-h-0"
       />
     </div>
   );

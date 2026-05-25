@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpenText, Check, Download, ExternalLink, Files, FolderOpen, Image, Link2, MoreVertical, Rows3, Trash2 } from "lucide-react";
+import { BookOpenText, Check, ChevronLeft, ChevronRight, Download, ExternalLink, Files, FolderOpen, Image, Link2, MoreVertical, Rows3, Trash2 } from "lucide-react";
 import { entityImages, fileOps, playback, texts } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
@@ -38,6 +38,81 @@ function isPdfTextFile(file?: { format?: string | null; basename?: string | null
   const basename = file?.basename?.trim().toLowerCase();
   const path = file?.path?.trim().toLowerCase();
   return format === "pdf" || basename?.endsWith(".pdf") || path?.endsWith(".pdf") || false;
+}
+
+function buildPdfFrameUrl(sourceUrl: string, page: number) {
+  const fragmentSeparator = sourceUrl.includes("#") ? "&" : "#";
+  return `${sourceUrl}${fragmentSeparator}page=${page}&zoom=page-width&view=FitH&toolbar=1&navpanes=0`;
+}
+
+function SourcePdfViewer({ title, sourceUrl, pageCount }: { title: string; sourceUrl: string; pageCount?: number | null }) {
+  const [page, setPage] = useState(1);
+  const normalizedPageCount = Number.isFinite(pageCount ?? NaN) && (pageCount ?? 0) > 0 ? Math.floor(pageCount ?? 0) : undefined;
+  const frameUrl = buildPdfFrameUrl(sourceUrl, page);
+
+  useEffect(() => {
+    setPage(1);
+  }, [sourceUrl]);
+
+  const setClampedPage = (nextPage: number) => {
+    const maxPage = normalizedPageCount ?? Number.MAX_SAFE_INTEGER;
+    setPage(Math.min(maxPage, Math.max(1, Math.floor(nextPage))));
+  };
+
+  return (
+    <div className="flex min-h-[70svh] flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card/80 px-3 py-2 text-sm">
+        <div className="mr-auto min-w-0 text-xs font-medium uppercase text-secondary">PDF</div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setClampedPage(page - 1)}
+            disabled={page <= 1}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border bg-background/70 text-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <label className="flex items-center gap-1 text-xs text-secondary">
+            <span>Page</span>
+            <input
+              type="number"
+              min={1}
+              max={normalizedPageCount}
+              value={page}
+              onChange={(event) => setClampedPage(Number(event.currentTarget.value))}
+              className="h-10 w-16 rounded-md border border-border bg-input px-2 text-center text-sm text-foreground focus:border-accent focus:outline-none"
+            />
+            {normalizedPageCount ? <span>/ {normalizedPageCount}</span> : null}
+          </label>
+          <button
+            type="button"
+            onClick={() => setClampedPage(page + 1)}
+            disabled={normalizedPageCount ? page >= normalizedPageCount : false}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border bg-background/70 text-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Next page"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <a
+          href={sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-10 items-center gap-1 rounded-md border border-border bg-background/70 px-3 text-xs text-secondary hover:text-foreground"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Open
+        </a>
+      </div>
+      <iframe
+        title={title}
+        src={frameUrl}
+        className="min-h-0 flex-1 border-0 bg-surface"
+        scrolling="yes"
+      />
+    </div>
+  );
 }
 
 export function TextDetailPage({ id, onNavigate }: Props) {
@@ -209,13 +284,9 @@ export function TextDetailPage({ id, onNavigate }: Props) {
   const contentIsPdf = content?.format?.trim().toLowerCase() === "pdf";
   const showSourcePdf = canStreamTextFile && (primaryFileIsPdf || contentIsPdf);
   const textMedia = (
-    <div className="flex min-h-0 flex-1 bg-background p-3 sm:p-4">
+    <div className="flex min-h-0 flex-1 bg-background p-2 sm:p-4">
       {showSourcePdf ? (
-        <iframe
-          title={displayTitle}
-          src={texts.fileUrl(text.id)}
-          className="h-full min-h-[28rem] w-full rounded-lg border border-border bg-surface"
-        />
+        <SourcePdfViewer title={displayTitle} sourceUrl={texts.fileUrl(text.id)} pageCount={text.maxPageCount ?? primaryFile?.pageCount} />
       ) : contentLoading ? (
         <div className="flex min-h-[28rem] flex-1 items-center justify-center rounded-lg border border-border bg-surface text-sm text-muted">
           Loading extracted text content...

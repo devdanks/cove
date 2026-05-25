@@ -31,7 +31,7 @@ export function TagBadge({ name, tag, color, groupColor, onClick, provenance }: 
       type="button"
       onClick={onClick}
       style={colorStyle}
-      className="inline-flex items-center gap-1.5 rounded border border-border bg-card px-2 py-0.5 text-xs font-medium text-secondary transition hover:bg-card-hover hover:text-foreground"
+      className="inline-flex min-h-9 items-center gap-1.5 rounded border border-border bg-card px-2.5 py-1 text-xs font-medium text-secondary transition hover:bg-card-hover hover:text-foreground sm:min-h-0 sm:px-2 sm:py-0.5"
     >
       {badgeContent}
     </button>
@@ -112,7 +112,7 @@ export function ProvenanceBadge({ name, provenance, onClick, sourceLabel = "Sour
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded border border-border bg-card px-2 py-0.5 text-xs font-medium text-secondary transition hover:bg-card-hover hover:text-foreground"
+      className="inline-flex min-h-9 items-center gap-1.5 rounded border border-border bg-card px-2.5 py-1 text-xs font-medium text-secondary transition hover:bg-card-hover hover:text-foreground sm:min-h-0 sm:px-2 sm:py-0.5"
     >
       {badgeContent}
     </button>

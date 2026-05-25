@@ -22,8 +22,8 @@ export function EntityDetailTabs({ tabs, activeTab, onTabChange, className = "" 
 
   return (
     <div className={["border-b border-border", className].filter(Boolean).join(" ")}>
-      <div className="overflow-x-auto">
-        <div className="flex w-max min-w-max gap-1" role="tablist" aria-label="Detail tabs">
+      <div className="overflow-x-auto px-1 [mask-image:linear-gradient(to_right,transparent,black_12px,black_calc(100%-12px),transparent)] sm:px-0 sm:[mask-image:none]">
+        <div className="flex w-max min-w-full gap-1 sm:min-w-max" role="tablist" aria-label="Detail tabs">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.key;
             return (
@@ -36,7 +36,7 @@ export function EntityDetailTabs({ tabs, activeTab, onTabChange, className = "" 
                 disabled={tab.disabled}
                 onClick={() => onTabChange(tab.key)}
                 className={[
-                  "inline-flex min-h-10 shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors",
+                  "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors sm:min-h-10 sm:px-4 sm:py-3",
                   isActive
                     ? "border-accent text-foreground"
                     : "border-transparent text-secondary hover:border-muted hover:text-foreground",
@@ -44,7 +44,7 @@ export function EntityDetailTabs({ tabs, activeTab, onTabChange, className = "" 
                 ].join(" ")}
               >
                 {tab.icon ? <span className="shrink-0 text-current">{tab.icon}</span> : null}
-                <span>{tab.label}</span>
+                <span className="max-w-[8.5rem] truncate sm:max-w-none">{tab.label}</span>
                 {typeof tab.count === "number" ? (
                   <span className="rounded-full bg-card px-2 py-0.5 text-xs text-muted">{tab.count}</span>
                 ) : null}
