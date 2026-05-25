@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, Film, FolderOpen, ImageIcon, Layers, Loader2, Search, Tag, Users } from "lucide-react";
 import { galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
@@ -64,8 +65,10 @@ async function mergeSearches<TItem extends { id: number }>(limit: number, search
 export function GlobalSearch({ navigate }: Props) {
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState(false);
+  const [desktopPanelStyle, setDesktopPanelStyle] = useState<{ left: number; top: number; width: number } | null>(null);
   const deferredTerm = useDeferredValue(term.trim());
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const lastTrackedSearchKey = useRef("");
   const { hasPermission, permissions } = useAuth();
 
@@ -93,13 +96,43 @@ export function GlobalSearch({ navigate }: Props) {
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const inSearchControl = containerRef.current?.contains(target);
+      const inSearchPanel = panelRef.current?.contains(target);
+
+      if (!inSearchControl && !inSearchPanel) {
         setOpen(false);
       }
     };
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setDesktopPanelStyle(null);
+      return;
+    }
+
+    const updatePanelPosition = () => {
+      const trigger = containerRef.current;
+      if (!trigger) return;
+
+      const rect = trigger.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const width = Math.min(480, Math.max(280, viewportWidth - 32));
+      const left = Math.min(Math.max(16, rect.right - width), Math.max(16, viewportWidth - width - 16));
+      setDesktopPanelStyle({ left, top: rect.bottom + 8, width });
+    };
+
+    updatePanelPosition();
+    window.addEventListener("resize", updatePanelPosition);
+    window.addEventListener("scroll", updatePanelPosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePanelPosition);
+      window.removeEventListener("scroll", updatePanelPosition, true);
+    };
+  }, [open]);
 
   const { data, isFetching } = useQuery({
     queryKey: ["global-search", deferredTerm, searchableLabels.join(",")],
@@ -323,6 +356,54 @@ export function GlobalSearch({ navigate }: Props) {
     </>
   );
 
+  const renderedPanel = open && typeof document !== "undefined" ? createPortal(
+    <>
+      <div className="pointer-events-none fixed inset-0 z-40 bg-black/60" />
+      <div ref={panelRef}>
+        {/* Mobile: full-width search input dropdown */}
+        <div className="md:hidden fixed left-4 right-4 top-14 z-[60]">
+          <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+            <div className="p-2 border-b border-border">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                <input
+                  value={term}
+                  onChange={(event) => {
+                    setTerm(event.target.value);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setOpen(false);
+                      return;
+                    }
+                    if (event.key === "Enter" && flatResults.length > 0) {
+                      event.preventDefault();
+                      handleSelect(flatResults[0], 1);
+                    }
+                  }}
+                  placeholder="Search all..."
+                  className="w-full rounded-lg border border-border bg-input py-1.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
+                />
+              </div>
+            </div>
+            {renderResults()}
+          </div>
+        </div>
+
+        {/* Desktop: results dropdown */}
+        {desktopPanelStyle ? (
+          <div
+            className="hidden md:block fixed z-[60] overflow-hidden rounded-lg border border-border bg-surface shadow-xl"
+            style={desktopPanelStyle}
+          >
+            {renderResults()}
+          </div>
+        ) : null}
+      </div>
+    </>,
+    document.body,
+  ) : null;
+
   return (
     <div ref={containerRef} className="relative">
       {/* Mobile: icon button that opens the search */}
@@ -335,7 +416,7 @@ export function GlobalSearch({ navigate }: Props) {
       </button>
 
       {/* Desktop: always-visible search input */}
-      <div className="hidden md:block relative">
+      <div className="relative z-[60] hidden md:block">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
         <input
           value={term}
@@ -359,45 +440,8 @@ export function GlobalSearch({ navigate }: Props) {
         />
       </div>
 
-      {/* Mobile: full-width search input dropdown */}
-      {open && (
-        <div className="md:hidden fixed left-4 right-4 top-14 z-50">
-          <div className="rounded-xl border border-border bg-surface shadow-2xl shadow-black/40 overflow-hidden">
-            <div className="p-2 border-b border-border">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                <input
-                  autoFocus
-                  value={term}
-                  onChange={(event) => {
-                    setTerm(event.target.value);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      setOpen(false);
-                      return;
-                    }
-                    if (event.key === "Enter" && flatResults.length > 0) {
-                      event.preventDefault();
-                      handleSelect(flatResults[0], 1);
-                    }
-                  }}
-                  placeholder="Search all..."
-                  className="w-full rounded-lg border border-border bg-input py-1.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
-                />
-              </div>
-            </div>
-            {renderResults()}
-          </div>
-        </div>
-      )}
-
-      {/* Desktop: results dropdown */}
-      {open && (
-        <div className="global-search-dropdown hidden md:block absolute right-0 top-full z-50 mt-2 w-[30rem] overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40">
-          {renderResults()}
-        </div>
-      )}
+      {open && <div className="pointer-events-none fixed inset-0 z-50 bg-black/60" />}
+      {renderedPanel}
     </div>
   );
 }

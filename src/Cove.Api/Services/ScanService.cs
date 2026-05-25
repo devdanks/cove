@@ -166,9 +166,9 @@ public class ScanService(
             var textExts = new HashSet<string>(cfg.TextExtensions, StringComparer.OrdinalIgnoreCase);
             var allExts = videoExts.Union(imageExts).Union(galleryExts).Union(audioExts).Union(textExts).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var processedVideoPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var processedImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var processedAudioPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var processedTextPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var processedImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var processedAudioPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var processedTextPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var ignoreRuleCache = new Dictionary<string, List<IgnoreRule>>(StringComparer.OrdinalIgnoreCase);
 
             // Phase 1: Discover files
@@ -205,7 +205,7 @@ public class ScanService(
                     {
                         continue;
                     }
-                    if (IsExcluded(scanTarget.Path, cfg.ExcludePatterns)
+                    if (IsExcludedByConfiguredPatterns(scanTarget.Path, ext, imageExts, galleryExts, cfg)
                         || IsExcludedByFolderIgnore(scanTarget.Path, Path.GetDirectoryName(scanTarget.Path) ?? scanTarget.Path, ignoreRuleCache))
                     {
                         continue;
@@ -230,7 +230,7 @@ public class ScanService(
                         if (scanTarget.ExcludeImage && imageExts.Contains(ext)) return false;
                         if (scanTarget.ExcludeAudio && audioExts.Contains(ext)) return false;
                         if (scanTarget.ExcludeText && textExts.Contains(ext)) return false;
-                        return !IsExcluded(f, cfg.ExcludePatterns)
+                        return !IsExcludedByConfiguredPatterns(f, ext, imageExts, galleryExts, cfg)
                             && !IsExcludedByFolderIgnore(f, scanTarget.Path, ignoreRuleCache);
                     })
                     .Select(f => new DiscoveredFile(NormalizePath(f), Path.GetExtension(f)));
@@ -1719,6 +1719,18 @@ public class ScanService(
                 return true;
         }
         return false;
+    }
+
+    private static bool IsExcludedByConfiguredPatterns(
+        string path,
+        string extension,
+        HashSet<string> imageExts,
+        HashSet<string> galleryExts,
+        CoveConfiguration cfg)
+    {
+        return IsExcluded(path, cfg.ExcludePatterns)
+            || (imageExts.Contains(extension) && IsExcluded(path, cfg.ExcludeImagePatterns))
+            || (galleryExts.Contains(extension) && IsExcluded(path, cfg.ExcludeGalleryPatterns));
     }
 
     private IEnumerable<string> EnumerateFilesSafely(string rootPath)

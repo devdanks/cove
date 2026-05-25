@@ -11,6 +11,7 @@ import { SceneCard } from "../components/EntityCards";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CoverImageDialog } from "../components/CoverImageDialog";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { formatDate, ProvenanceBadge, TagBadge } from "../components/shared";
 import { EntityReferenceSelector } from "../components/EntityReferenceSelector";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -844,8 +845,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
-              {showOpsMenu ? (
-                <div className="absolute right-0 top-full z-50 mt-1 min-w-[190px] rounded-2xl border border-border bg-card py-1 shadow-lg">
+              <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[190px] py-1">
                   {canSetSegmentCover ? (
                     <button
                       type="button"
@@ -887,8 +887,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
                       <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>
                   ) : null}
-                </div>
-              ) : null}
+              </FloatingActionMenu>
             </div>
           ) : null}
         </>

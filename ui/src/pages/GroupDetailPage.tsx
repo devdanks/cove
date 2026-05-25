@@ -15,6 +15,7 @@ import { DetailListToolbar } from "../components/DetailListToolbar";
 import { SCENE_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
@@ -341,8 +342,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
                 >
                   <MoreVertical className="h-4 w-4" />
                 </button>
-                {showOpsMenu ? (
-                  <div className="absolute right-0 top-full z-30 mt-2 min-w-44 rounded-lg border border-border bg-card p-1 shadow-xl" role="menu">
+                <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-44 p-1">
                     {canAddSubGroup ? (
                       <button
                         type="button"
@@ -370,8 +370,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
                       Delete group
                     </button>
                     ) : null}
-                  </div>
-                ) : null}
+                </FloatingActionMenu>
               </div>
             ) : null}
           </>

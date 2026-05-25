@@ -21,6 +21,7 @@ import { createRouteLinkProps } from "../components/cardNavigation";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionEntityActions } from "../components/ExtensionEntityActions";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
@@ -549,8 +550,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         >
           <MoreVertical className="h-4 w-4" />
         </button>
-        {showOpsMenu && (
-          <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] rounded-2xl border border-border bg-card py-1 shadow-lg">
+        <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[220px] py-1">
             {!file && canDownloadScene ? (
               <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Download className="h-3.5 w-3.5" /> Download Media…</button>
             ) : null}
@@ -567,8 +567,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             {canWriteScene ? <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Merge className="h-3.5 w-3.5" /> Merge…</button> : null}
             {canDeleteScene ? <div className="my-1 border-t border-border" /> : null}
             {canDeleteScene ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
-          </div>
-        )}
+        </FloatingActionMenu>
       </div>
 
       <ExtensionSlot slot="scene-detail-actions" context={{ scene, onNavigate }} />

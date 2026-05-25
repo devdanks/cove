@@ -55,6 +55,10 @@ public class MetadataController(
         return filterPaths.Any(path => normalizedCandidate.StartsWith(path, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static string ResolveFilePath(BaseFileEntity file) => file.ParentFolder != null
+        ? Path.Combine(file.ParentFolder.Path, file.Basename)
+        : file.Basename;
+
     private readonly record struct SegmentPreviewClip(double StartSec, double EndSec, string Path);
 
     [HttpPost("scan")]
@@ -84,6 +88,23 @@ public class MetadataController(
     [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite, ActionArgumentName = "opts", PropertyName = "SceneIds")]
     public ActionResult<object> StartGenerate([FromBody] GenerateOptionsDto? opts)
     {
+        var selectedSceneIds = opts?.SceneIds;
+        var hasSceneSelection = selectedSceneIds is { Count: > 0 };
+        var hasPathSelection = opts?.Paths is { Count: > 0 };
+        var requestsExplicitNonSceneWork = opts?.ImagePhashes == true
+            || opts?.ImageThumbnails == true
+            || opts?.GalleryThumbnails == true
+            || opts?.AudioPhashes == true
+            || opts?.TextPhashes == true;
+
+        if (hasSceneSelection && !hasPathSelection && requestsExplicitNonSceneWork)
+        {
+            return BadRequest(new
+            {
+                error = "Non-scene generate options require paths when sceneIds are supplied. Provide paths for image, gallery, audio, or text work, or run those options without sceneIds."
+            });
+        }
+
         var jobId = jobService.Enqueue("generate", "Generating content", async (progress, ct) =>
         {
             using var scope = scopeFactory.CreateScope();
@@ -102,15 +123,14 @@ public class MetadataController(
                 await innerDb.SaveChangesAsync(token);
             }
 
-            var selectedSceneIds = opts?.SceneIds;
-            var hasSceneSelection = selectedSceneIds is { Count: > 0 };
+            var allowNonSceneWork = !hasSceneSelection || hasPathSelection;
+            var generateNonSceneMd5 = opts?.Md5 == true && allowNonSceneWork;
 
             var scenes = hasSceneSelection
                 ? await dbCtx.Scenes.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).Where(s => selectedSceneIds!.Contains(s.Id)).AsSplitQuery().ToListAsync(ct)
                 : await dbCtx.Scenes.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).AsSplitQuery().ToListAsync(ct);
 
-            // Filter by paths if specified
-            if (opts?.Paths is { Count: > 0 } paths)
+            if (!hasSceneSelection && opts?.Paths is { Count: > 0 } paths)
             {
                 var filterPaths = NormalizeFilterPaths(paths);
                 scenes = scenes.Where(s =>
@@ -280,7 +300,7 @@ public class MetadataController(
                 progress.Report((double)current / total, $"Generating ({current}/{total}) {item.Scene.Title ?? "Untitled"}");
             });
 
-            if (!hasSceneSelection && (opts?.ImagePhashes == true || opts?.ImageThumbnails == true || opts?.Md5 == true))
+            if (allowNonSceneWork && (opts?.ImagePhashes == true || opts?.ImageThumbnails == true || generateNonSceneMd5))
             {
                 var imageFiles = await dbCtx.ImageFiles
                     .Include(f => f.ParentFolder)
@@ -308,11 +328,11 @@ public class MetadataController(
                         ? Path.Combine(imageFile.ParentFolder.Path, imageFile.Basename)
                         : imageFile.Basename;
 
+                    if (opts?.ImageThumbnails == true && imageFile.ImageId.HasValue)
+                        await thumbnailService.GenerateImageThumbnailAsync(imageFile.ImageId.Value, overwrite: opts?.Overwrite == true, ct: token);
+
                     if (System.IO.File.Exists(imagePath))
                     {
-                        if (opts?.ImageThumbnails == true && imageFile.ImageId.HasValue)
-                            await thumbnailService.GenerateImageThumbnailAsync(imageFile.ImageId.Value, ct: token);
-
                         var hasPhash = imageFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value));
                         if (opts?.ImagePhashes == true && (opts?.Overwrite == true || !hasPhash))
                         {
@@ -322,7 +342,7 @@ public class MetadataController(
                         }
 
                         var hasMd5 = imageFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
-                        if (opts?.Md5 == true && (opts?.Overwrite == true || !hasMd5))
+                        if (generateNonSceneMd5 && (opts?.Overwrite == true || !hasMd5))
                         {
                             var md5 = await fingerprintService.ComputeMd5Async(imagePath, token);
                             if (!string.IsNullOrWhiteSpace(md5))
@@ -335,7 +355,79 @@ public class MetadataController(
                 });
             }
 
-            if (!hasSceneSelection && (opts?.AudioPhashes == true || opts?.Md5 == true))
+            if (allowNonSceneWork && (opts?.GalleryThumbnails == true || generateNonSceneMd5))
+            {
+                var galleries = await dbCtx.Galleries
+                    .Include(g => g.Folder)
+                    .Include(g => g.Files).ThenInclude(f => f.ParentFolder)
+                    .Include(g => g.Files).ThenInclude(f => f.Fingerprints)
+                    .AsSplitQuery()
+                    .ToListAsync(ct);
+
+                if (opts?.Paths is { Count: > 0 } galleryPaths)
+                {
+                    var filterPaths = NormalizeFilterPaths(galleryPaths);
+                    galleries = galleries.Where(gallery =>
+                        (gallery.Folder != null && IsUnderAnyPath(gallery.Folder.Path, filterPaths))
+                        || gallery.Files.Any(file => IsUnderAnyPath(ResolveFilePath(file), filterPaths)))
+                        .ToList();
+                }
+
+                var galleryIds = galleries.Select(gallery => gallery.Id).ToList();
+                var firstImageRows = new List<(int GalleryId, int ImageId)>();
+                if (galleryIds.Count > 0)
+                {
+                    firstImageRows = (await dbCtx.Set<ImageGallery>()
+                        .AsNoTracking()
+                        .Where(link => galleryIds.Contains(link.GalleryId))
+                        .Select(link => new { link.GalleryId, link.ImageId })
+                        .ToListAsync(ct))
+                        .Select(link => (link.GalleryId, link.ImageId))
+                        .ToList();
+                }
+                var firstImageByGalleryId = firstImageRows
+                    .GroupBy(link => link.GalleryId)
+                    .ToDictionary(group => group.Key, group => group.Min(link => link.ImageId));
+
+                var galleryTotal = galleries.Count;
+                var galleryProcessed = 0;
+
+                await Parallel.ForEachAsync(galleries, new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = ct }, async (gallery, token) =>
+                {
+                    if (opts?.GalleryThumbnails == true)
+                    {
+                        var coverImageId = gallery.CoverImageId;
+                        if (!coverImageId.HasValue && firstImageByGalleryId.TryGetValue(gallery.Id, out var firstImageId))
+                            coverImageId = firstImageId;
+
+                        if (coverImageId.HasValue)
+                            await thumbnailService.GenerateImageThumbnailAsync(coverImageId.Value, overwrite: opts?.Overwrite == true, ct: token);
+                    }
+
+                    if (generateNonSceneMd5)
+                    {
+                        foreach (var galleryFile in gallery.Files)
+                        {
+                            var galleryPath = ResolveFilePath(galleryFile);
+                            if (!System.IO.File.Exists(galleryPath))
+                                continue;
+
+                            var hasMd5 = galleryFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
+                            if (opts?.Overwrite == true || !hasMd5)
+                            {
+                                var md5 = await fingerprintService.ComputeMd5Async(galleryPath, token);
+                                if (!string.IsNullOrWhiteSpace(md5))
+                                    await UpsertFingerprintAsync(galleryFile.Id, "md5", md5, token);
+                            }
+                        }
+                    }
+
+                    var current = Interlocked.Increment(ref galleryProcessed);
+                    progress.Report(galleryTotal == 0 ? 1d : (double)current / galleryTotal, $"Generating gallery content ({current}/{galleryTotal})");
+                });
+            }
+
+            if (allowNonSceneWork && (opts?.AudioPhashes == true || generateNonSceneMd5))
             {
                 var audioFiles = await dbCtx.AudioFiles
                     .Include(f => f.ParentFolder)
@@ -374,7 +466,7 @@ public class MetadataController(
                         }
 
                         var hasMd5 = audioFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
-                        if (opts?.Md5 == true && (opts?.Overwrite == true || !hasMd5))
+                        if (generateNonSceneMd5 && (opts?.Overwrite == true || !hasMd5))
                         {
                             var md5 = await fingerprintService.ComputeMd5Async(audioPath, token);
                             if (!string.IsNullOrWhiteSpace(md5))
@@ -387,7 +479,7 @@ public class MetadataController(
                 });
             }
 
-            if (!hasSceneSelection && (opts?.TextPhashes == true || opts?.Md5 == true))
+            if (allowNonSceneWork && (opts?.TextPhashes == true || generateNonSceneMd5))
             {
                 var textFiles = await dbCtx.TextFiles
                     .Include(f => f.ParentFolder)
@@ -426,7 +518,7 @@ public class MetadataController(
                         }
 
                         var hasMd5 = textFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
-                        if (opts?.Md5 == true && (opts?.Overwrite == true || !hasMd5))
+                        if (generateNonSceneMd5 && (opts?.Overwrite == true || !hasMd5))
                         {
                             var md5 = await fingerprintService.ComputeMd5Async(textPath, token);
                             if (!string.IsNullOrWhiteSpace(md5))

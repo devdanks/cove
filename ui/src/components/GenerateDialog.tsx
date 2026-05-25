@@ -52,6 +52,7 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
   const label = sceneIds?.length
     ? `Generate for ${sceneIds.length} scene${sceneIds.length !== 1 ? "s" : ""}`
     : "Generate All";
+  const isSceneScoped = (sceneIds?.length ?? 0) > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
@@ -95,23 +96,27 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
             </label>
           ))}
 
-          <div className="border-t border-border my-3" />
+          {!isSceneScoped && (
+            <>
+              <div className="border-t border-border my-3" />
 
-          <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Audio and Text</h4>
-          {([
-            ["audioPhashes", "Audio perceptual hashes"],
-            ["textPhashes", "Text perceptual hashes"],
-          ] as const).map(([key, labelText]) => (
-            <label key={key} className="flex items-center gap-3 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={!!opts[key]}
-                onChange={() => toggle(key)}
-                className="w-4 h-4 rounded border-border accent-accent"
-              />
-              <span className="text-sm text-foreground group-hover:text-accent">{labelText}</span>
-            </label>
-          ))}
+              <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Audio and Text</h4>
+              {([
+                ["audioPhashes", "Audio perceptual hashes"],
+                ["textPhashes", "Text perceptual hashes"],
+              ] as const).map(([key, labelText]) => (
+                <label key={key} className="flex items-center gap-3 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={!!opts[key]}
+                    onChange={() => toggle(key)}
+                    className="w-4 h-4 rounded border-border accent-accent"
+                  />
+                  <span className="text-sm text-foreground group-hover:text-accent">{labelText}</span>
+                </label>
+              ))}
+            </>
+          )}
 
           <div className="border-t border-border my-3" />
 

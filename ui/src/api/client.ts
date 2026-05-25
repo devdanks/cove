@@ -1073,6 +1073,7 @@ export interface GenerateOptions {
   md5?: boolean;
   imageThumbnails?: boolean;
   imagePhashes?: boolean;
+  galleryThumbnails?: boolean;
   audioPhashes?: boolean;
   textPhashes?: boolean;
   overwrite?: boolean;

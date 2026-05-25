@@ -1204,7 +1204,7 @@ export function ListPage({
       </div>
 
       {showInfiniteAutoScrollControls && (
-        <div className="pointer-events-none fixed right-3 top-[24%] z-[90] -translate-y-1/2 sm:right-5">
+        <div className="pointer-events-none fixed right-3 top-1/2 z-[90] -translate-y-1/2 sm:right-5 sm:top-[24%]">
           <div
             className="pointer-events-auto relative flex min-h-36 w-12 items-center justify-end"
             onPointerEnter={wakeAutoScrollControls}

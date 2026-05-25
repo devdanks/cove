@@ -14,6 +14,7 @@ import { FaceCompareDialog } from "../components/FaceCompareDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { EditModal } from "../components/EditModal";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { FaceAppearanceTile, FaceTile } from "../components/EntityCards";
 import { formatDate } from "../components/shared";
@@ -633,8 +634,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
           >
             <MoreVertical className="h-4 w-4" />
           </button>
-          {showActionsMenu ? (
-            <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded border border-border bg-card py-1 shadow-lg">
+          <FloatingActionMenu open={showActionsMenu} anchorRef={actionsMenuRef} onClose={() => setShowActionsMenu(false)} className="min-w-[180px] py-1">
               {canWriteFace ? (
                 <button
                   type="button"
@@ -675,8 +675,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
                   {deleteMutation.isPending ? "Deleting..." : "Delete face"}
                 </button>
               ) : null}
-            </div>
-          ) : null}
+          </FloatingActionMenu>
         </div>
       ) : null}
     </>

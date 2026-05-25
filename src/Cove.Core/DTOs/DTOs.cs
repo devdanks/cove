@@ -2003,6 +2003,7 @@ public record GenerateOptionsDto
     public bool Md5 { get; init; }
     public bool ImageThumbnails { get; init; }
     public bool ImagePhashes { get; init; }
+    public bool GalleryThumbnails { get; init; }
     public bool AudioPhashes { get; init; }
     public bool TextPhashes { get; init; }
     public bool Overwrite { get; init; }

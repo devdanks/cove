@@ -20,6 +20,7 @@ import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { AUDIO_CRITERIA, GALLERY_CRITERIA, GROUP_CRITERIA, IMAGE_CRITERIA, SCENE_CRITERIA, TEXT_CRITERIA } from "../components/FilterDialog";
@@ -367,15 +368,13 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
                 <button onClick={() => setShowOpsMenu(!showOpsMenu)} className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground" title="Actions">
                   <MoreVertical className="h-4 w-4" />
                 </button>
-                {showOpsMenu ? (
-                  <div className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-xl">
+                <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[160px] py-1">
                     {canAutoTagPerformer ? <button onClick={() => { autoTagMut.mutate(); setShowOpsMenu(false); }} disabled={autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface disabled:opacity-60">{autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag</button> : null}
                     {canScrapePerformer ? <button onClick={() => { setScrapeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Scrape...</button> : null}
                     {canWritePerformer ? <button onClick={() => { setMergeOpen(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-surface"><GitMerge className="h-3.5 w-3.5" /> Merge...</button> : null}
                     {canDeletePerformer ? <div className="my-1 border-t border-border" /> : null}
                     {canDeletePerformer ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
-                  </div>
-                ) : null}
+                </FloatingActionMenu>
               </div>
             ) : null}
           </>

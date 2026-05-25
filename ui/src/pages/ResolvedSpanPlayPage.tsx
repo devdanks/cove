@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clapperboard, ExternalLink, Info, ListVideo, MoreVertical, Network, Sparkles } from "lucide-react";
 import { faces, performers, scenes, segmentDisplayProfiles, segmentLibrary, tags } from "../api/client";
@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 import { canWriteEntity } from "../auth/visibility";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { SceneCard } from "../components/EntityCards";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { SegmentVisualSimilarityPanel, useSegmentVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
 import { VideoPlayer } from "../components/VideoPlayer";
@@ -88,6 +89,7 @@ function ResolvedSpanPlayerCard({
   const [autostartToken, setAutostartToken] = useState(0);
   const [activeTab, setActiveTab] = useState<ResolvedSpanTab>("overview");
   const [showOpsMenu, setShowOpsMenu] = useState(false);
+  const opsMenuRef = useRef<HTMLDivElement>(null);
 
   const intervals = useMemo(
     () => detail.intervals.length > 0 ? detail.intervals : [{ startSec: detail.span.startSec, endSec: detail.span.endSec }],
@@ -489,7 +491,7 @@ function ResolvedSpanPlayerCard({
             <ExternalLink className="h-4 w-4" />
           </button>
           {canCreateSubScene ? (
-            <div className="relative">
+            <div className="relative" ref={opsMenuRef}>
               <button
                 type="button"
                 onClick={() => setShowOpsMenu((current) => !current)}
@@ -498,8 +500,7 @@ function ResolvedSpanPlayerCard({
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
-              {showOpsMenu ? (
-                <div className="absolute right-0 top-full z-50 mt-1 min-w-[190px] rounded-2xl border border-border bg-card py-1 shadow-lg">
+              <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[190px] py-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -511,8 +512,7 @@ function ResolvedSpanPlayerCard({
                   >
                     <Clapperboard className="h-3.5 w-3.5" /> {createSubSceneMutation.isPending ? "Creating scene" : "Make scene"}
                   </button>
-                </div>
-              ) : null}
+              </FloatingActionMenu>
             </div>
           ) : null}
         </>

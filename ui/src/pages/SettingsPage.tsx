@@ -545,24 +545,34 @@ const DEFAULT_GENERATE_OPTIONS: GenerateOptions = {
   md5: false,
   imageThumbnails: false,
   imagePhashes: false,
+  galleryThumbnails: false,
   overwrite: false,
 };
 
-function readSettingsTabFromUrl(extraAliases: Partial<Record<string, SettingsTab>> = {}): SettingsTab {
+export function readSettingsTabFromUrl(extraAliases: Partial<Record<string, SettingsTab>> = {}): SettingsTab {
   const aliases = { ...settingsPathAliases, ...extraAliases };
   const pathParts = window.location.pathname.split("/").filter(Boolean);
   if (pathParts[0] === "settings") {
+    const fullRouteKey = pathParts.slice(1).join("/").toLowerCase();
+    if (fullRouteKey) {
+      const exactTab = aliases[fullRouteKey];
+      if (exactTab) {
+        return exactTab;
+      }
+
+      // Preserve unknown nested settings paths so contributed tabs can resolve
+      // after extensions finish loading instead of collapsing to a shorter built-in alias.
+      if (fullRouteKey.includes("/")) {
+        return fullRouteKey;
+      }
+    }
+
     for (let length = Math.min(pathParts.length - 1, 4); length >= 1; length--) {
       const routeKey = pathParts.slice(1, 1 + length).join("/").toLowerCase();
       const routeTab = aliases[routeKey];
       if (routeTab) {
         return routeTab;
       }
-    }
-
-    const routeKey = pathParts.slice(1).join("/").toLowerCase();
-    if (routeKey) {
-      return aliases[routeKey] ?? routeKey;
     }
   }
 
@@ -617,21 +627,46 @@ export function mergeTaskSelectablePaths(
   previousSelectablePaths: string[]
 ): string[] {
   if (selectablePaths.length === 0) {
-    return [];
+    return currentPaths ?? [];
   }
 
   const filteredCurrentPaths = currentPaths?.filter((path) => selectablePaths.includes(path)) ?? [];
-  if (filteredCurrentPaths.length === 0) {
-    return selectablePaths;
-  }
+  const customCurrentPaths = getTaskCustomPaths(currentPaths, selectablePaths)
+    .filter((path) => !previousSelectablePaths.includes(path));
+  const selectedRootPaths = filteredCurrentPaths.length === 0 && customCurrentPaths.length === 0
+    ? selectablePaths
+    : filteredCurrentPaths;
 
   const addedPaths = selectablePaths.filter(
-    (path) => !previousSelectablePaths.includes(path) && !filteredCurrentPaths.includes(path)
+    (path) => !previousSelectablePaths.includes(path) && !selectedRootPaths.includes(path)
   );
 
-  return addedPaths.length > 0
-    ? [...filteredCurrentPaths, ...addedPaths]
-    : filteredCurrentPaths;
+  const nextRootPaths = addedPaths.length > 0
+    ? [...selectedRootPaths, ...addedPaths]
+    : selectedRootPaths;
+
+  return mergeTaskPathSelection(nextRootPaths, customCurrentPaths);
+}
+
+function parseTaskPathInput(value: string): string[] {
+  return Array.from(new Set(
+    value
+      .split(/\r?\n/)
+      .map((path) => path.trim())
+      .filter(Boolean)
+  ));
+}
+
+function getTaskRootPaths(currentPaths: string[] | undefined, selectablePaths: string[]): string[] {
+  return currentPaths?.filter((path) => selectablePaths.includes(path)) ?? [];
+}
+
+function getTaskCustomPaths(currentPaths: string[] | undefined, selectablePaths: string[]): string[] {
+  return currentPaths?.filter((path) => !selectablePaths.includes(path)) ?? [];
+}
+
+function mergeTaskPathSelection(rootPaths: string[], customPaths: string[]): string[] {
+  return Array.from(new Set([...rootPaths, ...customPaths]));
 }
 
 function arePathSelectionsEqual(left: string[] | undefined, right: string[] | undefined): boolean {
@@ -4293,54 +4328,76 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
     }));
   }, [downloadImportCachedFileName, downloadImportCachedUrls]);
 
+  const selectedScanRootPaths = useMemo(() => getTaskRootPaths(scanOpts.paths, selectablePaths), [scanOpts.paths, selectablePaths]);
+  const scanCustomPaths = useMemo(() => getTaskCustomPaths(scanOpts.paths, selectablePaths), [scanOpts.paths, selectablePaths]);
+
   const effectiveScanOpts = useMemo<ScanOptions>(() => {
-    const selectedPaths = scanOpts.paths?.filter((path) => selectablePaths.includes(path)) ?? [];
+    const selectedPaths = mergeTaskPathSelection(selectedScanRootPaths, scanCustomPaths);
     return {
       ...scanOpts,
       paths: selectablePaths.length === 0
-        ? undefined
-        : selectedPaths.length === selectablePaths.length
+        ? (scanCustomPaths.length > 0 ? scanCustomPaths : undefined)
+        : selectedScanRootPaths.length === selectablePaths.length && scanCustomPaths.length === 0
           ? undefined
           : selectedPaths,
     };
-  }, [scanOpts, selectablePaths]);
+  }, [scanCustomPaths, scanOpts, selectablePaths.length, selectedScanRootPaths]);
 
   const allScanPathsSelected = selectablePaths.length > 0
-    && (scanOpts.paths?.length ?? 0) === selectablePaths.length;
+    && selectedScanRootPaths.length === selectablePaths.length;
 
   const toggleScanPath = (path: string, checked: boolean) => {
     setScanOpts((current) => {
-      const selectedPaths = current.paths?.filter((value) => selectablePaths.includes(value)) ?? selectablePaths;
-      const nextPaths = checked
-        ? [...new Set([...selectedPaths, path])]
-        : selectedPaths.filter((value) => value !== path);
-      return { ...current, paths: nextPaths };
+      const selectedRootPaths = getTaskRootPaths(current.paths, selectablePaths);
+      const customPaths = getTaskCustomPaths(current.paths, selectablePaths);
+      const nextRootPaths = checked
+        ? [...new Set([...selectedRootPaths, path])]
+        : selectedRootPaths.filter((value) => value !== path);
+      return { ...current, paths: mergeTaskPathSelection(nextRootPaths, customPaths) };
     });
   };
 
+  const updateScanCustomPaths = (value: string) => {
+    setScanOpts((current) => ({
+      ...current,
+      paths: mergeTaskPathSelection(getTaskRootPaths(current.paths, selectablePaths), parseTaskPathInput(value)),
+    }));
+  };
+
+  const selectedGenRootPaths = useMemo(() => getTaskRootPaths(genOpts.paths, selectablePaths), [genOpts.paths, selectablePaths]);
+  const genCustomPaths = useMemo(() => getTaskCustomPaths(genOpts.paths, selectablePaths), [genOpts.paths, selectablePaths]);
+
   const effectiveGenOpts = useMemo<GenerateOptions>(() => {
-    const selectedPaths = genOpts.paths?.filter((path: string) => selectablePaths.includes(path)) ?? [];
+    const selectedPaths = mergeTaskPathSelection(selectedGenRootPaths, genCustomPaths);
     return {
       ...genOpts,
       paths: selectablePaths.length === 0
-        ? undefined
-        : selectedPaths.length === selectablePaths.length
+        ? (genCustomPaths.length > 0 ? genCustomPaths : undefined)
+        : selectedGenRootPaths.length === selectablePaths.length && genCustomPaths.length === 0
           ? undefined
           : selectedPaths,
     };
-  }, [genOpts, selectablePaths]);
+  }, [genCustomPaths, genOpts, selectablePaths.length, selectedGenRootPaths]);
 
   const allGenPathsSelected = selectablePaths.length > 0
-    && (genOpts.paths?.length ?? 0) === selectablePaths.length;
+    && selectedGenRootPaths.length === selectablePaths.length;
 
   const toggleGenPath = (path: string, checked: boolean) => {
     setGenOpts((current) => {
-      const selectedPaths = current.paths?.filter((value: string) => selectablePaths.includes(value)) ?? selectablePaths;
-      const nextPaths = checked
-        ? [...new Set([...selectedPaths, path])]
-        : selectedPaths.filter((value: string) => value !== path);
-      return { ...current, paths: nextPaths };
+      const selectedRootPaths = getTaskRootPaths(current.paths, selectablePaths);
+      const customPaths = getTaskCustomPaths(current.paths, selectablePaths);
+      const nextRootPaths = checked
+        ? [...new Set([...selectedRootPaths, path])]
+        : selectedRootPaths.filter((value) => value !== path);
+      return { ...current, paths: mergeTaskPathSelection(nextRootPaths, customPaths) };
     });
+  };
+
+  const updateGenCustomPaths = (value: string) => {
+    setGenOpts((current) => ({
+      ...current,
+      paths: mergeTaskPathSelection(getTaskRootPaths(current.paths, selectablePaths), parseTaskPathInput(value)),
+    }));
   };
 
   const scanMut = useMutation({ mutationFn: () => metadata.scan(effectiveScanOpts), onSuccess: () => refetchJobs() });
@@ -4448,7 +4505,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
                   </div>
                   <button
                     type="button"
-                    onClick={() => setScanOpts({ ...scanOpts, paths: allScanPathsSelected ? [] : selectablePaths })}
+                    onClick={() => setScanOpts({ ...scanOpts, paths: mergeTaskPathSelection(allScanPathsSelected ? [] : selectablePaths, scanCustomPaths) })}
                     className="text-[11px] text-accent hover:text-accent-hover"
                   >
                     {allScanPathsSelected ? "Clear" : "Select all"}
@@ -4459,11 +4516,21 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
                     <CheckboxLabel
                       key={path}
                       label={path}
-                      checked={scanOpts.paths?.includes(path) ?? false}
+                      checked={selectedScanRootPaths.includes(path)}
                       onChange={(checked) => toggleScanPath(path, checked)}
                     />
                   ))}
                 </div>
+                <label className="block space-y-1.5 pt-2">
+                  <span className="text-xs font-medium text-foreground">Specific files or folders</span>
+                  <textarea
+                    value={scanCustomPaths.join("\n")}
+                    onChange={(event) => updateScanCustomPaths(event.target.value)}
+                    rows={3}
+                    placeholder="One path per line"
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
+                  />
+                </label>
               </div>
             )}
           </div>
@@ -4503,6 +4570,10 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
               <CheckboxLabel label="Image thumbnails" checked={!!genOpts.imageThumbnails} onChange={(c) => setGenOpts({ ...genOpts, imageThumbnails: c })} />
               <CheckboxLabel label="Image phashes" checked={!!genOpts.imagePhashes} onChange={(c) => setGenOpts({ ...genOpts, imagePhashes: c })} />
             </div>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Gallery options</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CheckboxLabel label="Gallery cover thumbnails" checked={!!genOpts.galleryThumbnails} onChange={(c) => setGenOpts({ ...genOpts, galleryThumbnails: c })} />
+            </div>
             <div className="pt-2">
               <CheckboxLabel label="Overwrite existing generated files" checked={!!genOpts.overwrite} onChange={(c) => setGenOpts({ ...genOpts, overwrite: c })} />
             </div>
@@ -4515,7 +4586,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
                   </div>
                   <button
                     type="button"
-                    onClick={() => setGenOpts({ ...genOpts, paths: allGenPathsSelected ? [] : selectablePaths })}
+                    onClick={() => setGenOpts({ ...genOpts, paths: mergeTaskPathSelection(allGenPathsSelected ? [] : selectablePaths, genCustomPaths) })}
                     className="text-[11px] text-accent hover:text-accent-hover"
                   >
                     {allGenPathsSelected ? "Clear" : "Select all"}
@@ -4526,11 +4597,21 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
                     <CheckboxLabel
                       key={path}
                       label={path}
-                      checked={genOpts.paths?.includes(path) ?? false}
+                      checked={selectedGenRootPaths.includes(path)}
                       onChange={(checked) => toggleGenPath(path, checked)}
                     />
                   ))}
                 </div>
+                <label className="block space-y-1.5 pt-2">
+                  <span className="text-xs font-medium text-foreground">Specific files or folders</span>
+                  <textarea
+                    value={genCustomPaths.join("\n")}
+                    onChange={(event) => updateGenCustomPaths(event.target.value)}
+                    rows={3}
+                    placeholder="One path per line"
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
+                  />
+                </label>
               </div>
             )}
           </div>

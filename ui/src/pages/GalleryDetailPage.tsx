@@ -15,6 +15,7 @@ import { IMAGE_CRITERIA, SCENE_CRITERIA } from "../components/FilterDialog";
 import { SceneCard, ImageTile, PerformerTile } from "../components/EntityCards";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { QuickViewDialog } from "../components/QuickViewDialog";
@@ -348,13 +349,11 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
-              {showOpsMenu ? (
-                <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded border border-border bg-card py-1 shadow-lg">
+              <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[180px] py-1">
                   <button onClick={() => { setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button>
                   {canDeleteGallery ? <div className="my-1 border-t border-border" /> : null}
                   {canDeleteGallery ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
-                </div>
-              ) : null}
+              </FloatingActionMenu>
             </div>
           </>
         }

@@ -8,6 +8,7 @@ import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { BookmarkButton } from "../components/BookmarkButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
@@ -372,8 +373,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
-              {showOpsMenu ? (
-                <div className="absolute right-0 top-full z-50 mt-1 min-w-[220px] rounded border border-border bg-card py-1 shadow-lg">
+              <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[220px] py-1">
                   {canWriteText ? (
                     <button
                       type="button"
@@ -422,8 +422,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                       <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>
                   ) : null}
-                </div>
-              ) : null}
+              </FloatingActionMenu>
             </div>
           ) : null}
         </>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeTaskSelectablePaths, resolveVisibleSettingsTab } from "../pages/SettingsPage";
+import { mergeTaskSelectablePaths, readSettingsTabFromUrl, resolveVisibleSettingsTab } from "../pages/SettingsPage";
 import { isLimitedPrimarySettingsTabVisible } from "../pages/settings/tabVisibility";
 
 describe("mergeTaskSelectablePaths", () => {
@@ -26,6 +26,20 @@ describe("mergeTaskSelectablePaths", () => {
       "/library/b",
     ]);
   });
+
+  it("preserves manually entered file or folder paths", () => {
+    expect(
+      mergeTaskSelectablePaths(
+        ["/library/a", "/library/a/specific/file.mp4"],
+        ["/library/a", "/library/b"],
+        ["/library/a"]
+      )
+    ).toEqual([
+      "/library/a",
+      "/library/b",
+      "/library/a/specific/file.mp4",
+    ]);
+  });
 });
 
 describe("resolveVisibleSettingsTab", () => {
@@ -46,6 +60,20 @@ describe("resolveVisibleSettingsTab", () => {
         { key: "system-info-about" },
       ])
     ).toBe("system-info-about");
+  });
+});
+
+describe("readSettingsTabFromUrl", () => {
+  it("preserves nested extension settings paths before contributed aliases are loaded", () => {
+    window.history.replaceState({}, "", "/settings/extensions/ai");
+
+    expect(readSettingsTabFromUrl()).toBe("extensions/ai");
+  });
+
+  it("keeps nested contributed child settings paths instead of collapsing to the built-in extensions tab", () => {
+    window.history.replaceState({}, "", "/settings/extensions/ai/tagging");
+
+    expect(readSettingsTabFromUrl()).toBe("extensions/ai/tagging");
   });
 });
 

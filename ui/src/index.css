@@ -250,7 +250,6 @@ html[data-component-style*="glass"] .scene-card:hover {
 /* Glass: dropdowns/dialogs — semi-transparent frosted background */
 html[data-component-style*="glass"] .styled-dropdown-panel,
 html[data-component-style*="glass"] .filter-dialog,
-html[data-component-style*="glass"] .global-search-dropdown,
 html[data-component-style*="glass"] [role="dialog"] {
   background: rgba(20, 22, 28, 0.72) !important;
   -webkit-backdrop-filter: blur(20px);
@@ -535,7 +534,6 @@ html[data-theme-bg-animation][data-component-style*="glass"] .scene-card:hover {
 /* BG Animation + Glass: dropdowns/dialogs */
 html[data-theme-bg-animation][data-component-style*="glass"] .styled-dropdown-panel,
 html[data-theme-bg-animation][data-component-style*="glass"] .filter-dialog,
-html[data-theme-bg-animation][data-component-style*="glass"] .global-search-dropdown,
 html[data-theme-bg-animation][data-component-style*="glass"] [role="dialog"] {
   background: rgba(14, 14, 22, 0.65) !important;
   -webkit-backdrop-filter: blur(24px);

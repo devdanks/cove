@@ -16,6 +16,7 @@ import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
+import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { SCENE_CRITERIA } from "../components/FilterDialog";
@@ -282,8 +283,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
                 <button onClick={() => setShowOpsMenu(!showOpsMenu)} className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground" title="Actions">
                   <MoreVertical className="h-4 w-4" />
                 </button>
-                {showOpsMenu && (
-                  <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded border border-border bg-surface py-1 shadow-xl">
+                <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="w-44 py-1">
                     {canAutoTagTag ? (
                       <button type="button" onClick={() => { setShowOpsMenu(false); autoTagMut.mutate(); }} disabled={tag.ignoreAutoTag || autoTagMut.isPending} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary hover:bg-card hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">
                         {autoTagMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Auto Tag
@@ -299,8 +299,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
                         <Trash2 className="h-3.5 w-3.5" /> Delete
                       </button>
                     ) : null}
-                  </div>
-                )}
+                </FloatingActionMenu>
               </div>
             ) : null}
           </>
