@@ -515,28 +515,37 @@ function pickTopicIdForContexts(topics: TutorialStoryboardTopic[], request?: Tut
     currentPage ? `page:${currentPage}` : undefined,
   ]);
 
-  for (const context of contexts) {
-    const topic = topics.find((candidate) => topicMatchesContext(candidate, context));
-    if (topic) return topic.id;
-  }
+  let bestMatch: { topicId: string; score: number } | undefined;
 
-  return undefined;
+  topics.forEach((topic, topicIndex) => {
+    contexts.forEach((context, contextIndex) => {
+      const score = scoreTopicContextMatch(topic, context, contextIndex, topicIndex);
+      if (score == null) return;
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = { topicId: topic.id, score };
+      }
+    });
+  });
+
+  return bestMatch?.topicId;
 }
 
-function topicMatchesContext(topic: TutorialStoryboardTopic, context: string) {
+function scoreTopicContextMatch(topic: TutorialStoryboardTopic, context: string, contextIndex: number, topicIndex: number) {
   const normalizedContext = normalizeManualContext(context);
-  if (!normalizedContext) return false;
+  if (!normalizedContext) return undefined;
 
   if (topic.contexts?.some((topicContext) => normalizeManualContext(topicContext) === normalizedContext)) {
-    return true;
+    return 10000 - contextIndex * 10 - topicIndex / 1000;
   }
 
   if (normalizedContext.startsWith("page:")) {
     const page = normalizedContext.slice("page:".length);
-    return topic.pages?.some((topicPage) => topicPage.toLowerCase() === page) ?? false;
+    if (topic.pages?.some((topicPage) => topicPage.toLowerCase() === page)) {
+      return 1000 - contextIndex * 10 - topicIndex / 1000;
+    }
   }
 
-  return false;
+  return undefined;
 }
 
 function StoryboardPreview({ slide }: { slide: TutorialStoryboardSlide }) {

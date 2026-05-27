@@ -560,11 +560,9 @@ export function readSettingsTabFromUrl(extraAliases: Partial<Record<string, Sett
         return exactTab;
       }
 
-      // Preserve unknown nested settings paths so contributed tabs can resolve
-      // after extensions finish loading instead of collapsing to a shorter built-in alias.
-      if (fullRouteKey.includes("/")) {
-        return fullRouteKey;
-      }
+      // Preserve unknown settings paths so contributed tabs can resolve after
+      // extensions finish loading instead of collapsing to a built-in fallback.
+      return fullRouteKey;
     }
 
     for (let length = Math.min(pathParts.length - 1, 4); length >= 1; length--) {
@@ -1073,7 +1071,11 @@ export function SettingsPage() {
     return Object.fromEntries(
       contributedSettingsTabs.flatMap((tab) => {
         const resolvedKey = tab.key.toLowerCase();
-        return [resolvedKey, ...(tab.aliases ?? []).map((alias) => alias.toLowerCase())]
+        const shorthandAlias = resolvedKey.startsWith("extensions/")
+          ? resolvedKey.slice("extensions/".length)
+          : undefined;
+        return [resolvedKey, shorthandAlias, ...(tab.aliases ?? []).map((alias) => alias.toLowerCase())]
+          .filter((alias): alias is string => Boolean(alias))
           .map((alias) => [alias, resolvedKey] as const);
       }),
     );

@@ -88,10 +88,6 @@ export function createManualOpenRequest(currentPage: string, activePage: string,
 
 export function createPageManualContexts(currentPage: string, activePage: string, pathname: string) {
   const contexts: string[] = [];
-  contexts.push(`page:${activePage}`);
-  if (currentPage !== activePage) {
-    contexts.push(`page:${currentPage}`);
-  }
 
   const normalizedPath = normalizePathname(pathname);
   contexts.push(`route:${normalizedPath}`);
@@ -102,6 +98,18 @@ export function createPageManualContexts(currentPage: string, activePage: string
     for (let length = settingsKeyParts.length; length >= 1; length--) {
       contexts.push(`settings-tab:${settingsKeyParts.slice(0, length).join("/")}`);
     }
+
+    if (settingsKeyParts.length > 0 && settingsKeyParts[0] !== "extensions") {
+      for (let length = settingsKeyParts.length; length >= 1; length--) {
+        contexts.push(`settings-tab:extensions/${settingsKeyParts.slice(0, length).join("/")}`);
+      }
+      contexts.push(`route:/settings/extensions/${settingsKeyParts.join("/")}`);
+    }
+  }
+
+  contexts.push(`page:${activePage}`);
+  if (currentPage !== activePage) {
+    contexts.push(`page:${currentPage}`);
   }
 
   return uniqueManualContexts(contexts);

@@ -602,7 +602,9 @@ public record UITabContribution(
     int Order = 100,
     /// <summary>API endpoint template for fetching a count badge. Use {entityId} as placeholder.</summary>
     string? CountEndpoint = null,
-    string? Icon = null
+    string? Icon = null,
+    /// <summary>Manual contexts to publish while this tab is active.</summary>
+    string[]? ManualContexts = null
 );
 
 /// <summary>Add a panel/pane region contribution to a page layout.</summary>

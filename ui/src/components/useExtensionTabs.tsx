@@ -8,6 +8,7 @@ interface Tab {
   icon?: ReactNode;
   count?: number;
   order?: number;
+  manualContexts?: string[];
 }
 
 /**
@@ -62,6 +63,7 @@ export function useExtensionTabs(pageType: string, builtInTabs: Tab[], entityId?
       label: t.label,
       count: extCounts[t.key],
       order: t.order,
+      manualContexts: t.manualContexts,
     }));
     return [...withOrder, ...ext].sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
   }, [builtInTabs, extTabs, extCounts]);

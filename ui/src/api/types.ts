@@ -3137,6 +3137,7 @@ export interface ExtensionTabContribution {
   order: number;
   countEndpoint?: string;
   icon?: string;
+  manualContexts?: string[];
 }
 
 export interface ExtensionFeatureDef {

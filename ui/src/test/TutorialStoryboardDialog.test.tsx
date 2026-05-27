@@ -9,35 +9,35 @@ describe("TutorialStoryboardDialog", () => {
     const user = userEvent.setup();
     const extensionTopics: ExtensionTutorialTopic[] = [
       {
-        id: "cove.ai",
-        title: "AI",
-        description: "AI overview.",
-        extensionId: "cove.ai.core",
+        id: "docs.bundle",
+        title: "Docs Bundle",
+        description: "Docs overview.",
+        extensionId: "docs.bundle",
         order: 80,
         slides: [
           {
             id: "overview",
-            title: "AI overview",
-            caption: "Start with the AI stack.",
-            points: ["Connect the AI server"],
+            title: "Docs overview",
+            caption: "Start with extension docs.",
+            points: ["Open the manual"],
           },
         ],
       },
       {
-        id: "cove.ai.tagging",
-        title: "AI Tagging",
-        description: "Generated tag workflows.",
-        extensionId: "cove.ai.tagging",
-        parentTopicId: "cove.ai",
+        id: "docs.bundle.child",
+        title: "Docs Child",
+        description: "Nested extension docs.",
+        extensionId: "docs.bundle",
+        parentTopicId: "docs.bundle",
         order: 81,
         slides: [
           {
             id: "settings",
-            title: "Configure tag generation",
-            bodyMarkdown: "Tune **generated tag names** and review the results in Cove.\n\n- Use the AI settings tab\n- Review before broad cleanup",
-            imageSrc: "docs/tagging.png",
-            imageAlt: "AI Tagging screenshot",
-            links: [{ label: "AI Extensions README", url: "https://github.com/yourcove/AI.Extensions" }],
+            title: "Open nested docs",
+            bodyMarkdown: "Use **extension manual pages** for workflows that live outside Cove source.\n\n- Contribute a topic\n- Attach matching contexts",
+            imageSrc: "docs/topic.png",
+            imageAlt: "Docs topic screenshot",
+            links: [{ label: "Extension docs", url: "https://example.com/docs" }],
           },
         ],
       },
@@ -47,39 +47,39 @@ describe("TutorialStoryboardDialog", () => {
       <TutorialStoryboardDialog
         open
         onClose={vi.fn()}
-        request={{ topicId: "cove.ai" }}
+        request={{ topicId: "docs.bundle" }}
         extensionTopics={extensionTopics}
       />,
     );
 
-    expect(screen.getByRole("button", { name: /AI overview/i })).toHaveAttribute("data-topic-depth", "0");
-    const childButton = screen.getByRole("button", { name: /AI Tagging/i });
+    expect(screen.getByRole("button", { name: /Docs overview/i })).toHaveAttribute("data-topic-depth", "0");
+    const childButton = screen.getByRole("button", { name: /Docs Child/i });
     expect(childButton).toHaveAttribute("data-topic-depth", "1");
 
     await user.click(childButton);
 
-    expect(screen.getByRole("heading", { name: "AI Tagging" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Configure tag generation" })).toBeInTheDocument();
-    expect(screen.getByText("generated tag names")).toBeInTheDocument();
-    expect(screen.getByAltText("AI Tagging screenshot")).toHaveAttribute("src", "/api/extensions/assets/cove.ai.tagging/docs/tagging.png");
-    expect(screen.getByRole("link", { name: /AI Extensions README/i })).toHaveAttribute("href", "https://github.com/yourcove/AI.Extensions");
+    expect(screen.getByRole("heading", { name: "Docs Child" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Open nested docs" })).toBeInTheDocument();
+    expect(screen.getByText("extension manual pages")).toBeInTheDocument();
+    expect(screen.getByAltText("Docs topic screenshot")).toHaveAttribute("src", "/api/extensions/assets/docs.bundle/docs/topic.png");
+    expect(screen.getByRole("link", { name: /Extension docs/i })).toHaveAttribute("href", "https://example.com/docs");
   });
 
   it("opens the topic whose manual contexts match the current UI context", () => {
     const extensionTopics: ExtensionTutorialTopic[] = [
       {
-        id: "cove.ai.visual",
-        title: "AI Visual",
-        description: "Visual similarity workflows.",
-        contexts: ["settings-tab:extensions/ai/visual", "panel:visual-similarity"],
+        id: "docs.search",
+        title: "Docs Search",
+        description: "Search workflows.",
+        contexts: ["settings-tab:extensions/docs/search", "panel:docs-search"],
         pages: ["settings"],
-        extensionId: "cove.ai.visual",
+        extensionId: "docs.bundle",
         order: 80,
         slides: [
           {
-            id: "visual-search",
-            title: "Find visually related media",
-            bodyMarkdown: "Use the **Similar** tab after visual embeddings are ready.",
+            id: "search",
+            title: "Find related docs",
+            bodyMarkdown: "Use the **Search** panel after docs are indexed.",
           },
         ],
       },
@@ -89,14 +89,70 @@ describe("TutorialStoryboardDialog", () => {
       <TutorialStoryboardDialog
         open
         onClose={vi.fn()}
-        request={{ page: "settings", contexts: ["panel:visual-similarity", "page:settings"] }}
+        request={{ page: "settings", contexts: ["panel:docs-search", "page:settings"] }}
         currentPage="settings"
         extensionTopics={extensionTopics}
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "AI Visual" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Find visually related media" })).toBeInTheDocument();
-    expect(screen.getByText("Similar")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Docs Search" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Find related docs" })).toBeInTheDocument();
+    expect(screen.getByText("Search")).toBeInTheDocument();
+  });
+
+  it("prefers explicit settings contexts over generic settings page topics", () => {
+    const extensionTopics: ExtensionTutorialTopic[] = [
+      {
+        id: "docs.bundle",
+        title: "Docs Bundle",
+        description: "Docs settings and workflows.",
+        contexts: ["settings-tab:extensions/docs", "route:/settings/extensions/docs"],
+        pages: ["settings"],
+        extensionId: "docs.bundle",
+        order: 80,
+        slides: [{ id: "overview", title: "Configure extension docs", bodyMarkdown: "Configure docs here." }],
+      },
+    ];
+
+    render(
+      <TutorialStoryboardDialog
+        open
+        onClose={vi.fn()}
+        request={{ page: "settings", contexts: ["page:settings", "settings-tab:extensions/docs"] }}
+        currentPage="settings"
+        extensionTopics={extensionTopics}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Docs Bundle" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Configure extension docs" })).toBeInTheDocument();
+  });
+
+  it("prefers explicit detail tab contexts over generic detail page topics", () => {
+    const extensionTopics: ExtensionTutorialTopic[] = [
+      {
+        id: "docs.related",
+        title: "Related Docs",
+        description: "Related item workflows.",
+        contexts: ["detail-tab:related", "panel:related-docs"],
+        pages: ["scene"],
+        extensionId: "docs.bundle",
+        order: 83,
+        slides: [{ id: "related", title: "Find related items", bodyMarkdown: "Use Related." }],
+      },
+    ];
+
+    render(
+      <TutorialStoryboardDialog
+        open
+        onClose={vi.fn()}
+        request={{ page: "scenes", contexts: ["page:scenes", "detail-tab:related"] }}
+        currentPage="scene"
+        extensionTopics={extensionTopics}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Related Docs" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Find related items" })).toBeInTheDocument();
   });
 });

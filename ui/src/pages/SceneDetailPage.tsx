@@ -381,7 +381,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     { key: "filters", label: "Filters" },
     { key: "file-info", label: `File Info${scene?.files.length && scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },
     { key: "history", label: "History" },
-    ...getTabsForPage("scene").map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label })),
+    ...getTabsForPage("scene").map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label, manualContexts: t.manualContexts })),
     { key: "edit", label: "Edit" },
   ], {
     segments: "segments.read",

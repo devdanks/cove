@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+import { getActiveManualContexts } from "../components/ManualContext";
 
 afterEach(() => {
   cleanup();
@@ -116,6 +117,32 @@ describe("MediaDetailLayout", () => {
     expect(tablist.closest(".media-detail-layout-tabs-row")).not.toBeNull();
     expect(screen.queryByTestId("media-detail-layout-sidebar-toggle")).not.toBeInTheDocument();
     expect(screen.getByText("Body content")).toBeInTheDocument();
+  });
+
+  it("publishes the active detail tab as manual context", async () => {
+    render(
+      <MediaDetailLayout
+        title="Scene Title"
+        tabs={[
+          { key: "details", label: "Details" },
+          { key: "related", label: "Related", manualContexts: ["panel:related-media", "feature:example.detail"] },
+        ]}
+        activeTab="related"
+      >
+        <MediaDetailLayout.Content>
+          <div>Body content</div>
+        </MediaDetailLayout.Content>
+      </MediaDetailLayout>,
+    );
+
+    await waitFor(() => {
+      expect(getActiveManualContexts()).toEqual(expect.arrayContaining([
+        "detail-tab:related",
+        "tab:related",
+        "panel:related-media",
+        "feature:example.detail",
+      ]));
+    });
   });
 
   it("uses tab semantics and arrow-key navigation for tabs", () => {

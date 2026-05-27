@@ -24,6 +24,7 @@ import { MediaDetailLayoutContent } from "./Content";
 import { MediaDetailLayoutMetadata } from "./Metadata";
 import { MediaDetailLayoutSidebar } from "./Sidebar";
 import { useMediaDetailLayout } from "./useMediaDetailLayout";
+import { useManualContext } from "../ManualContext";
 import type { MediaDetailLayoutProps, MediaDetailTab } from "./types";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "cove.detailSidebarCollapsed";
@@ -280,6 +281,11 @@ function MediaDetailLayoutRoot({
   const presentation = useMediaDetailPresentation();
 
   const hasTabs = tabs.length > 0;
+  const activeTabDefinition = activeTab ? tabs.find((tab) => tab.key === activeTab) : undefined;
+  useManualContext(
+    activeTab ? [`detail-tab:${activeTab}`, `tab:${activeTab}`, ...(activeTabDefinition?.manualContexts ?? [])] : [],
+    hasTabs && Boolean(activeTab),
+  );
   const showDesktopHorizontalTabs = hasTabs && isDesktop && presentation.desktopTabNav === "row";
   const showVerticalTabs = hasTabs && isDesktop && presentation.desktopTabNav === "rail";
   const showMobileTabs = hasTabs && !isDesktop;

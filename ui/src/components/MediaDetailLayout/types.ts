@@ -10,6 +10,7 @@ export interface MediaDetailTab {
   icon?: ReactNode;
   count?: number;
   disabled?: boolean;
+  manualContexts?: string[];
 }
 
 export interface MediaDetailKeyboardShortcut {

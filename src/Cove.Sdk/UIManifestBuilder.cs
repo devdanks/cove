@@ -79,9 +79,10 @@ public class UIManifestBuilder
         string componentName,
         int order = 100,
         string? countEndpoint = null,
-        string? icon = null)
+        string? icon = null,
+        string[]? manualContexts = null)
     {
-        _manifest.Tabs.Add(new UITabContribution(key, label, pageType, _extensionId, componentName, order, countEndpoint, icon));
+        _manifest.Tabs.Add(new UITabContribution(key, label, pageType, _extensionId, componentName, order, countEndpoint, icon, manualContexts));
         return this;
     }
 

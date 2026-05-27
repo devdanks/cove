@@ -65,15 +65,27 @@ describe("resolveVisibleSettingsTab", () => {
 
 describe("readSettingsTabFromUrl", () => {
   it("preserves nested extension settings paths before contributed aliases are loaded", () => {
-    window.history.replaceState({}, "", "/settings/extensions/ai");
+    window.history.replaceState({}, "", "/settings/extensions/docs");
 
-    expect(readSettingsTabFromUrl()).toBe("extensions/ai");
+    expect(readSettingsTabFromUrl()).toBe("extensions/docs");
   });
 
   it("keeps nested contributed child settings paths instead of collapsing to the built-in extensions tab", () => {
-    window.history.replaceState({}, "", "/settings/extensions/ai/tagging");
+    window.history.replaceState({}, "", "/settings/extensions/docs/topic");
 
-    expect(readSettingsTabFromUrl()).toBe("extensions/ai/tagging");
+    expect(readSettingsTabFromUrl()).toBe("extensions/docs/topic");
+  });
+
+  it("preserves single-segment extension settings paths before contributed aliases are loaded", () => {
+    window.history.replaceState({}, "", "/settings/docs");
+
+    expect(readSettingsTabFromUrl()).toBe("docs");
+  });
+
+  it("resolves single-segment extension settings aliases after contributions load", () => {
+    window.history.replaceState({}, "", "/settings/docs");
+
+    expect(readSettingsTabFromUrl({ docs: "extensions/docs" })).toBe("extensions/docs");
   });
 });
 

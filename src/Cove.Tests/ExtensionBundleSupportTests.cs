@@ -39,6 +39,25 @@ public class ExtensionBundleSupportTests
     }
 
     [Fact]
+    public void AggregatedManifest_IncludesTabManualContexts()
+    {
+        var manager = new ExtensionManager(new ExtensionContext
+        {
+            Configuration = new ConfigurationBuilder().Build(),
+            DataDirectory = Path.GetTempPath(),
+            CoveVersion = "1.0.0",
+        });
+
+        manager.Register(new TabContributionExtension(), "local");
+
+        var manifest = manager.GetAggregatedManifest();
+        var tab = Assert.Single(manifest.Tabs);
+        Assert.Equal("related", tab.Key);
+        var manualContexts = Assert.IsType<string[]>(tab.ManualContexts);
+        Assert.Equal(["panel:related-media", "feature:example.detail"], manualContexts);
+    }
+
+    [Fact]
     public void AggregatedManifest_IncludesListFiltersAndSorts()
     {
         var manager = new ExtensionManager(new ExtensionContext
@@ -115,24 +134,24 @@ public class ExtensionBundleSupportTests
         var root = Path.Combine(Path.GetTempPath(), $"cove-bundle-{Guid.NewGuid():N}");
         var dataDir = Path.Combine(root, "data");
         var extensionsDir = Path.Combine(root, "extensions");
-        var bundleDir = Path.Combine(extensionsDir, "ai.full");
+        var bundleDir = Path.Combine(extensionsDir, "docs.full");
 
         Directory.CreateDirectory(dataDir);
         Directory.CreateDirectory(bundleDir);
 
         var manifest = new ExtensionManifestFile
         {
-            Id = "ai.full",
-            Name = "AI Full",
+            Id = "docs.full",
+            Name = "Docs Full",
             Version = "1.2.3",
             Kind = "bundle",
-            Description = "Installs the full AI stack.",
+            Description = "Installs the full docs stack.",
             Dependencies = new Dictionary<string, string>
             {
-                ["cove.ai.core"] = ">=1.0.0",
-                ["cove.ai.vlm"] = ">=1.0.0",
+                ["docs.core"] = ">=1.0.0",
+                ["docs.search"] = ">=1.0.0",
             },
-            Categories = ["ai"],
+            Categories = ["docs"],
         };
 
         await File.WriteAllTextAsync(
@@ -150,8 +169,8 @@ public class ExtensionBundleSupportTests
 
             manager.DiscoverExtensions(extensionsDir);
 
-            Assert.True(manager.IsManifestOnlyExtension("ai.full"));
-            var install = Assert.IsType<ExtensionInstallation>(manager.GetInstallation("ai.full"));
+            Assert.True(manager.IsManifestOnlyExtension("docs.full"));
+            var install = Assert.IsType<ExtensionInstallation>(manager.GetInstallation("docs.full"));
             Assert.Equal("1.2.3", install.Version);
 
             var controller = CreateController(manager, new ServiceCollection().BuildServiceProvider());
@@ -160,13 +179,13 @@ public class ExtensionBundleSupportTests
             var ok = Assert.IsType<OkObjectResult>(listResult.Result);
             var items = Assert.IsAssignableFrom<IEnumerable<ExtensionInfo>>(ok.Value);
             var bundle = Assert.Single(items);
-            Assert.Equal("ai.full", bundle.Id);
+            Assert.Equal("docs.full", bundle.Id);
             Assert.Equal("bundle", bundle.Kind);
             Assert.Equal(2, bundle.Dependencies.Count);
 
-            var uninstallResult = await controller.RegistryUninstall(new RegistryUninstallRequest { ExtensionId = "ai.full" });
+            var uninstallResult = await controller.RegistryUninstall(new RegistryUninstallRequest { ExtensionId = "docs.full" });
             Assert.IsType<OkObjectResult>(uninstallResult);
-            Assert.Null(manager.GetInstallation("ai.full"));
+            Assert.Null(manager.GetInstallation("docs.full"));
             Assert.False(Directory.Exists(bundleDir));
         }
         finally
@@ -428,6 +447,25 @@ public class ExtensionBundleSupportTests
             => ManifestBuilder()
                 .AddCustomFieldListFilter("scenes", "scene-quality-filter", "Quality Score", "quality_score", "number", order: 10)
                 .AddCustomFieldListSort("scenes", "scene-quality-sort", "Quality Score", "quality_score", "number", order: 10)
+                .Build();
+    }
+
+    private sealed class TabContributionExtension : CoveExtensionBase
+    {
+        public const string ExtensionId = "com.example.tab-contribution";
+
+        public override string Id => ExtensionId;
+        public override string Name => "Tab Contribution Extension";
+        public override string Version => "1.0.0";
+
+        public override UIManifest GetUIManifest()
+            => ManifestBuilder()
+                .AddTab(
+                    "scene",
+                    "related",
+                    "Related",
+                    "RelatedTab",
+                    manualContexts: ["panel:related-media", "feature:example.detail"])
                 .Build();
     }
 
