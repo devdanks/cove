@@ -156,6 +156,22 @@ public class MetadataController(
                 };
             }).Where(w => w.File != null).ToList();
 
+            var overwrite = opts?.Overwrite == true;
+            var generateSceneFiles = opts?.Thumbnails == true
+                || opts?.Previews == true
+                || opts?.Sprites == true
+                || opts?.SegmentThumbnails == true
+                || opts?.SegmentPreviews == true
+                || opts?.Markers == true;
+            var generateScenePhashes = opts?.Phashes == true;
+            var generateSceneMd5 = opts?.Md5 == true;
+
+            workItems = workItems
+                .Where(item => generateSceneFiles
+                    || (generateScenePhashes && (overwrite || !item.HasPhash))
+                    || (generateSceneMd5 && (overwrite || !item.HasMd5)))
+                .ToList();
+
             var total = workItems.Count;
             var processed = 0;
             var maxParallel = config.MaxParallelTasks;
@@ -240,14 +256,14 @@ public class MetadataController(
                             screenshotSecond = Math.Min(screenshotSecond, Math.Max(0, duration - 0.1));
 
                         var segmentThumbnailPath = thumbnailService.GetTimestampedThumbnailPath(item.Scene.Id, screenshotSecond);
-                        if (opts?.Overwrite == true && System.IO.File.Exists(segmentThumbnailPath))
+                            if (overwrite && System.IO.File.Exists(segmentThumbnailPath))
                             System.IO.File.Delete(segmentThumbnailPath);
 
                         var segmentPreviewPath = generateSegmentPreviews
                             ? thumbnailService.GetSegmentAnimatedPreviewPath(item.Scene.Id, screenshotSecond)
                             : null;
 
-                        if (segmentPreviewPath != null && opts?.Overwrite == true && System.IO.File.Exists(segmentPreviewPath))
+                        if (segmentPreviewPath != null && overwrite && System.IO.File.Exists(segmentPreviewPath))
                         {
                             System.IO.File.Delete(segmentPreviewPath);
                         }
@@ -282,14 +298,14 @@ public class MetadataController(
                     }
                 }
 
-                if (opts?.Phashes == true && (opts?.Overwrite == true || !item.HasPhash))
+                if (generateScenePhashes && (overwrite || !item.HasPhash))
                 {
                     var phash = await fingerprintService.ComputeVideoPhashAsync(item.Path, item.File!.Duration, token);
                     if (!string.IsNullOrWhiteSpace(phash))
                         await UpsertFingerprintAsync(item.File!.Id, "phash", phash, token);
                 }
 
-                if (opts?.Md5 == true && (opts?.Overwrite == true || !item.HasMd5))
+                if (generateSceneMd5 && (overwrite || !item.HasMd5))
                 {
                     var md5 = await fingerprintService.ComputeMd5Async(item.Path, token);
                     if (!string.IsNullOrWhiteSpace(md5))

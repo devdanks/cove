@@ -1,8 +1,10 @@
+using System.Text.Json;
 using Cove.Api.Controllers;
 using Cove.Api.Services;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Entities.Auth;
 using Cove.Core.Enums;
 using Cove.Core.Interfaces;
 using Cove.Data;
@@ -73,6 +75,32 @@ public class DynamicGroupsAndBookmarksTests
     }
 
     [Fact]
+    public async Task SaveForLaterDynamicGroup_TotalCountExcludesMissingHydratedEntities()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var principalAccessor = scope.PrincipalAccessor;
+        principalAccessor.Set(CreatePrincipal(7));
+
+        var scene = new Scene { Title = "Still exists" };
+        var group = new Group { Name = "Save for Later", Kind = GroupKind.Dynamic, QuerySourceKey = DynamicGroupResolver.SaveForLaterSourceKey };
+        context.AddRange(scene, group);
+        await context.SaveChangesAsync();
+        context.UserBookmarks.AddRange(
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = scene.Id, CreatedAt = DateTime.UtcNow },
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = 999_999, CreatedAt = DateTime.UtcNow.AddMinutes(-1) });
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context, principalAccessor);
+        var page = await resolver.ResolvePageDtosAsync(group.Id, new FindFilter { Page = 1, PerPage = 10 }, forceRefresh: true, CancellationToken.None);
+
+        var item = Assert.Single(page.Items);
+        Assert.Equal(scene.Id, item.SceneId);
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(1, await context.Groups.Where(item => item.Id == group.Id).Select(item => item.CachedItemCount).SingleAsync());
+    }
+
+    [Fact]
     public async Task ContinueWatchingDynamicGroup_ExcludesCompletedScenes()
     {
         await using var scope = CreateContext();
@@ -96,6 +124,93 @@ public class DynamicGroupsAndBookmarksTests
         var item = Assert.Single(items);
         Assert.Equal("Unfinished", item.Title);
         Assert.Equal(unfinished.Id, item.SceneId);
+    }
+
+    [Fact]
+    public async Task ContinueWatchingDynamicGroup_IncludesAudioAndSegments()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var principalAccessor = scope.PrincipalAccessor;
+        principalAccessor.Set(CreatePrincipal(7));
+
+        var audio = new Audio { Title = "Unfinished audio" };
+        var scene = new Scene { Title = "Segment scene" };
+        var group = new Group { Name = "Continue Watching", Kind = GroupKind.Dynamic, QuerySourceKey = DynamicGroupResolver.ContinueWatchingSourceKey };
+        context.AddRange(audio, scene, group);
+        await context.SaveChangesAsync();
+        var segment = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            SourceKey = "test",
+            StartSec = 12,
+            EndSec = 24,
+            Title = "Unfinished segment",
+        };
+        context.Segments.Add(segment);
+        await context.SaveChangesAsync();
+        context.UserEntityAffinities.AddRange(
+            new UserEntityAffinity { UserId = 7, HostType = AffinityHostType.Audio, HostId = audio.Id, LastConsumedAt = DateTime.UtcNow, LastPositionSec = 33, TotalConsumedSec = 33 },
+            new UserEntityAffinity { UserId = 7, HostType = AffinityHostType.Segment, HostId = segment.Id, LastConsumedAt = DateTime.UtcNow.AddMinutes(-1), LastPositionSec = 6, TotalConsumedSec = 6 });
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context, principalAccessor);
+        var items = await resolver.ResolveDtosAsync(group.Id, forceRefresh: true, CancellationToken.None);
+
+        Assert.Contains(items, item => item.HostType == "audio" && item.HostId == audio.Id && item.Title == "Unfinished audio");
+        Assert.Contains(items, item => item.HostType == "segment" && item.HostId == segment.Id && item.SceneId == scene.Id && item.StartSec == 12);
+    }
+
+    [Fact]
+    public async Task DeletingEntity_RemovesEngagementRowsAndBookmarks()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var audio = new Audio { Title = "Delete me" };
+        context.Audios.Add(audio);
+        await context.SaveChangesAsync();
+        context.UserEntityAffinities.Add(new UserEntityAffinity { UserId = 7, HostType = AffinityHostType.Audio, HostId = audio.Id, LastConsumedAt = DateTime.UtcNow, LastPositionSec = 12 });
+        context.UserBookmarks.Add(new UserBookmark { UserId = 7, HostType = AffinityHostType.Audio, HostId = audio.Id, CreatedAt = DateTime.UtcNow });
+        context.Interactions.Add(new Interaction { UserId = 7, HostType = InteractionHostType.Audio, HostId = audio.Id, Kind = InteractionKind.PageVisit });
+        context.PlaybackSessions.Add(new PlaybackSession { UserId = 7, HostType = InteractionHostType.Audio, HostId = audio.Id, SessionId = Guid.NewGuid() });
+        context.Ratings.Add(new Rating { UserId = 7, HostType = RatingHostType.Audio, HostId = audio.Id, Aspect = "overall", Value = 80 });
+        await context.SaveChangesAsync();
+
+        context.Audios.Remove(audio);
+        await context.SaveChangesAsync();
+
+        Assert.Empty(await context.UserEntityAffinities.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await context.UserBookmarks.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await context.Interactions.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await context.PlaybackSessions.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await context.Ratings.IgnoreQueryFilters().ToListAsync());
+    }
+
+    [Fact]
+    public async Task DeletingUser_RemovesTheirEngagementRowsAndBookmarks()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var audio = new Audio { Title = "User cleanup audio" };
+        var user = new User { Id = 17, Username = "cleanup-user", PasswordHash = "test" };
+        context.AddRange(audio, user);
+        await context.SaveChangesAsync();
+        context.UserEntityAffinities.Add(new UserEntityAffinity { UserId = user.Id, HostType = AffinityHostType.Audio, HostId = audio.Id, LastConsumedAt = DateTime.UtcNow, LastPositionSec = 12 });
+        context.UserBookmarks.Add(new UserBookmark { UserId = user.Id, HostType = AffinityHostType.Audio, HostId = audio.Id, CreatedAt = DateTime.UtcNow });
+        context.Interactions.Add(new Interaction { UserId = user.Id, HostType = InteractionHostType.Audio, HostId = audio.Id, Kind = InteractionKind.PageVisit });
+        context.PlaybackSessions.Add(new PlaybackSession { UserId = user.Id, HostType = InteractionHostType.Audio, HostId = audio.Id, SessionId = Guid.NewGuid() });
+        context.Ratings.Add(new Rating { UserId = user.Id, HostType = RatingHostType.Audio, HostId = audio.Id, Aspect = "overall", Value = 80 });
+        await context.SaveChangesAsync();
+
+        context.Users.Remove(user);
+        await context.SaveChangesAsync();
+
+        Assert.Empty(await context.UserEntityAffinities.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await context.UserBookmarks.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await context.Interactions.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await context.PlaybackSessions.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await context.Ratings.IgnoreQueryFilters().ToListAsync());
     }
 
     [Fact]
@@ -211,6 +326,145 @@ public class DynamicGroupsAndBookmarksTests
         Assert.Equal(1, page.TotalCount);
         Assert.Equal(included.Id, item.SceneId);
         Assert.Equal("Included", item.Title);
+    }
+
+    [Fact]
+    public async Task FilterDynamicGroupSource_UsesSavedSegmentFilterAndSort()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var principalAccessor = scope.PrincipalAccessor;
+        principalAccessor.Set(CreatePrincipal(7));
+
+        var scene = new Scene { Title = "Host Scene" };
+        context.Add(scene);
+        await context.SaveChangesAsync();
+
+        var shortIncluded = new Segment { HostType = SegmentHostType.Scene, HostId = scene.Id, StartSec = 3, EndSec = 5, ImageBlobId = "short-cover", Title = "Short Included" };
+        var longIncluded = new Segment { HostType = SegmentHostType.Scene, HostId = scene.Id, StartSec = 4, EndSec = 14, ImageBlobId = "long-cover", Title = "Long Included" };
+        var missingCover = new Segment { HostType = SegmentHostType.Scene, HostId = scene.Id, StartSec = 5, EndSec = 20, Title = "Missing Cover" };
+        var early = new Segment { HostType = SegmentHostType.Scene, HostId = scene.Id, StartSec = 1, EndSec = 30, ImageBlobId = "early-cover", Title = "Early" };
+        var group = new Group
+        {
+            Name = "Covered Segments",
+            Kind = GroupKind.Dynamic,
+            QuerySourceKey = DynamicGroupResolver.FilterSourceKey,
+            QueryJson = "{\"entityType\":\"segment\",\"findFilter\":{\"sort\":\"duration\",\"direction\":\"desc\"},\"objectFilter\":{\"hasImageCriterion\":{\"value\":true},\"startSecCriterion\":{\"value\":2,\"modifier\":\"GREATER_THAN\"}}}",
+        };
+        context.AddRange(shortIncluded, longIncluded, missingCover, early, group);
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context, principalAccessor, includeFilterSource: true);
+        var page = await resolver.ResolvePageDtosAsync(group.Id, new FindFilter { Page = 1, PerPage = 10 }, forceRefresh: true, CancellationToken.None);
+
+        Assert.Equal(2, page.TotalCount);
+        Assert.Equal([longIncluded.Id, shortIncluded.Id], page.Items.Select(item => item.HostId).ToArray());
+        Assert.All(page.Items, item => Assert.Equal("segment", item.HostType));
+    }
+
+    [Fact]
+    public async Task FilterDynamicGroupSource_UsesSegmentRelationshipAndHostFilters()
+    {
+        await using var scope = CreateContext();
+        var context = scope.Context;
+        var principalAccessor = scope.PrincipalAccessor;
+        principalAccessor.Set(CreatePrincipal(7));
+
+        var performer = new Performer { Name = "Matched Performer" };
+        var tag = new Tag { Name = "Matched Tag" };
+        var scene = new Scene { Title = "Host Scene" };
+        var otherScene = new Scene { Title = "Other Scene" };
+        context.AddRange(performer, tag, scene, otherScene);
+        await context.SaveChangesAsync();
+
+        var alphaFace = new Face { Label = "Alpha Face", PerformerId = performer.Id };
+        var betaFace = new Face { Label = "Beta Face", PerformerId = performer.Id };
+        context.Faces.AddRange(alphaFace, betaFace);
+        await context.SaveChangesAsync();
+
+        var betaSegment = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 10,
+            EndSec = 12,
+            TagId = tag.Id,
+            Kind = "face",
+            RefId = betaFace.Id,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-match",
+            Title = "Beta Segment",
+        };
+        var alphaSegment = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 20,
+            EndSec = 22,
+            TagId = tag.Id,
+            Kind = "face",
+            RefId = alphaFace.Id,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-match",
+            Title = "Alpha Segment",
+        };
+        var excludedWrongSource = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 30,
+            EndSec = 32,
+            TagId = tag.Id,
+            Kind = "face",
+            RefId = alphaFace.Id,
+            SourceKey = "user",
+            SourceRunId = "run-match",
+            Title = "Wrong Source",
+        };
+        var excludedWrongScene = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = otherScene.Id,
+            StartSec = 40,
+            EndSec = 42,
+            TagId = tag.Id,
+            Kind = "face",
+            RefId = alphaFace.Id,
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-match",
+            Title = "Wrong Scene",
+        };
+        var group = new Group
+        {
+            Name = "Relationship Segments",
+            Kind = GroupKind.Dynamic,
+            QuerySourceKey = DynamicGroupResolver.FilterSourceKey,
+            QueryJson = JsonSerializer.Serialize(new
+            {
+                entityType = "segment",
+                findFilter = new FindFilter { Sort = "ref", Direction = SortDirection.Asc },
+                objectFilter = new
+                {
+                    sceneTitleCriterion = new StringCriterion { Value = "Host", Modifier = CriterionModifier.Includes },
+                    scenesCriterion = new MultiIdCriterion { Value = [scene.Id], Modifier = CriterionModifier.Includes },
+                    hostTypeCriterion = new StringCriterion { Value = "scene", Modifier = CriterionModifier.Equals },
+                    sourceCategoryCriterion = new StringCriterion { Value = "extensions", Modifier = CriterionModifier.Equals },
+                    sourceRunIdCriterion = new StringCriterion { Value = "run-match", Modifier = CriterionModifier.Equals },
+                    tagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
+                    performersCriterion = new MultiIdCriterion { Value = [performer.Id], Modifier = CriterionModifier.Includes },
+                    facesCriterion = new MultiIdCriterion { Value = [alphaFace.Id, betaFace.Id], Modifier = CriterionModifier.Includes },
+                },
+            }),
+        };
+        context.AddRange(betaSegment, alphaSegment, excludedWrongSource, excludedWrongScene, group);
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context, principalAccessor, includeFilterSource: true);
+        var page = await resolver.ResolvePageDtosAsync(group.Id, new FindFilter { Page = 1, PerPage = 10 }, forceRefresh: true, CancellationToken.None);
+
+        Assert.Equal(2, page.TotalCount);
+        Assert.Equal([alphaSegment.Id, betaSegment.Id], page.Items.Select(item => item.HostId).ToArray());
+        Assert.All(page.Items, item => Assert.Equal("segment", item.HostType));
     }
 
     [Fact]

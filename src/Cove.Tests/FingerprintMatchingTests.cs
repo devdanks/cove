@@ -150,7 +150,7 @@ public class ThemeSystemTests
         var manifest = ext.GetUIManifest();
 
         // Keep this in sync with ThemeCollectionExtension built-ins.
-        Assert.Equal(19, manifest.Themes.Count);
+        Assert.Equal(20, manifest.Themes.Count);
     }
 
     [Theory]
@@ -173,6 +173,7 @@ public class ThemeSystemTests
     [InlineData("deep-space")]
     [InlineData("synthwave")]
     [InlineData("ember")]
+    [InlineData("cinema-dark")]
     public void ThemeCollectionExtension_ContainsTheme(string themeId)
     {
         var ext = new ThemeCollectionExtension();
@@ -190,10 +191,11 @@ public class ThemeSystemTests
     [InlineData("neon-glow", "#8b5cf6")]
     [InlineData("sunset-gradient", "#f97316")]
     [InlineData("aurora", "#10b981")]
-    [InlineData("cyberpunk", "#ff2d95")]
+    [InlineData("cyberpunk", "#00eaff")]
     [InlineData("deep-space", "#6366f1")]
-    [InlineData("synthwave", "#ff2d95")]
+    [InlineData("synthwave", "#ff5cab")]
     [InlineData("ember", "#f97316")]
+    [InlineData("cinema-dark", "#ff0033")]
     public void NewThemes_HaveCorrectAccentColor(string themeId, string expectedAccent)
     {
         var ext = new ThemeCollectionExtension();
@@ -202,6 +204,32 @@ public class ThemeSystemTests
 
         Assert.NotNull(theme.CssVariables);
         Assert.Equal(expectedAccent, theme.CssVariables["--color-accent"]);
+    }
+
+    [Fact]
+    public void ThemeCollectionExtension_ContainsP7StyleAndLayoutPresets()
+    {
+        var ext = new ThemeCollectionExtension();
+        var manifest = ext.GetUIManifest();
+
+        Assert.Contains(manifest.ComponentStyles, style => style.Id == "floating");
+        Assert.DoesNotContain(manifest.ComponentStyles, style => style.Id == "minimal");
+        Assert.Contains(manifest.LayoutStyles, layout => layout.Id == "detail-theater");
+        Assert.Contains(manifest.LayoutStyles, layout => layout.Id == "detail-tabs");
+        Assert.DoesNotContain(manifest.LayoutStyles, layout => layout.Id == "control-rail");
+        Assert.DoesNotContain(manifest.LayoutStyles, layout => layout.Id == "compact");
+        Assert.DoesNotContain(manifest.LayoutStyles, layout => layout.Id == "wide");
+    }
+
+    [Fact]
+    public void CinemaDarkTheme_BundlesFloatingCardsAndTheaterLayout()
+    {
+        var ext = new ThemeCollectionExtension();
+        var manifest = ext.GetUIManifest();
+        var theme = manifest.Themes.First(t => t.Id == "cinema-dark");
+
+        Assert.Equal("floating", theme.ComponentStyle);
+        Assert.Equal("detail-theater detail-tabs", theme.LayoutStyle);
     }
 
     [Fact]

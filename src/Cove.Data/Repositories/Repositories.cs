@@ -556,10 +556,13 @@ public class PerformerRepository : IPerformerRepository
 
         var totalCount = await query.AsNoTracking().CountAsync(ct);
 
+        var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
-        {
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Performer, sort, desc)
+            : sort switch
+            {
             "name" => desc ? query.OrderByDescending(p => p.Name) : query.OrderBy(p => p.Name),
             "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Performer, desc),
             "created_at" => desc ? query.OrderByDescending(p => p.CreatedAt) : query.OrderBy(p => p.CreatedAt),
@@ -580,8 +583,9 @@ public class PerformerRepository : IPerformerRepository
             "last_played_at" => ApplyLastPlayedAtSort(query, desc),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, p => p.Id, desc),
             _ => desc ? query.OrderByDescending(p => p.UpdatedAt) : query.OrderBy(p => p.UpdatedAt),
-        };
-        query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
+            };
+        if (!hasExplicitSort)
+            query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
 
         var page = findFilter?.Page ?? 1;
         var perPage = findFilter?.PerPage ?? 25;
@@ -855,10 +859,13 @@ public class TagRepository : ITagRepository
 
         var totalCount = await query.AsNoTracking().CountAsync(ct);
 
+        var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
-        {
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Tag, sort, desc)
+            : sort switch
+            {
             "name" => desc ? query.OrderByDescending(t => t.Name) : query.OrderBy(t => t.Name),
             "tag_group" => ApplyTagGroupSort(query, desc),
             "scene_count" => desc ? query.OrderByDescending(t => t.SceneCount) : query.OrderBy(t => t.SceneCount),
@@ -873,8 +880,9 @@ public class TagRepository : ITagRepository
             "updated_at" => desc ? query.OrderByDescending(t => t.UpdatedAt) : query.OrderBy(t => t.UpdatedAt),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, t => t.Id, desc),
             _ => desc ? query.OrderByDescending(t => t.UpdatedAt) : query.OrderBy(t => t.UpdatedAt),
-        };
-        query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
+            };
+        if (!hasExplicitSort)
+            query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
 
         var page = findFilter?.Page ?? 1;
         var pagedIds = await query
@@ -1320,6 +1328,7 @@ public class StudioRepository : IStudioRepository
             }
 
             // Count criteria
+            query = FilterHelpers.ApplyInt(query, filter.ParentCountCriterion, s => s.ParentId.HasValue ? 1 : 0);
             query = FilterHelpers.ApplyInt(query, filter.ChildCountCriterion, s => s.ChildStudioCount);
             query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, s => s.TagCount);
             query = FilterHelpers.ApplyInt(query, filter.GroupCountCriterion, s => s.GroupCount);
@@ -1334,9 +1343,6 @@ public class StudioRepository : IStudioRepository
         }
         query = ApplyStudioSearch(query, findFilter?.Q);
 
-        if (filter == null || !filter.ParentId.HasValue)
-            query = query.Where(s => s.ParentId == null);
-
         var perPage = findFilter?.PerPage ?? 25;
         if (perPage <= 0)
         {
@@ -1345,10 +1351,13 @@ public class StudioRepository : IStudioRepository
         }
 
         var totalCount = await query.AsNoTracking().CountAsync(ct);
+        var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
-        {
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Studio, sort, desc)
+            : sort switch
+            {
             "name" => desc ? query.OrderByDescending(s => s.Name) : query.OrderBy(s => s.Name),
             "scene_count" => desc ? query.OrderByDescending(s => s.SceneCount) : query.OrderBy(s => s.SceneCount),
             "gallery_count" => desc ? query.OrderByDescending(s => s.GalleryCount) : query.OrderBy(s => s.GalleryCount),
@@ -1356,14 +1365,16 @@ public class StudioRepository : IStudioRepository
             "latest_scene_date" => desc ? query.OrderByDescending(s => s.Scenes.Max(scene => scene.Date)) : query.OrderBy(s => s.Scenes.Max(scene => scene.Date)),
             "total_file_size" => desc ? query.OrderByDescending(s => s.Scenes.Sum(scene => (long?)scene.MaxFileSize) ?? 0L) : query.OrderBy(s => s.Scenes.Sum(scene => (long?)scene.MaxFileSize) ?? 0L),
             "rating" => ApplyStudioRatingSort(query, desc),
+            "parent_count" => desc ? query.OrderByDescending(s => s.ParentId.HasValue ? 1 : 0).ThenByDescending(s => s.Id) : query.OrderBy(s => s.ParentId.HasValue ? 1 : 0).ThenBy(s => s.Id),
             "child_count" => desc ? query.OrderByDescending(s => s.ChildStudioCount) : query.OrderBy(s => s.ChildStudioCount),
             "tag_count" => desc ? query.OrderByDescending(s => s.TagCount) : query.OrderBy(s => s.TagCount),
             "created_at" => desc ? query.OrderByDescending(s => s.CreatedAt) : query.OrderBy(s => s.CreatedAt),
             "updated_at" => desc ? query.OrderByDescending(s => s.UpdatedAt) : query.OrderBy(s => s.UpdatedAt),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, s => s.Id, desc),
             _ => desc ? query.OrderByDescending(s => s.UpdatedAt) : query.OrderBy(s => s.UpdatedAt),
-        };
-        query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
+            };
+        if (!hasExplicitSort)
+            query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
         var page = findFilter?.Page ?? 1;
         var pagedIds = await query
             .Skip((page - 1) * perPage)
@@ -1534,10 +1545,13 @@ public class GalleryRepository : IGalleryRepository
             g => g.SearchText);
 
         var totalCount = await query.CountAsync(ct);
+        var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);
         var sort = findFilter?.Sort ?? "updated_at";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
-        {
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Gallery, sort, desc)
+            : sort switch
+            {
             "updated_at" => desc ? query.OrderByDescending(g => g.UpdatedAt) : query.OrderBy(g => g.UpdatedAt),
             "date" => desc ? query.OrderByDescending(g => g.Date ?? DateOnly.MinValue) : query.OrderBy(g => g.Date ?? DateOnly.MinValue),
             "file_mod_time" => ApplyGalleryFileModTimeSort(query, desc),
@@ -1553,8 +1567,9 @@ public class GalleryRepository : IGalleryRepository
             "created_at" => desc ? query.OrderByDescending(g => g.CreatedAt) : query.OrderBy(g => g.CreatedAt),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, g => g.Id, desc),
             _ => desc ? query.OrderByDescending(g => g.UpdatedAt) : query.OrderBy(g => g.UpdatedAt),
-        };
-        query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
+            };
+        if (!hasExplicitSort)
+            query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
         var page = findFilter?.Page ?? 1;
         var perPage = findFilter?.PerPage ?? 25;
 
@@ -1883,10 +1898,12 @@ public class ImageRepository : IImageRepository
         var totalCount = await filterQuery.AsNoTracking().CountAsync(ct);
 
         // Sort and paginate on the lightweight query, then fetch only the IDs
+        var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);
         var sort = findFilter?.Sort ?? "updated_at";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
         filterQuery = ApplySorting(filterQuery, sort, desc, findFilter?.Seed);
-        filterQuery = FullTextSearchHelpers.OrderByRelevance(_db, filterQuery, findFilter?.Q);
+        if (!hasExplicitSort)
+            filterQuery = FullTextSearchHelpers.OrderByRelevance(_db, filterQuery, findFilter?.Q);
 
         var page = findFilter?.Page ?? 1;
         var pagedIds = await filterQuery
@@ -2093,22 +2110,28 @@ public class ImageRepository : IImageRepository
         return ApplySortingSwitch(query, sort, desc);
     }
 
-    private IQueryable<Image> ApplySortingSwitch(IQueryable<Image> query, string sort, bool desc) => sort switch
+    private IQueryable<Image> ApplySortingSwitch(IQueryable<Image> query, string sort, bool desc)
     {
-        "title" => ApplyDisplayTitleSort(query, desc),
-        "date" => desc ? query.OrderByDescending(i => i.Date ?? DateOnly.MinValue) : query.OrderBy(i => i.Date ?? DateOnly.MinValue),
-        "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Image, desc),
-        "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Image, nameof(UserEntityAffinity.LikeCount), desc),
-        "random" => query.OrderBy(i => i.Id),
-        "file_mod_time" => ApplyFileModTimeSort(query, desc),
-        "file_size" => desc ? query.OrderByDescending(i => i.MaxFileSize) : query.OrderBy(i => i.MaxFileSize),
-        "resolution" => desc ? query.OrderByDescending(i => i.MaxResolution) : query.OrderBy(i => i.MaxResolution),
-        "path" => ApplyPathSort(query, desc),
-        "tag_count" => desc ? query.OrderByDescending(i => i.TagCount) : query.OrderBy(i => i.TagCount),
-        "performer_count" => desc ? query.OrderByDescending(i => i.ImagePerformers.Count) : query.OrderBy(i => i.ImagePerformers.Count),
-        "created_at" => desc ? query.OrderByDescending(i => i.CreatedAt) : query.OrderBy(i => i.CreatedAt),
-        _ => desc ? query.OrderByDescending(i => i.UpdatedAt) : query.OrderBy(i => i.UpdatedAt),
-    };
+        if (FilterHelpers.TryParseCustomFieldSort(sort, out _, out _))
+            return query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Image, sort, desc);
+
+        return sort switch
+        {
+            "title" => ApplyDisplayTitleSort(query, desc),
+            "date" => desc ? query.OrderByDescending(i => i.Date ?? DateOnly.MinValue) : query.OrderBy(i => i.Date ?? DateOnly.MinValue),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Image, desc),
+            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Image, nameof(UserEntityAffinity.LikeCount), desc),
+            "random" => query.OrderBy(i => i.Id),
+            "file_mod_time" => ApplyFileModTimeSort(query, desc),
+            "file_size" => desc ? query.OrderByDescending(i => i.MaxFileSize) : query.OrderBy(i => i.MaxFileSize),
+            "resolution" => desc ? query.OrderByDescending(i => i.MaxResolution) : query.OrderBy(i => i.MaxResolution),
+            "path" => ApplyPathSort(query, desc),
+            "tag_count" => desc ? query.OrderByDescending(i => i.TagCount) : query.OrderBy(i => i.TagCount),
+            "performer_count" => desc ? query.OrderByDescending(i => i.ImagePerformers.Count) : query.OrderBy(i => i.ImagePerformers.Count),
+            "created_at" => desc ? query.OrderByDescending(i => i.CreatedAt) : query.OrderBy(i => i.CreatedAt),
+            _ => desc ? query.OrderByDescending(i => i.UpdatedAt) : query.OrderBy(i => i.UpdatedAt),
+        };
+    }
 
     private static IQueryable<Image> ApplyDisplayTitleSort(IQueryable<Image> query, bool desc)
     {
@@ -2449,11 +2472,31 @@ public class GroupRepository : IGroupRepository
 
             // String criteria
             query = FilterHelpers.ApplyString(query, filter.NameCriterion, g => g.Name);
+            query = FilterHelpers.ApplyString(query, filter.AliasesCriterion, g => g.Aliases);
             query = FilterHelpers.ApplyString(query, filter.DirectorCriterion, g => g.Director);
             query = FilterHelpers.ApplyString(query, filter.SynopsisCriterion, g => g.Synopsis);
+            query = FilterHelpers.ApplyString(query, filter.QuerySourceKeyCriterion, g => g.QuerySourceKey);
+            query = ApplyAllowedHostTypesCriterion(query, filter.AllowedHostTypesCriterion);
+            query = FilterHelpers.ApplyBool(query, filter.HasQueryCriterion, g => g.QueryJson != null && g.QueryJson != string.Empty);
+            query = FilterHelpers.ApplyBool(query, filter.ShowInSceneListsCriterion, g => g.ShowInSceneLists);
+            query = FilterHelpers.ApplyNullableTimestamp(query, filter.LastResolvedAtCriterion, g => g.LastResolvedAt);
+            query = FilterHelpers.ApplyInt(query, filter.SortOrderCriterion, g => g.SortOrder);
+            query = FilterHelpers.ApplyInt(query, filter.CachedItemCountCriterion, g => g.CachedItemCount ?? 0);
 
             // Count criteria
-            query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, g => g.GroupItems.Select(item => item.SceneId).Distinct().Count());
+            query = FilterHelpers.ApplyInt(query, filter.ItemCountCriterion, g => g.GroupItems.Count);
+            query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, g => g.GroupItems.Where(item => item.SceneId != null).Select(item => item.SceneId).Distinct().Count());
+            query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Image));
+            query = FilterHelpers.ApplyInt(query, filter.AudioCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Audio));
+            query = FilterHelpers.ApplyInt(query, filter.TextCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Text));
+            query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Gallery));
+            query = FilterHelpers.ApplyInt(query, filter.PerformerItemCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Performer));
+            query = FilterHelpers.ApplyInt(query, filter.StudioItemCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Studio));
+            query = FilterHelpers.ApplyInt(query, filter.TagItemCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Tag));
+            query = FilterHelpers.ApplyInt(query, filter.FaceCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Face));
+            query = FilterHelpers.ApplyInt(query, filter.SegmentCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Segment));
+            query = FilterHelpers.ApplyInt(query, filter.SubGroupCountCriterion, g => g.SubGroupRelations.Count);
+            query = FilterHelpers.ApplyInt(query, filter.ContainingGroupCountCriterion, g => g.ContainingGroupRelations.Count);
             query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, g => g.GroupTags.Count);
 
             // Performers criterion (performers in scenes belonging to this group)
@@ -2482,10 +2525,13 @@ public class GroupRepository : IGroupRepository
             g => g.SearchText);
 
         var totalCount = await query.CountAsync(ct);
+        var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);
         var sort = findFilter?.Sort ?? "name";
         var desc = findFilter?.Direction == Core.Enums.SortDirection.Desc;
-        query = sort switch
-        {
+        query = FilterHelpers.TryParseCustomFieldSort(sort, out _, out _)
+            ? query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Group, sort, desc)
+            : sort switch
+            {
             "name" => desc ? query.OrderByDescending(g => g.Name) : query.OrderBy(g => g.Name),
             "sort_order" or "sortOrder" => desc
                 ? query.OrderByDescending(g => g.SortOrder).ThenByDescending(g => g.Name).ThenByDescending(g => g.Id)
@@ -2493,10 +2539,31 @@ public class GroupRepository : IGroupRepository
             "date" => desc ? query.OrderByDescending(g => g.Date ?? DateOnly.MinValue) : query.OrderBy(g => g.Date ?? DateOnly.MinValue),
             "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Group, desc),
             "created_at" => desc ? query.OrderByDescending(g => g.CreatedAt) : query.OrderBy(g => g.CreatedAt),
+            "updated_at" or "updatedAt" => desc ? query.OrderByDescending(g => g.UpdatedAt).ThenByDescending(g => g.Id) : query.OrderBy(g => g.UpdatedAt).ThenBy(g => g.Id),
+            "item_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count, desc),
+            "scene_count" => ApplyGroupIntSort(query, g => g.GroupItems.Where(item => item.SceneId != null).Select(item => item.SceneId).Distinct().Count(), desc),
+            "image_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Image), desc),
+            "audio_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Audio), desc),
+            "text_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Text), desc),
+            "gallery_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Gallery), desc),
+            "performer_count" or "performer_item_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Performer), desc),
+            "studio_count" or "studio_item_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Studio), desc),
+            "tag_item_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Tag), desc),
+            "tag_count" => ApplyGroupIntSort(query, g => g.GroupTags.Count, desc),
+            "face_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Face), desc),
+            "segment_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Segment), desc),
+            "subgroup_count" => ApplyGroupIntSort(query, g => g.SubGroupRelations.Count, desc),
+            "containing_group_count" => ApplyGroupIntSort(query, g => g.ContainingGroupRelations.Count, desc),
+            "cached_item_count" => ApplyGroupIntSort(query, g => g.CachedItemCount ?? 0, desc),
+            "last_resolved_at" => desc ? query.OrderByDescending(g => g.LastResolvedAt).ThenByDescending(g => g.Id) : query.OrderBy(g => g.LastResolvedAt).ThenBy(g => g.Id),
+            "query_source_key" => desc ? query.OrderByDescending(g => g.QuerySourceKey).ThenByDescending(g => g.Id) : query.OrderBy(g => g.QuerySourceKey).ThenBy(g => g.Id),
+            "show_in_scene_lists" => desc ? query.OrderByDescending(g => g.ShowInSceneLists).ThenByDescending(g => g.Id) : query.OrderBy(g => g.ShowInSceneLists).ThenBy(g => g.Id),
+            "aliases" => desc ? query.OrderByDescending(g => g.Aliases ?? g.Name).ThenByDescending(g => g.Id) : query.OrderBy(g => g.Aliases ?? g.Name).ThenBy(g => g.Id),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, g => g.Id, desc),
             _ => desc ? query.OrderByDescending(g => g.UpdatedAt) : query.OrderBy(g => g.UpdatedAt),
-        };
-        query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
+            };
+        if (!hasExplicitSort)
+            query = FullTextSearchHelpers.OrderByRelevance(_db, query, findFilter?.Q);
         var page = findFilter?.Page ?? 1;
         var perPage = findFilter?.PerPage ?? 25;
         if (perPage <= 0)
@@ -2540,6 +2607,27 @@ public class GroupRepository : IGroupRepository
             "static" => GroupKind.Static,
             "dynamic" => GroupKind.Dynamic,
             _ => Enum.TryParse<GroupKind>(value, ignoreCase: true, out var parsed) ? parsed : null,
+        };
+    }
+
+    private static IQueryable<Group> ApplyGroupIntSort(IQueryable<Group> query, System.Linq.Expressions.Expression<Func<Group, int>> selector, bool desc)
+        => desc
+            ? query.OrderByDescending(selector).ThenByDescending(group => group.Id)
+            : query.OrderBy(selector).ThenBy(group => group.Id);
+
+    private static IQueryable<Group> ApplyAllowedHostTypesCriterion(IQueryable<Group> query, StringCriterion? criterion)
+    {
+        if (criterion == null)
+            return query;
+
+        var value = criterion.Value.Trim().ToLowerInvariant();
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals or CriterionModifier.Includes => query.Where(group => group.AllowedHostTypes.Any(hostType => hostType.ToLower() == value)),
+            CriterionModifier.NotEquals or CriterionModifier.Excludes => query.Where(group => !group.AllowedHostTypes.Any(hostType => hostType.ToLower() == value)),
+            CriterionModifier.IsNull => query.Where(group => group.AllowedHostTypes.Count == 0),
+            CriterionModifier.NotNull => query.Where(group => group.AllowedHostTypes.Count > 0),
+            _ => query,
         };
     }
 }

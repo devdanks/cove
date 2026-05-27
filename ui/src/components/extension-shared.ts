@@ -48,6 +48,9 @@ export {
   SaveButton,
 } from "./EditModal";
 export { ImageInput } from "./ImageInput";
+export { openTutorialStoryboard } from "./TutorialStoryboardDialog";
+export { registerManualContext, useManualContext } from "./ManualContext";
+export type { TutorialOpenRequest } from "./ManualContext";
 
 // ─── Entity Cards & Popovers ─────────────────────────────────────────────
 export {

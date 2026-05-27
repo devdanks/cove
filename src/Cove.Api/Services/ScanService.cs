@@ -245,6 +245,22 @@ public class ScanService(
                 // Phase 2: Process files
                 using var scope = scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
+                var existingFiles = await LoadExistingFileScanIndexAsync(db, files, ct);
+
+                void PublishScanEntityEvent(string entityType, int entityId, bool isUpdate)
+                {
+                    var eventType = entityType switch
+                    {
+                        "Scene" => isUpdate ? EventType.SceneUpdated : EventType.SceneCreated,
+                        "Image" => isUpdate ? EventType.ImageUpdated : EventType.ImageCreated,
+                        "Gallery" => isUpdate ? EventType.GalleryUpdated : EventType.GalleryCreated,
+                        "Audio" => isUpdate ? EventType.AudioUpdated : EventType.AudioCreated,
+                        "Text" => isUpdate ? EventType.TextUpdated : EventType.TextCreated,
+                        _ => EventType.ScanCompleted,
+                    };
+
+                    eventBus.Publish(new EntityEvent(eventType, entityType, entityId));
+                }
 
                 var processedCount = 0;
                 foreach (var file in files)
@@ -255,40 +271,32 @@ public class ScanService(
 
                     try
                     {
-                        // Check if file already exists in DB by path
-                        var existingFolderPath = NormalizeStoredFolderPath(Path.GetDirectoryName(file.Path) ?? file.Path);
-                        var existingFolder = await db.Folders
-                            .FirstOrDefaultAsync(f => f.Path == existingFolderPath, ct);
-
-                        if (existingFolder != null)
+                        var storedFilePath = NormalizeStoredFilePath(file.Path);
+                        var isKnownFile = existingFiles.TryGetValue(storedFilePath, out var existingFile);
+                        if (isKnownFile)
                         {
-                            var basename = Path.GetFileName(file.Path);
-                            var existingFile = await db.Set<BaseFileEntity>()
-                                .FirstOrDefaultAsync(f => f.ParentFolderId == existingFolder.Id && f.Basename == basename, ct);
-
-                            if (existingFile != null)
+                            var fileInfo = new FileInfo(file.Path);
+                            if (!options.Rescan && !existingFile!.NeedsMetadataProbe && existingFile.ModTime >= fileInfo.LastWriteTimeUtc && existingFile.Size == fileInfo.Length)
                             {
-                                // Check if file has been modified — but always re-process videos with missing metadata
-                                var fileInfo = new FileInfo(file.Path);
-                                var needsMetadata = existingFile switch
+                                if (existingFile.Kind == ExistingFileKind.Video)
                                 {
-                                    VideoFile vf => NeedsVideoMetadataProbe(vf),
-                                    AudioFile af => af.Duration == 0 && string.IsNullOrWhiteSpace(af.AudioCodec),
-                                    TextFile tf => !tf.WordCount.HasValue && string.IsNullOrWhiteSpace(tf.ExcerptText),
-                                    _ => false,
-                                };
-                                if (!options.Rescan && !needsMetadata && existingFile.ModTime >= fileInfo.LastWriteTimeUtc && existingFile.Size == fileInfo.Length)
-                                {
-                                    if (existingFile is VideoFile)
+                                    var existingVideo = await db.VideoFiles
+                                        .Include(item => item.Captions)
+                                        .FirstOrDefaultAsync(item => item.Id == existingFile.Id, ct);
+                                    if (existingVideo != null)
                                     {
-                                        var existingVideo = await db.VideoFiles
-                                            .Include(item => item.Captions)
-                                            .FirstOrDefaultAsync(item => item.Id == existingFile.Id, ct);
-                                        if (existingVideo != null)
-                                            SyncVideoCaptions(existingVideo, file.Path);
+                                        SyncVideoCaptions(existingVideo, file.Path);
+                                        if (db.ChangeTracker.HasChanges())
+                                        {
+                                            await db.SaveChangesAsync(ct);
+                                            if (existingVideo.SceneId.HasValue)
+                                                PublishScanEntityEvent("Scene", existingVideo.SceneId.Value, isUpdate: true);
+                                        }
+                                        db.ChangeTracker.Clear();
                                     }
-                                    continue; // Not modified and metadata present, skip
                                 }
+
+                                continue; // Not modified and metadata present, skip
                             }
                         }
 
@@ -296,25 +304,43 @@ public class ScanService(
                         if (videoExts.Contains(file.Extension))
                         {
                             processedVideoPaths.Add(file.Path);
-                            await ProcessVideoFileAsync(db, file.Path, sceneId: null, ct);
+                            var videoFile = await ProcessVideoFileAsync(db, file.Path, sceneId: null, ct);
+                            await db.SaveChangesAsync(ct);
+                            if (videoFile.SceneId.HasValue)
+                                PublishScanEntityEvent("Scene", videoFile.SceneId.Value, isKnownFile);
+                            db.ChangeTracker.Clear();
                         }
                         else if (imageExts.Contains(file.Extension))
                         {
                             processedImagePaths.Add(file.Path);
-                            await ProcessImageFileAsync(db, file.Path, imageId: null, ct);
+                            var image = await ProcessImageFileAsync(db, file.Path, imageId: null, ct);
+                            await db.SaveChangesAsync(ct);
+                            PublishScanEntityEvent("Image", image.Id, isKnownFile);
+                            db.ChangeTracker.Clear();
                         }
                         else if (audioExts.Contains(file.Extension))
                         {
                             processedAudioPaths.Add(file.Path);
-                            await ProcessAudioFileAsync(db, file.Path, audioId: null, ct);
+                            var audio = await ProcessAudioFileAsync(db, file.Path, audioId: null, ct);
+                            await db.SaveChangesAsync(ct);
+                            PublishScanEntityEvent("Audio", audio.Id, isKnownFile);
+                            db.ChangeTracker.Clear();
                         }
                         else if (textExts.Contains(file.Extension))
                         {
                             processedTextPaths.Add(file.Path);
-                            await ProcessTextFileAsync(db, file.Path, textDocumentId: null, ct);
+                            var textDocument = await ProcessTextFileAsync(db, file.Path, textDocumentId: null, ct);
+                            await db.SaveChangesAsync(ct);
+                            PublishScanEntityEvent("Text", textDocument.Id, isKnownFile);
+                            db.ChangeTracker.Clear();
                         }
                         else if (galleryExts.Contains(file.Extension))
-                            await ProcessGalleryFileAsync(db, file.Path, galleryId: null, ct);
+                        {
+                            var gallery = await ProcessGalleryFileAsync(db, file.Path, galleryId: null, ct);
+                            await db.SaveChangesAsync(ct);
+                            PublishScanEntityEvent("Gallery", gallery.Id, isKnownFile);
+                            db.ChangeTracker.Clear();
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -366,6 +392,104 @@ public class ScanService(
             logger.LogInformation("Scan completed. Processed {Count} core files, {ParticipantCount} extension participant(s)", files.Count, participants.Count);
             eventBus.Publish(new CoveEvent(EventType.ScanCompleted));
         });
+    }
+
+    private static async Task<Dictionary<string, ExistingFileScanInfo>> LoadExistingFileScanIndexAsync(CoveContext db, IReadOnlyCollection<DiscoveredFile> files, CancellationToken ct)
+    {
+        var storedPaths = files
+            .Select(file => NormalizeStoredFilePath(file.Path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var index = new Dictionary<string, ExistingFileScanInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var chunk in storedPaths.Chunk(1000))
+        {
+            await AddExistingVideoFilesAsync(db, index, chunk, ct);
+            await AddExistingImageFilesAsync(db, index, chunk, ct);
+            await AddExistingGalleryFilesAsync(db, index, chunk, ct);
+            await AddExistingAudioFilesAsync(db, index, chunk, ct);
+            await AddExistingTextFilesAsync(db, index, chunk, ct);
+        }
+
+        return index;
+    }
+
+    private static async Task AddExistingVideoFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
+    {
+        var rows = await db.VideoFiles
+            .AsNoTracking()
+            .Where(file => storedPaths.Contains(file.Path))
+            .Select(file => new ExistingFileScanInfo(
+                file.Path,
+                file.Id,
+                ExistingFileKind.Video,
+                file.Size,
+                file.ModTime,
+                file.Width <= 0 || file.Height <= 0 || file.Duration <= 0))
+            .ToListAsync(ct);
+
+        foreach (var row in rows)
+            index.TryAdd(row.StoredPath, row);
+    }
+
+    private static async Task AddExistingImageFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
+    {
+        var rows = await db.ImageFiles
+            .AsNoTracking()
+            .Where(file => storedPaths.Contains(file.Path))
+            .Select(file => new ExistingFileScanInfo(file.Path, file.Id, ExistingFileKind.Image, file.Size, file.ModTime, false))
+            .ToListAsync(ct);
+
+        foreach (var row in rows)
+            index.TryAdd(row.StoredPath, row);
+    }
+
+    private static async Task AddExistingGalleryFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
+    {
+        var rows = await db.GalleryFiles
+            .AsNoTracking()
+            .Where(file => storedPaths.Contains(file.Path))
+            .Select(file => new ExistingFileScanInfo(file.Path, file.Id, ExistingFileKind.Gallery, file.Size, file.ModTime, false))
+            .ToListAsync(ct);
+
+        foreach (var row in rows)
+            index.TryAdd(row.StoredPath, row);
+    }
+
+    private static async Task AddExistingAudioFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
+    {
+        var rows = await db.AudioFiles
+            .AsNoTracking()
+            .Where(file => storedPaths.Contains(file.Path))
+            .Select(file => new ExistingFileScanInfo(
+                file.Path,
+                file.Id,
+                ExistingFileKind.Audio,
+                file.Size,
+                file.ModTime,
+                file.Duration == 0 && file.AudioCodec == string.Empty))
+            .ToListAsync(ct);
+
+        foreach (var row in rows)
+            index.TryAdd(row.StoredPath, row);
+    }
+
+    private static async Task AddExistingTextFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
+    {
+        var rows = await db.TextFiles
+            .AsNoTracking()
+            .Where(file => storedPaths.Contains(file.Path))
+            .Select(file => new ExistingFileScanInfo(
+                file.Path,
+                file.Id,
+                ExistingFileKind.Text,
+                file.Size,
+                file.ModTime,
+                !file.WordCount.HasValue && (file.ExcerptText == null || file.ExcerptText == string.Empty)))
+            .ToListAsync(ct);
+
+        foreach (var row in rows)
+            index.TryAdd(row.StoredPath, row);
     }
 
     private async Task GenerateRequestedAssetsAsync(
@@ -750,6 +874,7 @@ public class ScanService(
             .Select(g => new { FolderId = g.Key, ImageIds = g.Select(f => f.ImageId!.Value).ToList() })
             .ToListAsync(ct);
 
+        var createdGalleries = new List<Gallery>();
         foreach (var group in imagesByFolder)
         {
             if (!folders.TryGetValue(group.FolderId, out var folder)) continue;
@@ -766,10 +891,13 @@ public class ScanService(
             }
 
             db.Galleries.Add(gallery);
+            createdGalleries.Add(gallery);
             logger.LogDebug("Created folder gallery for: {Path} with {Count} images", folder.Path, group.ImageIds.Count);
         }
 
         await db.SaveChangesAsync(ct);
+        foreach (var gallery in createdGalleries)
+            eventBus.Publish(new EntityEvent(EventType.GalleryCreated, "Gallery", gallery.Id));
     }
 
     private async Task<Folder> EnsureFolderAsync(CoveContext db, string dirPath, CancellationToken ct)
@@ -1948,6 +2076,13 @@ public class ScanService(
         return normalized.Replace('\\', '/');
     }
 
+    private static string NormalizeStoredFilePath(string path)
+    {
+        var dirPath = Path.GetDirectoryName(path) ?? string.Empty;
+        var basename = Path.GetFileName(path);
+        return BaseFileEntity.ComputePath(NormalizeStoredFolderPath(dirPath), basename);
+    }
+
     private static string? GetParentStoredFolderPath(string storedPath)
     {
         var nativePath = storedPath.Replace('/', Path.DirectorySeparatorChar);
@@ -1958,6 +2093,8 @@ public class ScanService(
     private static readonly string[] FolderIgnoreFileNames = [".coveignore", ".stashignore"];
 
     private record CaptionSidecar(string Filename, string LanguageCode, string CaptionType);
+    private enum ExistingFileKind { Video, Image, Gallery, Audio, Text }
+    private sealed record ExistingFileScanInfo(string StoredPath, int Id, ExistingFileKind Kind, long Size, DateTime ModTime, bool NeedsMetadataProbe);
     private sealed record AudioProbeMetadata(string? Title);
     private record DiscoveredFile(string Path, string Extension);
     private record IgnoreRule(string Pattern, bool Negated);

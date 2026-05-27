@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.Interfaces;
 
 namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.JobsRead)]
 public class JobsController(IJobService jobService, IScanService scanService, IThumbnailService thumbnailService, IFingerprintService fingerprintService, IAutoTagService autoTagService, ICleanService cleanService, IBackupService backupService) : ControllerBase
 {
     [HttpGet]
@@ -24,18 +26,21 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
     }
 
     [HttpDelete("{jobId}")]
+    [RequiresPermission(Permissions.JobsCancel)]
     public IActionResult CancelJob(string jobId)
     {
         return jobService.Cancel(jobId) ? Ok() : NotFound();
     }
 
     [HttpPut("{jobId}/reorder")]
+    [RequiresPermission(Permissions.JobsCancel)]
     public IActionResult ReorderJob(string jobId, [FromBody] ReorderJobRequest request)
     {
         return jobService.ReorderQueued(jobId, request.BeforeJobId) ? Ok() : NotFound();
     }
 
     [HttpPost("scan")]
+    [RequiresPermission(Permissions.LibraryScan)]
     public ActionResult<object> StartScan([FromQuery] bool generatePreviews = false)
     {
         var jobId = scanService.StartScan(new ScanOperationOptions
@@ -46,6 +51,7 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
     }
 
     [HttpPost("generate-thumbnails")]
+    [RequiresPermission(Permissions.LibraryScan)]
     public ActionResult<object> GenerateThumbnails()
     {
         var jobId = thumbnailService.StartGenerateAllThumbnails();
@@ -53,6 +59,7 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
     }
 
     [HttpPost("generate-scene-phashes")]
+    [RequiresPermission(Permissions.LibraryScan)]
     public ActionResult<object> GenerateScenePhashes()
     {
         Console.WriteLine("[JobsController] Received request to generate scene phashes");
@@ -61,6 +68,7 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
     }
 
     [HttpPost("generate-image-phashes")]
+    [RequiresPermission(Permissions.LibraryScan)]
     public ActionResult<object> GenerateImagePhashes()
     {
         var jobId = fingerprintService.StartGenerateImagePhashes();
@@ -68,6 +76,7 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
     }
 
     [HttpPost("auto-tag")]
+    [RequiresPermission(Permissions.LibraryAutoTag)]
     public ActionResult<object> StartAutoTag([FromBody] AutoTagRequest? request = null)
     {
         var jobId = autoTagService.StartAutoTag(request?.PerformerIds, request?.StudioIds, request?.TagIds);
@@ -75,6 +84,7 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
     }
 
     [HttpPost("clean")]
+    [RequiresPermission(Permissions.LibraryClean)]
     public ActionResult<object> StartClean([FromQuery] bool dryRun = false)
     {
         var jobId = cleanService.StartClean(dryRun);
@@ -82,6 +92,7 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
     }
 
     [HttpPost("backup")]
+    [RequiresPermission(Permissions.SystemBackup)]
     public ActionResult<object> StartBackup()
     {
         var jobId = backupService.StartBackup();
@@ -89,6 +100,7 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
     }
 
     [HttpGet("backup/latest")]
+    [RequiresPermission(Permissions.SystemBackup)]
     public async Task<ActionResult<object>> GetLatestBackup()
     {
         var path = await backupService.GetLatestBackupPathAsync();

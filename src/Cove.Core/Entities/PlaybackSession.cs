@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Cove.Core.Entities;
 
 public enum PlaybackSessionState
@@ -29,6 +31,24 @@ public class PlaybackSession : BaseEntity
     public bool IsCompleted { get; set; }
     public bool CountsAsView { get; set; }
     public bool DerivedLikeAwarded { get; set; }
+    public string? Surface { get; set; }
+    public string? ScopeKey { get; set; }
+    public InteractionHostType? ParentHostType { get; set; }
+    public int? ParentHostId { get; set; }
+    public InteractionHostType? ItemHostType { get; set; }
+    public int? ItemHostId { get; set; }
+    public int? GroupItemId { get; set; }
+    public int? SegmentId { get; set; }
+    public double? ClipStartSec { get; set; }
+    public double? ClipEndSec { get; set; }
+    public bool? Autoplay { get; set; }
+    public bool? Muted { get; set; }
+    public bool? Fullscreen { get; set; }
+    public double? PlaybackRate { get; set; }
+    public string? Route { get; set; }
+    public string? Referrer { get; set; }
+    public string? RecommendationSource { get; set; }
+    public JsonDocument? Context { get; set; }
     public List<PlaybackInterval> Intervals { get; set; } = [];
 }
 
@@ -43,4 +63,16 @@ public class PlaybackInterval : BaseEntity
     public double StartSec { get; set; }
     public double EndSec { get; set; }
     public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
+    public string? Surface { get; set; }
+    public string? ScopeKey { get; set; }
+    public InteractionHostType? ParentHostType { get; set; }
+    public int? ParentHostId { get; set; }
+    public InteractionHostType? ItemHostType { get; set; }
+    public int? ItemHostId { get; set; }
+    public int? GroupItemId { get; set; }
+    public int? SegmentId { get; set; }
+    public double? ClipStartSec { get; set; }
+    public double? ClipEndSec { get; set; }
+    public double? PlaybackRate { get; set; }
+    public JsonDocument? Context { get; set; }
 }

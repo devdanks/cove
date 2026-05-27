@@ -60,7 +60,7 @@ import type {
   FindFilter,
   FileBackedCreate,
   DeleteEntityOptions,
-  CustomFieldDefinition, CustomFieldDefinitionCreate, CustomFieldDefinitionUpdate,
+  CustomFieldDefinition, CustomFieldDefinitionCreate, CustomFieldDefinitionUpdate, CustomFieldCriterion,
   SavedFilter,
   SavedFilterCreate,
   SavedFilterUpdate,
@@ -465,6 +465,27 @@ export const segmentLibrary = {
     perPage?: number;
     ids?: string;
     excludeSceneIds?: string;
+    title?: string;
+    titleModifier?: string;
+    hostType?: string;
+    sourceRunId?: string;
+    sourceRunIdModifier?: string;
+    colorHint?: string;
+    colorHintModifier?: string;
+    hasImage?: boolean;
+    hasPayload?: boolean;
+    startSec?: number;
+    startSec2?: number;
+    startSecModifier?: string;
+    endSec?: number;
+    endSec2?: number;
+    endSecModifier?: string;
+    createdAt?: string;
+    createdAt2?: string;
+    createdAtModifier?: string;
+    updatedAt?: string;
+    updatedAt2?: string;
+    updatedAtModifier?: string;
   }) =>
     request<PaginatedResponse<SegmentRecord>>(`/segments${buildQuery(undefined, opts)}`),
   get: (id: number) => requestOptional<SegmentRecord>(`/segments/${id}`),
@@ -475,8 +496,10 @@ export const segmentLibrary = {
 };
 
 // ===== Faces =====
+type FaceListOptions = { q?: string; performerId?: number; performerIds?: string; linked?: boolean; ignored?: boolean; merged?: boolean; mergedIntoFaceId?: number; label?: string; labelModifier?: string; primarySourceKey?: string; primarySourceKeyModifier?: string; hasCover?: boolean; detectionCount?: number; detectionCount2?: number; detectionCountModifier?: string; appearanceCount?: number; appearanceCount2?: number; appearanceCountModifier?: string; frameSampleCount?: number; frameSampleCount2?: number; frameSampleCountModifier?: string; sceneCount?: number; sceneCount2?: number; sceneCountModifier?: string; imageCount?: number; imageCount2?: number; imageCountModifier?: string; minSuggestionConfidence?: number; suggestionConfidence?: number; suggestionConfidence2?: number; suggestionConfidenceModifier?: string; topSuggestionPerformerIds?: string; sort?: string; direction?: "asc" | "desc"; customFieldCriteria?: CustomFieldCriterion[]; page?: number; perPage?: number };
+
 export const faces: {
-  list: (opts?: { q?: string; performerId?: number; performerIds?: string; linked?: boolean; ignored?: boolean; merged?: boolean; minSuggestionConfidence?: number; suggestionConfidence?: number; suggestionConfidence2?: number; suggestionConfidenceModifier?: string; topSuggestionPerformerIds?: string; sort?: string; page?: number; perPage?: number }) => Promise<PaginatedResponse<Face>>;
+  list: (opts?: FaceListOptions) => Promise<PaginatedResponse<Face>>;
   get: (id: number) => Promise<Face>;
   appearances: (id: number, opts?: { q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) => Promise<PaginatedResponse<FaceAppearance>>;
   sceneFaces: (sceneId: number) => Promise<FaceHostFace[]>;
@@ -500,19 +523,42 @@ export const faces: {
   suggestions: (id: number, maxResults?: number) => Promise<FaceSuggestion[]>;
   recordSuggestionDecision: (id: number, data: { performerId: number; decision: "accept" | "reject"; setPerformerImage?: boolean }) => Promise<void>;
 } = {
-  list: (opts?: { q?: string; performerId?: number; performerIds?: string; linked?: boolean; ignored?: boolean; merged?: boolean; minSuggestionConfidence?: number; suggestionConfidence?: number; suggestionConfidence2?: number; suggestionConfidenceModifier?: string; topSuggestionPerformerIds?: string; sort?: string; page?: number; perPage?: number }) =>
+  list: (opts?: FaceListOptions) =>
     request<PaginatedResponse<Face>>(`/faces${buildQuery({ page: opts?.page, perPage: opts?.perPage, q: opts?.q }, {
       performerId: opts?.performerId,
       performerIds: opts?.performerIds,
       linked: opts?.linked,
       ignored: opts?.ignored,
       merged: opts?.merged,
+      mergedIntoFaceId: opts?.mergedIntoFaceId,
+      label: opts?.label,
+      labelModifier: opts?.labelModifier,
+      primarySourceKey: opts?.primarySourceKey,
+      primarySourceKeyModifier: opts?.primarySourceKeyModifier,
+      hasCover: opts?.hasCover,
+      detectionCount: opts?.detectionCount,
+      detectionCount2: opts?.detectionCount2,
+      detectionCountModifier: opts?.detectionCountModifier,
+      appearanceCount: opts?.appearanceCount,
+      appearanceCount2: opts?.appearanceCount2,
+      appearanceCountModifier: opts?.appearanceCountModifier,
+      frameSampleCount: opts?.frameSampleCount,
+      frameSampleCount2: opts?.frameSampleCount2,
+      frameSampleCountModifier: opts?.frameSampleCountModifier,
+      sceneCount: opts?.sceneCount,
+      sceneCount2: opts?.sceneCount2,
+      sceneCountModifier: opts?.sceneCountModifier,
+      imageCount: opts?.imageCount,
+      imageCount2: opts?.imageCount2,
+      imageCountModifier: opts?.imageCountModifier,
       minSuggestionConfidence: opts?.minSuggestionConfidence,
       suggestionConfidence: opts?.suggestionConfidence,
       suggestionConfidence2: opts?.suggestionConfidence2,
       suggestionConfidenceModifier: opts?.suggestionConfidenceModifier,
       topSuggestionPerformerIds: opts?.topSuggestionPerformerIds,
       sort: opts?.sort,
+      direction: opts?.direction,
+      customFieldCriteria: opts?.customFieldCriteria && opts.customFieldCriteria.length > 0 ? JSON.stringify(opts.customFieldCriteria) : undefined,
     })}`),
   get: (id: number) => request<Face>(`/faces/${id}`),
   appearances: (id: number, opts?: { q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) =>
@@ -797,6 +843,8 @@ export const audios = {
     request<void>(`/audios/${id}${buildQuery(undefined, { deleteFile: options?.deleteFile, deleteGenerated: options?.deleteGenerated })}`, { method: "DELETE" }),
   bulkDelete: (ids: number[], options?: DeleteEntityOptions) =>
     request<void>("/audios/bulk", { method: "DELETE", body: JSON.stringify({ ids, deleteFiles: options?.deleteFile ?? false, deleteGenerated: options?.deleteGenerated ?? false }) }),
+  getHistory: (id: number) => request<SceneHistory>(`/audios/${id}/history`),
+  resetActivity: (id: number) => request<void>(`/audios/${id}/activity/reset`, { method: "POST" }),
   streamUrl: (id: number) => buildMediaUrl(`/audios/${id}/stream`),
 };
 

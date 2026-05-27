@@ -17,7 +17,7 @@ import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { FaceAppearanceTile, FaceTile } from "../components/EntityCards";
-import { formatDate } from "../components/shared";
+import { FieldProvenanceHover, formatDate } from "../components/shared";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
@@ -375,6 +375,11 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   );
   const [heroImageIndex, setHeroImageIndex] = useState(0);
   const title = face?.label?.trim() || face?.performerName || `Face #${id}`;
+  const titleWithProvenance = face ? (
+    <FieldProvenanceHover fieldProvenance={face.fieldProvenance} fieldKey={["label", "performer_id"]}>
+      {title}
+    </FieldProvenanceHover>
+  ) : title;
   const tabs = useMemo(() => [
     { key: "overview", label: "Overview" },
     { key: "appearances", label: "Appears In", count: face?.appearanceCount || faceAppearancesPage.totalCount },
@@ -433,7 +438,9 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
                 onClick={() => canReadPerformers && onNavigate({ page: "performer", id: face.performerId })}
                 className={`text-left text-base font-medium ${canReadPerformers ? "text-accent hover:underline" : "text-foreground"}`}
               >
-                {face.performerName || `Performer #${face.performerId}`}
+                <FieldProvenanceHover fieldProvenance={face.fieldProvenance} fieldKey="performer_id">
+                  {face.performerName || `Performer #${face.performerId}`}
+                </FieldProvenanceHover>
               </button>
               {canWriteFace ? (
                 <button
@@ -692,7 +699,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         onImageCarouselIndexChange={setHeroImageIndex}
         imageAlt={title}
         imageFallback={<Fingerprint className="h-14 w-14" />}
-        title={title}
+        title={titleWithProvenance}
         counts={[
           { key: "appearances", label: "Appearances", value: face.appearanceCount || faceAppearancesPage.totalCount, icon: <Eye className="h-4 w-4" /> },
           { key: "scenes", label: "Scenes", value: face.sceneCount, icon: <Film className="h-4 w-4" /> },
@@ -702,7 +709,9 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
           <>
             <span>Created {formatDate(face.createdAt)}</span>
             <span>Updated {formatDate(face.updatedAt)}</span>
-            <span>{face.performerName || "Unlinked"}</span>
+            <FieldProvenanceHover fieldProvenance={face.fieldProvenance} fieldKey="performer_id">
+              <span>{face.performerName || "Unlinked"}</span>
+            </FieldProvenanceHover>
           </>
         )}
         favorite={canEngageFace ? faceFavorite : undefined}

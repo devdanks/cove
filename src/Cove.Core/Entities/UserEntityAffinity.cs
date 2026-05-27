@@ -12,6 +12,7 @@ public enum AffinityHostType
     Group = 8,
     Audio = 9,
     Text = 10,
+    Segment = 11,
 }
 
 public class UserEntityAffinity : BaseEntity
@@ -29,4 +30,17 @@ public class UserEntityAffinity : BaseEntity
     public int LikeCount { get; set; }
     public int DerivedLikeCount { get; set; }
     public int PageVisitCount { get; set; }
+    public int InteractionCount { get; set; }
+    public DateTime? LastInteractedAt { get; set; }
+    public int OpenDetailCount { get; set; }
+    public int OpenLightboxCount { get; set; }
+    public int NavigateCount { get; set; }
+    public int PauseCount { get; set; }
+    public int SeekCount { get; set; }
+    public int PlayerControlCount { get; set; }
+    public int SearchInteractionCount { get; set; }
+    public int FilterInteractionCount { get; set; }
+    public int ShareCount { get; set; }
+    public int HideCount { get; set; }
+    public int ZoomCount { get; set; }
 }

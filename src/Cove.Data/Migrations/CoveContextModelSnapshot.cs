@@ -24,8 +24,7 @@ namespace Cove.Data.Migrations
                 .HasAnnotation("ProductVersion", "10.0.5")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            modelBuilder.HasPostgresExtension("vector");
-
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("Cove.Core.Entities.AiRun", b =>
@@ -2417,13 +2416,13 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
-                    b.Property<string>("ImageOverrideBlobId")
-                        .HasColumnType("text");
-
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
 
                     b.Property<string>("Measurements")
                         .HasColumnType("text");
@@ -2580,11 +2579,23 @@ namespace Cove.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<double?>("ClipEndSec")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("ClipStartSec")
+                        .HasColumnType("double precision");
+
+                    b.Property<JsonDocument>("Context")
+                        .HasColumnType("jsonb");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<double>("EndSec")
                         .HasColumnType("double precision");
+
+                    b.Property<int?>("GroupItemId")
+                        .HasColumnType("integer");
 
                     b.Property<int>("HostId")
                         .HasColumnType("integer");
@@ -2592,14 +2603,40 @@ namespace Cove.Data.Migrations
                     b.Property<int>("HostType")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("ItemHostId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ItemHostType")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ParentHostId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ParentHostType")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("PlaybackRate")
+                        .HasColumnType("double precision");
+
                     b.Property<int>("PlaybackSessionId")
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("RecordedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ScopeKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("SegmentId")
+                        .HasColumnType("integer");
+
                     b.Property<double>("StartSec")
                         .HasColumnType("double precision");
+
+                    b.Property<string>("Surface")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -2613,6 +2650,8 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("UserId", "HostType", "HostId");
 
+                    b.HasIndex("UserId", "Surface", "RecordedAt");
+
                     b.ToTable("PlaybackIntervals");
                 });
 
@@ -2623,6 +2662,18 @@ namespace Cove.Data.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool?>("Autoplay")
+                        .HasColumnType("boolean");
+
+                    b.Property<double?>("ClipEndSec")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("ClipStartSec")
+                        .HasColumnType("double precision");
+
+                    b.Property<JsonDocument>("Context")
+                        .HasColumnType("jsonb");
 
                     b.Property<bool>("CountsAsView")
                         .HasColumnType("boolean");
@@ -2636,6 +2687,12 @@ namespace Cove.Data.Migrations
                     b.Property<DateTime?>("EndedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool?>("Fullscreen")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("GroupItemId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("HostId")
                         .HasColumnType("integer");
 
@@ -2644,6 +2701,12 @@ namespace Cove.Data.Migrations
 
                     b.Property<bool>("IsCompleted")
                         .HasColumnType("boolean");
+
+                    b.Property<int?>("ItemHostId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ItemHostType")
+                        .HasColumnType("integer");
 
                     b.Property<double?>("LastPositionSec")
                         .HasColumnType("double precision");
@@ -2654,6 +2717,37 @@ namespace Cove.Data.Migrations
                     b.Property<double>("MediaDurationSec")
                         .HasColumnType("double precision");
 
+                    b.Property<bool?>("Muted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("ParentHostId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ParentHostType")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("PlaybackRate")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("RecommendationSource")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Referrer")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Route")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("ScopeKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("SegmentId")
+                        .HasColumnType("integer");
+
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uuid");
 
@@ -2662,6 +2756,10 @@ namespace Cove.Data.Migrations
 
                     b.Property<int>("State")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Surface")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<double>("TotalWatchedSec")
                         .HasColumnType("double precision");
@@ -2676,6 +2774,8 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("UserId", "SessionId")
                         .IsUnique();
+
+                    b.HasIndex("UserId", "Surface", "LastSeenAt");
 
                     b.HasIndex("UserId", "HostType", "HostId", "StartedAt");
 
@@ -2835,6 +2935,11 @@ namespace Cove.Data.Migrations
                     b.Property<int?>("InteractiveSpeed")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("IsVr")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<long>("MaxBitRate")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
@@ -2876,11 +2981,6 @@ namespace Cove.Data.Migrations
 
                     b.Property<bool>("Organized")
                         .HasColumnType("boolean");
-
-                    b.Property<bool>("IsVr")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false);
 
                     b.Property<int?>("ParentSceneId")
                         .HasColumnType("integer");
@@ -2930,6 +3030,8 @@ namespace Cove.Data.Migrations
 
                     b.HasIndex("HasSquareFiles");
 
+                    b.HasIndex("IsVr");
+
                     b.HasIndex("MaxBitRate");
 
                     b.HasIndex("MaxDuration");
@@ -2949,8 +3051,6 @@ namespace Cove.Data.Migrations
                     b.HasIndex("MinPath");
 
                     b.HasIndex("Organized");
-
-                    b.HasIndex("IsVr");
 
                     b.HasIndex("ParentSceneId");
 
@@ -3460,13 +3560,13 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
-                    b.Property<string>("ImageOverrideBlobId")
-                        .HasColumnType("text");
-
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3658,13 +3758,13 @@ namespace Cove.Data.Migrations
                     b.Property<string>("ImageBlobId")
                         .HasColumnType("text");
 
-                    b.Property<string>("ImageOverrideBlobId")
-                        .HasColumnType("text");
-
                     b.Property<int>("ImageCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("ImageOverrideBlobId")
+                        .HasColumnType("text");
 
                     b.Property<double?>("MinOccurrencePercent")
                         .HasColumnType("double precision");
@@ -4139,16 +4239,34 @@ namespace Cove.Data.Migrations
                     b.Property<DateTime?>("FavoritedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("FilterInteractionCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("HideCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<int>("HostId")
                         .HasColumnType("integer");
 
                     b.Property<int>("HostType")
                         .HasColumnType("integer");
 
+                    b.Property<int>("InteractionCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<bool>("IsFavorite")
                         .HasColumnType("boolean");
 
                     b.Property<DateTime?>("LastConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastInteractedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<double?>("LastPositionSec")
@@ -4159,7 +4277,47 @@ namespace Cove.Data.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<int>("NavigateCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("OpenDetailCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("OpenLightboxCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<int>("PageVisitCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("PauseCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("PlayerControlCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("SearchInteractionCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("SeekCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("ShareCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
@@ -4176,6 +4334,11 @@ namespace Cove.Data.Migrations
                         .HasColumnType("integer");
 
                     b.Property<int>("ViewCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("ZoomCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);

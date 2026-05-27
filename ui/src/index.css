@@ -939,16 +939,6 @@ html[data-theme-bg-animation][data-component-style*="animated"] button:hover:not
   box-shadow: 0 0 8px 0 color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
-/* --- Component Style: Minimal --- */
-html[data-component-style*="minimal"] .entity-card,
-html[data-component-style*="minimal"] .scene-card {
-  box-shadow: none;
-  border-radius: 4px;
-}
-html[data-component-style*="minimal"] button { border-radius: 4px; }
-html[data-component-style*="minimal"] .rounded-xl,
-html[data-component-style*="minimal"] .rounded-2xl { border-radius: 4px; }
-
 /* --- Component Style: Rounded --- */
 html[data-component-style*="rounded"] button { border-radius: 9999px; }
 html[data-component-style*="rounded"] .entity-card,
@@ -961,10 +951,6 @@ html[data-component-style*="rounded"] select { border-radius: 9999px; }
 html[data-component-style*="rounded"] .styled-dropdown-panel { border-radius: 16px; }
 
 /* ===== Layer 3: Layout Styles ===== */
-
-html[data-layout="compact"] .scene-card { --card-min-width: 180px; }
-html[data-layout="compact"] .card-title { font-size: 0.75rem; }
-html[data-layout="compact"] .card-popovers { display: none; }
 
 /* ===== Text Readability ===== */
 html[data-component-style*="glass"] .text-foreground,
@@ -1998,20 +1984,6 @@ html[data-style-gradient-animated]:not([data-style-gradient-animated="0"])[data-
   animation: liquid-drift calc((8 + var(--_inv) * var(--_inv) * 0.0112) * 1s) ease-in-out infinite;
 }
 
-/* --- Component Style: Minimal --- */
-html[data-component-style*="minimal"] .entity-card,
-html[data-component-style*="minimal"] .scene-card {
-  box-shadow: none;
-  border-radius: 4px;
-}
-html[data-component-style*="minimal"] button {
-  border-radius: 4px;
-}
-html[data-component-style*="minimal"] .rounded-xl,
-html[data-component-style*="minimal"] .rounded-2xl {
-  border-radius: 4px;
-}
-
 /* --- Component Style: Rounded --- */
 html[data-component-style*="rounded"] button {
   border-radius: 9999px;
@@ -2030,17 +2002,6 @@ html[data-component-style*="rounded"] .styled-dropdown-panel {
 }
 
 /* ===== Layer 3: Layout Styles ===== */
-
-/* --- Layout: Compact --- */
-html[data-layout="compact"] .scene-card {
-  --card-min-width: 180px;
-}
-html[data-layout="compact"] .card-title {
-  font-size: 0.75rem;
-}
-html[data-layout="compact"] .card-popovers {
-  display: none;
-}
 
 /* ===== Text Readability: ensure text is always legible over glass/gradients ===== */
 html[data-component-style*="glass"] .text-shell-text,
@@ -2141,4 +2102,245 @@ html[data-theme="sunset-gradient"] {
 /* Theme: Aurora — teal glow variables */
 html[data-theme="aurora"] {
   --glow-r: 16; --glow-g: 185; --glow-b: 129;
+}
+
+/* ===== P7 Theme / Style / Layout Refresh ===== */
+
+html[data-component-style*="gradient"] {
+  --gd-bg: 135deg;
+  --gd-cards: 135deg;
+  --gd-surfaces: 135deg;
+}
+
+@keyframes card-sheen-sweep {
+  0% { transform: translateX(-130%); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateX(130%); opacity: 0; }
+}
+
+html[data-component-style*="glass"] {
+  --_glass-alpha: calc(var(--sv-surface-opacity, 40) / 100);
+  --_glass-card-alpha: calc(var(--sv-card-opacity, 40) / 100);
+  --_glass-button-alpha: calc(var(--sv-button-opacity, 55) / 100);
+  --color-nav: rgb(18 18 24 / var(--_glass-alpha));
+  --color-surface: rgb(28 28 36 / calc(var(--_glass-alpha) * 0.75));
+  --color-card: rgb(36 36 46 / var(--_glass-card-alpha));
+  --color-card-hover: rgb(48 48 58 / var(--_glass-card-alpha));
+}
+
+html[data-color-scheme="light"][data-component-style*="glass"] {
+  --color-nav: rgb(255 255 255 / calc(var(--sv-surface-opacity, 40) / 100));
+  --color-surface: rgb(255 255 255 / calc((var(--sv-surface-opacity, 40) + 5) / 100));
+  --color-card: rgb(255 255 255 / calc(var(--sv-card-opacity, 40) / 100));
+  --color-card-hover: rgb(255 255 255 / calc(var(--sv-card-opacity, 40) / 100));
+}
+
+html[data-component-style*="glass"] .entity-card,
+html[data-component-style*="glass"] .scene-card,
+html[data-component-style*="glass"] .settings-style-card,
+html[data-component-style*="glass"] .theme-option-card,
+html[data-component-style*="glass"] .layout-option-card {
+  background-color: rgb(36 36 46 / var(--_glass-card-alpha));
+}
+
+html[data-color-scheme="light"][data-component-style*="glass"] .entity-card,
+html[data-color-scheme="light"][data-component-style*="glass"] .scene-card,
+html[data-color-scheme="light"][data-component-style*="glass"] .settings-style-card,
+html[data-color-scheme="light"][data-component-style*="glass"] .theme-option-card,
+html[data-color-scheme="light"][data-component-style*="glass"] .layout-option-card {
+  background-color: rgb(255 255 255 / var(--_glass-card-alpha));
+}
+
+html[data-component-style*="glass"] button.bg-card,
+html[data-component-style*="glass"] button.bg-surface,
+html[data-component-style*="glass"] button[class*="bg-card"],
+html[data-component-style*="glass"] button[class*="bg-surface"],
+html[data-component-style*="glass"] .theme-option-card,
+html[data-component-style*="glass"] .layout-option-card,
+html[data-component-style*="glass"] .settings-style-card > .flex > button {
+  background-color: rgb(28 28 36 / var(--_glass-button-alpha));
+}
+
+html[data-component-style*="floating"] .entity-card,
+html[data-component-style*="floating"] .scene-card,
+html[data-theme-bg-animation][data-component-style*="floating"] .entity-card,
+html[data-theme-bg-animation][data-component-style*="floating"] .scene-card {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  overflow: visible;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+html[data-component-style*="floating"] .card-media,
+html[data-component-style*="floating"] .entity-card > div:first-of-type,
+html[data-component-style*="floating"] .scene-card > .scene-card-preview {
+  border-radius: 16px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-surface) 84%, transparent);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--color-overlay, rgba(0, 0, 0, 0.45)) 68%, transparent);
+}
+
+html[data-component-style*="floating"] .entity-card:hover,
+html[data-component-style*="floating"] .scene-card:hover {
+  transform: translateY(-3px);
+}
+
+html[data-component-style*="floating"] .entity-card:hover .card-media,
+html[data-component-style*="floating"] .scene-card:hover .card-media,
+html[data-component-style*="floating"] .entity-card:hover > div:first-of-type,
+html[data-component-style*="floating"] .scene-card:hover > .scene-card-preview {
+  box-shadow: 0 24px 44px color-mix(in srgb, var(--color-overlay, rgba(0, 0, 0, 0.45)) 80%, transparent);
+}
+
+html[data-component-style*="floating"] .card-body,
+html[data-component-style*="floating"] .card-popovers,
+html[data-style-gradient-cards="0"][data-component-style*="gradient"][data-component-style*="floating"] .card-body,
+html[data-style-gradient-cards="0"][data-component-style*="gradient"][data-component-style*="floating"] .card-popovers {
+  background: transparent;
+  box-shadow: none;
+  border-color: transparent;
+}
+
+html[data-component-style*="floating"] .card-body {
+  padding-top: 0.8rem;
+  padding-right: 0.3rem;
+  padding-bottom: 0.35rem;
+  padding-left: 0.3rem;
+}
+
+html[data-component-style*="floating"] .card-popovers {
+  min-height: 0;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  padding-top: 0;
+  padding-right: 0.2rem;
+  padding-bottom: 0.2rem;
+  padding-left: 0.2rem;
+}
+
+html[data-component-style*="floating"] .entity-card hr,
+html[data-component-style*="floating"] .scene-card hr {
+  border-color: transparent;
+}
+
+html[data-component-style*="rounded"] button,
+html[data-component-style*="rounded"] input,
+html[data-component-style*="rounded"] select,
+html[data-component-style*="rounded"] textarea,
+html[data-component-style*="rounded"] .bg-surface button,
+html[data-component-style*="rounded"] .bg-surface input,
+html[data-component-style*="rounded"] .bg-surface select,
+html[data-component-style*="rounded"] .theme-option-card,
+html[data-component-style*="rounded"] .settings-style-card,
+html[data-component-style*="rounded"] .layout-option-card {
+  border-radius: 14px;
+}
+
+html[data-component-style*="rounded"] .entity-card,
+html[data-component-style*="rounded"] .scene-card,
+html[data-component-style*="rounded"] .styled-dropdown-panel,
+html[data-component-style*="rounded"] .filter-dialog,
+html[data-component-style*="rounded"] [role="dialog"] {
+  border-radius: 18px;
+}
+
+html[data-component-style*="rounded"] .card-media {
+  border-radius: 16px 16px 0 0;
+}
+
+html[data-component-style*="rounded"] .card-popovers {
+  border-bottom-right-radius: 16px;
+  border-bottom-left-radius: 16px;
+}
+
+html[data-component-style*="animated"] .entity-card,
+html[data-component-style*="animated"] .scene-card {
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+html[data-component-style*="animated"] .entity-card::before,
+html[data-component-style*="animated"] .scene-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 34%, color-mix(in srgb, var(--color-accent) 16%, transparent) 50%, transparent 66%);
+  transform: translateX(-130%);
+  opacity: 0;
+}
+
+html[data-component-style*="animated"] .entity-card:hover,
+html[data-component-style*="animated"] .scene-card:hover {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 18px 42px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+html[data-component-style*="animated"] .entity-card:hover::before,
+html[data-component-style*="animated"] .scene-card:hover::before {
+  animation: card-sheen-sweep 900ms ease-out;
+}
+
+html[data-component-style*="animated"] nav a:hover,
+html[data-component-style*="animated"] button:hover:not(.no-glass) {
+  transform: translateY(-1px);
+}
+
+html[data-component-style*="animated"] .bg-accent:hover {
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+
+@media (min-width: 1024px) {
+  html[data-layout*="detail-theater"] .media-detail-layout-shell {
+    background: #000;
+  }
+
+  html[data-layout*="detail-theater"] .media-detail-layout-sidebar {
+    order: 2;
+    border-right: 0;
+    border-left: 1px solid var(--color-border);
+  }
+
+  html[data-layout*="detail-theater"] .media-detail-layout-media {
+    order: 1;
+  }
+
+  html[data-layout*="detail-theater"] [data-testid="media-detail-layout-sidebar"][data-sidebar-collapsed="false"] {
+    width: min(34vw, 520px);
+    min-width: 360px;
+    max-width: 560px;
+  }
+
+  html[data-layout*="detail-tabs"] .media-detail-layout-tabs-rail {
+    display: none;
+  }
+
+  html[data-layout*="detail-tabs"] .media-detail-layout-tabs-row {
+    display: block;
+    margin: 0 1.5rem;
+  }
+
+  html[data-layout*="detail-tabs"] .media-detail-layout-sidebar-content {
+    display: block !important;
+  }
+
+  html[data-layout*="detail-tabs"] [data-testid="media-detail-layout-sidebar"][data-sidebar-collapsed="true"] {
+    width: min(34vw, 520px);
+    min-width: 360px;
+    max-width: 560px;
+  }
+
+  html[data-layout*="detail-tabs"] .media-detail-layout-tabs-row nav {
+    scrollbar-width: thin;
+  }
+
+  html[data-layout*="detail-tabs"] .media-detail-layout-tabs-row button {
+    border-radius: 0;
+    background: transparent;
+  }
+
+  html[data-layout*="detail-tabs"] .media-detail-layout-tabs-row button[aria-selected="true"] {
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  }
 }

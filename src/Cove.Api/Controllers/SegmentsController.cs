@@ -3,6 +3,7 @@ using System.Linq.Expressions;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Interfaces;
 using Cove.Data;
 using Cove.Data.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -14,7 +15,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.SegmentsRead)]
-public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IServiceScopeFactory scopeFactory) : ControllerBase
+public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IServiceScopeFactory scopeFactory, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PaginatedResponse<SegmentRecordDto>>> List(
@@ -42,6 +43,27 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         [FromQuery] string? sort,
         [FromQuery] string? direction,
         [FromQuery] string? excludeSceneIds = null,
+        [FromQuery] string? title = null,
+        [FromQuery] string? titleModifier = null,
+        [FromQuery] string? hostType = null,
+        [FromQuery] string? sourceRunId = null,
+        [FromQuery] string? sourceRunIdModifier = null,
+        [FromQuery] string? colorHint = null,
+        [FromQuery] string? colorHintModifier = null,
+        [FromQuery] bool? hasImage = null,
+        [FromQuery] bool? hasPayload = null,
+        [FromQuery] double? startSec = null,
+        [FromQuery] double? startSec2 = null,
+        [FromQuery] string? startSecModifier = null,
+        [FromQuery] double? endSec = null,
+        [FromQuery] double? endSec2 = null,
+        [FromQuery] string? endSecModifier = null,
+        [FromQuery] string? createdAt = null,
+        [FromQuery] string? createdAt2 = null,
+        [FromQuery] string? createdAtModifier = null,
+        [FromQuery] string? updatedAt = null,
+        [FromQuery] string? updatedAt2 = null,
+        [FromQuery] string? updatedAtModifier = null,
         [FromQuery] int page = 1,
         [FromQuery] int perPage = 48,
         CancellationToken cancellationToken = default)
@@ -155,6 +177,35 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         if (durationSec.HasValue)
             query = ApplyDurationCriterion(query, durationSec.Value, durationSec2, durationModifier);
 
+        query = ApplyStringCriterion(query, title, titleModifier, item => item.Segment.Title);
+        query = ApplyStringCriterion(query, sourceRunId, sourceRunIdModifier, item => item.Segment.SourceRunId);
+        query = ApplyStringCriterion(query, colorHint, colorHintModifier, item => item.Segment.ColorHint);
+
+        if (!string.IsNullOrWhiteSpace(hostType) && Enum.TryParse<SegmentHostType>(hostType, true, out var parsedHostType))
+            query = query.Where(item => item.Segment.HostType == parsedHostType);
+
+        if (hasImage.HasValue)
+            query = hasImage.Value
+                ? query.Where(item => item.Segment.ImageBlobId != null && item.Segment.ImageBlobId != string.Empty)
+                : query.Where(item => item.Segment.ImageBlobId == null || item.Segment.ImageBlobId == string.Empty);
+
+        if (hasPayload.HasValue)
+            query = hasPayload.Value
+                ? query.Where(item => item.Segment.Payload != null)
+                : query.Where(item => item.Segment.Payload == null);
+
+        if (startSec.HasValue)
+            query = ApplyDoubleCriterion(query, startSec.Value, startSec2, startSecModifier, item => item.Segment.StartSec);
+
+        if (endSec.HasValue)
+            query = ApplyDoubleCriterion(query, endSec.Value, endSec2, endSecModifier, item => item.Segment.EndSec ?? item.Segment.StartSec);
+
+        if (TryParseDateTime(createdAt, out var createdAtValue))
+            query = ApplyDateTimeCriterion(query, createdAtValue, createdAt2, createdAtModifier, item => item.Segment.CreatedAt);
+
+        if (TryParseDateTime(updatedAt, out var updatedAtValue))
+            query = ApplyDateTimeCriterion(query, updatedAtValue, updatedAt2, updatedAtModifier, item => item.Segment.UpdatedAt);
+
         if (!string.IsNullOrWhiteSpace(q))
         {
             var term = q.Trim();
@@ -179,7 +230,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             .Take(perPage)
             .ToListAsync(cancellationToken);
 
-        return Ok(new PaginatedResponse<SegmentRecordDto>(items.Select(MapToDto).ToList(), totalCount, page, perPage));
+        return Ok(new PaginatedResponse<SegmentRecordDto>(items.Select(item => MapToDto(item)).ToList(), totalCount, page, perPage));
     }
 
     [HttpGet("{id:int}")]
@@ -211,7 +262,14 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             })
             .FirstOrDefaultAsync(cancellationToken);
 
-        return item is null ? NotFound() : Ok(MapToDto(item));
+        if (item is null)
+            return NotFound();
+
+        var fieldProvenance = fieldProvenanceService == null
+            ? null
+            : await fieldProvenanceService.GetForHostAsync(AffinityHostType.Segment, item.Segment.Id, cancellationToken);
+
+        return Ok(MapToDto(item, fieldProvenance));
     }
 
     [HttpPost("bulk/remove-tag")]
@@ -225,7 +283,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         if (ids.Length == 0)
             return BadRequest("At least one segment id is required.");
 
-        var segments = await db.Segments
+        var segments = await db.VisibleSegments()
             .Where(segment => ids.Contains(segment.Id) && segment.TagId == request.TagId)
             .ToListAsync(cancellationToken);
 
@@ -253,7 +311,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
     [HttpGet("source-keys/distinct")]
     public async Task<ActionResult<IReadOnlyList<SegmentDistinctValueDto>>> DistinctSourceKeys(CancellationToken cancellationToken)
     {
-        var values = await db.Segments.AsNoTracking()
+        var values = await db.VisibleSegments().AsNoTracking()
             .Where(segment => segment.HostType == SegmentHostType.Scene && !string.IsNullOrWhiteSpace(segment.SourceKey))
             .GroupBy(segment => segment.SourceKey)
             .Select(group => new
@@ -276,7 +334,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
     [HttpGet("kinds/distinct")]
     public async Task<ActionResult<IReadOnlyList<SegmentDistinctValueDto>>> DistinctKinds(CancellationToken cancellationToken)
     {
-        var values = await db.Segments.AsNoTracking()
+        var values = await db.VisibleSegments().AsNoTracking()
             .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Kind != null && segment.Kind != string.Empty)
             .GroupBy(segment => segment.Kind!)
             .Select(group => new
@@ -296,7 +354,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         return Ok(items);
     }
 
-    private static SegmentRecordDto MapToDto(SegmentLibraryRow item) => new(
+    private static SegmentRecordDto MapToDto(SegmentLibraryRow item, IReadOnlyList<FieldProvenanceDto>? fieldProvenance = null) => new(
         item.Segment.Id,
         item.Segment.HostType,
         item.Segment.HostId,
@@ -317,7 +375,8 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         item.Segment.Title,
         item.Segment.ColorHint,
         item.Segment.CreatedAt.ToString("o"),
-        item.Segment.UpdatedAt.ToString("o"));
+        item.Segment.UpdatedAt.ToString("o"),
+        fieldProvenance?.ToList());
 
     private static string NormalizeSort(string? sort)
     {
@@ -351,6 +410,121 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             "EQUALS" => query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) == value),
             _ => query.Where(item => ((item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec) > value),
         };
+    }
+
+    private static IQueryable<SegmentLibraryRow> ApplyDoubleCriterion(
+        IQueryable<SegmentLibraryRow> query,
+        double value,
+        double? value2,
+        string? modifier,
+        Expression<Func<SegmentLibraryRow, double>> selector)
+    {
+        var normalized = NormalizeCriterionModifier(modifier);
+        var upper = value2 ?? value;
+        return normalized switch
+        {
+            "NOT_EQUALS" => WhereCompare(query, selector, value, ExpressionType.NotEqual),
+            "LESS_THAN" => WhereCompare(query, selector, value, ExpressionType.LessThan),
+            "BETWEEN" => WhereBetween(query, selector, Math.Min(value, upper), Math.Max(value, upper)),
+            "NOT_BETWEEN" => WhereNotBetween(query, selector, Math.Min(value, upper), Math.Max(value, upper)),
+            "EQUALS" => WhereCompare(query, selector, value, ExpressionType.Equal),
+            _ => WhereCompare(query, selector, value, ExpressionType.GreaterThan),
+        };
+    }
+
+    private static IQueryable<SegmentLibraryRow> ApplyDateTimeCriterion(
+        IQueryable<SegmentLibraryRow> query,
+        DateTime value,
+        string? value2,
+        string? modifier,
+        Expression<Func<SegmentLibraryRow, DateTime>> selector)
+    {
+        _ = TryParseDateTime(value2, out var parsedValue2);
+        var upper = parsedValue2 == default ? value : parsedValue2;
+        return NormalizeCriterionModifier(modifier) switch
+        {
+            "NOT_EQUALS" => WhereCompare(query, selector, value, ExpressionType.NotEqual),
+            "LESS_THAN" => WhereCompare(query, selector, value, ExpressionType.LessThan),
+            "BETWEEN" => WhereBetween(query, selector, value < upper ? value : upper, value < upper ? upper : value),
+            "NOT_BETWEEN" => WhereNotBetween(query, selector, value < upper ? value : upper, value < upper ? upper : value),
+            "EQUALS" => WhereCompare(query, selector, value, ExpressionType.Equal),
+            _ => WhereCompare(query, selector, value, ExpressionType.GreaterThan),
+        };
+    }
+
+    private static IQueryable<SegmentLibraryRow> ApplyStringCriterion(
+        IQueryable<SegmentLibraryRow> query,
+        string? value,
+        string? modifier,
+        Expression<Func<SegmentLibraryRow, string?>> selector)
+    {
+        var normalized = NormalizeCriterionModifier(modifier);
+        if (normalized is "IS_NULL" or "NOT_NULL")
+        {
+            var param = selector.Parameters[0];
+            var nullCheck = normalized == "IS_NULL"
+                ? Expression.Equal(selector.Body, Expression.Constant(null, typeof(string)))
+                : Expression.NotEqual(selector.Body, Expression.Constant(null, typeof(string)));
+            return query.Where(Expression.Lambda<Func<SegmentLibraryRow, bool>>(nullCheck, param));
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+            return query;
+
+        var normalizedValue = value.Trim().ToLowerInvariant();
+        var parameter = selector.Parameters[0];
+        var body = Expression.Coalesce(selector.Body, Expression.Constant(string.Empty));
+        var lowered = Expression.Call(body, typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!);
+        var constant = Expression.Constant(normalizedValue);
+        var contains = Expression.Call(lowered, typeof(string).GetMethod(nameof(string.Contains), [typeof(string)])!, constant);
+        var equals = Expression.Equal(lowered, constant);
+
+        Expression predicate = normalized switch
+        {
+            "EQUALS" => equals,
+            "NOT_EQUALS" => Expression.Not(equals),
+            "EXCLUDES" => Expression.Not(contains),
+            _ => contains,
+        };
+
+        return query.Where(Expression.Lambda<Func<SegmentLibraryRow, bool>>(predicate, parameter));
+    }
+
+    private static IQueryable<SegmentLibraryRow> WhereCompare<T>(IQueryable<SegmentLibraryRow> query, Expression<Func<SegmentLibraryRow, T>> selector, T value, ExpressionType comparison)
+    {
+        var predicate = Expression.MakeBinary(comparison, selector.Body, Expression.Constant(value));
+        return query.Where(Expression.Lambda<Func<SegmentLibraryRow, bool>>(predicate, selector.Parameters[0]));
+    }
+
+    private static IQueryable<SegmentLibraryRow> WhereBetween<T>(IQueryable<SegmentLibraryRow> query, Expression<Func<SegmentLibraryRow, T>> selector, T lower, T upper)
+    {
+        var body = selector.Body;
+        var predicate = Expression.AndAlso(
+            Expression.GreaterThanOrEqual(body, Expression.Constant(lower)),
+            Expression.LessThanOrEqual(body, Expression.Constant(upper)));
+        return query.Where(Expression.Lambda<Func<SegmentLibraryRow, bool>>(predicate, selector.Parameters[0]));
+    }
+
+    private static IQueryable<SegmentLibraryRow> WhereNotBetween<T>(IQueryable<SegmentLibraryRow> query, Expression<Func<SegmentLibraryRow, T>> selector, T lower, T upper)
+    {
+        var body = selector.Body;
+        var predicate = Expression.OrElse(
+            Expression.LessThan(body, Expression.Constant(lower)),
+            Expression.GreaterThan(body, Expression.Constant(upper)));
+        return query.Where(Expression.Lambda<Func<SegmentLibraryRow, bool>>(predicate, selector.Parameters[0]));
+    }
+
+    private static bool TryParseDateTime(string? value, out DateTime parsed)
+    {
+        if (DateTime.TryParse(value, out parsed))
+        {
+            if (parsed.Kind == DateTimeKind.Unspecified)
+                parsed = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+            return true;
+        }
+
+        parsed = default;
+        return false;
     }
 
     private static string NormalizeCriterionModifier(string? modifier)
@@ -528,13 +702,17 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             }
         }
 
+        IReadOnlyDictionary<int, SegmentSearchRow> segmentRows = new Dictionary<int, SegmentSearchRow>();
         if (allItems.Count > 0 && NeedsSegmentRows(request))
         {
-            var segmentRows = await LoadSpanSegmentRowsAsync(allItems.SelectMany(item => item.Span.SegmentIds), ct);
+            segmentRows = await LoadSpanSegmentRowsAsync(allItems.SelectMany(item => item.Span.SegmentIds), ct);
             allItems = allItems
                 .Where(item => MatchesSpanSearchRequest(item, request, segmentRows))
                 .ToList();
         }
+
+        if (IsSpanLevelSort(sort))
+            allItems = ApplySpanOrdering(allItems, sort, descending, segmentRows).ToList();
 
         var totalCount = allItems.Count;
         var offset = (page - 1) * perPage;
@@ -545,13 +723,106 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
 
     private static bool NeedsSegmentRows(SegmentSpanSearchRequestDto request)
         => !string.IsNullOrWhiteSpace(request.Q)
+            || !string.IsNullOrWhiteSpace(request.Title)
             || !string.IsNullOrWhiteSpace(request.Kind)
             || !string.IsNullOrWhiteSpace(request.SourceKey)
+            || !string.IsNullOrWhiteSpace(request.SourceCategory)
+            || !string.IsNullOrWhiteSpace(request.SourceRunId)
+            || !string.IsNullOrWhiteSpace(request.ColorHint)
+            || !string.IsNullOrWhiteSpace(request.HostType)
+            || request.HasImage.HasValue
+            || request.HasPayload.HasValue
+            || request.StartSec.HasValue
+            || request.EndSec.HasValue
+            || !string.IsNullOrWhiteSpace(request.CreatedAt)
+            || !string.IsNullOrWhiteSpace(request.UpdatedAt)
             || request.TagIds is { Length: > 0 }
             || request.RefIds is { Length: > 0 }
             || request.PerformerIds is { Length: > 0 }
             || request.Confidence.HasValue
-            || request.DurationSec.HasValue;
+            || request.DurationSec.HasValue
+            || SortNeedsSegmentRows(request.Sort);
+
+    private static bool SortNeedsSegmentRows(string? sort)
+        => (sort ?? string.Empty).Trim().ToLowerInvariant() is "segment_confidence" or "confidence" or "segment_count" or "segment_created_at" or "segment_updated_at" or "source_run_id" or "segment_source_run_id" or "performer" or "segment_performer" or "ref" or "segment_ref" or "host_type" or "host_id";
+
+    private static bool IsSpanLevelSort(string sort)
+        => sort is "start_sec" or "span_start" or "end_sec" or "span_end" or "duration" or "span_duration" or "kind" or "segment_kind" or "source_key" or "segment_source_key" or "tag_name" or "segment_tag_name" or "segment_count" or "segment_confidence" or "confidence" or "segment_created_at" or "segment_updated_at" or "source_run_id" or "segment_source_run_id" or "performer" or "segment_performer" or "ref" or "segment_ref" or "host_title" or "host_type" or "host_id";
+
+    private static IOrderedEnumerable<SegmentSpanSearchResultItemDto> ApplySpanOrdering(
+        IEnumerable<SegmentSpanSearchResultItemDto> items,
+        string sort,
+        bool descending,
+        IReadOnlyDictionary<int, SegmentSearchRow> segmentRows)
+    {
+        return sort switch
+        {
+            "start_sec" or "span_start" => OrderSpanBy(items, item => item.Span.StartSec, descending),
+            "end_sec" or "span_end" => OrderSpanBy(items, item => item.Span.EndSec, descending),
+            "duration" or "span_duration" => OrderSpanBy(items, item => item.Span.EndSec - item.Span.StartSec, descending),
+            "kind" or "segment_kind" => OrderSpanBy(items, item => item.Span.Kind ?? string.Empty, descending),
+            "source_key" or "segment_source_key" => OrderSpanBy(items, item => item.Span.SourceKey ?? string.Empty, descending),
+            "tag_name" or "segment_tag_name" => OrderSpanBy(items, item => item.Span.TagName ?? string.Empty, descending),
+            "segment_count" => OrderSpanBy(items, item => item.Span.SegmentIds.Count, descending),
+            "segment_confidence" or "confidence" => OrderSpanBy(items, item => MaxSpanConfidence(item, segmentRows), descending),
+            "segment_created_at" => OrderSpanBy(items, item => EarliestSpanDateKey(item, segmentRows, row => row.CreatedAt), descending),
+            "segment_updated_at" => OrderSpanBy(items, item => LatestSpanDateKey(item, segmentRows, row => row.UpdatedAt), descending),
+            "source_run_id" or "segment_source_run_id" => OrderSpanBy(items, item => SpanTextKey(item, segmentRows, row => row.SourceRunId), descending),
+            "performer" or "segment_performer" => OrderSpanBy(items, item => SpanTextKey(item, segmentRows, row => row.PerformerName), descending),
+            "ref" or "segment_ref" => OrderSpanBy(items, item => SpanTextKey(item, segmentRows, row => row.RefLabel ?? row.PerformerName), descending),
+            "host_title" => OrderSpanBy(items, item => item.SceneTitle ?? string.Empty, descending),
+            "host_type" => OrderSpanBy(items, item => item.Span.HostType.ToString(), descending),
+            "host_id" => OrderSpanBy(items, item => item.Span.HostId, descending),
+            _ => OrderSpanBy(items, item => item.SceneUpdatedAt ?? string.Empty, descending),
+        };
+    }
+
+    private static IOrderedEnumerable<SegmentSpanSearchResultItemDto> OrderSpanBy<TKey>(
+        IEnumerable<SegmentSpanSearchResultItemDto> items,
+        Func<SegmentSpanSearchResultItemDto, TKey> keySelector,
+        bool descending)
+        => descending
+            ? items.OrderByDescending(keySelector).ThenByDescending(item => item.SceneId).ThenByDescending(item => item.Span.StartSec)
+            : items.OrderBy(keySelector).ThenBy(item => item.SceneId).ThenBy(item => item.Span.StartSec);
+
+    private static float MaxSpanConfidence(SegmentSpanSearchResultItemDto item, IReadOnlyDictionary<int, SegmentSearchRow> segmentRows)
+        => item.Span.SegmentIds
+            .Select(id => segmentRows.TryGetValue(id, out var row) ? row.Confidence : null)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .DefaultIfEmpty(-1f)
+            .Max();
+
+    private static DateTime EarliestSpanDateKey(SegmentSpanSearchResultItemDto item, IReadOnlyDictionary<int, SegmentSearchRow> segmentRows, Func<SegmentSearchRow, DateTime> selector)
+        => SpanDateKey(item, segmentRows, selector, values => values.Min());
+
+    private static DateTime LatestSpanDateKey(SegmentSpanSearchResultItemDto item, IReadOnlyDictionary<int, SegmentSearchRow> segmentRows, Func<SegmentSearchRow, DateTime> selector)
+        => SpanDateKey(item, segmentRows, selector, values => values.Max());
+
+    private static DateTime SpanDateKey(
+        SegmentSpanSearchResultItemDto item,
+        IReadOnlyDictionary<int, SegmentSearchRow> segmentRows,
+        Func<SegmentSearchRow, DateTime> selector,
+        Func<IReadOnlyList<DateTime>, DateTime> aggregate)
+    {
+        var values = item.Span.SegmentIds
+            .Select(id => segmentRows.TryGetValue(id, out var row) ? selector(row) : (DateTime?)null)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .ToList();
+
+        if (values.Count == 0)
+            return DateTime.MinValue;
+
+        return aggregate(values);
+    }
+
+    private static string SpanTextKey(SegmentSpanSearchResultItemDto item, IReadOnlyDictionary<int, SegmentSearchRow> segmentRows, Func<SegmentSearchRow, string?> selector)
+        => item.Span.SegmentIds
+            .Select(id => segmentRows.TryGetValue(id, out var row) ? selector(row) : null)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault() ?? string.Empty;
 
     private async Task<Dictionary<int, SegmentSearchRow>> LoadSpanSegmentRowsAsync(IEnumerable<int> segmentIds, CancellationToken ct)
     {
@@ -574,7 +845,12 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             {
                 Id = segment.Id,
                 Title = segment.Title,
+                HostType = segment.HostType,
+                HostId = segment.HostId,
+                StartSec = segment.StartSec,
+                EndSec = segment.EndSec,
                 SourceKey = segment.SourceKey,
+                SourceRunId = segment.SourceRunId,
                 Kind = segment.Kind,
                 TagId = segment.TagId,
                 TagName = tag != null ? tag.Name : null,
@@ -584,6 +860,11 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
                 DirectPerformerId = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Id : null,
                 PerformerName = segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : facePerformer != null ? facePerformer!.Name : null,
                 Confidence = segment.Confidence,
+                ColorHint = segment.ColorHint,
+                HasImage = segment.ImageBlobId != null && segment.ImageBlobId != string.Empty,
+                HasPayload = segment.Payload != null,
+                CreatedAt = segment.CreatedAt,
+                UpdatedAt = segment.UpdatedAt,
             })
             .ToListAsync(ct);
 
@@ -597,6 +878,39 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             .Where(row => row is not null)
             .Select(row => row!)
             .ToList();
+
+        if (!MatchesStringCriterion(rows.Select(row => row.Title), request.Title, request.TitleModifier))
+            return false;
+
+        if (!MatchesHostTypeCriterion(item, rows, request.HostType))
+            return false;
+
+        if (!MatchesSourceCategory(item.Span.SourceKey, rows.Select(row => row.SourceKey), request.SourceCategory))
+            return false;
+
+        if (!MatchesStringCriterion(rows.Select(row => row.SourceRunId), request.SourceRunId, request.SourceRunIdModifier))
+            return false;
+
+        if (!MatchesStringCriterion(rows.Select(row => row.ColorHint), request.ColorHint, request.ColorHintModifier))
+            return false;
+
+        if (!MatchesBool(rows.Select(row => row.HasImage), request.HasImage))
+            return false;
+
+        if (!MatchesBool(rows.Select(row => row.HasPayload), request.HasPayload))
+            return false;
+
+        if (request.StartSec.HasValue && !MatchesNumberCriterion(item.Span.StartSec, request.StartSec.Value, request.StartSec2, request.StartSecModifier))
+            return false;
+
+        if (request.EndSec.HasValue && !MatchesNumberCriterion(item.Span.EndSec, request.EndSec.Value, request.EndSec2, request.EndSecModifier))
+            return false;
+
+        if (!MatchesDateCriterion(rows.Select(row => row.CreatedAt), request.CreatedAt, request.CreatedAt2, request.CreatedAtModifier))
+            return false;
+
+        if (!MatchesDateCriterion(rows.Select(row => row.UpdatedAt), request.UpdatedAt, request.UpdatedAt2, request.UpdatedAtModifier))
+            return false;
 
         if (!string.IsNullOrWhiteSpace(request.Kind))
         {
@@ -659,6 +973,73 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         return true;
     }
 
+    private static bool MatchesStringCriterion(IEnumerable<string?> actualValues, string? expected, string? modifier)
+    {
+        var normalized = NormalizeCriterionModifier(modifier);
+        var values = actualValues.ToList();
+        if (normalized == "IS_NULL")
+            return values.Count == 0 || values.All(string.IsNullOrWhiteSpace);
+        if (normalized == "NOT_NULL")
+            return values.Any(value => !string.IsNullOrWhiteSpace(value));
+        if (string.IsNullOrWhiteSpace(expected))
+            return true;
+
+        var text = expected.Trim();
+        return normalized switch
+        {
+            "EQUALS" => values.Any(value => EqualsIgnoreCase(value, text)),
+            "NOT_EQUALS" => !values.Any(value => EqualsIgnoreCase(value, text)),
+            "EXCLUDES" => !values.Any(value => ContainsIgnoreCase(value, text)),
+            _ => values.Any(value => ContainsIgnoreCase(value, text)),
+        };
+    }
+
+    private static bool MatchesHostTypeCriterion(SegmentSpanSearchResultItemDto item, IEnumerable<SegmentSearchRow> rows, string? hostType)
+    {
+        if (string.IsNullOrWhiteSpace(hostType))
+            return true;
+
+        if (!Enum.TryParse<SegmentHostType>(hostType.Trim(), true, out var parsed))
+            return true;
+
+        return item.Span.HostType == parsed || rows.Any(row => row.HostType == parsed);
+    }
+
+    private static bool MatchesSourceCategory(string? spanSourceKey, IEnumerable<string?> rowSourceKeys, string? sourceCategory)
+    {
+        if (string.IsNullOrWhiteSpace(sourceCategory))
+            return true;
+
+        var keys = rowSourceKeys.Append(spanSourceKey).Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
+        return sourceCategory.Trim().ToLowerInvariant() switch
+        {
+            "extensions" => keys.Any(value => value!.StartsWith("ext:", StringComparison.OrdinalIgnoreCase)),
+            "user" => keys.Any(value => string.Equals(value, "user", StringComparison.OrdinalIgnoreCase)),
+            _ => true,
+        };
+    }
+
+    private static bool MatchesBool(IEnumerable<bool> actualValues, bool? expected)
+        => !expected.HasValue || (expected.Value ? actualValues.Any(value => value) : actualValues.All(value => !value));
+
+    private static bool MatchesDateCriterion(IEnumerable<DateTime> actualValues, string? expected, string? expected2, string? modifier)
+    {
+        if (!TryParseDateTime(expected, out var value))
+            return true;
+
+        _ = TryParseDateTime(expected2, out var parsedValue2);
+        var upper = parsedValue2 == default ? value : parsedValue2;
+        return actualValues.Any(actual => NormalizeCriterionModifier(modifier) switch
+        {
+            "NOT_EQUALS" => actual != value,
+            "LESS_THAN" => actual < value,
+            "BETWEEN" => actual >= (value < upper ? value : upper) && actual <= (value < upper ? upper : value),
+            "NOT_BETWEEN" => actual < (value < upper ? value : upper) || actual > (value < upper ? upper : value),
+            "EQUALS" => actual == value,
+            _ => actual > value,
+        });
+    }
+
     private static bool MatchesNumberCriterion(double actual, double value, double? value2, string? modifier)
     {
         return NormalizeCriterionModifier(modifier) switch
@@ -682,7 +1063,12 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
     {
         public int Id { get; init; }
         public string? Title { get; init; }
+        public SegmentHostType HostType { get; init; }
+        public int HostId { get; init; }
+        public double StartSec { get; init; }
+        public double? EndSec { get; init; }
         public string? SourceKey { get; init; }
+        public string? SourceRunId { get; init; }
         public string? Kind { get; init; }
         public int? TagId { get; init; }
         public string? TagName { get; init; }
@@ -692,5 +1078,10 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         public int? DirectPerformerId { get; init; }
         public string? PerformerName { get; init; }
         public float? Confidence { get; init; }
+        public string? ColorHint { get; init; }
+        public bool HasImage { get; init; }
+        public bool HasPayload { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public DateTime UpdatedAt { get; init; }
     }
 }

@@ -8,6 +8,7 @@ using Cove.Data.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Cove.Tests;
 
@@ -95,6 +96,248 @@ public sealed class Phase11PlaybackTests
         Assert.All(intervals, interval => Assert.Equal(InteractionHostType.Group, interval.HostType));
         Assert.Equal((0.0, 12.0), (intervals[0].StartSec, intervals[0].EndSec));
         Assert.Equal((12.0, 27.0), (intervals[1].StartSec, intervals[1].EndSec));
+    }
+
+    [Fact]
+    public async Task PlaybackController_PersistsPlaybackContextOnSessionAndIntervals()
+    {
+        await using var scope = await CreateContextAsync();
+        var scene = new Scene { Title = "Compilation Item" };
+        var group = new Group { Name = "Compilation Context" };
+        scope.Context.AddRange(scene, group);
+        await scope.Context.SaveChangesAsync();
+
+        scope.PrincipalAccessor.Set(CreatePrincipal(12));
+        var controller = CreateController(scope.Context, scope.PrincipalAccessor);
+        var sessionId = Guid.NewGuid();
+        var context = JsonSerializer.SerializeToElement(new { itemIndex = 3, source = "test" });
+
+        Assert.IsType<NoContentResult>(await controller.RecordIntervals(new PlaybackIntervalsRequestDto(
+            "group",
+            group.Id,
+            sessionId,
+            90.0,
+            15.0,
+            "paused",
+            [new PlaybackIntervalInputDto(5.0, 15.0)],
+            Surface: "compilation",
+            ScopeKey: $"group:{group.Id}",
+            ParentHostType: "group",
+            ParentHostId: group.Id,
+            ItemHostType: "scene",
+            ItemHostId: scene.Id,
+            GroupItemId: 123,
+            SegmentId: null,
+            ClipStartSec: 5.0,
+            ClipEndSec: 15.0,
+            Autoplay: true,
+            Muted: true,
+            Fullscreen: false,
+            PlaybackRate: 1.25,
+            Route: $"/compilation/{group.Id}",
+            RecommendationSource: "home",
+            Context: context), CancellationToken.None));
+
+        var session = await scope.Context.PlaybackSessions.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal("compilation", session.Surface);
+        Assert.Equal($"group:{group.Id}", session.ScopeKey);
+        Assert.Equal(InteractionHostType.Group, session.ParentHostType);
+        Assert.Equal(group.Id, session.ParentHostId);
+        Assert.Equal(InteractionHostType.Scene, session.ItemHostType);
+        Assert.Equal(scene.Id, session.ItemHostId);
+        Assert.Equal(123, session.GroupItemId);
+        Assert.Equal(5.0, session.ClipStartSec);
+        Assert.Equal(15.0, session.ClipEndSec);
+        Assert.True(session.Autoplay);
+        Assert.True(session.Muted);
+        Assert.False(session.Fullscreen);
+        Assert.Equal(1.25, session.PlaybackRate);
+        Assert.Equal($"/compilation/{group.Id}", session.Route);
+        Assert.Equal("home", session.RecommendationSource);
+        Assert.Equal(3, session.Context!.RootElement.GetProperty("itemIndex").GetInt32());
+
+        var interval = await scope.Context.PlaybackIntervals.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal("compilation", interval.Surface);
+        Assert.Equal(InteractionHostType.Scene, interval.ItemHostType);
+        Assert.Equal(scene.Id, interval.ItemHostId);
+        Assert.Equal(123, interval.GroupItemId);
+        Assert.Equal(1.25, interval.PlaybackRate);
+        Assert.Equal("test", interval.Context!.RootElement.GetProperty("source").GetString());
+    }
+
+    [Fact]
+    public async Task SegmentPlayback_CreatesSegmentAffinityAndCompletion()
+    {
+        await using var scope = await CreateContextAsync();
+        var scene = new Scene { Title = "Segment Host" };
+        scope.Context.Scenes.Add(scene);
+        await scope.Context.SaveChangesAsync();
+        var segment = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            SourceKey = "test",
+            StartSec = 10,
+            EndSec = 20,
+            Title = "Tracked segment",
+        };
+        scope.Context.Segments.Add(segment);
+        await scope.Context.SaveChangesAsync();
+
+        scope.PrincipalAccessor.Set(CreatePrincipal(13, Permissions.SegmentsRead));
+        var controller = CreateController(scope.Context, scope.PrincipalAccessor);
+
+        Assert.IsType<NoContentResult>(await controller.RecordIntervals(new PlaybackIntervalsRequestDto(
+            "segment",
+            segment.Id,
+            Guid.NewGuid(),
+            120.0,
+            20.0,
+            "ended",
+            [new PlaybackIntervalInputDto(10.0, 20.0)],
+            Surface: "segmentDetail",
+            ScopeKey: $"segment:{segment.Id}",
+            ParentHostType: "scene",
+            ParentHostId: scene.Id,
+            ItemHostType: "scene",
+            ItemHostId: scene.Id,
+            SegmentId: segment.Id,
+            ClipStartSec: 10.0,
+            ClipEndSec: 20.0), CancellationToken.None));
+
+        var affinity = await scope.Context.UserEntityAffinities.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal(AffinityHostType.Segment, affinity.HostType);
+        Assert.Equal(segment.Id, affinity.HostId);
+        Assert.Equal(1, affinity.ViewCount);
+        Assert.Equal(1, affinity.CompleteCount);
+        Assert.Equal(10.0, affinity.TotalConsumedSec, precision: 5);
+        Assert.Equal(10.0, affinity.LastPositionSec);
+    }
+
+    [Fact]
+    public async Task SegmentFirstTouch_ConcurrentInteractionAndPlaybackShareOneAffinity()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"cove-phase11-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<CoveContext>()
+            .UseSqlite($"Data Source={databasePath};Pooling=False")
+            .Options;
+
+        try
+        {
+            int sceneId;
+            int segmentId;
+            var setupPrincipalAccessor = new CurrentPrincipalAccessor();
+            await using (var setupContext = new PlaybackTestContext(options, setupPrincipalAccessor))
+            {
+                await setupContext.Database.EnsureCreatedAsync();
+                setupContext.Users.Add(new User
+                {
+                    Id = 29,
+                    Username = "user-29",
+                    PasswordHash = "test",
+                });
+                var scene = new Scene { Title = "Concurrent Segment Host" };
+                setupContext.Scenes.Add(scene);
+                await setupContext.SaveChangesAsync();
+                sceneId = scene.Id;
+
+                var segment = new Segment
+                {
+                    HostType = SegmentHostType.Scene,
+                    HostId = sceneId,
+                    SourceKey = "test",
+                    StartSec = 10,
+                    EndSec = 20,
+                    Title = "Concurrent segment",
+                };
+                setupContext.Segments.Add(segment);
+                await setupContext.SaveChangesAsync();
+                segmentId = segment.Id;
+            }
+
+            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var interactionTask = Task.Run(async () =>
+            {
+                var principalAccessor = new CurrentPrincipalAccessor();
+                principalAccessor.Set(CreatePrincipal(29, Permissions.SegmentsRead));
+                await using var context = new PlaybackTestContext(options, principalAccessor);
+                var controller = CreateEngagementController(context, principalAccessor);
+                await gate.Task;
+                return await controller.RecordInteraction(new EngagementInteractionWriteDto("segment", segmentId, "seek"), CancellationToken.None);
+            });
+
+            var playbackTask = Task.Run(async () =>
+            {
+                var principalAccessor = new CurrentPrincipalAccessor();
+                principalAccessor.Set(CreatePrincipal(29, Permissions.SegmentsRead));
+                await using var context = new PlaybackTestContext(options, principalAccessor);
+                var controller = CreateController(context, principalAccessor);
+                await gate.Task;
+                return await controller.RecordIntervals(new PlaybackIntervalsRequestDto(
+                    "segment",
+                    segmentId,
+                    Guid.NewGuid(),
+                    120.0,
+                    12.0,
+                    "ended",
+                    [new PlaybackIntervalInputDto(10.0, 12.0)],
+                    Surface: "segmentDetail",
+                    ScopeKey: $"segment:{segmentId}",
+                    ParentHostType: "scene",
+                    ParentHostId: sceneId,
+                    ItemHostType: "scene",
+                    ItemHostId: sceneId,
+                    SegmentId: segmentId,
+                    ClipStartSec: 10.0,
+                    ClipEndSec: 20.0), CancellationToken.None);
+            });
+
+            gate.SetResult(true);
+
+            var results = await Task.WhenAll(interactionTask, playbackTask);
+            Assert.All(results, result => Assert.IsType<NoContentResult>(result));
+
+            await using var verifyContext = new PlaybackTestContext(options, new CurrentPrincipalAccessor());
+            var affinity = await verifyContext.UserEntityAffinities.IgnoreQueryFilters()
+                .SingleAsync(row => row.UserId == 29 && row.HostType == AffinityHostType.Segment && row.HostId == segmentId);
+            Assert.Equal(1, affinity.InteractionCount);
+            Assert.Equal(1, affinity.SeekCount);
+            Assert.Equal(1, affinity.PlayerControlCount);
+            Assert.Equal(2.0, affinity.TotalConsumedSec, precision: 5);
+            Assert.Equal(2.0, affinity.LastPositionSec);
+            Assert.Equal(1, await verifyContext.UserEntityAffinities.IgnoreQueryFilters()
+                .CountAsync(row => row.UserId == 29 && row.HostType == AffinityHostType.Segment && row.HostId == segmentId));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(databasePath))
+                File.Delete(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task RichPlayerInteractions_AreAcceptedAndAggregated()
+    {
+        await using var scope = await CreateContextAsync();
+        await AddUserAsync(scope, 14);
+        scope.Context.Images.Add(new Image { Title = "Lightbox image" });
+        await scope.Context.SaveChangesAsync();
+        var imageId = await scope.Context.Images.Select(image => image.Id).SingleAsync();
+
+        scope.PrincipalAccessor.Set(CreatePrincipal(14, Permissions.ImagesRead));
+        var controller = CreateEngagementController(scope.Context, scope.PrincipalAccessor);
+
+        Assert.IsType<NoContentResult>(await controller.RecordInteraction(new EngagementInteractionWriteDto("image", imageId, "fullscreen"), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.RecordInteraction(new EngagementInteractionWriteDto("image", imageId, "slideshowDelay"), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.RecordInteraction(new EngagementInteractionWriteDto("image", imageId, "zoom"), CancellationToken.None));
+
+        var affinity = await scope.Context.UserEntityAffinities.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal(3, affinity.InteractionCount);
+        Assert.Equal(2, affinity.PlayerControlCount);
+        Assert.Equal(1, affinity.ZoomCount);
+        Assert.Equal(3, await scope.Context.Interactions.IgnoreQueryFilters().CountAsync());
     }
 
     [Fact]

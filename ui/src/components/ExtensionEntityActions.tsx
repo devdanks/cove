@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Puzzle } from "lucide-react";
 import { extensions } from "../api/client";
 import type { ExtensionAction } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
+import { registerManualContext } from "./ManualContext";
 
 interface Props {
   entityType: string;
@@ -88,12 +89,27 @@ function shouldSuppressQueuedAlert(action: ExtensionAction, result: unknown): bo
   return false;
 }
 
+function getActionManualContexts(action: ExtensionAction) {
+  return [
+    `extension:${action.extensionId}`,
+    `extension-action:${action.extensionId}:${action.id}`,
+    `extension-action:${action.id}`,
+    action.handlerName ? `extension-handler:${action.handlerName}` : undefined,
+  ];
+}
+
 export function ExtensionEntityActions({ entityType, entityId, pageType, renderMode = "toolbar", onInvoked }: Props) {
   const normalizedEntityType = normalizeEntityType(entityType);
   const normalizedPageType = normalizeEntityType(pageType ?? entityType);
   const queryClient = useQueryClient();
   const { getActionsForContext, resolveActionHandler } = useExtensions();
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const unregisterManualContextRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => {
+    unregisterManualContextRef.current?.();
+    unregisterManualContextRef.current = null;
+  }, []);
 
   const actions = useMemo(() => {
     if (normalizedEntityType !== "scene" && normalizedEntityType !== "image") {
@@ -121,6 +137,8 @@ export function ExtensionEntityActions({ entityType, entityId, pageType, renderM
       return await extensions.invokeAction(action.apiEndpoint, payload);
     },
     onMutate: (action) => {
+      unregisterManualContextRef.current?.();
+      unregisterManualContextRef.current = registerManualContext(...getActionManualContexts(action));
       setPendingActionId(action.id);
     },
     onSuccess: (result, action) => {
@@ -135,6 +153,8 @@ export function ExtensionEntityActions({ entityType, entityId, pageType, renderM
       window.alert(error.message || "Failed to run the extension action.");
     },
     onSettled: () => {
+      unregisterManualContextRef.current?.();
+      unregisterManualContextRef.current = null;
       setPendingActionId(null);
     },
   });

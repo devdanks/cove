@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
+using Cove.Core.Enums;
 using Cove.Core.Interfaces;
 using Cove.Data;
 using Cove.Data.Repositories;
@@ -22,24 +24,48 @@ public class FacesController(
     IEnumerable<IFaceLifecycleParticipant> faceLifecycleParticipants,
     ILogger<FacesController> logger,
     IEnumerable<IFaceSuggester>? faceSuggesters = null,
-    ICurrentPrincipalAccessor? principalAccessor = null) : ControllerBase
+    ICurrentPrincipalAccessor? principalAccessor = null,
+    IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private const int TopSuggestionCandidateCount = 3;
 
     [HttpGet]
     public async Task<ActionResult<PaginatedResponse<FaceDto>>> List(
-        [FromQuery] string? q,
-        [FromQuery] int? performerId,
-        [FromQuery] string? performerIds,
-        [FromQuery] bool? linked,
-        [FromQuery] bool? ignored,
-        [FromQuery] bool? merged,
-        [FromQuery] float? minSuggestionConfidence,
-        [FromQuery] float? suggestionConfidence,
-        [FromQuery] float? suggestionConfidence2,
-        [FromQuery] string? suggestionConfidenceModifier,
-        [FromQuery] string? topSuggestionPerformerIds,
-        [FromQuery] string? sort,
+        [FromQuery] string? q = null,
+        [FromQuery] int? performerId = null,
+        [FromQuery] string? performerIds = null,
+        [FromQuery] bool? linked = null,
+        [FromQuery] bool? ignored = null,
+        [FromQuery] bool? merged = null,
+        [FromQuery] int? mergedIntoFaceId = null,
+        [FromQuery] string? label = null,
+        [FromQuery] string? labelModifier = null,
+        [FromQuery] string? primarySourceKey = null,
+        [FromQuery] string? primarySourceKeyModifier = null,
+        [FromQuery] bool? hasCover = null,
+        [FromQuery] int? detectionCount = null,
+        [FromQuery] int? detectionCount2 = null,
+        [FromQuery] string? detectionCountModifier = null,
+        [FromQuery] int? appearanceCount = null,
+        [FromQuery] int? appearanceCount2 = null,
+        [FromQuery] string? appearanceCountModifier = null,
+        [FromQuery] int? frameSampleCount = null,
+        [FromQuery] int? frameSampleCount2 = null,
+        [FromQuery] string? frameSampleCountModifier = null,
+        [FromQuery] int? sceneCount = null,
+        [FromQuery] int? sceneCount2 = null,
+        [FromQuery] string? sceneCountModifier = null,
+        [FromQuery] int? imageCount = null,
+        [FromQuery] int? imageCount2 = null,
+        [FromQuery] string? imageCountModifier = null,
+        [FromQuery] float? minSuggestionConfidence = null,
+        [FromQuery] float? suggestionConfidence = null,
+        [FromQuery] float? suggestionConfidence2 = null,
+        [FromQuery] string? suggestionConfidenceModifier = null,
+        [FromQuery] string? topSuggestionPerformerIds = null,
+        [FromQuery] string? sort = null,
+        [FromQuery] SortDirection direction = SortDirection.Asc,
+        [FromQuery] string? customFieldCriteria = null,
         [FromQuery] int page = 1,
         [FromQuery] int perPage = 50,
         CancellationToken cancellationToken = default)
@@ -78,9 +104,26 @@ public class FacesController(
                 ? query.Where(face => face.MergedIntoFaceId != null)
                 : query.Where(face => face.MergedIntoFaceId == null);
 
-        var sortedQuery = FullTextSearchHelpers.IsActive(db, q)
+        if (mergedIntoFaceId.HasValue)
+            query = query.Where(face => face.MergedIntoFaceId == mergedIntoFaceId.Value);
+
+        query = FilterHelpers.ApplyString(query, BuildStringCriterion(label, labelModifier), face => face.Label);
+        query = FilterHelpers.ApplyString(query, BuildStringCriterion(primarySourceKey, primarySourceKeyModifier), face => face.PrimarySourceKey);
+        query = FilterHelpers.ApplyInt(query, BuildIntCriterion(detectionCount, detectionCount2, detectionCountModifier), face => face.DetectionCount);
+        query = FilterHelpers.ApplyInt(query, BuildIntCriterion(appearanceCount, appearanceCount2, appearanceCountModifier), face => face.AppearanceCount);
+        query = FilterHelpers.ApplyInt(query, BuildIntCriterion(frameSampleCount, frameSampleCount2, frameSampleCountModifier), face => face.FrameSampleCount);
+        query = FilterHelpers.ApplyInt(query, BuildIntCriterion(sceneCount, sceneCount2, sceneCountModifier), face => face.SceneCount);
+        query = FilterHelpers.ApplyInt(query, BuildIntCriterion(imageCount, imageCount2, imageCountModifier), face => face.ImageCount);
+        query = query.ApplyCustomFieldCriteria(db, CustomFieldEntityTypes.Face, null, ParseCustomFieldCriteria(customFieldCriteria));
+
+        if (hasCover.HasValue)
+            query = hasCover.Value
+                ? query.Where(face => face.CoverBlobId != null && face.CoverBlobId != "")
+                : query.Where(face => face.CoverBlobId == null || face.CoverBlobId == "");
+
+        var sortedQuery = FullTextSearchHelpers.ShouldOrderByRelevance(db, q, sort)
             ? FullTextSearchHelpers.OrderByRelevance(db, query, q)
-            : ApplyFaceSort(query, sort);
+            : ApplyFaceSort(db, query, sort, direction == SortDirection.Desc);
 
         var parsedTopSuggestionPerformerIds = ParseIntList(topSuggestionPerformerIds);
         var hasTopSuggestionFilter = minSuggestionConfidence.HasValue || suggestionConfidence.HasValue || parsedTopSuggestionPerformerIds.Count > 0;
@@ -176,9 +219,102 @@ public class FacesController(
             return null;
 
         var normalized = value.Trim().ToUpperInvariant();
-        return normalized is "EQUALS" or "NOT_EQUALS" or "GREATER_THAN" or "LESS_THAN" or "BETWEEN" or "NOT_BETWEEN" or "IS_NULL" or "NOT_NULL"
+        return normalized is "EQUALS" or "NOT_EQUALS" or "GREATER_THAN" or "LESS_THAN" or "BETWEEN" or "NOT_BETWEEN" or "IS_NULL" or "NOT_NULL" or "INCLUDES" or "EXCLUDES" or "MATCHES_REGEX" or "NOT_MATCHES_REGEX"
             ? normalized
             : null;
+    }
+
+    private static CriterionModifier? ParseCriterionModifier(string? value)
+    {
+        var normalized = NormalizeCriterionModifier(value);
+        return normalized switch
+        {
+            "EQUALS" => CriterionModifier.Equals,
+            "NOT_EQUALS" => CriterionModifier.NotEquals,
+            "GREATER_THAN" => CriterionModifier.GreaterThan,
+            "LESS_THAN" => CriterionModifier.LessThan,
+            "BETWEEN" => CriterionModifier.Between,
+            "NOT_BETWEEN" => CriterionModifier.NotBetween,
+            "IS_NULL" => CriterionModifier.IsNull,
+            "NOT_NULL" => CriterionModifier.NotNull,
+            "INCLUDES" => CriterionModifier.Includes,
+            "EXCLUDES" => CriterionModifier.Excludes,
+            "MATCHES_REGEX" => CriterionModifier.MatchesRegex,
+            "NOT_MATCHES_REGEX" => CriterionModifier.NotMatchesRegex,
+            _ => null,
+        };
+    }
+
+    private static StringCriterion? BuildStringCriterion(string? value, string? modifier)
+    {
+        var parsedModifier = ParseCriterionModifier(modifier) ?? CriterionModifier.Includes;
+        if ((parsedModifier == CriterionModifier.IsNull || parsedModifier == CriterionModifier.NotNull) || !string.IsNullOrWhiteSpace(value))
+            return new StringCriterion { Value = value?.Trim() ?? string.Empty, Modifier = parsedModifier };
+
+        return null;
+    }
+
+    private static IntCriterion? BuildIntCriterion(int? value, int? value2, string? modifier)
+    {
+        var parsedModifier = ParseCriterionModifier(modifier) ?? CriterionModifier.Equals;
+        if (parsedModifier is CriterionModifier.IsNull or CriterionModifier.NotNull || value.HasValue)
+            return new IntCriterion { Value = value ?? 0, Value2 = value2, Modifier = parsedModifier };
+
+        return null;
+    }
+
+    private static List<CustomFieldCriterion> ParseCustomFieldCriteria(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+                return [];
+
+            var criteria = new List<CustomFieldCriterion>();
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var key = GetString(element, "key");
+                if (string.IsNullOrWhiteSpace(key))
+                    continue;
+
+                criteria.Add(new CustomFieldCriterion
+                {
+                    Key = key.Trim(),
+                    Type = GetString(element, "type") ?? CustomFieldTypes.Text,
+                    Value = GetString(element, "value") ?? string.Empty,
+                    Value2 = GetString(element, "value2"),
+                    Modifier = ParseCriterionModifier(GetString(element, "modifier")) ?? CriterionModifier.Equals,
+                });
+            }
+
+            return criteria;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static string? GetString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+            return null;
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.String => property.GetString(),
+            JsonValueKind.Number => property.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
     }
 
     private static bool MatchesConfidenceCriterion(float confidence, string? modifier, float? value, float? value2)
@@ -211,10 +347,12 @@ public class FacesController(
 
         var computedCounts = await LoadComputedCountsAsync(new[] { id }, cancellationToken);
         var topSuggestion = await BuildTopSuggestionAsync(face, cancellationToken);
+        var fieldProvenance = await LoadFaceFieldProvenanceAsync(face.Id, cancellationToken);
         return Ok(MapToDto(
             face,
             computedCounts.TryGetValue(face.Id, out var counts) ? counts : null,
-            topSuggestion));
+            topSuggestion,
+            fieldProvenance));
     }
 
     [HttpGet("{id:int}/appearances")]
@@ -545,6 +683,7 @@ public class FacesController(
 
         await facePerformerPropagationService.ApplyLinkChangeAsync(id, face.PerformerId, performer.Id, cancellationToken);
         face.PerformerId = performer.Id;
+        await RecordManualFaceFieldProvenanceAsync(face.Id, new Dictionary<string, object?> { ["performer_id"] = performer.Id }, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         var updated = await db.Faces
@@ -564,6 +703,11 @@ public class FacesController(
         if (face is null)
             return NotFound();
 
+        var originalLabel = face.Label;
+        var originalPerformerId = face.PerformerId;
+        var originalIgnored = face.Ignored;
+        var originalPrimarySourceKey = face.PrimarySourceKey;
+
         if (dto.PerformerId.HasValue)
         {
             var performerExists = await db.Performers.AnyAsync(performer => performer.Id == dto.PerformerId.Value, cancellationToken);
@@ -577,6 +721,17 @@ public class FacesController(
         face.Ignored = dto.Ignored;
         face.PrimarySourceKey = Clean(dto.PrimarySourceKey);
 
+        var manualFields = new Dictionary<string, object?>();
+        if (!string.Equals(originalLabel, face.Label, StringComparison.Ordinal))
+            manualFields["label"] = face.Label;
+        if (originalPerformerId != face.PerformerId)
+            manualFields["performer_id"] = face.PerformerId;
+        if (originalIgnored != face.Ignored)
+            manualFields["ignored"] = face.Ignored;
+        if (!string.Equals(originalPrimarySourceKey, face.PrimarySourceKey, StringComparison.Ordinal))
+            manualFields["primary_source_key"] = face.PrimarySourceKey;
+        await RecordManualFaceFieldProvenanceAsync(face.Id, manualFields, cancellationToken);
+
         await db.SaveChangesAsync(cancellationToken);
 
         var updated = await db.Faces
@@ -584,7 +739,7 @@ public class FacesController(
             .Include(item => item.Performer)
             .FirstAsync(item => item.Id == id, cancellationToken);
 
-        return Ok(MapToDto(updated));
+        return Ok(MapToDto(updated, fieldProvenance: await LoadFaceFieldProvenanceAsync(updated.Id, cancellationToken)));
     }
 
     [HttpDelete("{id:int}")]
@@ -622,6 +777,7 @@ public class FacesController(
         face.PerformerId = dto.PerformerId;
         if (performer is not null)
             await TrySetLocalPerformerImageFromFaceAsync(face, performer, dto.SetPerformerImage, cancellationToken);
+        await RecordManualFaceFieldProvenanceAsync(face.Id, new Dictionary<string, object?> { ["performer_id"] = face.PerformerId }, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         var linked = await db.Faces
@@ -629,7 +785,7 @@ public class FacesController(
             .Include(item => item.Performer)
             .FirstAsync(item => item.Id == id, cancellationToken);
 
-        return Ok(MapToDto(linked));
+        return Ok(MapToDto(linked, fieldProvenance: await LoadFaceFieldProvenanceAsync(linked.Id, cancellationToken)));
     }
 
     [HttpPost("{id:int}/suggestions/decision")]
@@ -888,11 +1044,34 @@ public class FacesController(
         }
     }
 
-    private static IOrderedQueryable<Face> ApplyFaceSort(IQueryable<Face> query, string? sort)
+    private static IQueryable<Face> ApplyFaceSort(CoveContext db, IQueryable<Face> query, string? sort, bool descending)
     {
         var normalized = (sort ?? string.Empty).Trim().ToLowerInvariant();
+        if (FilterHelpers.TryParseCustomFieldSort(normalized, out _, out _))
+            return query.ApplyCustomFieldSort(db, CustomFieldEntityTypes.Face, normalized, descending);
+
         return normalized switch
         {
+            "label_asc" => query.OrderBy(face => face.Label ?? (face.Performer != null ? face.Performer.Name : string.Empty)).ThenBy(face => face.Id),
+            "label_desc" => query.OrderByDescending(face => face.Label ?? (face.Performer != null ? face.Performer.Name : string.Empty)).ThenByDescending(face => face.Id),
+            "performer_name_asc" => query.OrderBy(face => face.Performer != null ? face.Performer.Name : string.Empty).ThenBy(face => face.Label).ThenBy(face => face.Id),
+            "performer_name_desc" => query.OrderByDescending(face => face.Performer != null ? face.Performer.Name : string.Empty).ThenByDescending(face => face.Label).ThenByDescending(face => face.Id),
+            "primary_source_key_asc" => query.OrderBy(face => face.PrimarySourceKey ?? string.Empty).ThenBy(face => face.Id),
+            "primary_source_key_desc" => query.OrderByDescending(face => face.PrimarySourceKey ?? string.Empty).ThenByDescending(face => face.Id),
+            "ignored_asc" => query.OrderBy(face => face.Ignored).ThenBy(face => face.Id),
+            "ignored_desc" => query.OrderByDescending(face => face.Ignored).ThenByDescending(face => face.Id),
+            "merged_asc" => query.OrderBy(face => face.MergedIntoFaceId != null).ThenBy(face => face.Id),
+            "merged_desc" => query.OrderByDescending(face => face.MergedIntoFaceId != null).ThenByDescending(face => face.Id),
+            "cover_present_asc" => query.OrderBy(face => face.CoverBlobId != null && face.CoverBlobId != string.Empty).ThenBy(face => face.Id),
+            "cover_present_desc" => query.OrderByDescending(face => face.CoverBlobId != null && face.CoverBlobId != string.Empty).ThenByDescending(face => face.Id),
+            "detection_count_asc" => query.OrderBy(face => face.DetectionCount).ThenBy(face => face.Id),
+            "detection_count_desc" => query.OrderByDescending(face => face.DetectionCount).ThenByDescending(face => face.Id),
+            "appearance_count_asc" => query.OrderBy(face => face.AppearanceCount).ThenBy(face => face.Id),
+            "appearance_count_desc" => query.OrderByDescending(face => face.AppearanceCount).ThenByDescending(face => face.Id),
+            "frame_sample_count_asc" => query.OrderBy(face => face.FrameSampleCount).ThenBy(face => face.Id),
+            "frame_sample_count_desc" => query.OrderByDescending(face => face.FrameSampleCount).ThenByDescending(face => face.Id),
+            "scene_count_asc" => query.OrderBy(face => face.SceneCount).ThenBy(face => face.Id),
+            "image_count_asc" => query.OrderBy(face => face.ImageCount).ThenBy(face => face.Id),
             "created_desc" => query.OrderByDescending(face => face.CreatedAt).ThenBy(face => face.Id),
             "updated_desc" => query.OrderByDescending(face => face.UpdatedAt).ThenBy(face => face.Id),
             "appearance_desc" => query.OrderBy(face => face.MergedIntoFaceId != null).ThenByDescending(face => face.AppearanceCount).ThenByDescending(face => face.FrameSampleCount).ThenBy(face => face.Label).ThenBy(face => face.Id),
@@ -1315,7 +1494,7 @@ public class FacesController(
         performer.ImageBlobId = await blobService.StoreBlobAsync(stream, blob.Value.ContentType, cancellationToken);
     }
 
-    private FaceDto MapToDto(Face face, FaceComputedCounts? computedCounts = null, FaceTopSuggestionDto? topSuggestion = null) => new(
+    private FaceDto MapToDto(Face face, FaceComputedCounts? computedCounts = null, FaceTopSuggestionDto? topSuggestion = null, IReadOnlyList<FieldProvenanceDto>? fieldProvenance = null) => new(
         face.Id,
         face.Label,
         face.PerformerId,
@@ -1331,7 +1510,18 @@ public class FacesController(
         face.UpdatedAt,
         computedCounts?.AppearanceCount ?? face.AppearanceCount,
         computedCounts?.FrameSampleCount ?? face.FrameSampleCount,
-        topSuggestion);
+        topSuggestion,
+        fieldProvenance?.ToList());
+
+    private async Task<IReadOnlyList<FieldProvenanceDto>?> LoadFaceFieldProvenanceAsync(int faceId, CancellationToken cancellationToken)
+        => fieldProvenanceService == null
+            ? null
+            : await fieldProvenanceService.GetForHostAsync(AffinityHostType.Face, faceId, cancellationToken);
+
+    private Task RecordManualFaceFieldProvenanceAsync(int faceId, IReadOnlyDictionary<string, object?> fields, CancellationToken cancellationToken)
+        => fieldProvenanceService == null || fields.Count == 0
+            ? Task.CompletedTask
+            : fieldProvenanceService.RecordManyAsync(AffinityHostType.Face, faceId, fields, "user", cancellationToken: cancellationToken);
 
     private FaceSimilarDto MapToSimilarDto(Face face, FaceComputedCounts? computedCounts, float distance) => new(
         face.Id,

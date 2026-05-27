@@ -634,7 +634,29 @@ public record SegmentSpanSearchRequestDto(
     string? ConfidenceModifier = null,
     double? DurationSec = null,
     double? DurationSec2 = null,
-    string? DurationModifier = null);
+    string? DurationModifier = null,
+    string? Title = null,
+    string? TitleModifier = null,
+    string? HostType = null,
+    string? SourceCategory = null,
+    string? SourceRunId = null,
+    string? SourceRunIdModifier = null,
+    string? ColorHint = null,
+    string? ColorHintModifier = null,
+    bool? HasImage = null,
+    bool? HasPayload = null,
+    double? StartSec = null,
+    double? StartSec2 = null,
+    string? StartSecModifier = null,
+    double? EndSec = null,
+    double? EndSec2 = null,
+    string? EndSecModifier = null,
+    string? CreatedAt = null,
+    string? CreatedAt2 = null,
+    string? CreatedAtModifier = null,
+    string? UpdatedAt = null,
+    string? UpdatedAt2 = null,
+    string? UpdatedAtModifier = null);
 
 public record SegmentSpanSearchResultItemDto(
     ResolvedSpan Span,
@@ -709,7 +731,8 @@ public record SegmentDto(
     string? Title,
     string? ColorHint,
     string CreatedAt,
-    string UpdatedAt);
+    string UpdatedAt,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record SegmentRecordDto(
     int Id,
@@ -732,7 +755,8 @@ public record SegmentRecordDto(
     string? Title,
     string? ColorHint,
     string CreatedAt,
-    string UpdatedAt);
+    string UpdatedAt,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record SegmentCreateDto(
     double StartSec,
@@ -882,7 +906,8 @@ public record FaceDto(
     DateTime UpdatedAt,
     int AppearanceCount = 0,
     int FrameSampleCount = 0,
-    FaceTopSuggestionDto? TopSuggestion = null);
+    FaceTopSuggestionDto? TopSuggestion = null,
+    List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record FaceCreateDto(
     string? Label,
@@ -1119,14 +1144,17 @@ public record StatsDto(
     long AudioPlayCount,
     long TextReadCount,
     long ImageViewCount,
+    long SegmentViewCount,
     long SceneCompleteCount,
     long AudioCompleteCount,
     long TextCompleteCount,
     long ImageCompleteCount,
+    long SegmentCompleteCount,
     double SceneConsumedSeconds,
     double AudioConsumedSeconds,
     double TextConsumedSeconds,
     double ImageConsumedSeconds,
+    double SegmentConsumedSeconds,
     long TotalLikes,
     long TotalDerivedLikes,
     long TotalFavorites);
@@ -1327,6 +1355,7 @@ public record SecurityConfigDto
     public bool Enabled { get; init; }
     public string? Username { get; init; }
     public bool AllowAnonymousShareLinks { get; init; } = true;
+    public bool EnforceDefaultDeny { get; init; } = true;
     public List<string>? KnownProxies { get; init; } = [];
     public string? NewPassword { get; init; }
 }
@@ -1729,7 +1758,25 @@ public record PlaybackIntervalsRequestDto(
     double MediaDurationSec,
     double CurrentPositionSec,
     string State,
-    List<PlaybackIntervalInputDto> Intervals);
+    List<PlaybackIntervalInputDto> Intervals,
+    string? Surface = null,
+    string? ScopeKey = null,
+    string? ParentHostType = null,
+    int? ParentHostId = null,
+    string? ItemHostType = null,
+    int? ItemHostId = null,
+    int? GroupItemId = null,
+    int? SegmentId = null,
+    double? ClipStartSec = null,
+    double? ClipEndSec = null,
+    bool? Autoplay = null,
+    bool? Muted = null,
+    bool? Fullscreen = null,
+    double? PlaybackRate = null,
+    string? Route = null,
+    string? Referrer = null,
+    string? RecommendationSource = null,
+    JsonElement? Context = null);
 
 public record PlaybackIntervalDto(double StartSec, double EndSec, string RecordedAt);
 

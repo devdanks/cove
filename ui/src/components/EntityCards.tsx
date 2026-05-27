@@ -79,7 +79,7 @@ export function EntityTileFrame({
       className={`entity-card group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"} ${isDragging ? "opacity-50" : ""} ${isOver ? "outline outline-2 outline-accent" : ""} ${className}`}
     >
       <RouteCardLinkOverlay route={route} onClick={onClick} label={label} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className={`relative flex shrink-0 items-center justify-center overflow-hidden ${mediaClassName}`}>
+      <div className={`card-media relative flex shrink-0 items-center justify-center overflow-hidden ${mediaClassName}`}>
         {media}
         {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
       </div>
@@ -711,7 +711,7 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
   return (
     <div onClick={selecting ? onClick : undefined} className={`scene-card relative cursor-pointer group rounded border bg-card overflow-hidden flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border"}`}>
       <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={onClick} label={`Open scene ${cardTitle}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="scene-card-preview relative aspect-video bg-black overflow-hidden">
+      <div className="scene-card-preview card-media relative aspect-video bg-black overflow-hidden">
         <img
           src={coverUrl}
           alt={scene.title || ""}
@@ -1110,7 +1110,7 @@ export function ImageTile({ image, engagement, onClick, onPreview, onDetails, on
   return (
     <div onClick={selecting ? onClick : undefined} className={`entity-card group relative cursor-pointer overflow-hidden rounded-lg border bg-card text-left shadow-md shadow-black/20 flex flex-col h-full transition-colors ${selected ? "ring-2 ring-accent border-accent" : "border-border hover:border-accent/60"}`}>
       {!onPreview ? <RouteCardLinkOverlay route={{ page: "image", id: image.id }} onClick={detailsClick} label={`Open image ${displayTitle}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} /> : null}
-      <div className="aspect-square overflow-hidden bg-surface relative" onClick={selecting ? undefined : previewClick}>
+      <div className="card-media aspect-square overflow-hidden bg-surface relative" onClick={selecting ? undefined : previewClick}>
         <CoverImage src={images.thumbnailUrl(image.id)} alt={displayTitle} className="h-full w-full" loading="lazy" />
         <RatingBanner rating={engagement?.rating} />
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
@@ -1566,7 +1566,7 @@ export function AudioTile({ audio, engagement, selected, onSelect, selecting, on
   return (
     <article onClick={selecting ? onClick : undefined} onMouseEnter={schedulePreview} onMouseLeave={stopPreview} className={`entity-card group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "audio", id: audio.id }} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
+      <div className="card-media relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
         {audio.imagePath ? (
           <CoverImage src={audio.imagePath} alt={title} className="h-full w-full" loading="lazy" />
         ) : (
@@ -1614,7 +1614,7 @@ export function TextTile({ text, selected, onSelect, selecting, onClick, onNavig
   return (
     <article onClick={selecting ? onClick : undefined} className={`entity-card group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={{ page: "text", id: text.id }} onClick={onClick} label={`Open ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
+      <div className="card-media relative flex aspect-video items-center justify-center overflow-hidden bg-surface">
         {text.imagePath ? <CoverImage src={text.imagePath} alt={title} className="h-full w-full" loading="lazy" /> : <FileText className="h-12 w-12 text-muted opacity-50" />}
         {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
         {!selecting ? <BookmarkButton hostType="text" hostId={text.id} compact deferUntilHover className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100" /> : null}
@@ -1865,7 +1865,7 @@ export function SegmentTile({ segment, route, label, eyebrow, footer, onClick, s
   return (
     <article onClick={selecting ? onClick : undefined} className={`entity-card scene-card group relative overflow-hidden rounded border bg-card transition-all ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={cardRoute} onClick={onClick} label={label ?? `Open segment ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="relative aspect-video w-full overflow-hidden bg-surface/70">
+      <div className="card-media relative aspect-video w-full overflow-hidden bg-surface/70">
         {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
         {segment.hostType === "scene" ? <SegmentHoverPreview hostId={segment.hostId} segmentId={typeof segment.id === "number" ? segment.id : undefined} updatedAt={segment.updatedAt} startSec={segment.startSec} endSec={segment.endSec} title={title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className="flex h-full w-full items-center justify-center bg-surface text-muted"><Layers className="h-10 w-10" /></div>}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-3 text-white">
@@ -1875,11 +1875,11 @@ export function SegmentTile({ segment, route, label, eyebrow, footer, onClick, s
           </div>
         </div>
       </div>
-      <div className="border-t border-border bg-card p-3">
+      <div className="card-body border-t border-border bg-card p-3">
         <div className="line-clamp-2 text-sm font-medium text-foreground">{title}</div>
         <div className="truncate text-xs text-secondary">{segment.hostTitle || `${segment.hostType} #${segment.hostId}`}</div>
       </div>
-      <div className="relative z-10 flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2 text-[11px] text-secondary">
+      <div className="card-popovers relative z-10 flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2 text-[11px] text-secondary">
         {segment.tagName ? <SegmentInfoChip label="Tag" value={segment.tagName} /> : null}
         {segment.kind ? <SegmentInfoChip label="Kind" value={segment.kind} /> : null}
         {refLabel ? <SegmentInfoChip label="Ref" value={refLabel} /> : null}

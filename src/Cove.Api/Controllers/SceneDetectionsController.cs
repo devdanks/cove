@@ -3,6 +3,7 @@ using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Data;
+using Cove.Data.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,7 +19,7 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
     {
         if (!await SceneExistsAsync(sceneId, ct)) return NotFound();
 
-        var detections = await db.Detections
+        var detections = await db.VisibleDetections()
             .AsNoTracking()
             .Where(detection => detection.HostType == DetectionHostType.Scene && detection.HostId == sceneId)
             .OrderBy(detection => detection.ObservedAtSec ?? 0d)
@@ -31,7 +32,7 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<DetectionDto>> GetById(int sceneId, int id, CancellationToken ct)
     {
-        var detection = await db.Detections
+        var detection = await db.VisibleDetections()
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id && item.HostType == DetectionHostType.Scene && item.HostId == sceneId, ct);
 

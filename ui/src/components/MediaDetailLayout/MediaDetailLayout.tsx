@@ -160,7 +160,7 @@ function MediaDetailLayoutRoot({
   };
 
   const tabsNav = hasTabs ? (
-    <div className="hidden w-11 shrink-0 flex-col border-r border-border bg-background/70 py-2 lg:flex">
+    <div className="media-detail-layout-tabs-rail hidden w-11 shrink-0 flex-col border-r border-border bg-background/70 py-2 lg:flex">
       {canCollapseSidebar ? (
         <>
           <button
@@ -247,7 +247,7 @@ function MediaDetailLayoutRoot({
   ) : null;
 
   const mobileTabsNav = hasTabs ? (
-    <div className="border-b border-border bg-background/70 lg:hidden">
+    <div className="media-detail-layout-tabs-mobile border-b border-border bg-background/70 lg:hidden">
       <nav
         className="flex gap-1 overflow-x-auto px-3 py-2"
         aria-label="Detail tabs"
@@ -284,6 +284,43 @@ function MediaDetailLayoutRoot({
     </div>
   ) : null;
 
+  const horizontalTabsNav = hasTabs ? (
+    <div className="media-detail-layout-tabs-row hidden border-b border-border/80 bg-background/35 py-2">
+      <nav
+        className="flex gap-1 overflow-x-auto"
+        aria-label="Detail tabs"
+        role="tablist"
+        aria-orientation="horizontal"
+      >
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              disabled={tab.disabled}
+              onClick={() => handleTabChange(tab.key)}
+              className={[
+                "inline-flex min-h-9 shrink-0 items-center gap-2 border-b-2 px-2.5 py-2 text-sm transition-colors",
+                isActive
+                  ? "border-accent text-foreground"
+                  : "border-transparent text-secondary hover:border-muted hover:text-foreground",
+                tab.disabled ? "cursor-not-allowed opacity-50" : "",
+              ].filter(Boolean).join(" ")}
+            >
+              <span>{tab.label}</span>
+              {typeof tab.count === "number" ? (
+                <span className="rounded-full bg-card px-1.5 py-0.5 text-xs text-muted">{tab.count}</span>
+              ) : null}
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  ) : null;
+
   const contentNode = isLoading ? (
     <DetailSkeleton showMedia={false} />
   ) : error ? (
@@ -310,7 +347,7 @@ function MediaDetailLayoutRoot({
   const sidebar = (
     <div
       className={[
-        "relative w-full shrink-0 border-b border-border bg-background/40 transition-[width] duration-150",
+        "media-detail-layout-sidebar relative w-full shrink-0 border-b border-border bg-background/40 transition-[width] duration-150",
         media ? "order-2 lg:order-1" : "",
         media ? (
           sidebarCollapsed
@@ -323,7 +360,7 @@ function MediaDetailLayoutRoot({
     >
       <div className={["flex min-h-0 overflow-hidden", media ? "h-full" : "max-h-[calc(100vh-49px)]"].join(" ")}>
         {tabsNav}
-        <div className={["min-w-0 flex-1 overflow-y-auto", sidebarCollapsed ? "lg:hidden" : ""].join(" ")}>
+        <div className={["media-detail-layout-sidebar-content min-w-0 flex-1 overflow-y-auto", sidebarCollapsed ? "lg:hidden" : ""].join(" ")}>
           {mobileTabsNav}
           <div className="px-4 pt-4 pb-2 sm:pl-7 sm:pr-6 lg:pl-8">
             {onGoBack ? (
@@ -349,6 +386,7 @@ function MediaDetailLayoutRoot({
               </div>
             ) : null}
           </div>
+          {horizontalTabsNav}
           <div className="px-4 py-4 sm:pl-7 sm:pr-6 lg:pl-8">{contentNode}</div>
         </div>
       </div>
@@ -360,7 +398,7 @@ function MediaDetailLayoutRoot({
   const rightColumn = media ? (
     <div
       className={[
-        "flex min-w-0 min-h-0 flex-1 flex-col",
+        "media-detail-layout-media flex min-w-0 min-h-0 flex-1 flex-col",
         media ? "order-1 lg:order-2" : "",
         isCompactMedia ? "overflow-visible p-4 sm:p-6 lg:p-8" : "overflow-hidden",
         hasFramedMedia ? "items-center justify-center bg-black/95 p-3 sm:p-4" : "",
@@ -386,14 +424,14 @@ function MediaDetailLayoutRoot({
   ) : null;
 
   return (
-    <div className="-mx-3 sm:-mx-4 md:-mx-6 -mt-5 -mb-5 overflow-x-hidden">
+    <div className="media-detail-layout -mx-3 sm:-mx-4 md:-mx-6 -mt-5 -mb-5 overflow-x-hidden">
       <div
         className={
           !media
-            ? "flex flex-col"
+            ? "media-detail-layout-shell flex flex-col"
             : isCompactMedia
-              ? "flex flex-col lg:flex-row"
-            : "flex flex-col lg:h-[calc(100vh-49px)] lg:overflow-hidden lg:flex-row"
+              ? "media-detail-layout-shell flex flex-col lg:flex-row"
+            : "media-detail-layout-shell flex flex-col lg:h-[calc(100vh-49px)] lg:overflow-hidden lg:flex-row"
         }
       >
         {sidebar}

@@ -1,8 +1,14 @@
 using System.Net;
+using System.Reflection;
+using Cove.Api.Controllers;
 using Cove.Core.Interfaces;
 using Cove.Api.Middleware;
+using Cove.Core.Auth;
 using Cove.Data.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Routing;
 
 namespace Cove.Tests;
 
@@ -94,4 +100,90 @@ public class AuthDisabledRequestGuardTests
 
         Assert.Equal(IPAddress.Parse("203.0.113.9"), AuthDisabledRequestGuard.GetEffectiveRemoteAddress(context, config));
     }
+}
+
+public class AuthorizationSurfaceTests
+{
+    [Fact]
+    public void Http_actions_declare_authorization_policy_or_explicit_anonymous_access()
+    {
+        var missing = typeof(CurrentPrincipalMiddleware).Assembly
+            .GetTypes()
+            .Where(type => !type.IsAbstract && typeof(ControllerBase).IsAssignableFrom(type))
+            .SelectMany(type => type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+                .Where(method => method.GetCustomAttributes<HttpMethodAttribute>(inherit: true).Any())
+                .Where(method => !method.GetCustomAttributes<NonActionAttribute>(inherit: true).Any())
+                .Where(method => !HasAuthMarker(type.GetCustomAttributes(inherit: true).OfType<Attribute>())
+                    && !HasAuthMarker(method.GetCustomAttributes(inherit: true).OfType<Attribute>()))
+                .Select(method => $"{type.Name}.{method.Name}"))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(missing.Length == 0, "HTTP actions without an authorization marker: " + string.Join(", ", missing));
+    }
+
+    [Theory]
+    [InlineData("GET", "/hubs/notifications", true)]
+    [InlineData("POST", "/hubs/notifications", true)]
+    [InlineData("GET", "/api/stream/scene/1/hls/master.m3u8", true)]
+    [InlineData("HEAD", "/api/stream/scene/1/preview", true)]
+    [InlineData("GET", "/api/audios/1/stream", true)]
+    [InlineData("GET", "/api/texts/1/file", true)]
+    [InlineData("GET", "/api/groups/2/image/front", true)]
+    [InlineData("GET", "/api/auth/me", false)]
+    [InlineData("GET", "/api/audios/1", false)]
+    [InlineData("POST", "/api/stream/scene/1", false)]
+    public void Query_tokens_are_only_accepted_for_hubs_and_gettable_media_routes(string method, string path, bool expected)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = method;
+        context.Request.Path = path;
+
+        Assert.Equal(expected, CurrentPrincipalMiddleware.AllowsQueryToken(context.Request));
+    }
+
+    [Theory]
+    [InlineData("ai.faces", true)]
+    [InlineData("plugin_1-2", true)]
+    [InlineData("", false)]
+    [InlineData(".", false)]
+    [InlineData("..", false)]
+    [InlineData("../outside", false)]
+    [InlineData("sub/plugin", false)]
+    [InlineData("sub\\plugin", false)]
+    public void Plugin_ids_reject_path_traversal_and_nested_paths(string pluginId, bool expected)
+    {
+        Assert.Equal(expected, PluginsController.IsSafePluginId(pluginId));
+    }
+
+    [Fact]
+    public void Plugin_directory_resolution_stays_inside_plugin_root()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"cove-plugin-root-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            Assert.True(PluginsController.TryResolvePluginDirectory(root, "ai.faces", out var resolved));
+
+            var rootFullPath = Path.GetFullPath(root);
+            var expectedPrefix = rootFullPath.EndsWith(Path.DirectorySeparatorChar)
+                ? rootFullPath
+                : rootFullPath + Path.DirectorySeparatorChar;
+            Assert.StartsWith(expectedPrefix, resolved, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+            Assert.False(PluginsController.TryResolvePluginDirectory(root, "..", out _));
+            Assert.False(PluginsController.TryResolvePluginDirectory(root, "../outside", out _));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static bool HasAuthMarker(IEnumerable<Attribute> attributes)
+        => attributes.Any(attribute =>
+            attribute is RequiresPermissionAttribute
+                or AllowWithoutPermissionAttribute
+                or AllowAnonymousAttribute
+                or AuthorizeAttribute);
 }

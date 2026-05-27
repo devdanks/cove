@@ -172,13 +172,12 @@ public class TranscodeService : ITranscodeService
 
     public Task<Stream?> GetHlsSegmentAsync(int sceneId, string segment, CancellationToken ct = default)
     {
+        var segmentName = Path.GetFileName(segment);
+        if (string.IsNullOrWhiteSpace(segmentName) || segmentName != segment) return Task.FromResult<Stream?>(null);
+
         var segmentPath = Path.Combine(_config.GeneratedPath ?? Path.GetTempPath(), "transcodes", "hls", sceneId.ToString(), segment);
 
         if (!File.Exists(segmentPath)) return Task.FromResult<Stream?>(null);
-
-        // Validate segment name is safe (no directory traversal)
-        var segmentName = Path.GetFileName(segment);
-        if (segmentName != segment) return Task.FromResult<Stream?>(null);
 
         Stream stream = new FileStream(segmentPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
         return Task.FromResult<Stream?>(stream);

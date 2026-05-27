@@ -5,13 +5,27 @@ import { authStore } from "../auth/authStore";
 export interface PlaybackTrackingTarget {
   hostType: string;
   hostId: number;
+  surface?: string;
   scopeKey?: string;
+  parentHostType?: string;
+  parentHostId?: number;
+  itemHostType?: string;
+  itemHostId?: number;
   groupItemId?: number;
+  segmentId?: number;
+  clipStartSec?: number;
+  clipEndSec?: number | null;
+  autoplay?: boolean;
+  muted?: boolean;
+  fullscreen?: boolean;
+  playbackRate?: number;
+  route?: string;
+  referrer?: string;
+  recommendationSource?: string;
+  context?: Record<string, unknown>;
 }
 
-export interface PlaybackTrackingBatch extends PlaybackIntervalsRequest {
-  groupItemId?: number;
-}
+export interface PlaybackTrackingBatch extends PlaybackIntervalsRequest {}
 
 export type PlaybackTrackingMode = "default" | "keepalive";
 
@@ -82,6 +96,62 @@ function toScopeKey(target: PlaybackTrackingTarget | null) {
   return target?.scopeKey ?? (target ? `${target.hostType}:${target.hostId}` : null);
 }
 
+function targetSignature(target: PlaybackTrackingTarget | null) {
+  if (!target) {
+    return null;
+  }
+
+  return JSON.stringify({
+    hostType: target.hostType,
+    hostId: target.hostId,
+    surface: target.surface,
+    scopeKey: target.scopeKey,
+    parentHostType: target.parentHostType,
+    parentHostId: target.parentHostId,
+    itemHostType: target.itemHostType,
+    itemHostId: target.itemHostId,
+    groupItemId: target.groupItemId,
+    segmentId: target.segmentId,
+    clipStartSec: target.clipStartSec,
+    clipEndSec: target.clipEndSec,
+    autoplay: target.autoplay,
+    muted: target.muted,
+    fullscreen: target.fullscreen,
+    playbackRate: target.playbackRate,
+    route: target.route,
+    referrer: target.referrer,
+    recommendationSource: target.recommendationSource,
+    context: target.context,
+  });
+}
+
+function applyTargetContext(batch: PlaybackTrackingBatch, target: PlaybackTrackingTarget) {
+  const assign = <K extends keyof PlaybackTrackingBatch>(key: K, value: PlaybackTrackingBatch[K]) => {
+    if (value !== undefined) {
+      batch[key] = value;
+    }
+  };
+
+  assign("surface", target.surface);
+  assign("scopeKey", target.scopeKey);
+  assign("parentHostType", target.parentHostType);
+  assign("parentHostId", target.parentHostId);
+  assign("itemHostType", target.itemHostType);
+  assign("itemHostId", target.itemHostId);
+  assign("groupItemId", target.groupItemId);
+  assign("segmentId", target.segmentId);
+  assign("clipStartSec", target.clipStartSec);
+  assign("clipEndSec", target.clipEndSec);
+  assign("autoplay", target.autoplay);
+  assign("muted", target.muted);
+  assign("fullscreen", target.fullscreen);
+  assign("playbackRate", target.playbackRate);
+  assign("route", target.route);
+  assign("referrer", target.referrer);
+  assign("recommendationSource", target.recommendationSource);
+  assign("context", target.context);
+}
+
 export function createPlaybackTracker(options: PlaybackTrackerOptions = {}) {
   const flushIntervalMs = options.flushIntervalMs ?? 5000;
   const maxBatchSize = options.maxBatchSize ?? 20;
@@ -89,6 +159,7 @@ export function createPlaybackTracker(options: PlaybackTrackerOptions = {}) {
 
   let target: PlaybackTrackingTarget | null = null;
   let scopeKey: string | null = null;
+  let signature: string | null = null;
   let sessionId = createPlaybackSessionId();
   let mediaDurationSec = 0;
   let currentPositionSec = 0;
@@ -145,10 +216,7 @@ export function createPlaybackTracker(options: PlaybackTrackerOptions = {}) {
         state: snapshot.state,
         intervals: batchIntervals,
       };
-
-      if (snapshot.target.groupItemId != null) {
-        batch.groupItemId = snapshot.target.groupItemId;
-      }
+      applyTargetContext(batch, snapshot.target);
 
       try {
         await dispatchBatch(batch, mode);
@@ -172,14 +240,9 @@ export function createPlaybackTracker(options: PlaybackTrackerOptions = {}) {
     },
     async setTarget(nextTarget: PlaybackTrackingTarget | null) {
       const nextScopeKey = toScopeKey(nextTarget);
+      const nextSignature = targetSignature(nextTarget);
       const scopeChanged = nextScopeKey !== scopeKey;
-      const targetChanged =
-        !scopeChanged
-        && target != null
-        && nextTarget != null
-        && (target.hostType !== nextTarget.hostType
-          || target.hostId !== nextTarget.hostId
-          || target.groupItemId !== nextTarget.groupItemId);
+      const targetChanged = !scopeChanged && signature !== nextSignature;
 
       const pendingFlush = scopeChanged || targetChanged ? flush() : Promise.resolve();
 
@@ -192,6 +255,7 @@ export function createPlaybackTracker(options: PlaybackTrackerOptions = {}) {
 
       target = nextTarget;
       scopeKey = nextScopeKey;
+      signature = nextSignature;
       await pendingFlush;
     },
     recordInterval(params: {
@@ -248,5 +312,9 @@ export function trackInteraction(payload: EngagementInteractionWrite) {
     return;
   }
 
-  void entityEngagement.recordInteraction(payload).catch(() => {});
+  void entityEngagement.recordInteraction(payload).catch((error) => {
+    if (import.meta.env.DEV) {
+      console.warn("Failed to record interaction", payload, error);
+    }
+  });
 }

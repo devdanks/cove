@@ -11,7 +11,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/scrape-attempts")]
-[RequiresPermission(Permissions.ScenesScrape, Permissions.ScenesWrite, Permissions.AudiosWrite, Permissions.TextsWrite, Permissions.ImagesWrite, Permissions.GroupsWrite, Mode = PermissionMode.Any)]
+[RequiresPermission(Permissions.ScenesScrape, Permissions.ScenesWrite, Permissions.AudiosWrite, Permissions.TextsWrite, Permissions.ImagesWrite, Permissions.GalleriesWrite, Permissions.GroupsWrite, Mode = PermissionMode.Any)]
 public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService, SceneBatchScrapeService sceneBatchScrapeService, ImageBatchScrapeService imageBatchScrapeService, IJobService jobService, ICurrentPrincipalAccessor principalAccessor, IAuthorizationService authorizationService) : ControllerBase
 {
     [HttpGet]
@@ -200,6 +200,9 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
                 return true;
             case EntityKinds.Image:
                 permissions = [Permissions.ImagesWrite];
+                return true;
+            case EntityKinds.Gallery:
+                permissions = [Permissions.GalleriesWrite];
                 return true;
             case EntityKinds.Group:
                 permissions = [Permissions.GroupsWrite];

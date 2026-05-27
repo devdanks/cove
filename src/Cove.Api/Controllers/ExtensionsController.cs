@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Cove.Plugins;
+using Cove.Core.Auth;
 using Cove.Core.Interfaces;
 using Cove.Api.Services;
 using System.IO;
@@ -15,6 +16,7 @@ internal static class FrontendRuntimeContract
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.ExtensionsRead)]
 public class ExtensionsController(ExtensionManager extensionManager, ScraperService scraperService) : ControllerBase
 {
     /// <summary>Returns the aggregated UI manifest from all registered extensions.</summary>
@@ -107,7 +109,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         var basePath = Path.Combine(extensionManager.Context.DataDirectory, extensionId);
         var fullPath = Path.GetFullPath(Path.Combine(basePath, path));
 
-        if (!fullPath.StartsWith(Path.GetFullPath(basePath)) || !System.IO.File.Exists(fullPath))
+        if (!IsPathInsideDirectory(basePath, fullPath) || !System.IO.File.Exists(fullPath))
         {
             return url;
         }
@@ -269,6 +271,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
     /// <summary>Enable an extension.</summary>
     [HttpPost("{id}/enable")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public async Task<IActionResult> Enable(string id, CancellationToken ct)
     {
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id);
@@ -284,6 +287,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
     /// <summary>Disable an extension.</summary>
     [HttpPost("{id}/disable")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public async Task<IActionResult> Disable(string id, CancellationToken ct)
     {
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id);
@@ -295,6 +299,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
     /// <summary>Get extension key-value store data.</summary>
     [HttpGet("{id}/data")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public async Task<IActionResult> GetData(string id, CancellationToken ct)
     {
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id) as IStatefulExtension;
@@ -310,6 +315,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
     /// <summary>Set a key-value pair in extension store.</summary>
     [HttpPut("{id}/data/{key}")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public async Task<IActionResult> SetData(string id, string key, [FromBody] string value, CancellationToken ct)
     {
         var ext = extensionManager.Extensions.FirstOrDefault(e => e.Id == id) as IStatefulExtension;
@@ -325,6 +331,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
     /// <summary>Trigger a job defined by an extension.</summary>
     [HttpPost("{id}/jobs/{jobId}/run")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public IActionResult RunJob(string id, string jobId, [FromBody] Dictionary<string, string>? parameters,
         [FromServices] IJobService jobService)
     {
@@ -359,7 +366,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         var fullPath = Path.GetFullPath(Path.Combine(basePath, path));
 
         // Security: prevent path traversal
-        if (!fullPath.StartsWith(Path.GetFullPath(basePath)))
+        if (!IsPathInsideDirectory(basePath, fullPath))
             return BadRequest("Invalid path");
 
         if (!System.IO.File.Exists(fullPath)) return NotFound();
@@ -384,6 +391,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
     /// <summary>Install an extension package from a user-provided URL after explicit trust confirmation.</summary>
     [HttpPost("install-from-url")]
+    [RequiresPermission(Permissions.ExtensionsInstall)]
     public async Task<IActionResult> InstallFromUrl(
         [FromBody] InstallExtensionFromUrlRequest request,
         [FromServices] IHttpClientFactory httpClientFactory,
@@ -541,6 +549,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
     /// <summary>Install an extension from the registry.</summary>
     [HttpPost("registry/install")]
+    [RequiresPermission(Permissions.ExtensionsInstall)]
     public async Task<IActionResult> RegistryInstall(
         [FromBody] RegistryInstallRequest request,
         [FromServices] IExtensionRegistry registry = null!,
@@ -665,6 +674,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
     /// <summary>Uninstall an extension by removing its directory.</summary>
     [HttpPost("registry/uninstall")]
+    [RequiresPermission(Permissions.ExtensionsUninstall)]
     public async Task<IActionResult> RegistryUninstall(
         [FromBody] RegistryUninstallRequest request,
         CancellationToken ct = default)
@@ -983,6 +993,17 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
             return false;
 
         return id.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+    }
+
+    private static bool IsPathInsideDirectory(string basePath, string candidatePath)
+    {
+        var root = Path.GetFullPath(basePath);
+        var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+        var candidate = Path.GetFullPath(candidatePath);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return candidate.StartsWith(rootWithSeparator, comparison);
     }
 
     private static async Task<Exception?> DeleteDirectoryWithRetriesAsync(string directoryPath, CancellationToken ct)

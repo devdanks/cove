@@ -63,7 +63,20 @@ export function SegmentPreviewMedia({
         videoStartTimeSec={startSec ?? 0}
         videoLoadRootMargin="0px"
         videoPlayThreshold={0.1}
-        trackingEnabled={false}
+        trackingEnabled={segmentId != null}
+        playbackTracking={segmentId != null ? {
+          hostType: "segment",
+          hostId: segmentId,
+          surface: "segmentPreview",
+          scopeKey: `segment-preview:${segmentId}`,
+          parentHostType: "scene",
+          parentHostId: hostId,
+          itemHostType: "scene",
+          itemHostId: hostId,
+          segmentId,
+          clipStartSec: startSec,
+          clipEndSec: endSec ?? null,
+        } : undefined}
         fillMedia
         chromeless
         imageClassName={mediaClassName}

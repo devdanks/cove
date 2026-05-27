@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -9,7 +10,7 @@ using Cove.Data;
 
 namespace Cove.Api.Services;
 
-public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService thumbnailService, IBlobService blobService) : IStreamService
+public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService thumbnailService, IBlobService blobService, IMemoryCache? memoryCache = null) : IStreamService
 {
     private static readonly Dictionary<string, string> MimeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -160,10 +161,59 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
         return (output, "image/jpeg", true);
     }
 
-    private static async Task<SpriteFrame?> FindSpriteFrameAsync(string vttPath, double seconds, CancellationToken ct)
+    private async Task<SpriteFrame?> FindSpriteFrameAsync(string vttPath, double seconds, CancellationToken ct)
     {
-        var lines = await File.ReadAllLinesAsync(vttPath, ct);
+        var frames = await LoadSpriteFramesAsync(vttPath, ct);
+        if (frames.Count == 0) return null;
+
         SpriteFrame? previousFrame = null;
+
+        foreach (var frame in frames)
+        {
+            if (seconds >= frame.StartSeconds && seconds < frame.EndSeconds)
+                return frame;
+
+            if (seconds < frame.StartSeconds)
+                return previousFrame ?? frame;
+
+            previousFrame = frame;
+        }
+
+        return previousFrame;
+    }
+
+    private async Task<IReadOnlyList<SpriteFrame>> LoadSpriteFramesAsync(string vttPath, CancellationToken ct)
+    {
+        var fileInfo = new FileInfo(vttPath);
+        if (!fileInfo.Exists) return [];
+
+        var cacheKey = $"{nameof(StreamService)}:sprite-vtt:{vttPath}";
+        if (memoryCache != null
+            && memoryCache.TryGetValue(cacheKey, out SpriteFrameCache? cached)
+            && cached is not null
+            && cached.LastWriteTimeUtc == fileInfo.LastWriteTimeUtc
+            && cached.Length == fileInfo.Length)
+        {
+            return cached.Frames;
+        }
+
+        var lines = await File.ReadAllLinesAsync(vttPath, ct);
+        var frames = ParseSpriteFrames(lines);
+        memoryCache?.Set(
+            cacheKey,
+            new SpriteFrameCache(fileInfo.LastWriteTimeUtc, fileInfo.Length, frames),
+            new MemoryCacheEntryOptions
+            {
+                SlidingExpiration = TimeSpan.FromMinutes(20),
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(2),
+            });
+
+        return frames;
+    }
+
+    private static IReadOnlyList<SpriteFrame> ParseSpriteFrames(string[] lines)
+    {
+        var frames = new List<SpriteFrame>();
 
         for (var i = 0; i < lines.Length; i++)
         {
@@ -177,17 +227,10 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
             var bounds = TryParseSpriteBounds(lines, i + 1);
             if (bounds == null) continue;
 
-            var frame = new SpriteFrame(startSeconds, endSeconds, bounds.Value);
-            if (seconds >= frame.StartSeconds && seconds < frame.EndSeconds)
-                return frame;
-
-            if (seconds < frame.StartSeconds)
-                return previousFrame ?? frame;
-
-            previousFrame = frame;
+            frames.Add(new SpriteFrame(startSeconds, endSeconds, bounds.Value));
         }
 
-        return previousFrame;
+        return frames;
     }
 
     private static Rectangle? TryParseSpriteBounds(string[] lines, int startIndex)
@@ -259,4 +302,5 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
     }
 
     private readonly record struct SpriteFrame(double StartSeconds, double EndSeconds, Rectangle Bounds);
+    private sealed record SpriteFrameCache(DateTime LastWriteTimeUtc, long Length, IReadOnlyList<SpriteFrame> Frames);
 }

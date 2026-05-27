@@ -1,26 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, Check, ChevronLeft, ChevronRight, Database, FolderOpen, HelpCircle, ImageIcon, LayoutGrid, Play, RefreshCw, Settings, Tag, X } from "lucide-react";
+import { BookOpen, Check, ChevronLeft, ChevronRight, Database, ExternalLink, FolderOpen, HelpCircle, ImageIcon, LayoutGrid, Play, RefreshCw, Settings, Tag, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import type { ExtensionTutorialTopic } from "../api/types";
+import { normalizeManualContext, uniqueManualContexts, type TutorialOpenRequest } from "./ManualContext";
 
 export const TUTORIAL_STORYBOARD_STORAGE_KEY = "cove-tutorial-storyboard-complete";
 export const TUTORIAL_STORYBOARD_EVENT = "cove:tutorial-storyboard-open";
 
 export type TutorialSlideMockKind = "tasks" | "feed" | "metadata" | "settings" | "scenePlayer" | "tagging" | "images" | "extension";
 
-export interface TutorialOpenRequest {
-  topicId?: string;
-  slideId?: string;
-  page?: string;
-}
+export type { TutorialOpenRequest } from "./ManualContext";
 
 export interface TutorialStoryboardSlide {
   id: string;
   title: string;
-  caption: string;
+  caption?: string;
+  bodyMarkdown?: string;
   imageSrc?: string;
   imageAlt?: string;
   mockKind?: TutorialSlideMockKind;
-  points: string[];
+  points?: string[];
+  links?: { label: string; url: string }[];
 }
 
 export interface TutorialStoryboardTopic {
@@ -28,9 +28,16 @@ export interface TutorialStoryboardTopic {
   title: string;
   description?: string;
   pages?: string[];
+  contexts?: string[];
   extensionId?: string;
+  parentTopicId?: string;
   order: number;
   slides: TutorialStoryboardSlide[];
+}
+
+interface TutorialTopicEntry {
+  topic: TutorialStoryboardTopic;
+  depth: number;
 }
 
 const builtinTutorialTopics: TutorialStoryboardTopic[] = [
@@ -177,6 +184,7 @@ interface Props {
 
 export function TutorialStoryboardDialog({ open, onClose, request, currentPage, extensionTopics = [] }: Props) {
   const topics = useMemo(() => mergeTutorialTopics(extensionTopics), [extensionTopics]);
+  const topicEntries = useMemo(() => buildTopicEntries(topics), [topics]);
   const [selectedTopicId, setSelectedTopicId] = useState(() => pickInitialTopicId(topics, request, currentPage));
   const [index, setIndex] = useState(0);
   const selectedTopic = topics.find((topic) => topic.id === selectedTopicId) ?? topics[0];
@@ -243,11 +251,13 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
           <aside className="hidden min-h-0 border-r border-border bg-nav/40 p-3 lg:block">
             <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-muted">Topics</div>
             <div className="space-y-1 overflow-y-auto pr-1">
-              {topics.map((topic) => (
+              {topicEntries.map(({ topic, depth }) => (
                 <button
                   key={topic.id}
                   type="button"
                   onClick={() => chooseTopic(topic.id)}
+                  data-topic-depth={depth}
+                  style={{ paddingLeft: `${0.75 + depth * 1.1}rem` }}
                   className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${topic.id === selectedTopic.id ? "bg-accent/15 text-accent" : "text-secondary hover:bg-card hover:text-foreground"}`}
                 >
                   <span className="block truncate text-sm font-medium">{topic.title}</span>
@@ -266,7 +276,7 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
                 className="w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
                 aria-label="Tutorial topic"
               >
-                {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.title}</option>)}
+                {topicEntries.map(({ topic, depth }) => <option key={topic.id} value={topic.id}>{`${"  ".repeat(depth)}${topic.title}`}</option>)}
               </select>
             </div>
             <StoryboardPreview slide={slide} />
@@ -275,15 +285,34 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
           <aside className="flex min-h-0 flex-col overflow-y-auto border-t border-border p-4 lg:border-l lg:border-t-0 sm:p-6">
             <div className="text-xs font-semibold uppercase tracking-wide text-muted">{progressLabel}</div>
             <h3 className="mt-2 text-xl font-semibold text-foreground">{slide.title}</h3>
-            <p className="mt-3 text-sm leading-6 text-secondary">{slide.caption}</p>
-            <div className="mt-5 space-y-2">
-              {slide.points.map((point) => (
-                <div key={point} className="flex items-start gap-2 rounded-lg border border-border bg-card/70 px-3 py-2 text-sm text-secondary">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-                  <span>{point}</span>
-                </div>
-              ))}
-            </div>
+            {slide.caption ? <p className="mt-3 text-sm leading-6 text-secondary">{slide.caption}</p> : null}
+            {slide.bodyMarkdown ? <ManualMarkdown markdown={slide.bodyMarkdown} /> : null}
+            {(slide.points?.length ?? 0) > 0 ? (
+              <div className="mt-5 space-y-2">
+                {slide.points!.map((point) => (
+                  <div key={point} className="flex items-start gap-2 rounded-lg border border-border bg-card/70 px-3 py-2 text-sm text-secondary">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+                    <span>{point}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {(slide.links?.length ?? 0) > 0 ? (
+              <div className="mt-5 space-y-2">
+                {slide.links!.map((link) => (
+                  <a
+                    key={`${link.label}:${link.url}`}
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card/70 px-3 py-2 text-sm text-accent transition-colors hover:border-accent hover:bg-card"
+                  >
+                    <span className="truncate">{link.label}</span>
+                    <ExternalLink className="h-4 w-4 shrink-0" />
+                  </a>
+                ))}
+              </div>
+            ) : null}
 
             <div className="mt-auto pt-6">
               <div className="mb-4 flex gap-1.5">
@@ -335,20 +364,120 @@ function mergeTutorialTopics(extensionTopics: ExtensionTutorialTopic[]): Tutoria
       title: topic.title,
       description: topic.description,
       pages: topic.pages,
+      contexts: normalizeManualContexts(topic.contexts),
       extensionId: topic.extensionId,
+      parentTopicId: topic.parentTopicId,
       order: topic.order ?? 100,
       slides: (topic.slides ?? []).map((slide) => ({
         id: slide.id,
         title: slide.title,
         caption: slide.caption,
-        imageSrc: slide.imageSrc,
+        bodyMarkdown: slide.bodyMarkdown,
+        imageSrc: resolveManualImageSrc(slide.imageSrc, topic.extensionId),
         imageAlt: slide.imageAlt,
         mockKind: normalizeMockKind(slide.mockKind),
         points: slide.points?.length ? slide.points : [],
+        links: normalizeManualLinks(slide.links),
       })),
     }));
 
   return [...builtinTutorialTopics, ...normalizedExtensionTopics].sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
+}
+
+function buildTopicEntries(topics: TutorialStoryboardTopic[]): TutorialTopicEntry[] {
+  const sorted = [...topics].sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
+  const byId = new Map(sorted.map((topic) => [topic.id, topic]));
+  const childrenByParent = new Map<string, TutorialStoryboardTopic[]>();
+  const roots: TutorialStoryboardTopic[] = [];
+
+  for (const topic of sorted) {
+    if (topic.parentTopicId && byId.has(topic.parentTopicId)) {
+      const children = childrenByParent.get(topic.parentTopicId) ?? [];
+      children.push(topic);
+      childrenByParent.set(topic.parentTopicId, children);
+    } else {
+      roots.push(topic);
+    }
+  }
+
+  const entries: TutorialTopicEntry[] = [];
+  const visited = new Set<string>();
+  const visit = (topic: TutorialStoryboardTopic, depth: number) => {
+    if (visited.has(topic.id)) return;
+    visited.add(topic.id);
+    entries.push({ topic, depth });
+    for (const child of childrenByParent.get(topic.id) ?? []) {
+      visit(child, depth + 1);
+    }
+  };
+
+  for (const topic of roots) {
+    visit(topic, 0);
+  }
+
+  for (const topic of sorted) {
+    visit(topic, 0);
+  }
+
+  return entries;
+}
+
+function normalizeManualLinks(links?: { label: string; url: string }[]) {
+  return (links ?? [])
+    .map((link) => ({ label: link.label?.trim(), url: normalizeManualLinkUrl(link.url) }))
+    .filter((link): link is { label: string; url: string } => Boolean(link.label && link.url));
+}
+
+function normalizeManualLinkUrl(url?: string) {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveManualImageSrc(imageSrc: string | undefined, extensionId: string | undefined) {
+  const value = imageSrc?.trim();
+  if (!value) return undefined;
+  if (isAbsoluteManualAssetUrl(value) || value.startsWith("/")) return value;
+  if (!extensionId) return value;
+
+  const normalizedPath = value.replace(/^\.\//, "").split("/").filter(Boolean).map(encodeURIComponent).join("/");
+  return `/api/extensions/assets/${encodeURIComponent(extensionId)}/${normalizedPath}`;
+}
+
+function isAbsoluteManualAssetUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "data:";
+  } catch {
+    return false;
+  }
+}
+
+function ManualMarkdown({ markdown }: { markdown: string }) {
+  return (
+    <div className="mt-4 text-sm leading-6 text-secondary">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="mb-3 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
+          ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
+          li: ({ children }) => <li>{children}</li>,
+          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+          code: ({ children }) => <code className="rounded bg-card px-1 py-0.5 text-xs text-foreground">{children}</code>,
+          a: ({ href, children }) => {
+            const safeHref = normalizeManualLinkUrl(href);
+            return safeHref ? <a href={safeHref} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{children}</a> : <span>{children}</span>;
+          },
+        }}
+      >
+        {markdown}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 function normalizeMockKind(value?: string): TutorialSlideMockKind | undefined {
@@ -356,9 +485,18 @@ function normalizeMockKind(value?: string): TutorialSlideMockKind | undefined {
   return knownKinds.has(value as TutorialSlideMockKind) ? value as TutorialSlideMockKind : undefined;
 }
 
+function normalizeManualContexts(contexts?: string[]) {
+  return uniqueManualContexts(contexts ?? []);
+}
+
 function pickInitialTopicId(topics: TutorialStoryboardTopic[], request?: TutorialOpenRequest, currentPage?: string) {
   if (request?.topicId && topics.some((topic) => topic.id === request.topicId)) {
     return request.topicId;
+  }
+
+  const contextTopicId = pickTopicIdForContexts(topics, request, currentPage);
+  if (contextTopicId) {
+    return contextTopicId;
   }
 
   const page = request?.page ?? currentPage;
@@ -368,6 +506,37 @@ function pickInitialTopicId(topics: TutorialStoryboardTopic[], request?: Tutoria
   }
 
   return topics.find((topic) => topic.id === "getting-started")?.id ?? topics[0]?.id ?? "getting-started";
+}
+
+function pickTopicIdForContexts(topics: TutorialStoryboardTopic[], request?: TutorialOpenRequest, currentPage?: string) {
+  const contexts = uniqueManualContexts([
+    request?.context,
+    ...(request?.contexts ?? []),
+    currentPage ? `page:${currentPage}` : undefined,
+  ]);
+
+  for (const context of contexts) {
+    const topic = topics.find((candidate) => topicMatchesContext(candidate, context));
+    if (topic) return topic.id;
+  }
+
+  return undefined;
+}
+
+function topicMatchesContext(topic: TutorialStoryboardTopic, context: string) {
+  const normalizedContext = normalizeManualContext(context);
+  if (!normalizedContext) return false;
+
+  if (topic.contexts?.some((topicContext) => normalizeManualContext(topicContext) === normalizedContext)) {
+    return true;
+  }
+
+  if (normalizedContext.startsWith("page:")) {
+    const page = normalizedContext.slice("page:".length);
+    return topic.pages?.some((topicPage) => topicPage.toLowerCase() === page) ?? false;
+  }
+
+  return false;
 }
 
 function StoryboardPreview({ slide }: { slide: TutorialStoryboardSlide }) {

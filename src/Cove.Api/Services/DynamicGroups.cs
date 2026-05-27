@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Nodes;
+using System.Linq.Expressions;
 using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
@@ -79,7 +80,7 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
                     QuerySourceKey = sourceKey,
                     CacheTtlSec = 30,
                     AllowedHostTypes = sourceKey == ContinueWatchingSourceKey
-                        ? ["scene"]
+                        ? ["scene", "audio", "segment"]
                         : ["scene", "audio", "text", "image", "performer", "studio", "tag", "gallery", "group", "face", "segment"],
                 });
                 continue;
@@ -87,6 +88,9 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
 
             existing.Name = name;
             existing.QuerySourceKey = sourceKey;
+            existing.AllowedHostTypes = sourceKey == ContinueWatchingSourceKey
+                ? ["scene", "audio", "segment"]
+                : ["scene", "audio", "text", "image", "performer", "studio", "tag", "gallery", "group", "face", "segment"];
         }
 
         await db.SaveChangesAsync(ct);
@@ -401,6 +405,7 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
         AffinityHostType.Studio => GroupItemKind.Studio,
         AffinityHostType.Gallery => GroupItemKind.Gallery,
         AffinityHostType.Group => GroupItemKind.Group,
+        AffinityHostType.Segment => GroupItemKind.Segment,
         _ => GroupItemKind.Scene,
     };
 
@@ -421,6 +426,7 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
         var studioIds = rows.Where(row => row.HostType == AffinityHostType.Studio).Select(row => row.HostId).Distinct().ToArray();
         var galleryIds = rows.Where(row => row.HostType == AffinityHostType.Gallery).Select(row => row.HostId).Distinct().ToArray();
         var groupIds = rows.Where(row => row.HostType == AffinityHostType.Group).Select(row => row.HostId).Distinct().ToArray();
+        var segmentIds = rows.Where(row => row.HostType == AffinityHostType.Segment).Select(row => row.HostId).Distinct().ToArray();
 
         var scenes = await Db.Scenes.AsNoTracking().Where(item => sceneIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Title, ct);
         var sceneFileRows = await Db.VideoFiles.AsNoTracking()
@@ -440,12 +446,16 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
         var studios = await Db.Studios.AsNoTracking().Where(item => studioIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Name, ct);
         var galleries = await Db.Galleries.AsNoTracking().Where(item => galleryIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Title ?? $"Gallery {item.Id}", ct);
         var groups = await Db.Groups.AsNoTracking().Where(item => groupIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Name, ct);
+        var segments = await Db.VisibleSegments().AsNoTracking()
+            .Where(item => segmentIds.Contains(item.Id))
+            .Select(item => new { item.Id, item.HostType, item.HostId, item.StartSec, item.EndSec, item.Title, item.Kind })
+            .ToDictionaryAsync(item => item.Id, ct);
 
         string? TitleFor(AffinityHostType hostType, int hostId) => hostType switch
         {
-            AffinityHostType.Scene => !string.IsNullOrWhiteSpace(scenes.GetValueOrDefault(hostId))
-                ? scenes.GetValueOrDefault(hostId)
-                : sceneFileTitles.GetValueOrDefault(hostId) ?? $"Scene {hostId}",
+            AffinityHostType.Scene => scenes.TryGetValue(hostId, out var sceneTitle)
+                ? !string.IsNullOrWhiteSpace(sceneTitle) ? sceneTitle : sceneFileTitles.GetValueOrDefault(hostId) ?? $"Scene {hostId}"
+                : null,
             AffinityHostType.Audio => audios.GetValueOrDefault(hostId),
             AffinityHostType.Text => texts.GetValueOrDefault(hostId),
             AffinityHostType.Image => images.GetValueOrDefault(hostId),
@@ -455,8 +465,26 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
             AffinityHostType.Studio => studios.GetValueOrDefault(hostId),
             AffinityHostType.Gallery => galleries.GetValueOrDefault(hostId),
             AffinityHostType.Group => groups.GetValueOrDefault(hostId),
+            AffinityHostType.Segment => segments.TryGetValue(hostId, out var segment)
+                ? !string.IsNullOrWhiteSpace(segment.Title) ? segment.Title : $"{segment.Kind ?? "Segment"} {hostId}"
+                : null,
             _ => null,
         };
+
+        int? SceneIdFor(AffinityHostType hostType, int hostId)
+            => hostType == AffinityHostType.Scene
+                ? hostId
+                : hostType == AffinityHostType.Segment
+                    && segments.TryGetValue(hostId, out var segment)
+                    && segment.HostType == SegmentHostType.Scene
+                    ? segment.HostId
+                    : null;
+
+        double? StartSecFor(AffinityHostType hostType, int hostId)
+            => hostType == AffinityHostType.Segment && segments.TryGetValue(hostId, out var segment) ? segment.StartSec : null;
+
+        double? EndSecFor(AffinityHostType hostType, int hostId)
+            => hostType == AffinityHostType.Segment && segments.TryGetValue(hostId, out var segment) ? segment.EndSec : null;
 
         return rows
             .Select(row => new DynamicGroupResolvedItem(
@@ -465,11 +493,25 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
                 ToKind(row.HostType),
                 TitleFor(row.HostType, row.HostId),
                 row.SortKey,
-                SceneId: row.HostType == AffinityHostType.Scene ? row.HostId : null,
+                SceneId: SceneIdFor(row.HostType, row.HostId),
                 ImageId: row.HostType == AffinityHostType.Image ? row.HostId : null,
-                ChildGroupId: row.HostType == AffinityHostType.Group ? row.HostId : null))
+                ChildGroupId: row.HostType == AffinityHostType.Group ? row.HostId : null,
+                StartSec: StartSecFor(row.HostType, row.HostId),
+                EndSec: EndSecFor(row.HostType, row.HostId)))
             .Where(item => !string.IsNullOrWhiteSpace(item.Title))
             .ToList();
+    }
+
+    protected async Task<DynamicGroupResolveResult> HydratePageAsync(
+        IReadOnlyList<(AffinityHostType HostType, int HostId, double SortKey)> rows,
+        DynamicGroupResolveContext context,
+        CancellationToken ct)
+    {
+        var hydrated = await HydrateAsync(rows, ct);
+        var items = context.Limit <= 0
+            ? new List<DynamicGroupResolvedItem>()
+            : hydrated.Skip(Math.Max(0, context.Offset)).Take(context.Limit).ToList();
+        return new DynamicGroupResolveResult(items, hydrated.Count);
     }
 }
 
@@ -555,7 +597,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             "image" => ResolveImagesAsync(entityConfig, findFilter, localOffset, localLimit, ct),
             "audio" => ResolveAudiosAsync(entityConfig, findFilter, localOffset, localLimit, ct),
             "text" => ResolveTextsAsync(entityConfig, findFilter, localOffset, localLimit, ct),
-            "segment" => ResolveSegmentsAsync(findFilter, localOffset, localLimit, ct),
+            "segment" => ResolveSegmentsAsync(entityConfig, findFilter, localOffset, localLimit, ct),
             "scene" => ResolveScenesAsync(entityConfig, findFilter, localOffset, localLimit, ct),
             _ => Task.FromResult(new DynamicGroupResolveResult([], 0)),
         };
@@ -570,7 +612,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             "image" => (await imageRepository.FindAsync(DeserializeFilter<ImageFilter>(entityConfig.ObjectFilter) ?? new ImageFilter(), findFilter, ct)).TotalCount,
             "audio" => await ApplyAudioFilter(ApplyAudioSearch(db.Audios.AsNoTracking(), findFilter.Q), DeserializeFilter<AudioFilter>(entityConfig.ObjectFilter)).CountAsync(ct),
             "text" => await ApplyTextFilter(ApplyTextSearch(db.TextDocuments.AsNoTracking(), findFilter.Q), DeserializeFilter<TextDocumentFilter>(entityConfig.ObjectFilter)).CountAsync(ct),
-            "segment" => await ApplySegmentSearch(db.Segments.AsNoTracking().Include(segment => segment.Tag), findFilter.Q).CountAsync(ct),
+            "segment" => await ApplySegmentFilter(ApplySegmentSearch(db.VisibleSegments().AsNoTracking().Include(segment => segment.Tag), findFilter.Q), DeserializeFilter<SegmentFilter>(entityConfig.ObjectFilter)).CountAsync(ct),
             _ => 0,
         };
     }
@@ -647,10 +689,11 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             localOffset + index)).ToList(), totalCount);
     }
 
-    private async Task<DynamicGroupResolveResult> ResolveSegmentsAsync(FindFilter findFilter, int localOffset, int localLimit, CancellationToken ct)
+    private async Task<DynamicGroupResolveResult> ResolveSegmentsAsync(FilterEntityConfig entityConfig, FindFilter findFilter, int localOffset, int localLimit, CancellationToken ct)
     {
-        var query = db.Segments.AsNoTracking().Include(segment => segment.Tag).AsQueryable();
+        var query = db.VisibleSegments().AsNoTracking().Include(segment => segment.Tag).AsQueryable();
         query = ApplySegmentSearch(query, findFilter.Q);
+        query = ApplySegmentFilter(query, DeserializeFilter<SegmentFilter>(entityConfig.ObjectFilter));
 
         var desc = findFilter.Direction == SortDirection.Desc;
         query = (findFilter.Sort ?? "created_at") switch
@@ -658,9 +701,53 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             "title" => desc
                 ? query.OrderByDescending(segment => segment.Title ?? (segment.Tag != null ? segment.Tag.Name : null) ?? segment.Kind).ThenByDescending(segment => segment.Id)
                 : query.OrderBy(segment => segment.Title ?? (segment.Tag != null ? segment.Tag.Name : null) ?? segment.Kind).ThenBy(segment => segment.Id),
-            "start" => desc
+            "start" or "start_sec" => desc
                 ? query.OrderByDescending(segment => segment.StartSec).ThenByDescending(segment => segment.Id)
                 : query.OrderBy(segment => segment.StartSec).ThenBy(segment => segment.Id),
+            "end_sec" => desc
+                ? query.OrderByDescending(segment => segment.EndSec ?? segment.StartSec).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.EndSec ?? segment.StartSec).ThenBy(segment => segment.Id),
+            "duration" => desc
+                ? query.OrderByDescending(segment => (segment.EndSec ?? segment.StartSec) - segment.StartSec).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => (segment.EndSec ?? segment.StartSec) - segment.StartSec).ThenBy(segment => segment.Id),
+            "confidence" => desc
+                ? query.OrderByDescending(segment => segment.Confidence ?? -1f).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.Confidence ?? -1f).ThenBy(segment => segment.Id),
+            "kind" => desc
+                ? query.OrderByDescending(segment => segment.Kind ?? string.Empty).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.Kind ?? string.Empty).ThenBy(segment => segment.Id),
+            "source_key" => desc
+                ? query.OrderByDescending(segment => segment.SourceKey).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.SourceKey).ThenBy(segment => segment.Id),
+            "tag_name" => desc
+                ? query.OrderByDescending(segment => segment.Tag != null ? segment.Tag.Name : string.Empty).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.Tag != null ? segment.Tag.Name : string.Empty).ThenBy(segment => segment.Id),
+            "performer" or "segment_performer" => desc
+                ? query.OrderByDescending(segment => segment.Kind != null && segment.Kind.ToLower() == "performer"
+                    ? db.Performers.Where(performer => segment.RefId.HasValue && (long)performer.Id == segment.RefId.Value).Select(performer => performer.Name).FirstOrDefault()
+                    : db.Faces.Where(face => segment.RefId.HasValue && (long)face.Id == segment.RefId.Value).Select(face => face.Performer != null ? face.Performer.Name : null).FirstOrDefault()).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.Kind != null && segment.Kind.ToLower() == "performer"
+                    ? db.Performers.Where(performer => segment.RefId.HasValue && (long)performer.Id == segment.RefId.Value).Select(performer => performer.Name).FirstOrDefault()
+                    : db.Faces.Where(face => segment.RefId.HasValue && (long)face.Id == segment.RefId.Value).Select(face => face.Performer != null ? face.Performer.Name : null).FirstOrDefault()).ThenBy(segment => segment.Id),
+            "ref" or "segment_ref" => desc
+                ? query.OrderByDescending(segment => segment.Kind != null && segment.Kind.ToLower() == "performer"
+                    ? db.Performers.Where(performer => segment.RefId.HasValue && (long)performer.Id == segment.RefId.Value).Select(performer => performer.Name).FirstOrDefault()
+                    : db.Faces.Where(face => segment.RefId.HasValue && (long)face.Id == segment.RefId.Value).Select(face => face.Label).FirstOrDefault()).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.Kind != null && segment.Kind.ToLower() == "performer"
+                    ? db.Performers.Where(performer => segment.RefId.HasValue && (long)performer.Id == segment.RefId.Value).Select(performer => performer.Name).FirstOrDefault()
+                    : db.Faces.Where(face => segment.RefId.HasValue && (long)face.Id == segment.RefId.Value).Select(face => face.Label).FirstOrDefault()).ThenBy(segment => segment.Id),
+            "source_run_id" or "segment_source_run_id" => desc
+                ? query.OrderByDescending(segment => segment.SourceRunId ?? string.Empty).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.SourceRunId ?? string.Empty).ThenBy(segment => segment.Id),
+            "scene_title" or "host_title" => desc
+                ? query.OrderByDescending(segment => db.Scenes.Where(scene => segment.HostType == SegmentHostType.Scene && scene.Id == segment.HostId).Select(scene => scene.Title).FirstOrDefault() ?? string.Empty).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => db.Scenes.Where(scene => segment.HostType == SegmentHostType.Scene && scene.Id == segment.HostId).Select(scene => scene.Title).FirstOrDefault() ?? string.Empty).ThenBy(segment => segment.Id),
+            "host_type" => desc
+                ? query.OrderByDescending(segment => segment.HostType).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.HostType).ThenBy(segment => segment.Id),
+            "host_id" => desc
+                ? query.OrderByDescending(segment => segment.HostId).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => segment.HostId).ThenBy(segment => segment.Id),
             "updated_at" => desc
                 ? query.OrderByDescending(segment => segment.UpdatedAt).ThenByDescending(segment => segment.Id)
                 : query.OrderBy(segment => segment.UpdatedAt).ThenBy(segment => segment.Id),
@@ -853,20 +940,276 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             || (segment.Tag != null && EF.Functions.ILike(segment.Tag.Name, value)));
     }
 
+    private IQueryable<Segment> ApplySegmentFilter(IQueryable<Segment> query, SegmentFilter? filter)
+    {
+        if (filter == null)
+            return query;
+
+        query = FilterHelpers.ApplyString(query, filter.TitleCriterion, segment => segment.Title);
+        query = ApplySegmentSceneCriterion(query, filter.ScenesCriterion);
+        query = ApplySegmentSceneTitleCriterion(query, filter.SceneTitleCriterion);
+        query = ApplySegmentHostTypeCriterion(query, filter.HostTypeCriterion);
+        query = ApplySegmentSourceCategoryCriterion(query, filter.SourceCategoryCriterion);
+        query = FilterHelpers.ApplyString(query, filter.KindCriterion, segment => segment.Kind);
+        query = FilterHelpers.ApplyString(query, filter.SourceKeyCriterion, segment => segment.SourceKey);
+        query = FilterHelpers.ApplyString(query, filter.SourceRunIdCriterion, segment => segment.SourceRunId);
+        query = FilterHelpers.ApplyString(query, filter.ColorHintCriterion, segment => segment.ColorHint);
+        query = ApplySegmentTagCriterion(query, filter.TagsCriterion);
+        query = ApplySegmentFaceCriterion(query, filter.FacesCriterion);
+        query = ApplySegmentPerformerCriterion(query, filter.PerformersCriterion);
+        query = FilterHelpers.ApplyTimestamp(query, filter.CreatedAtCriterion, segment => segment.CreatedAt);
+        query = FilterHelpers.ApplyTimestamp(query, filter.UpdatedAtCriterion, segment => segment.UpdatedAt);
+        query = ApplySegmentBool(query, filter.HasImageCriterion, segment => segment.ImageBlobId != null && segment.ImageBlobId != "");
+        query = ApplySegmentBool(query, filter.HasPayloadCriterion, segment => segment.Payload != null);
+        query = ApplySegmentNumber(query, filter.StartSecCriterion, segment => segment.StartSec);
+        query = ApplySegmentNumber(query, filter.EndSecCriterion, segment => segment.EndSec ?? segment.StartSec);
+        query = ApplySegmentNumber(query, filter.DurationCriterion, segment => (segment.EndSec ?? segment.StartSec) - segment.StartSec);
+        query = ApplySegmentNumber(query, filter.ConfidenceCriterion, segment => (double)(segment.Confidence ?? -1f));
+        return query;
+    }
+
+    private IQueryable<Segment> ApplySegmentSceneCriterion(IQueryable<Segment> query, MultiIdCriterion? criterion)
+    {
+        if (criterion == null || (criterion.Value.Count == 0 && (criterion.Excludes == null || criterion.Excludes.Count == 0)))
+            return query;
+
+        var ids = criterion.Value.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length > 0)
+        {
+            query = criterion.Modifier switch
+            {
+                CriterionModifier.Excludes or CriterionModifier.ExcludesAll => query.Where(segment => segment.HostType != SegmentHostType.Scene || !ids.Contains(segment.HostId)),
+                _ => query.Where(segment => segment.HostType == SegmentHostType.Scene && ids.Contains(segment.HostId)),
+            };
+        }
+
+        var excludedIds = criterion.Excludes?.Where(id => id > 0).Distinct().ToArray() ?? [];
+        if (excludedIds.Length > 0)
+            query = query.Where(segment => segment.HostType != SegmentHostType.Scene || !excludedIds.Contains(segment.HostId));
+
+        return query;
+    }
+
+    private IQueryable<Segment> ApplySegmentSceneTitleCriterion(IQueryable<Segment> query, StringCriterion? criterion)
+    {
+        if (criterion == null)
+            return query;
+
+        var sceneIds = FilterHelpers.ApplyString(db.Scenes.AsNoTracking(), criterion, scene => scene.Title)
+            .Select(scene => scene.Id);
+        return query.Where(segment => segment.HostType == SegmentHostType.Scene && sceneIds.Contains(segment.HostId));
+    }
+
+    private static IQueryable<Segment> ApplySegmentHostTypeCriterion(IQueryable<Segment> query, StringCriterion? criterion)
+    {
+        if (criterion == null || string.IsNullOrWhiteSpace(criterion.Value) || !Enum.TryParse<SegmentHostType>(criterion.Value, true, out var parsed))
+            return query;
+
+        return criterion.Modifier switch
+        {
+            CriterionModifier.NotEquals or CriterionModifier.Excludes => query.Where(segment => segment.HostType != parsed),
+            _ => query.Where(segment => segment.HostType == parsed),
+        };
+    }
+
+    private static IQueryable<Segment> ApplySegmentSourceCategoryCriterion(IQueryable<Segment> query, StringCriterion? criterion)
+    {
+        if (criterion == null || string.IsNullOrWhiteSpace(criterion.Value))
+            return query;
+
+        var normalized = criterion.Value.Trim().ToLowerInvariant();
+        if (normalized is not ("extensions" or "user"))
+            return query;
+
+        var exclude = criterion.Modifier is CriterionModifier.NotEquals or CriterionModifier.Excludes;
+        return normalized switch
+        {
+            "extensions" => exclude
+                ? query.Where(segment => !segment.SourceKey.StartsWith("ext:"))
+                : query.Where(segment => segment.SourceKey.StartsWith("ext:")),
+            "user" => exclude
+                ? query.Where(segment => segment.SourceKey != "user")
+                : query.Where(segment => segment.SourceKey == "user"),
+            _ => query,
+        };
+    }
+
+    private static IQueryable<Segment> ApplySegmentTagCriterion(IQueryable<Segment> query, MultiIdCriterion? criterion)
+        => ApplySegmentNullableIntCriterion(query, criterion, segment => segment.TagId);
+
+    private static IQueryable<Segment> ApplySegmentFaceCriterion(IQueryable<Segment> query, MultiIdCriterion? criterion)
+    {
+        if (criterion == null)
+            return query;
+
+        if (criterion.Modifier == CriterionModifier.IsNull)
+            return query.Where(segment => segment.Kind == null || segment.Kind.ToLower() != "face" || segment.RefId == null);
+        if (criterion.Modifier == CriterionModifier.NotNull)
+            return query.Where(segment => segment.Kind != null && segment.Kind.ToLower() == "face" && segment.RefId != null);
+
+        var ids = criterion.Value.Where(id => id > 0).Select(id => (long)id).Distinct().ToArray();
+        if (ids.Length > 0)
+        {
+            query = criterion.Modifier switch
+            {
+                CriterionModifier.Excludes or CriterionModifier.ExcludesAll => query.Where(segment => segment.Kind == null || segment.Kind.ToLower() != "face" || !segment.RefId.HasValue || !ids.Contains(segment.RefId.Value)),
+                _ => query.Where(segment => segment.Kind != null && segment.Kind.ToLower() == "face" && segment.RefId.HasValue && ids.Contains(segment.RefId.Value)),
+            };
+        }
+
+        var excludedIds = criterion.Excludes?.Where(id => id > 0).Select(id => (long)id).Distinct().ToArray() ?? [];
+        if (excludedIds.Length > 0)
+            query = query.Where(segment => segment.Kind == null || segment.Kind.ToLower() != "face" || !segment.RefId.HasValue || !excludedIds.Contains(segment.RefId.Value));
+
+        return query;
+    }
+
+    private IQueryable<Segment> ApplySegmentPerformerCriterion(IQueryable<Segment> query, MultiIdCriterion? criterion)
+    {
+        if (criterion == null)
+            return query;
+
+        var hasPerformerFaceIds = db.Faces.AsNoTracking()
+            .Where(face => face.PerformerId.HasValue)
+            .Select(face => (long)face.Id);
+
+        if (criterion.Modifier == CriterionModifier.IsNull)
+            return query.Where(segment => !((segment.Kind != null && segment.Kind.ToLower() == "performer" && segment.RefId.HasValue)
+                || (segment.Kind != null && segment.Kind.ToLower() == "face" && segment.RefId.HasValue && hasPerformerFaceIds.Contains(segment.RefId.Value))));
+        if (criterion.Modifier == CriterionModifier.NotNull)
+            return query.Where(segment => (segment.Kind != null && segment.Kind.ToLower() == "performer" && segment.RefId.HasValue)
+                || (segment.Kind != null && segment.Kind.ToLower() == "face" && segment.RefId.HasValue && hasPerformerFaceIds.Contains(segment.RefId.Value)));
+
+        var ids = criterion.Value.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length > 0)
+        {
+            var performerIds = ids.Select(id => (long)id).ToArray();
+            var faceIds = db.Faces.AsNoTracking()
+                .Where(face => face.PerformerId.HasValue && ids.Contains(face.PerformerId.Value))
+                .Select(face => (long)face.Id);
+            query = criterion.Modifier switch
+            {
+                CriterionModifier.Excludes or CriterionModifier.ExcludesAll => query.Where(segment => !((segment.Kind != null && segment.Kind.ToLower() == "performer" && segment.RefId.HasValue && performerIds.Contains(segment.RefId.Value))
+                    || (segment.Kind != null && segment.Kind.ToLower() == "face" && segment.RefId.HasValue && faceIds.Contains(segment.RefId.Value)))),
+                _ => query.Where(segment => (segment.Kind != null && segment.Kind.ToLower() == "performer" && segment.RefId.HasValue && performerIds.Contains(segment.RefId.Value))
+                    || (segment.Kind != null && segment.Kind.ToLower() == "face" && segment.RefId.HasValue && faceIds.Contains(segment.RefId.Value))),
+            };
+        }
+
+        var excludedIds = criterion.Excludes?.Where(id => id > 0).Distinct().ToArray() ?? [];
+        if (excludedIds.Length > 0)
+        {
+            var excludedPerformerIds = excludedIds.Select(id => (long)id).ToArray();
+            var excludedFaceIds = db.Faces.AsNoTracking()
+                .Where(face => face.PerformerId.HasValue && excludedIds.Contains(face.PerformerId.Value))
+                .Select(face => (long)face.Id);
+            query = query.Where(segment => !((segment.Kind != null && segment.Kind.ToLower() == "performer" && segment.RefId.HasValue && excludedPerformerIds.Contains(segment.RefId.Value))
+                || (segment.Kind != null && segment.Kind.ToLower() == "face" && segment.RefId.HasValue && excludedFaceIds.Contains(segment.RefId.Value))));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<Segment> ApplySegmentNullableIntCriterion(IQueryable<Segment> query, MultiIdCriterion? criterion, Expression<Func<Segment, int?>> selector)
+    {
+        if (criterion == null)
+            return query;
+
+        if (criterion.Modifier == CriterionModifier.IsNull || criterion.Modifier == CriterionModifier.NotNull)
+        {
+            var hasValue = Expression.Property(selector.Body, nameof(Nullable<int>.HasValue));
+            Expression predicate = criterion.Modifier == CriterionModifier.IsNull ? Expression.Not(hasValue) : hasValue;
+            return query.Where(Expression.Lambda<Func<Segment, bool>>(predicate, selector.Parameters));
+        }
+
+        var ids = criterion.Value.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length > 0)
+            query = ApplySegmentNullableIntValues(query, selector, ids, criterion.Modifier is CriterionModifier.Excludes or CriterionModifier.ExcludesAll);
+
+        var excludedIds = criterion.Excludes?.Where(id => id > 0).Distinct().ToArray() ?? [];
+        if (excludedIds.Length > 0)
+            query = ApplySegmentNullableIntValues(query, selector, excludedIds, exclude: true);
+
+        return query;
+    }
+
+    private static IQueryable<Segment> ApplySegmentNullableIntValues(IQueryable<Segment> query, Expression<Func<Segment, int?>> selector, int[] ids, bool exclude)
+    {
+        var parameter = selector.Parameters[0];
+        var hasValue = Expression.Property(selector.Body, nameof(Nullable<int>.HasValue));
+        var value = Expression.Property(selector.Body, nameof(Nullable<int>.Value));
+        var contains = Expression.Call(
+            null,
+            typeof(Enumerable).GetMethods().First(method => method.Name == nameof(Enumerable.Contains) && method.GetParameters().Length == 2).MakeGenericMethod(typeof(int)),
+            Expression.Constant(ids),
+            value);
+        var match = Expression.AndAlso(hasValue, contains);
+        Expression predicate = exclude ? Expression.Not(match) : match;
+        return query.Where(Expression.Lambda<Func<Segment, bool>>(predicate, parameter));
+    }
+
+    private static IQueryable<Segment> ApplySegmentBool(IQueryable<Segment> query, BoolCriterion? criterion, Expression<Func<Segment, bool>> selector)
+    {
+        if (criterion == null)
+            return query;
+
+        var body = criterion.Value ? selector.Body : Expression.Not(selector.Body);
+        return query.Where(Expression.Lambda<Func<Segment, bool>>(body, selector.Parameters));
+    }
+
+    private static IQueryable<Segment> ApplySegmentNumber(IQueryable<Segment> query, IntCriterion? criterion, Expression<Func<Segment, double>> selector)
+    {
+        if (criterion == null)
+            return query;
+
+        var parameter = selector.Parameters[0];
+        var left = selector.Body;
+        var value = Expression.Constant((double)criterion.Value);
+        Expression predicate = criterion.Modifier switch
+        {
+            CriterionModifier.NotEquals => Expression.NotEqual(left, value),
+            CriterionModifier.GreaterThan => Expression.GreaterThan(left, value),
+            CriterionModifier.LessThan => Expression.LessThan(left, value),
+            CriterionModifier.Between => Expression.AndAlso(
+                Expression.GreaterThanOrEqual(left, value),
+                Expression.LessThanOrEqual(left, Expression.Constant((double)(criterion.Value2 ?? criterion.Value)))),
+            CriterionModifier.NotBetween => Expression.OrElse(
+                Expression.LessThan(left, value),
+                Expression.GreaterThan(left, Expression.Constant((double)(criterion.Value2 ?? criterion.Value)))),
+            _ => Expression.Equal(left, value)
+        };
+
+        return query.Where(Expression.Lambda<Func<Segment, bool>>(predicate, parameter));
+    }
+
     private IQueryable<Audio> ApplyAudioFilter(IQueryable<Audio> query, AudioFilter? filter)
     {
         if (filter == null)
             return query;
 
         query = FilterHelpers.ApplyString(query, filter.TitleCriterion, audio => audio.Title);
+        query = EngagementQueryHelpers.ApplyRatingCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), RatingHostType.Audio, filter.RatingCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Audio, nameof(UserEntityAffinity.ViewCount), filter.PlayCountCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Audio, nameof(UserEntityAffinity.LikeCount), filter.LikeCounterCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityDoubleAsIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Audio, nameof(UserEntityAffinity.TotalConsumedSec), filter.PlayDurationCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityTimestampCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Audio, nameof(UserEntityAffinity.LastConsumedAt), filter.LastPlayedAtCriterion);
         query = FilterHelpers.ApplyString(query, filter.CodeCriterion, audio => audio.Code);
         query = FilterHelpers.ApplyString(query, filter.DetailsCriterion, audio => audio.Details);
         query = FilterHelpers.ApplyFilePath(query, filter.PathCriterion, audio => audio.Files);
         query = FilterHelpers.ApplyString(query, filter.UrlCriterion, audio => audio.Urls.Select(url => url.Url).FirstOrDefault());
         query = FilterHelpers.ApplyBool(query, filter.OrganizedCriterion, audio => audio.Organized);
+        query = FilterHelpers.ApplyBool(query, filter.HasVideoFilesCriterion, audio => audio.HasVideoFiles);
+        query = FilterHelpers.ApplyBool(query, filter.HasCoverCriterion, audio => audio.ImageBlobId != null && audio.ImageBlobId != string.Empty);
         query = FilterHelpers.ApplyDate(query, filter.DateCriterion, audio => audio.Date);
         query = FilterHelpers.ApplyInt(query, filter.DurationCriterion, audio => (int)audio.MaxDuration);
+        query = FilterHelpers.ApplyLong(query, filter.BitRateCriterion, audio => audio.MaxBitRate);
+        query = FilterHelpers.ApplyLong(query, filter.FileSizeCriterion, audio => audio.MaxFileSize);
+        query = FilterHelpers.ApplyNullableTimestamp(query, filter.FileModTimeCriterion, audio => audio.MaxFileModTime);
         query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, audio => audio.FileCount);
+        query = FilterHelpers.ApplyInt(query, filter.TrackCountCriterion, audio => audio.Tracks.Count);
+        query = FilterHelpers.ApplyString(query, filter.TrackTitleCriterion, audio => audio.Tracks.Select(track => track.Title).FirstOrDefault());
+        query = FilterHelpers.ApplyInt(query, filter.SampleRateCriterion, audio => audio.Files.Select(file => file.SampleRate ?? 0).DefaultIfEmpty(0).Max());
+        query = FilterHelpers.ApplyInt(query, filter.ChannelsCriterion, audio => audio.Files.Select(file => file.Channels ?? 0).DefaultIfEmpty(0).Max());
         query = ApplyAudioEffectiveTagCountCriterion(query, filter.TagCountCriterion);
         query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, audio => audio.AudioPerformers.Count);
         query = ApplyAudioTagCriterion(query, filter.TagsCriterion);
@@ -888,14 +1231,23 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             return query;
 
         query = FilterHelpers.ApplyString(query, filter.TitleCriterion, text => text.Title);
+        query = EngagementQueryHelpers.ApplyRatingCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), RatingHostType.Text, filter.RatingCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.ViewCount), filter.PlayCountCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.LikeCount), filter.LikeCounterCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityDoubleAsIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.TotalConsumedSec), filter.PlayDurationCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityTimestampCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.LastConsumedAt), filter.LastReadAtCriterion);
         query = FilterHelpers.ApplyString(query, filter.CodeCriterion, text => text.Code);
         query = FilterHelpers.ApplyString(query, filter.DetailsCriterion, text => text.Details);
+        query = FilterHelpers.ApplyString(query, filter.ContentCriterion, text => text.SearchText);
         query = FilterHelpers.ApplyFilePath(query, filter.PathCriterion, text => text.Files);
         query = FilterHelpers.ApplyString(query, filter.UrlCriterion, text => text.Urls.Select(url => url.Url).FirstOrDefault());
         query = FilterHelpers.ApplyBool(query, filter.OrganizedCriterion, text => text.Organized);
+        query = FilterHelpers.ApplyBool(query, filter.HasCoverCriterion, text => text.ImageBlobId != null && text.ImageBlobId != string.Empty);
         query = FilterHelpers.ApplyDate(query, filter.DateCriterion, text => text.Date);
         query = FilterHelpers.ApplyInt(query, filter.WordCountCriterion, text => text.MaxWordCount ?? 0);
         query = FilterHelpers.ApplyInt(query, filter.PageCountCriterion, text => text.MaxPageCount ?? 0);
+        query = FilterHelpers.ApplyLong(query, filter.FileSizeCriterion, text => text.MaxFileSize);
+        query = FilterHelpers.ApplyNullableTimestamp(query, filter.FileModTimeCriterion, text => text.MaxFileModTime);
         query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, text => text.FileCount);
         query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, text => text.TextTags.Count);
         query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, text => text.TextPerformers.Count);
@@ -1097,23 +1449,58 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         _ => GroupItemKind.Scene,
     };
 
-    private static IQueryable<Audio> ApplyAudioSort(IQueryable<Audio> query, string? sort, bool desc) => (sort ?? "updated_at") switch
+    private IQueryable<Audio> ApplyAudioSort(IQueryable<Audio> query, string? sort, bool desc)
     {
-        "title" => desc ? query.OrderByDescending(audio => audio.Title ?? audio.MinPath).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.Title ?? audio.MinPath).ThenBy(audio => audio.Id),
-        "date" => desc ? query.OrderByDescending(audio => audio.Date ?? DateOnly.MinValue).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.Date ?? DateOnly.MinValue).ThenBy(audio => audio.Id),
-        "duration" => desc ? query.OrderByDescending(audio => audio.MaxDuration).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.MaxDuration).ThenBy(audio => audio.Id),
-        "created_at" => desc ? query.OrderByDescending(audio => audio.CreatedAt).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.CreatedAt).ThenBy(audio => audio.Id),
-        _ => desc ? query.OrderByDescending(audio => audio.UpdatedAt).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.UpdatedAt).ThenBy(audio => audio.Id),
-    };
+        if (FilterHelpers.TryParseCustomFieldSort(sort, out _, out _))
+            return query.ApplyCustomFieldSort(db, CustomFieldEntityTypes.Audio, sort, desc);
 
-    private static IQueryable<TextDocument> ApplyTextSort(IQueryable<TextDocument> query, string? sort, bool desc) => (sort ?? "updated_at") switch
+        return (sort ?? "updated_at") switch
+        {
+            "title" => desc ? query.OrderByDescending(audio => audio.Title ?? audio.MinPath).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.Title ?? audio.MinPath).ThenBy(audio => audio.Id),
+            "date" => desc ? query.OrderByDescending(audio => audio.Date ?? DateOnly.MinValue).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.Date ?? DateOnly.MinValue).ThenBy(audio => audio.Id),
+            "duration" => desc ? query.OrderByDescending(audio => audio.MaxDuration).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.MaxDuration).ThenBy(audio => audio.Id),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(db, query, EngagementQueryHelpers.CurrentUserId(db), RatingHostType.Audio, desc),
+            "play_count" => EngagementQueryHelpers.ApplyAffinityIntSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Audio, nameof(UserEntityAffinity.ViewCount), desc),
+            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Audio, nameof(UserEntityAffinity.LikeCount), desc),
+            "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Audio, nameof(UserEntityAffinity.LastConsumedAt), desc),
+            "file_size" => desc ? query.OrderByDescending(audio => audio.MaxFileSize).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.MaxFileSize).ThenBy(audio => audio.Id),
+            "file_mod_time" => desc ? query.OrderByDescending(audio => audio.MaxFileModTime).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.MaxFileModTime).ThenBy(audio => audio.Id),
+            "file_count" => desc ? query.OrderByDescending(audio => audio.FileCount).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.FileCount).ThenBy(audio => audio.Id),
+            "path" => desc ? query.OrderByDescending(audio => audio.MaxPath).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.MinPath).ThenBy(audio => audio.Id),
+            "bitrate" or "bit_rate" => desc ? query.OrderByDescending(audio => audio.MaxBitRate).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.MaxBitRate).ThenBy(audio => audio.Id),
+            "track_count" => desc ? query.OrderByDescending(audio => audio.Tracks.Count).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.Tracks.Count).ThenBy(audio => audio.Id),
+            "tag_count" => desc ? query.OrderByDescending(audio => audio.AudioTags.Count).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.AudioTags.Count).ThenBy(audio => audio.Id),
+            "performer_count" => desc ? query.OrderByDescending(audio => audio.AudioPerformers.Count).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.AudioPerformers.Count).ThenBy(audio => audio.Id),
+            "created_at" => desc ? query.OrderByDescending(audio => audio.CreatedAt).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.CreatedAt).ThenBy(audio => audio.Id),
+            _ => desc ? query.OrderByDescending(audio => audio.UpdatedAt).ThenByDescending(audio => audio.Id) : query.OrderBy(audio => audio.UpdatedAt).ThenBy(audio => audio.Id),
+        };
+    }
+
+    private IQueryable<TextDocument> ApplyTextSort(IQueryable<TextDocument> query, string? sort, bool desc)
     {
-        "title" => desc ? query.OrderByDescending(text => text.Title ?? text.MinPath).ThenByDescending(text => text.Id) : query.OrderBy(text => text.Title ?? text.MinPath).ThenBy(text => text.Id),
-        "date" => desc ? query.OrderByDescending(text => text.Date ?? DateOnly.MinValue).ThenByDescending(text => text.Id) : query.OrderBy(text => text.Date ?? DateOnly.MinValue).ThenBy(text => text.Id),
-        "word_count" => desc ? query.OrderByDescending(text => text.MaxWordCount).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxWordCount).ThenBy(text => text.Id),
-        "created_at" => desc ? query.OrderByDescending(text => text.CreatedAt).ThenByDescending(text => text.Id) : query.OrderBy(text => text.CreatedAt).ThenBy(text => text.Id),
-        _ => desc ? query.OrderByDescending(text => text.UpdatedAt).ThenByDescending(text => text.Id) : query.OrderBy(text => text.UpdatedAt).ThenBy(text => text.Id),
-    };
+        if (FilterHelpers.TryParseCustomFieldSort(sort, out _, out _))
+            return query.ApplyCustomFieldSort(db, CustomFieldEntityTypes.Text, sort, desc);
+
+        return (sort ?? "updated_at") switch
+        {
+            "title" => desc ? query.OrderByDescending(text => text.Title ?? text.MinPath).ThenByDescending(text => text.Id) : query.OrderBy(text => text.Title ?? text.MinPath).ThenBy(text => text.Id),
+            "date" => desc ? query.OrderByDescending(text => text.Date ?? DateOnly.MinValue).ThenByDescending(text => text.Id) : query.OrderBy(text => text.Date ?? DateOnly.MinValue).ThenBy(text => text.Id),
+            "word_count" or "words" => desc ? query.OrderByDescending(text => text.MaxWordCount).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxWordCount).ThenBy(text => text.Id),
+            "pages" or "page_count" => desc ? query.OrderByDescending(text => text.MaxPageCount).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxPageCount).ThenBy(text => text.Id),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(db, query, EngagementQueryHelpers.CurrentUserId(db), RatingHostType.Text, desc),
+            "read_count" or "play_count" => EngagementQueryHelpers.ApplyAffinityIntSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.ViewCount), desc),
+            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.LikeCount), desc),
+            "last_read_at" or "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.LastConsumedAt), desc),
+            "file_size" => desc ? query.OrderByDescending(text => text.MaxFileSize).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxFileSize).ThenBy(text => text.Id),
+            "file_mod_time" => desc ? query.OrderByDescending(text => text.MaxFileModTime).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxFileModTime).ThenBy(text => text.Id),
+            "file_count" => desc ? query.OrderByDescending(text => text.FileCount).ThenByDescending(text => text.Id) : query.OrderBy(text => text.FileCount).ThenBy(text => text.Id),
+            "path" => desc ? query.OrderByDescending(text => text.MaxPath).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MinPath).ThenBy(text => text.Id),
+            "tag_count" => desc ? query.OrderByDescending(text => text.TextTags.Count).ThenByDescending(text => text.Id) : query.OrderBy(text => text.TextTags.Count).ThenBy(text => text.Id),
+            "performer_count" => desc ? query.OrderByDescending(text => text.TextPerformers.Count).ThenByDescending(text => text.Id) : query.OrderBy(text => text.TextPerformers.Count).ThenBy(text => text.Id),
+            "created_at" => desc ? query.OrderByDescending(text => text.CreatedAt).ThenByDescending(text => text.Id) : query.OrderBy(text => text.CreatedAt).ThenBy(text => text.Id),
+            _ => desc ? query.OrderByDescending(text => text.UpdatedAt).ThenByDescending(text => text.Id) : query.OrderBy(text => text.UpdatedAt).ThenBy(text => text.Id),
+        };
+    }
 
     private static FilterDynamicGroupQuery ParseQuery(string? queryJson)
     {
@@ -1145,6 +1532,30 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         public Dictionary<string, JsonElement>? ObjectFilters { get; set; }
     }
 
+    private sealed class SegmentFilter
+    {
+        public StringCriterion? SceneTitleCriterion { get; set; }
+        public MultiIdCriterion? ScenesCriterion { get; set; }
+        public StringCriterion? TitleCriterion { get; set; }
+        public StringCriterion? HostTypeCriterion { get; set; }
+        public StringCriterion? SourceCategoryCriterion { get; set; }
+        public StringCriterion? KindCriterion { get; set; }
+        public StringCriterion? SourceKeyCriterion { get; set; }
+        public StringCriterion? SourceRunIdCriterion { get; set; }
+        public StringCriterion? ColorHintCriterion { get; set; }
+        public MultiIdCriterion? TagsCriterion { get; set; }
+        public MultiIdCriterion? PerformersCriterion { get; set; }
+        public MultiIdCriterion? FacesCriterion { get; set; }
+        public BoolCriterion? HasImageCriterion { get; set; }
+        public BoolCriterion? HasPayloadCriterion { get; set; }
+        public IntCriterion? StartSecCriterion { get; set; }
+        public IntCriterion? EndSecCriterion { get; set; }
+        public IntCriterion? DurationCriterion { get; set; }
+        public IntCriterion? ConfidenceCriterion { get; set; }
+        public TimestampCriterion? CreatedAtCriterion { get; set; }
+        public TimestampCriterion? UpdatedAtCriterion { get; set; }
+    }
+
     private sealed record FilterEntityConfig(string EntityType, FindFilter? FindFilter, JsonElement? ObjectFilter);
 }
 
@@ -1158,12 +1569,10 @@ public sealed class SaveForLaterDynamicGroupSource(CoveContext db) : UserScopedD
         var query = Db.UserBookmarks.AsNoTracking()
             .Where(bookmark => bookmark.UserId == context.UserId)
             .OrderByDescending(bookmark => bookmark.CreatedAt);
-        var totalCount = await query.CountAsync(ct);
-        var rows = await query.Skip(context.Offset).Take(context.Limit)
+        var rows = await query
             .Select(bookmark => new { bookmark.HostType, bookmark.HostId, bookmark.CreatedAt })
             .ToListAsync(ct);
-        var items = await HydrateAsync(rows.Select(row => (row.HostType, row.HostId, (double)row.CreatedAt.Ticks)).ToList(), ct);
-        return new DynamicGroupResolveResult(items, totalCount);
+        return await HydratePageAsync(rows.Select(row => (row.HostType, row.HostId, (double)row.CreatedAt.Ticks)).ToList(), context, ct);
     }
 }
 
@@ -1177,12 +1586,10 @@ public sealed class WatchHistoryDynamicGroupSource(CoveContext db) : UserScopedD
         var query = Db.UserEntityAffinities.AsNoTracking()
             .Where(affinity => affinity.UserId == context.UserId && affinity.LastConsumedAt != null)
             .OrderByDescending(affinity => affinity.LastConsumedAt);
-        var totalCount = await query.CountAsync(ct);
-        var rows = await query.Skip(context.Offset).Take(context.Limit)
+        var rows = await query
             .Select(affinity => new { affinity.HostType, affinity.HostId, affinity.LastConsumedAt })
             .ToListAsync(ct);
-        var items = await HydrateAsync(rows.Select(row => (row.HostType, row.HostId, (double)row.LastConsumedAt!.Value.Ticks)).ToList(), ct);
-        return new DynamicGroupResolveResult(items, totalCount);
+        return await HydratePageAsync(rows.Select(row => (row.HostType, row.HostId, (double)row.LastConsumedAt!.Value.Ticks)).ToList(), context, ct);
     }
 }
 
@@ -1195,17 +1602,26 @@ public sealed class ContinueWatchingDynamicGroupSource(CoveContext db) : UserSco
     {
         var query = Db.UserEntityAffinities.AsNoTracking()
             .Where(affinity => affinity.UserId == context.UserId
-                && affinity.HostType == AffinityHostType.Scene
+                && (affinity.HostType == AffinityHostType.Scene || affinity.HostType == AffinityHostType.Audio || affinity.HostType == AffinityHostType.Segment)
                 && affinity.LastConsumedAt != null
-                && affinity.LastPositionSec > 0)
-            .Join(Db.Scenes.AsNoTracking(), affinity => affinity.HostId, scene => scene.Id, (affinity, scene) => new { affinity, scene })
-            .Where(row => row.scene.MaxDuration <= 0 || row.affinity.TotalConsumedSec < row.scene.MaxDuration * 0.95)
-            .OrderByDescending(row => row.affinity.LastConsumedAt);
-        var totalCount = await query.CountAsync(ct);
-        var rows = await query.Skip(context.Offset).Take(context.Limit)
-            .Select(row => new { row.affinity.HostId, row.affinity.LastConsumedAt })
+                && affinity.LastPositionSec > 0
+                && affinity.CompleteCount == 0)
+            .OrderByDescending(affinity => affinity.LastConsumedAt);
+        var rows = await query
+            .Select(affinity => new { affinity.HostType, affinity.HostId, affinity.LastConsumedAt, affinity.TotalConsumedSec })
             .ToListAsync(ct);
-        var items = await HydrateAsync(rows.Select(row => (AffinityHostType.Scene, row.HostId, (double)row.LastConsumedAt!.Value.Ticks)).ToList(), ct);
-        return new DynamicGroupResolveResult(items, totalCount);
+        var sceneIds = rows.Where(row => row.HostType == AffinityHostType.Scene).Select(row => row.HostId).Distinct().ToArray();
+        var sceneDurations = await Db.Scenes.AsNoTracking()
+            .Where(scene => sceneIds.Contains(scene.Id))
+            .Select(scene => new { scene.Id, scene.MaxDuration })
+            .ToDictionaryAsync(scene => scene.Id, scene => scene.MaxDuration, ct);
+        var filteredRows = rows
+            .Where(row => row.HostType != AffinityHostType.Scene
+                || !sceneDurations.TryGetValue(row.HostId, out var maxDuration)
+                || maxDuration <= 0
+                || row.TotalConsumedSec < maxDuration * 0.95)
+            .Select(row => (row.HostType, row.HostId, (double)row.LastConsumedAt!.Value.Ticks))
+            .ToList();
+        return await HydratePageAsync(filteredRows, context, ct);
     }
 }

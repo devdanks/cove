@@ -2,6 +2,7 @@ using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Data;
+using Cove.Data.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,6 +10,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/me/bookmarks")]
+[AllowWithoutPermission]
 public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor principalAccessor) : ControllerBase
 {
     [HttpGet]
@@ -20,9 +22,16 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
         var rows = await db.UserBookmarks.AsNoTracking()
             .Where(bookmark => bookmark.UserId == userId)
             .OrderByDescending(bookmark => bookmark.CreatedAt)
-            .Select(bookmark => new BookmarkDto(bookmark.HostType, bookmark.HostId, bookmark.CreatedAt.ToString("o")))
             .ToListAsync(ct);
-        return Ok(rows);
+
+        var readableIdsByType = new Dictionary<AffinityHostType, HashSet<int>>();
+        foreach (var group in rows.GroupBy(bookmark => bookmark.HostType))
+            readableIdsByType[group.Key] = await GetReadableHostIdsAsync(group.Key, group.Select(bookmark => bookmark.HostId), ct);
+
+        return Ok(rows
+            .Where(bookmark => readableIdsByType.TryGetValue(bookmark.HostType, out var readableIds) && readableIds.Contains(bookmark.HostId))
+            .Select(bookmark => new BookmarkDto(bookmark.HostType, bookmark.HostId, bookmark.CreatedAt.ToString("o")))
+            .ToList());
     }
 
     [HttpPost("batch")]
@@ -34,14 +43,15 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
             return Forbid();
 
         var ids = dto.HostIds.Distinct().ToList();
+        var readableIds = await GetReadableHostIdsAsync(dto.HostType, ids, ct);
         var rows = await db.UserBookmarks.AsNoTracking()
-            .Where(bookmark => bookmark.UserId == userId && bookmark.HostType == dto.HostType && ids.Contains(bookmark.HostId))
+            .Where(bookmark => bookmark.UserId == userId && bookmark.HostType == dto.HostType && readableIds.Contains(bookmark.HostId))
             .ToDictionaryAsync(bookmark => bookmark.HostId, bookmark => bookmark.CreatedAt, ct);
 
         return Ok(ids.Select(id => new BookmarkStateDto(
             dto.HostType,
             id,
-            rows.ContainsKey(id),
+            readableIds.Contains(id) && rows.ContainsKey(id),
             rows.TryGetValue(id, out var createdAt) ? createdAt.ToString("o") : null)).ToList());
     }
 
@@ -95,8 +105,34 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
             AffinityHostType.Studio => await db.Studios.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Gallery => await db.Galleries.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Group => await db.Groups.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
+            AffinityHostType.Segment => await db.VisibleSegments().AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             _ => false,
         };
+
+    private async Task<HashSet<int>> GetReadableHostIdsAsync(AffinityHostType hostType, IEnumerable<int> hostIds, CancellationToken ct)
+    {
+        var ids = hostIds.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length == 0)
+            return [];
+
+        var readableIds = hostType switch
+        {
+            AffinityHostType.Scene => await db.Scenes.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Audio => await db.Audios.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Text => await db.TextDocuments.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Image => await db.Images.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Performer => await db.Performers.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Face => await db.Faces.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Tag => await db.Tags.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Studio => await db.Studios.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Gallery => await db.Galleries.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Group => await db.Groups.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Segment => await db.VisibleSegments().AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            _ => [],
+        };
+
+        return readableIds.ToHashSet();
+    }
 
     private bool HasPermission(AffinityHostType hostType)
     {
@@ -112,6 +148,7 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
             AffinityHostType.Studio => Permissions.StudiosRead,
             AffinityHostType.Gallery => Permissions.GalleriesRead,
             AffinityHostType.Group => Permissions.GroupsRead,
+            AffinityHostType.Segment => Permissions.SegmentsRead,
             _ => null,
         };
         return permission is not null && principalAccessor.Current?.Has(permission) == true;

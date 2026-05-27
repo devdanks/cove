@@ -39,21 +39,75 @@ const SORT_OPTIONS_BY_ENTITY: Record<string, { value: string; label: string }[]>
     { value: "date", label: "Date" },
     { value: "title", label: "Title" },
     { value: "duration", label: "Duration" },
+    { value: "rating", label: "Rating" },
+    { value: "file_size", label: "File Size" },
+    { value: "file_mod_time", label: "File Modified" },
+    { value: "file_count", label: "File Count" },
+    { value: "path", label: "Path" },
+    { value: "bitrate", label: "Bitrate" },
+    { value: "track_count", label: "Track Count" },
+    { value: "tag_count", label: "Tag Count" },
+    { value: "performer_count", label: "Performer Count" },
   ],
   text: [
     { value: "updated_at", label: "Recently Updated" },
     { value: "created_at", label: "Recently Added" },
     { value: "date", label: "Date" },
     { value: "title", label: "Title" },
-    { value: "word_count", label: "Word Count" },
+    { value: "words", label: "Word Count" },
+    { value: "pages", label: "Page Count" },
+    { value: "rating", label: "Rating" },
+    { value: "file_size", label: "File Size" },
+    { value: "file_mod_time", label: "File Modified" },
+    { value: "file_count", label: "File Count" },
+    { value: "path", label: "Path" },
+    { value: "tag_count", label: "Tag Count" },
+    { value: "performer_count", label: "Performer Count" },
   ],
   segment: [
-    { value: "created_at", label: "Recently Added" },
     { value: "updated_at", label: "Recently Updated" },
+    { value: "created_at", label: "Recently Added" },
     { value: "title", label: "Title" },
-    { value: "start", label: "Start Time" },
+    { value: "start_sec", label: "Start Time" },
+    { value: "end_sec", label: "End Time" },
+    { value: "duration", label: "Duration" },
+    { value: "confidence", label: "Confidence" },
+    { value: "kind", label: "Kind" },
+    { value: "source_key", label: "Source" },
+    { value: "source_run_id", label: "Source Run" },
+    { value: "tag_name", label: "Tag" },
+    { value: "performer", label: "Performer" },
+    { value: "ref", label: "Face/Reference" },
+    { value: "scene_title", label: "Scene Title" },
+    { value: "host_type", label: "Host Type" },
+    { value: "host_id", label: "Host ID" },
   ],
 };
+
+const SEGMENT_NUMBER_MODIFIERS = ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"] as const;
+
+const SEGMENT_CRITERIA: CriterionDefinition[] = [
+  { id: "sceneTitle", label: "Scene Title", type: "string", filterKey: "sceneTitleCriterion" },
+  { id: "scenes", label: "Scenes", type: "multiId", entityType: "scenes", filterKey: "scenesCriterion" },
+  { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
+  { id: "hostType", label: "Host Type", type: "enum", filterKey: "hostTypeCriterion", modifiers: ["EQUALS", "NOT_EQUALS"], options: [{ value: "scene", label: "Scene" }, { value: "image", label: "Image" }, { value: "audio", label: "Audio" }] },
+  { id: "sourceCategory", label: "Source Category", type: "enum", filterKey: "sourceCategoryCriterion", modifiers: ["EQUALS", "NOT_EQUALS"], options: [{ value: "extensions", label: "Extensions" }, { value: "user", label: "User-created" }] },
+  { id: "kind", label: "Kind", type: "string", filterKey: "kindCriterion" },
+  { id: "sourceKey", label: "Source", type: "string", filterKey: "sourceKeyCriterion" },
+  { id: "sourceRunId", label: "Source Run", type: "string", filterKey: "sourceRunIdCriterion" },
+  { id: "colorHint", label: "Color Hint", type: "string", filterKey: "colorHintCriterion" },
+  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
+  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
+  { id: "faces", label: "Faces", type: "multiId", entityType: "faces", filterKey: "facesCriterion" },
+  { id: "hasImage", label: "Has Image", type: "bool", filterKey: "hasImageCriterion" },
+  { id: "hasPayload", label: "Has Payload", type: "bool", filterKey: "hasPayloadCriterion" },
+  { id: "startSec", label: "Start Time", type: "duration", filterKey: "startSecCriterion", modifiers: [...SEGMENT_NUMBER_MODIFIERS] },
+  { id: "endSec", label: "End Time", type: "duration", filterKey: "endSecCriterion", modifiers: [...SEGMENT_NUMBER_MODIFIERS] },
+  { id: "duration", label: "Duration", type: "duration", filterKey: "durationCriterion", modifiers: [...SEGMENT_NUMBER_MODIFIERS] },
+  { id: "confidence", label: "Confidence", type: "number", filterKey: "confidenceCriterion", modifiers: [...SEGMENT_NUMBER_MODIFIERS] },
+  { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
+  { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
+];
 
 const ENTITY_OPTIONS = [
   { value: "scene", label: "Scenes" },
@@ -294,6 +348,7 @@ function getCriteriaDefinitions(entityType: DynamicEntityType): CriterionDefinit
     case "image": return IMAGE_CRITERIA;
     case "audio": return AUDIO_CRITERIA;
     case "text": return TEXT_CRITERIA;
+    case "segment": return SEGMENT_CRITERIA;
     default: return null;
   }
 }

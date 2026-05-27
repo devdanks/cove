@@ -30,6 +30,7 @@ const SORT_OPTIONS = [
   { value: "image_count", label: "Image Count" },
   { value: "latest_scene_date", label: "Latest Scene Date" },
   { value: "total_file_size", label: "Total File Size" },
+  { value: "parent_count", label: "Parent Studio Count" },
   { value: "child_count", label: "Substudios Count" },
   { value: "tag_count", label: "Tag Count" },
   { value: "updated_at", label: "Updated At" },

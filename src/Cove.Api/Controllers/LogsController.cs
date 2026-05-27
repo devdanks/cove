@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 
 namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.AuditRead)]
 public class LogsController : ControllerBase
 {
     [HttpGet]

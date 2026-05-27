@@ -28,6 +28,9 @@ import {
   readSceneSelectionCriterion,
   readSegmentsPageContentView,
   readStringCriterion,
+  readStringCriterionValue,
+  readTimestampCriterion,
+  readBoolCriterion,
   createSegmentCriteria,
 } from "./segments/segmentCriteriaDefinitions";
 import { buildSpanTitle } from "./segments/segmentDisplayUtils";
@@ -52,6 +55,22 @@ const DERIVED_SPAN_SORT_OPTIONS = [
   { value: "updated_at", label: "Scene Updated" },
   { value: "created_at", label: "Scene Created" },
   { value: "title", label: "Scene Title" },
+  { value: "span_start", label: "Span Start" },
+  { value: "span_end", label: "Span End" },
+  { value: "span_duration", label: "Span Duration" },
+  { value: "segment_confidence", label: "Segment Confidence" },
+  { value: "segment_kind", label: "Segment Kind" },
+  { value: "segment_source_key", label: "Segment Source" },
+  { value: "segment_source_run_id", label: "Segment Source Run" },
+  { value: "segment_tag_name", label: "Segment Tag" },
+  { value: "segment_performer", label: "Segment Performer" },
+  { value: "segment_ref", label: "Segment Reference" },
+  { value: "segment_created_at", label: "Segment Created" },
+  { value: "segment_updated_at", label: "Segment Updated" },
+  { value: "host_title", label: "Host Title" },
+  { value: "host_type", label: "Host Type" },
+  { value: "host_id", label: "Host ID" },
+  { value: "segment_count", label: "Segment Count" },
 ];
 
 const RAW_SEGMENT_SORT_OPTIONS = [
@@ -148,10 +167,30 @@ export function SegmentsPage({ onNavigate }: Props) {
   const rawFaceIds = useMemo(() => readMultiIdCriterionIds(objectFilter.rawFacesCriterion), [objectFilter.rawFacesCriterion]);
   const rawKind = readStringCriterion(objectFilter.rawKindCriterion);
   const rawSourceKey = readStringCriterion(objectFilter.rawSourceCriterion);
+  const rawTitle = readStringCriterionValue(objectFilter.rawTitleCriterion);
+  const rawHostType = readStringCriterion(objectFilter.rawHostTypeCriterion);
+  const rawSourceRun = readStringCriterionValue(objectFilter.rawSourceRunCriterion);
+  const rawColorHint = readStringCriterionValue(objectFilter.rawColorHintCriterion);
+  const rawHasImage = readBoolCriterion(objectFilter.rawHasImageCriterion);
+  const rawHasPayload = readBoolCriterion(objectFilter.rawHasPayloadCriterion);
+  const rawCreatedAt = readTimestampCriterion(objectFilter.rawCreatedAtCriterion);
+  const rawUpdatedAt = readTimestampCriterion(objectFilter.rawUpdatedAtCriterion);
+  const rawStartSec = readNumberCriterion(objectFilter.rawStartSecCriterion);
+  const rawEndSec = readNumberCriterion(objectFilter.rawEndSecCriterion);
   const rawConfidence = readNumberCriterion(objectFilter.rawConfidenceCriterion);
   const rawDuration = readNumberCriterion(objectFilter.rawDurationCriterion);
   const combinedRawSegmentFilter = useMemo(() => ({
     ...rawSegmentFilter,
+    titleCriterion: rawTitle,
+    hostType: rawHostType || undefined,
+    sourceRunCriterion: rawSourceRun,
+    colorHintCriterion: rawColorHint,
+    hasImage: rawHasImage?.value,
+    hasPayload: rawHasPayload?.value,
+    createdAtCriterion: rawCreatedAt,
+    updatedAtCriterion: rawUpdatedAt,
+    startSecCriterion: rawStartSec,
+    endSecCriterion: rawEndSec,
     tagIds: Array.from(new Set([...rawSegmentFilter.tagIds, ...rawTagIds])),
     performerIds: Array.from(new Set([...rawSegmentFilter.performerIds, ...rawPerformerIds])),
     faceIds: Array.from(new Set([...rawSegmentFilter.faceIds, ...rawFaceIds])),
@@ -161,7 +200,7 @@ export function SegmentsPage({ onNavigate }: Props) {
     durationCriterion: rawDuration ?? rawSegmentFilter.durationCriterion,
     minConfidence: rawSegmentFilter.minConfidence,
     minDurationSec: rawSegmentFilter.minDurationSec,
-  }), [rawConfidence, rawDuration, rawFaceIds, rawKind, rawPerformerIds, rawSegmentFilter, rawSourceKey, rawTagIds]);
+  }), [rawColorHint, rawConfidence, rawCreatedAt, rawDuration, rawEndSec, rawFaceIds, rawHasImage?.value, rawHasPayload?.value, rawHostType, rawKind, rawPerformerIds, rawSegmentFilter, rawSourceKey, rawSourceRun, rawStartSec, rawTagIds, rawTitle, rawUpdatedAt]);
   const derivedSpanQueryActive = isDerivedSpanQueryFilterActive(objectFilter.derivedSpanQuery);
   const q = filter.q?.trim() ?? "";
   const infinitePageSize = filter.perPage === 0;
@@ -328,6 +367,28 @@ export function SegmentsPage({ onNavigate }: Props) {
       tagIds: combinedRawSegmentFilter.tagIds.length > 0 ? combinedRawSegmentFilter.tagIds : undefined,
       kind: combinedRawSegmentFilter.kind,
       sourceKey: combinedRawSegmentFilter.sourceKey,
+      sourceCategory: combinedRawSegmentFilter.sourceCategory,
+      title: combinedRawSegmentFilter.titleCriterion?.value,
+      titleModifier: combinedRawSegmentFilter.titleCriterion?.modifier,
+      hostType: combinedRawSegmentFilter.hostType,
+      sourceRunId: combinedRawSegmentFilter.sourceRunCriterion?.value,
+      sourceRunIdModifier: combinedRawSegmentFilter.sourceRunCriterion?.modifier,
+      colorHint: combinedRawSegmentFilter.colorHintCriterion?.value,
+      colorHintModifier: combinedRawSegmentFilter.colorHintCriterion?.modifier,
+      hasImage: combinedRawSegmentFilter.hasImage,
+      hasPayload: combinedRawSegmentFilter.hasPayload,
+      startSec: combinedRawSegmentFilter.startSecCriterion?.value,
+      startSec2: combinedRawSegmentFilter.startSecCriterion?.value2,
+      startSecModifier: combinedRawSegmentFilter.startSecCriterion?.modifier,
+      endSec: combinedRawSegmentFilter.endSecCriterion?.value,
+      endSec2: combinedRawSegmentFilter.endSecCriterion?.value2,
+      endSecModifier: combinedRawSegmentFilter.endSecCriterion?.modifier,
+      createdAt: combinedRawSegmentFilter.createdAtCriterion?.value,
+      createdAt2: combinedRawSegmentFilter.createdAtCriterion?.value2,
+      createdAtModifier: combinedRawSegmentFilter.createdAtCriterion?.modifier,
+      updatedAt: combinedRawSegmentFilter.updatedAtCriterion?.value,
+      updatedAt2: combinedRawSegmentFilter.updatedAtCriterion?.value2,
+      updatedAtModifier: combinedRawSegmentFilter.updatedAtCriterion?.modifier,
       refIds: combinedRawSegmentFilter.faceIds.length > 0 ? combinedRawSegmentFilter.faceIds : undefined,
       performerIds: combinedRawSegmentFilter.performerIds.length > 0 ? combinedRawSegmentFilter.performerIds : undefined,
       confidence: combinedRawSegmentFilter.confidenceCriterion?.value,
@@ -373,6 +434,27 @@ export function SegmentsPage({ onNavigate }: Props) {
       kind: combinedRawSegmentFilter.kind,
       sourceKey: combinedRawSegmentFilter.sourceKey,
       sourceCategory: combinedRawSegmentFilter.sourceCategory,
+      title: combinedRawSegmentFilter.titleCriterion?.value,
+      titleModifier: combinedRawSegmentFilter.titleCriterion?.modifier,
+      hostType: combinedRawSegmentFilter.hostType,
+      sourceRunId: combinedRawSegmentFilter.sourceRunCriterion?.value,
+      sourceRunIdModifier: combinedRawSegmentFilter.sourceRunCriterion?.modifier,
+      colorHint: combinedRawSegmentFilter.colorHintCriterion?.value,
+      colorHintModifier: combinedRawSegmentFilter.colorHintCriterion?.modifier,
+      hasImage: combinedRawSegmentFilter.hasImage,
+      hasPayload: combinedRawSegmentFilter.hasPayload,
+      startSec: combinedRawSegmentFilter.startSecCriterion?.value,
+      startSec2: combinedRawSegmentFilter.startSecCriterion?.value2,
+      startSecModifier: combinedRawSegmentFilter.startSecCriterion?.modifier,
+      endSec: combinedRawSegmentFilter.endSecCriterion?.value,
+      endSec2: combinedRawSegmentFilter.endSecCriterion?.value2,
+      endSecModifier: combinedRawSegmentFilter.endSecCriterion?.modifier,
+      createdAt: combinedRawSegmentFilter.createdAtCriterion?.value,
+      createdAt2: combinedRawSegmentFilter.createdAtCriterion?.value2,
+      createdAtModifier: combinedRawSegmentFilter.createdAtCriterion?.modifier,
+      updatedAt: combinedRawSegmentFilter.updatedAtCriterion?.value,
+      updatedAt2: combinedRawSegmentFilter.updatedAtCriterion?.value2,
+      updatedAtModifier: combinedRawSegmentFilter.updatedAtCriterion?.modifier,
       refIds: combinedRawSegmentFilter.faceIds.length > 0 ? combinedRawSegmentFilter.faceIds.join(",") : undefined,
       performerIds: combinedRawSegmentFilter.performerIds.length > 0 ? combinedRawSegmentFilter.performerIds.join(",") : undefined,
       minConfidence: combinedRawSegmentFilter.minConfidence,
@@ -433,7 +515,7 @@ export function SegmentsPage({ onNavigate }: Props) {
   });
 
   const derivedInfiniteQuery = usePaginatedInfiniteQuery<DerivedSpanItem>({
-    queryKey: ["segments-page", "search", "infinite", activeProfileId, q, sceneTitle, sort, direction, sceneSelection.includeIds.join(","), sceneSelection.excludeIds.join(","), appliedQuery ?? null],
+    queryKey: ["segments-page", "search", "infinite", activeProfileId, q, sceneTitle, sort, direction, sceneSelection.includeIds.join(","), sceneSelection.excludeIds.join(","), appliedQuery ?? null, combinedRawSegmentFilter],
     queryFn: queryDerivedSpansPage,
     enabled: derivedQueryEnabled && infinitePageSize,
     chunkSize: defaultPerPage,

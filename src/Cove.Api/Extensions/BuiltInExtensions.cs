@@ -11,7 +11,7 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
     public string Id => "com.cove.themes";
     public string Name => "Theme Collection";
     public string Version => "1.0.0";
-    public string? Description => "Built-in theme collection with multiple dark and light themes";
+    public string? Description => "Built-in theme, style, and layout collection";
     public string? Author => "Cove";
     public string? Url => null;
     public string? IconUrl => null;
@@ -23,17 +23,18 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
     {
         ComponentStyles =
         [
-            new UIComponentStyleDef("default", "Default", "Rounded corners, raised cards, subtle transitions"),
-            new UIComponentStyleDef("minimal", "Minimal", "Flat surfaces, no shadows, clean lines"),
+            new UIComponentStyleDef("default", "Default", "Balanced corners, defined cards, restrained motion"),
             new UIComponentStyleDef("glass", "Glass", "Frosted glass surfaces with blur and transparency"),
-            new UIComponentStyleDef("rounded", "Rounded", "Extra rounded corners, pill buttons"),
-            new UIComponentStyleDef("gradient", "Gradient", "Animated gradient background using your active color palette"),
-            new UIComponentStyleDef("animated", "Animated", "Breathing borders, hover glow, shimmer effects on cards and nav"),
+            new UIComponentStyleDef("rounded", "Rounded", "Softer corners and friendlier panel geometry"),
+            new UIComponentStyleDef("gradient", "Gradient", "Accent-driven gradients across cards, surfaces, and the background"),
+            new UIComponentStyleDef("animated", "Animated", "Lift, shimmer, and accent trails on interactive surfaces"),
+            new UIComponentStyleDef("floating", "Floating", "Frameless media-first cards that sit directly on the page"),
         ],
         LayoutStyles =
         [
             new UILayoutStyleDef("default", "Default", "Standard layout with top navigation"),
-            new UILayoutStyleDef("compact", "Compact", "Denser grid, smaller spacing"),
+            new UILayoutStyleDef("detail-theater", "Theater Detail", "Places detail metadata in a right rail so media leads the page"),
+            new UILayoutStyleDef("detail-tabs", "Detail Tabs", "Uses a horizontal tab strip on media detail pages instead of the side icon rail"),
         ],
         Themes =
         [
@@ -109,20 +110,23 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
             new UIThemeDefinition(
                 Id: "dark-emerald",
                 Name: "Dark Emerald",
-                Description: "Dark theme with emerald green accents",
+                Description: "Dark slate with restrained emerald accents and softer contrast",
                 CssVariables: new()
                 {
-                    ["--color-background"] = "#0c1a10",
-                    ["--color-nav"] = "#122018",
-                    ["--color-card"] = "#182a1e",
-                    ["--color-surface"] = "#1e3225",
-                    ["--color-border"] = "#2a4432",
-                    ["--color-accent"] = "#10b981",
-                    ["--color-accent-hover"] = "#059669",
-                    ["--color-foreground"] = "#e6f0e8",
-                    ["--color-secondary"] = "#7ca38a",
-                    ["--color-muted"] = "#4a6350",
-                    ["--color-nav-active"] = "#8b5cf6",
+                    ["--color-background"] = "#0d1412",
+                    ["--color-nav"] = "#111916",
+                    ["--color-card"] = "#18211d",
+                    ["--color-card-hover"] = "#1f2a25",
+                    ["--color-surface"] = "#151d1a",
+                    ["--color-border"] = "#24332d",
+                    ["--color-input"] = "rgba(0, 0, 0, 0.24)",
+                    ["--color-accent"] = "#3bbd83",
+                    ["--color-accent-hover"] = "#5fd6a0",
+                    ["--color-foreground"] = "#eef8f2",
+                    ["--color-secondary"] = "#9db9ad",
+                    ["--color-muted"] = "#648378",
+                    ["--color-overlay"] = "rgba(0, 0, 0, 0.55)",
+                    ["--color-nav-active"] = "#2f9f74",
                 }
             ),
             new UIThemeDefinition(
@@ -349,23 +353,23 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
             new UIThemeDefinition(
                 Id: "cyberpunk",
                 Name: "Cyberpunk",
-                Description: "Neon pink and electric cyan on deep black — retro-futuristic vibes",
+                Description: "Electric cyan, acid gold, and sharp noir surfaces with hard neon contrast",
                 CssVariables: new()
                 {
-                    ["--color-background"] = "#0a0a0f",
-                    ["--color-nav"] = "#0e0a14",
-                    ["--color-card"] = "#16101e",
-                    ["--color-card-hover"] = "#201828",
-                    ["--color-surface"] = "#120e1a",
-                    ["--color-border"] = "#2a1e38",
-                    ["--color-input"] = "#08060c",
-                    ["--color-accent"] = "#ff2d95",
-                    ["--color-accent-hover"] = "#00f0ff",
-                    ["--color-foreground"] = "#f0e8ff",
-                    ["--color-secondary"] = "#a090c0",
-                    ["--color-muted"] = "#5a4878",
-                    ["--color-overlay"] = "rgba(0,0,0,0.6)",
-                    ["--color-nav-active"] = "#b44aff",
+                    ["--color-background"] = "#08090d",
+                    ["--color-nav"] = "#0b0f14",
+                    ["--color-card"] = "#101722",
+                    ["--color-card-hover"] = "#17212e",
+                    ["--color-surface"] = "#0e141f",
+                    ["--color-border"] = "#1f3141",
+                    ["--color-input"] = "#06090d",
+                    ["--color-accent"] = "#00eaff",
+                    ["--color-accent-hover"] = "#ff4fd8",
+                    ["--color-foreground"] = "#f4fbff",
+                    ["--color-secondary"] = "#9fc5d4",
+                    ["--color-muted"] = "#547184",
+                    ["--color-overlay"] = "rgba(0,0,0,0.65)",
+                    ["--color-nav-active"] = "#ffe45c",
                 },
                 BackgroundAnimation: "liquid-drift"
             ),
@@ -396,23 +400,23 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
             new UIThemeDefinition(
                 Id: "synthwave",
                 Name: "Synthwave",
-                Description: "Retro-futuristic pink, magenta, and cyan on deep violet — 80s aesthetic",
+                Description: "Violet dusk, sunset orange, and pop magenta for a warmer 80s neon feel",
                 CssVariables: new()
                 {
-                    ["--color-background"] = "#0d0520",
-                    ["--color-nav"] = "#120828",
-                    ["--color-card"] = "#1a0e30",
-                    ["--color-card-hover"] = "#24163a",
-                    ["--color-surface"] = "#160a2c",
-                    ["--color-border"] = "#2e1850",
-                    ["--color-input"] = "#0a0418",
-                    ["--color-accent"] = "#ff2d95",
-                    ["--color-accent-hover"] = "#00e5ff",
-                    ["--color-foreground"] = "#f8e8ff",
-                    ["--color-secondary"] = "#b080d0",
-                    ["--color-muted"] = "#6a4088",
-                    ["--color-overlay"] = "rgba(0,0,0,0.6)",
-                    ["--color-nav-active"] = "#bf5af2",
+                    ["--color-background"] = "#14071f",
+                    ["--color-nav"] = "#1a0a28",
+                    ["--color-card"] = "#24103a",
+                    ["--color-card-hover"] = "#2f1748",
+                    ["--color-surface"] = "#1d0d31",
+                    ["--color-border"] = "#47205f",
+                    ["--color-input"] = "#0d0418",
+                    ["--color-accent"] = "#ff5cab",
+                    ["--color-accent-hover"] = "#7c6dff",
+                    ["--color-foreground"] = "#fbeeff",
+                    ["--color-secondary"] = "#c09bd8",
+                    ["--color-muted"] = "#7e5a97",
+                    ["--color-overlay"] = "rgba(0,0,0,0.62)",
+                    ["--color-nav-active"] = "#ffb86b",
                 },
                 BackgroundAnimation: "liquid-drift"
             ),
@@ -438,6 +442,30 @@ public class ThemeCollectionExtension : IExtension, IUIExtension
                     ["--color-nav-active"] = "#ef4444",
                 },
                 BackgroundAnimation: "liquid-drift"
+            ),
+            new UIThemeDefinition(
+                Id: "cinema-dark",
+                Name: "Cinema Dark",
+                Description: "Dark video-first browsing with red accents and floating media tiles",
+                CssVariables: new()
+                {
+                    ["--color-background"] = "#0f0f0f",
+                    ["--color-nav"] = "#111111",
+                    ["--color-card"] = "#181818",
+                    ["--color-card-hover"] = "#242424",
+                    ["--color-surface"] = "#1a1a1a",
+                    ["--color-border"] = "#303030",
+                    ["--color-input"] = "#121212",
+                    ["--color-accent"] = "#ff0033",
+                    ["--color-accent-hover"] = "#ff4e45",
+                    ["--color-foreground"] = "#f1f1f1",
+                    ["--color-secondary"] = "#c0c0c0",
+                    ["--color-muted"] = "#8b8b8b",
+                    ["--color-overlay"] = "rgba(0,0,0,0.7)",
+                    ["--color-nav-active"] = "#ffffff",
+                },
+                ComponentStyle: "floating",
+                LayoutStyle: "detail-theater detail-tabs"
             ),
         ]
     };

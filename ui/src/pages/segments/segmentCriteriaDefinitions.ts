@@ -1,8 +1,9 @@
 import type { CriterionDefinition } from "../../components/FilterDialog";
-import type { CriterionModifier, IntCriterion, MultiIdCriterion } from "../../api/types";
+import type { BoolCriterion, CriterionModifier, IntCriterion, MultiIdCriterion, StringCriterion, TimestampCriterion } from "../../api/types";
 import type { SegmentsPageContentView } from "./types";
 
 const SEGMENT_NUMBER_MODIFIERS: CriterionModifier[] = ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"];
+const SEGMENT_INCLUDE_ONLY_MODIFIERS: CriterionModifier[] = ["INCLUDES"];
 
 export interface SegmentCriteriaOptions {
   kindOptions?: { value: string; label: string }[];
@@ -17,11 +18,21 @@ export const SEGMENT_CRITERIA: CriterionDefinition[] = [
 export function createSegmentCriteria(options: SegmentCriteriaOptions = {}): CriterionDefinition[] {
   return [
   ...SEGMENT_CRITERIA,
-  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "rawTagsCriterion" },
-  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "rawPerformersCriterion" },
-  { id: "faces", label: "Faces", type: "multiId", entityType: "faces", filterKey: "rawFacesCriterion" },
+  { id: "title", label: "Segment Title", type: "string", filterKey: "rawTitleCriterion" },
+  { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "rawCreatedAtCriterion" },
+  { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "rawUpdatedAtCriterion" },
+  { id: "startSec", label: "Start Time", type: "duration", filterKey: "rawStartSecCriterion", modifiers: SEGMENT_NUMBER_MODIFIERS },
+  { id: "endSec", label: "End Time", type: "duration", filterKey: "rawEndSecCriterion", modifiers: SEGMENT_NUMBER_MODIFIERS },
+  { id: "hostType", label: "Host Type", type: "enum", filterKey: "rawHostTypeCriterion", modifiers: ["EQUALS"], options: [{ value: "scene", label: "Scene" }] },
+  { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "rawTagsCriterion", modifiers: SEGMENT_INCLUDE_ONLY_MODIFIERS },
+  { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "rawPerformersCriterion", modifiers: SEGMENT_INCLUDE_ONLY_MODIFIERS },
+  { id: "faces", label: "Faces", type: "multiId", entityType: "faces", filterKey: "rawFacesCriterion", modifiers: SEGMENT_INCLUDE_ONLY_MODIFIERS },
   { id: "kind", label: "Segment Type", type: "enum", filterKey: "rawKindCriterion", modifiers: ["EQUALS"], options: options.kindOptions ?? [] },
   { id: "source", label: "Source", type: "enum", filterKey: "rawSourceCriterion", modifiers: ["EQUALS"], options: options.sourceOptions ?? [] },
+  { id: "sourceRun", label: "Source Run", type: "string", filterKey: "rawSourceRunCriterion" },
+  { id: "colorHint", label: "Color Hint", type: "string", filterKey: "rawColorHintCriterion" },
+  { id: "hasImage", label: "Has Image", type: "bool", filterKey: "rawHasImageCriterion" },
+  { id: "hasPayload", label: "Has Payload", type: "bool", filterKey: "rawHasPayloadCriterion" },
   { id: "confidence", label: "Confidence", type: "number", filterKey: "rawConfidenceCriterion", modifiers: SEGMENT_NUMBER_MODIFIERS },
   { id: "duration", label: "Duration", type: "duration", filterKey: "rawDurationCriterion", modifiers: SEGMENT_NUMBER_MODIFIERS },
   ];
@@ -119,6 +130,17 @@ export interface SegmentNumberCriterionValue {
   value2?: number;
 }
 
+export interface SegmentStringCriterionValue {
+  modifier?: CriterionModifier;
+  value?: string;
+}
+
+export interface SegmentTimestampCriterionValue {
+  modifier?: CriterionModifier;
+  value?: string;
+  value2?: string;
+}
+
 export function readNumberCriterion(value: unknown): SegmentNumberCriterionValue | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
@@ -134,4 +156,46 @@ export function readNumberCriterion(value: unknown): SegmentNumberCriterionValue
     value: criterion.value,
     value2: typeof criterion.value2 === "number" && Number.isFinite(criterion.value2) ? criterion.value2 : undefined,
   };
+}
+
+export function readStringCriterionValue(value: unknown): SegmentStringCriterionValue | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const criterion = value as Partial<StringCriterion>;
+  const modifier = criterion.modifier;
+  const text = typeof criterion.value === "string" ? criterion.value.trim() : "";
+  if ((modifier === "IS_NULL" || modifier === "NOT_NULL") || text.length > 0) {
+    return { modifier, value: text };
+  }
+
+  return undefined;
+}
+
+export function readTimestampCriterion(value: unknown): SegmentTimestampCriterionValue | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const criterion = value as Partial<TimestampCriterion>;
+  const text = typeof criterion.value === "string" ? criterion.value.trim() : "";
+  if (text.length === 0) {
+    return undefined;
+  }
+
+  return {
+    modifier: criterion.modifier,
+    value: text,
+    value2: typeof criterion.value2 === "string" && criterion.value2.trim().length > 0 ? criterion.value2.trim() : undefined,
+  };
+}
+
+export function readBoolCriterion(value: unknown): BoolCriterion | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const criterion = value as Partial<BoolCriterion>;
+  return typeof criterion.value === "boolean" ? { value: criterion.value } : undefined;
 }

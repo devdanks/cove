@@ -13,7 +13,7 @@ import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
-import type { FieldProvenance } from "../api/types";
+import type { FieldProvenance, SceneHistory } from "../api/types";
 import { InteractiveRating } from "../components/Rating";
 import { CustomFieldsDisplay, FieldProvenanceHover, formatDate, formatDuration, formatFileSize, TagBadge, resolveTagProvenance } from "../components/shared";
 import { EntityReferencePopovers, PerformerTile } from "../components/EntityCards";
@@ -114,6 +114,11 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   }, [audio, queryClient, trackAudioActivity]);
 
   const primaryFile = useMemo(() => pickPrimaryAudioFile(audio), [audio]);
+  const audioHistoryQuery = useQuery({
+    queryKey: ["audio", id, "history"],
+    queryFn: () => audios.getHistory(id),
+    enabled: activeTab === "history" && canEngageAudio,
+  });
   const displayTitle = audio ? getAudioDisplayTitle(audio) : `Audio ${id}`;
   const subtitleText = useMemo(() => {
     if (!audio) {
@@ -190,7 +195,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
           resumeTime={audioEngagement?.resumeTime}
           sceneId={audio.id}
           trackingEnabled={trackAudioActivity}
-          playbackTracking={{ hostType: "audio", hostId: audio.id, scopeKey: `audio:${audio.id}` }}
+          playbackTracking={{ hostType: "audio", hostId: audio.id, surface: "detail", scopeKey: `audio:${audio.id}` }}
           onEnded={() => queryClient.invalidateQueries({ queryKey: ["engagement", "audio", audio.id] })}
         />
       </div>
@@ -219,7 +224,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
             duration={audio.maxDuration || primaryFile.duration}
             resumeTime={audioEngagement?.resumeTime}
             trackingEnabled={trackAudioActivity}
-            playbackTracking={{ hostType: "audio", hostId: audio.id, scopeKey: `audio:${audio.id}` }}
+            playbackTracking={{ hostType: "audio", hostId: audio.id, surface: "detail", scopeKey: `audio:${audio.id}` }}
             onEnded={() => queryClient.invalidateQueries({ queryKey: ["engagement", "audio", audio.id] })}
           />
         </div>
@@ -540,6 +545,8 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
             playCount={audioPlayCount}
             playDuration={audioPlayDuration}
             pageVisitCount={audioPageVisitCount}
+            history={audioHistoryQuery.data}
+            historyLoading={audioHistoryQuery.isLoading}
             createdAt={audio.createdAt}
             updatedAt={audio.updatedAt}
           />
@@ -612,15 +619,20 @@ function AudioHistoryTab({
   playCount,
   playDuration,
   pageVisitCount,
+  history,
+  historyLoading,
   createdAt,
   updatedAt,
 }: {
   playCount: number;
   playDuration: number;
   pageVisitCount: number;
+  history?: SceneHistory;
+  historyLoading?: boolean;
   createdAt: string;
   updatedAt: string;
 }) {
+  const sessions = history?.sessions ?? [];
   return (
     <div className="space-y-6 text-sm">
       <section>
@@ -631,7 +643,32 @@ function AudioHistoryTab({
           <div><span className="text-muted">Play Count:</span> <span className="text-foreground">{playCount}</span></div>
           <div><span className="text-muted">Listened:</span> <span className="text-foreground">{formatDuration(playDuration)}</span></div>
           <div><span className="text-muted">Page Visits:</span> <span className="text-foreground">{pageVisitCount}</span></div>
+          {history ? <div><span className="text-muted">Distinct Listened:</span> <span className="text-foreground">{formatDuration(history.totalDistinctWatchedSec ?? 0)}</span></div> : null}
         </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">Sessions</h3>
+        {historyLoading ? (
+          <p className="text-muted">Loading history...</p>
+        ) : sessions.length > 0 ? (
+          <div className="space-y-2">
+            {sessions.slice(0, 8).map((session) => (
+              <div key={session.sessionId} className="rounded-md border border-border bg-card/60 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-foreground">{formatDuration(session.totalWatchedSec)}</span>
+                  <span className="text-xs uppercase text-muted">{session.state}</span>
+                </div>
+                <div className="mt-1 text-xs text-muted">
+                  {formatDate(session.startedAt)}
+                  {session.lastPositionSec != null ? ` • Resume ${formatDuration(session.lastPositionSec)}` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-muted">No playback sessions recorded yet.</p>
+        )}
       </section>
 
       <div className="grid grid-cols-2 gap-2">

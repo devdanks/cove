@@ -12,12 +12,19 @@
 // Types
 export type {
   EntityType,
+  CriterionModifier,
+  ListCriterionType,
+  CustomFieldType,
   EntityTabProps,
   SlotProps,
   PageProps,
   DetailPageProps,
   NavigateTarget,
   FindFilter,
+  ListFilterOption,
+  ListFilterContribution,
+  ListSortContribution,
+  UIManifestListContributions,
   ExtensionModule,
 } from "./types";
 

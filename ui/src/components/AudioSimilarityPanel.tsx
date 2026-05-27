@@ -6,6 +6,7 @@ import type { AiAudioSimilarScene } from "../api/types";
 import { formatDuration } from "./shared";
 import { EntityCardGrid } from "./EntityCardGrid";
 import { SceneCard } from "./EntityCards";
+import { useManualContext } from "./ManualContext";
 
 const SIMILAR_PER_PAGE = 8;
 const AVAILABILITY_PER_PAGE = 1;
@@ -27,6 +28,7 @@ export function useSceneAudioSimilarityAvailable(sceneId?: number) {
 }
 
 export function SceneAudioSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {
+  useManualContext(["panel:audio-similarity", "feature:cove.ai.audio.similarity"]);
   const audioSimilarity = useAudioSimilarityApi();
   const similarScenes = useQuery({
     queryKey: ["audio-similarity", "scene", sceneId, "similar-scenes"],

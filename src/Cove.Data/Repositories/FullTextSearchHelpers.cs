@@ -27,14 +27,12 @@ public static class FullTextSearchHelpers
         if (!SupportsPostgresFullText(db))
             return FilterHelpers.ApplyBooleanKeywordSearch(query, normalized, fallbackSelectors);
 
-        var fullTextQuery = query.Where(entity => EF.Property<NpgsqlTsVector>(entity, SearchVectorProperty)
+        return query.Where(entity => EF.Property<NpgsqlTsVector>(entity, SearchVectorProperty)
             .Matches(EF.Functions.WebSearchToTsQuery(SearchConfig, normalized)));
-        if (fallbackSelectors.Length == 0)
-            return fullTextQuery;
-
-        var containsQuery = FilterHelpers.ApplyBooleanKeywordSearch(query, normalized, fallbackSelectors);
-        return fullTextQuery.Concat(containsQuery).Distinct();
     }
+
+    public static bool ShouldOrderByRelevance(CoveContext db, string? search, string? explicitSort)
+        => IsActive(db, search) && string.IsNullOrWhiteSpace(explicitSort);
 
     public static IQueryable<T> OrderByRelevance<T>(CoveContext db, IQueryable<T> query, string? search)
         where T : BaseEntity

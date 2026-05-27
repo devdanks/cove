@@ -21,39 +21,50 @@ public class AutoTagService(
         {
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
-            var performers = FilterCandidates(await LoadPerformersAsync(db, ct), performerIds);
-            var studios = FilterCandidates(await LoadStudiosAsync(db, ct), studioIds);
-            var tags = FilterCandidates(await LoadTagsAsync(db, ct), tagIds);
-            var workItems = await LoadContentWorkItemsAsync(db, ct);
             var matchers = extensionManager.GetAutoTagMatchers();
+            var matcherLookup = BuildMatcherLookup(matchers);
+            var performers = BuildCandidateSet(FilterCandidates(await LoadPerformersAsync(db, ct), performerIds), AutoTagEntityKind.Performer, matcherLookup);
+            var studios = BuildCandidateSet(FilterCandidates(await LoadStudiosAsync(db, ct), studioIds), AutoTagEntityKind.Studio, matcherLookup);
+            var tags = BuildCandidateSet(FilterCandidates(await LoadTagsAsync(db, ct), tagIds), AutoTagEntityKind.Tag, matcherLookup);
+            var workItems = await LoadContentWorkItemsAsync(db, ct);
 
             var updatedItems = 0;
             var createdAssociations = 0;
             var total = workItems.Count;
+            var autoDetectChanges = db.ChangeTracker.AutoDetectChangesEnabled;
+            db.ChangeTracker.AutoDetectChangesEnabled = false;
 
-            for (var index = 0; index < total; index++)
+            try
             {
-                ct.ThrowIfCancellationRequested();
-
-                var workItem = workItems[index];
-                var itemAssociations = 0;
-                itemAssociations += await ApplyPerformerMatchesAsync(workItem, performers, matchers, ct);
-                itemAssociations += await ApplyStudioMatchesAsync(workItem, studios, matchers, ct);
-                itemAssociations += await ApplyTagMatchesAsync(workItem, tags, matchers, ct);
-
-                if (itemAssociations > 0)
+                for (var index = 0; index < total; index++)
                 {
-                    updatedItems++;
-                    createdAssociations += itemAssociations;
-                }
+                    ct.ThrowIfCancellationRequested();
 
-                progress.Report(total == 0 ? 1d : (double)(index + 1) / total, $"{workItem.Candidate.ContentType}: {workItem.Candidate.DisplayName ?? workItem.Candidate.ContentId.ToString()} ({index + 1}/{Math.Max(total, 1)})");
+                    var workItem = workItems[index];
+                    var itemAssociations = 0;
+                    itemAssociations += await ApplyPerformerMatchesAsync(workItem, performers, ct);
+                    itemAssociations += await ApplyStudioMatchesAsync(workItem, studios, ct);
+                    itemAssociations += await ApplyTagMatchesAsync(workItem, tags, ct);
+
+                    if (itemAssociations > 0)
+                    {
+                        updatedItems++;
+                        createdAssociations += itemAssociations;
+                    }
+
+                    progress.Report(total == 0 ? 1d : (double)(index + 1) / total, $"{workItem.Candidate.ContentType}: {workItem.Candidate.DisplayName ?? workItem.Candidate.ContentId.ToString()} ({index + 1}/{Math.Max(total, 1)})");
+                }
+            }
+            finally
+            {
+                db.ChangeTracker.AutoDetectChangesEnabled = autoDetectChanges;
             }
 
+            db.ChangeTracker.DetectChanges();
             await db.SaveChangesAsync(ct);
             logger.LogInformation("Auto-tag complete: {Associations} associations across {Items} content items", createdAssociations, updatedItems);
 
-            await RunLegacyParticipantsAsync(progress, performers, studios, tags, ct);
+            await RunLegacyParticipantsAsync(progress, performers.RawCandidates, studios.RawCandidates, tags.RawCandidates, ct);
         }, exclusive: false);
     }
 
@@ -126,6 +137,59 @@ public class AutoTagService(
         return candidate.Aliases?.Any(alias => NormalizeText(alias).Contains(normalizedSelector, StringComparison.Ordinal)) == true;
     }
 
+    private static Dictionary<AutoTagEntityKind, List<IAutoTagMatcher>> BuildMatcherLookup(IReadOnlyList<IAutoTagMatcher> matchers)
+    {
+        var lookup = new Dictionary<AutoTagEntityKind, List<IAutoTagMatcher>>
+        {
+            [AutoTagEntityKind.Performer] = [],
+            [AutoTagEntityKind.Studio] = [],
+            [AutoTagEntityKind.Tag] = [],
+        };
+
+        foreach (var matcher in matchers)
+        {
+            foreach (var kind in matcher.SupportedEntities.Distinct())
+            {
+                if (lookup.TryGetValue(kind, out var relevantMatchers))
+                    relevantMatchers.Add(matcher);
+            }
+        }
+
+        return lookup;
+    }
+
+    private static AutoTagCandidateSet BuildCandidateSet(
+        IReadOnlyList<AutoTagEntityCandidate> candidates,
+        AutoTagEntityKind entityKind,
+        IReadOnlyDictionary<AutoTagEntityKind, List<IAutoTagMatcher>> matcherLookup)
+    {
+        var prepared = candidates.Select(PrepareCandidate).ToList();
+        return new AutoTagCandidateSet(prepared, matcherLookup.TryGetValue(entityKind, out var matchers) ? matchers : []);
+    }
+
+    private static PreparedAutoTagEntityCandidate PrepareCandidate(AutoTagEntityCandidate candidate)
+    {
+        var phrases = new[] { candidate.Name }
+            .Concat(candidate.Aliases ?? [])
+            .Select(PreparePhrase)
+            .Where(phrase => phrase != null)
+            .Select(phrase => phrase!)
+            .ToList();
+
+        return new PreparedAutoTagEntityCandidate(candidate, phrases);
+    }
+
+    private static PreparedAutoTagPhrase? PreparePhrase(string? rawPhrase)
+    {
+        var normalizedPhrase = NormalizeText(rawPhrase);
+        if (string.IsNullOrWhiteSpace(normalizedPhrase))
+            return null;
+
+        var compactLength = normalizedPhrase.Replace(" ", string.Empty, StringComparison.Ordinal).Length;
+        var tokens = normalizedPhrase.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return new PreparedAutoTagPhrase(normalizedPhrase, compactLength, tokens);
+    }
+
     private async Task<List<AutoTagContentWorkItem>> LoadContentWorkItemsAsync(CoveContext db, CancellationToken ct)
     {
         var scenes = await db.Scenes
@@ -195,72 +259,71 @@ public class AutoTagService(
         return NormalizeText(string.Join(' ', parts.Where(part => !string.IsNullOrWhiteSpace(part))));
     }
 
-    private async Task<int> ApplyPerformerMatchesAsync(AutoTagContentWorkItem workItem, IReadOnlyList<AutoTagEntityCandidate> performers, IReadOnlyList<IAutoTagMatcher> matchers, CancellationToken ct)
+    private async Task<int> ApplyPerformerMatchesAsync(AutoTagContentWorkItem workItem, AutoTagCandidateSet performers, CancellationToken ct)
     {
         var added = 0;
-        foreach (var performer in performers)
+        foreach (var performer in performers.GetCandidates(workItem.Candidate.SearchText))
         {
-            if (HasPerformer(workItem.Entity, performer.EntityId))
+            if (HasPerformer(workItem.Entity, performer.Candidate.EntityId))
                 continue;
 
-            if (!await IsMatchAsync(performer, workItem.Candidate, matchers, ct))
+            if (!await IsMatchAsync(performer, workItem.Candidate, performers.Matchers, ct))
                 continue;
 
-            AddPerformer(workItem.Entity, performer.EntityId);
+            AddPerformer(workItem.Entity, performer.Candidate.EntityId);
             added++;
         }
 
         return added;
     }
 
-    private async Task<int> ApplyStudioMatchesAsync(AutoTagContentWorkItem workItem, IReadOnlyList<AutoTagEntityCandidate> studios, IReadOnlyList<IAutoTagMatcher> matchers, CancellationToken ct)
+    private async Task<int> ApplyStudioMatchesAsync(AutoTagContentWorkItem workItem, AutoTagCandidateSet studios, CancellationToken ct)
     {
         if (HasStudio(workItem.Entity))
             return 0;
 
-        foreach (var studio in studios)
+        foreach (var studio in studios.GetCandidates(workItem.Candidate.SearchText))
         {
-            if (!await IsMatchAsync(studio, workItem.Candidate, matchers, ct))
+            if (!await IsMatchAsync(studio, workItem.Candidate, studios.Matchers, ct))
                 continue;
 
-            SetStudio(workItem.Entity, studio.EntityId);
+            SetStudio(workItem.Entity, studio.Candidate.EntityId);
             return 1;
         }
 
         return 0;
     }
 
-    private async Task<int> ApplyTagMatchesAsync(AutoTagContentWorkItem workItem, IReadOnlyList<AutoTagEntityCandidate> tags, IReadOnlyList<IAutoTagMatcher> matchers, CancellationToken ct)
+    private async Task<int> ApplyTagMatchesAsync(AutoTagContentWorkItem workItem, AutoTagCandidateSet tags, CancellationToken ct)
     {
         var added = 0;
-        foreach (var tag in tags)
+        foreach (var tag in tags.GetCandidates(workItem.Candidate.SearchText))
         {
-            if (HasTag(workItem.Entity, tag.EntityId))
+            if (HasTag(workItem.Entity, tag.Candidate.EntityId))
                 continue;
 
-            if (!await IsMatchAsync(tag, workItem.Candidate, matchers, ct))
+            if (!await IsMatchAsync(tag, workItem.Candidate, tags.Matchers, ct))
                 continue;
 
-            AddTag(workItem.Entity, tag.EntityId);
+            AddTag(workItem.Entity, tag.Candidate.EntityId);
             if (TryGetTagProvenanceHost(workItem.Entity, out var hostType, out var hostId))
-                await tagProvenanceService.RecordAsync(hostType, hostId, tag.EntityId, "system", cancellationToken: ct);
+                await tagProvenanceService.RecordAsync(hostType, hostId, tag.Candidate.EntityId, "system", cancellationToken: ct);
             added++;
         }
 
         return added;
     }
 
-    private async Task<bool> IsMatchAsync(AutoTagEntityCandidate entity, AutoTagContentCandidate content, IReadOnlyList<IAutoTagMatcher> matchers, CancellationToken ct)
+    private async Task<bool> IsMatchAsync(PreparedAutoTagEntityCandidate entity, AutoTagContentCandidate content, IReadOnlyList<IAutoTagMatcher> matchers, CancellationToken ct)
     {
         if (HasBuiltInTextMatch(entity, content.SearchText))
             return true;
 
-        var relevantMatchers = matchers.Where(matcher => matcher.SupportedEntities.Contains(entity.EntityKind)).ToList();
-        if (relevantMatchers.Count == 0)
+        if (matchers.Count == 0)
             return false;
 
-        var request = new AutoTagMatchRequest(entity, content);
-        foreach (var matcher in relevantMatchers)
+        var request = new AutoTagMatchRequest(entity.Candidate, content);
+        foreach (var matcher in matchers)
         {
             try
             {
@@ -270,31 +333,28 @@ public class AutoTagService(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Auto-tag matcher {MatcherId} failed for {EntityKind} {EntityId}", matcher.Id, entity.EntityKind, entity.EntityId);
+                logger.LogWarning(ex, "Auto-tag matcher {MatcherId} failed for {EntityKind} {EntityId}", matcher.Id, entity.Candidate.EntityKind, entity.Candidate.EntityId);
             }
         }
 
         return false;
     }
 
-    private static bool HasBuiltInTextMatch(AutoTagEntityCandidate entity, string normalizedSearchText)
+    private static bool HasBuiltInTextMatch(PreparedAutoTagEntityCandidate entity, string normalizedSearchText)
     {
-        var names = new[] { entity.Name }.Concat(entity.Aliases ?? []);
-        return names.Any(name => ContainsNormalizedPhrase(normalizedSearchText, name));
+        var paddedSearchText = $" {normalizedSearchText} ";
+        return entity.Phrases.Any(phrase => ContainsNormalizedPhrase(paddedSearchText, phrase));
     }
 
-    private static bool ContainsNormalizedPhrase(string normalizedSearchText, string rawPhrase)
+    private static bool ContainsNormalizedPhrase(string paddedSearchText, PreparedAutoTagPhrase phrase)
     {
-        var normalizedPhrase = NormalizeText(rawPhrase);
-        if (normalizedPhrase.Replace(" ", string.Empty, StringComparison.Ordinal).Length < 3)
+        if (phrase.CompactLength < 3)
             return false;
 
-        var paddedSearchText = $" {normalizedSearchText} ";
-        if (paddedSearchText.Contains($" {normalizedPhrase} ", StringComparison.Ordinal))
+        if (paddedSearchText.Contains($" {phrase.NormalizedPhrase} ", StringComparison.Ordinal))
             return true;
 
-        var tokens = normalizedPhrase.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return tokens.Length > 1 && tokens.All(token => token.Length > 1 && paddedSearchText.Contains($" {token} ", StringComparison.Ordinal));
+        return phrase.Tokens.Length > 1 && phrase.Tokens.All(token => token.Length > 1 && paddedSearchText.Contains($" {token} ", StringComparison.Ordinal));
     }
 
     private static string NormalizeText(string? value)
@@ -459,6 +519,65 @@ public class AutoTagService(
     }
 
     private sealed record AutoTagContentWorkItem(AutoTagContentCandidate Candidate, object Entity);
+
+    private sealed record PreparedAutoTagPhrase(string NormalizedPhrase, int CompactLength, string[] Tokens);
+    private sealed record PreparedAutoTagEntityCandidate(AutoTagEntityCandidate Candidate, IReadOnlyList<PreparedAutoTagPhrase> Phrases);
+
+    private sealed class AutoTagCandidateSet
+    {
+        private readonly Dictionary<string, List<PreparedAutoTagEntityCandidate>> candidatesByToken = new(StringComparer.Ordinal);
+
+        public AutoTagCandidateSet(IReadOnlyList<PreparedAutoTagEntityCandidate> candidates, IReadOnlyList<IAutoTagMatcher> matchers)
+        {
+            Candidates = candidates;
+            Matchers = matchers;
+            RawCandidates = candidates.Select(candidate => candidate.Candidate).ToList();
+
+            foreach (var candidate in candidates)
+            {
+                foreach (var token in candidate.Phrases.Where(phrase => phrase.CompactLength >= 3).SelectMany(phrase => phrase.Tokens).Where(token => token.Length > 0).Distinct(StringComparer.Ordinal))
+                {
+                    if (!candidatesByToken.TryGetValue(token, out var bucket))
+                    {
+                        bucket = [];
+                        candidatesByToken[token] = bucket;
+                    }
+
+                    bucket.Add(candidate);
+                }
+            }
+        }
+
+        public IReadOnlyList<PreparedAutoTagEntityCandidate> Candidates { get; }
+        public IReadOnlyList<IAutoTagMatcher> Matchers { get; }
+        public IReadOnlyList<AutoTagEntityCandidate> RawCandidates { get; }
+
+        public IReadOnlyList<PreparedAutoTagEntityCandidate> GetCandidates(string normalizedSearchText)
+        {
+            if (Matchers.Count > 0)
+                return Candidates;
+
+            var tokens = normalizedSearchText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (tokens.Length == 0)
+                return [];
+
+            var result = new List<PreparedAutoTagEntityCandidate>();
+            var seenIds = new HashSet<int>();
+            foreach (var token in tokens)
+            {
+                if (!candidatesByToken.TryGetValue(token, out var candidates))
+                    continue;
+
+                foreach (var candidate in candidates)
+                {
+                    if (seenIds.Add(candidate.Candidate.EntityId))
+                        result.Add(candidate);
+                }
+            }
+
+            return result;
+        }
+    }
 
     /// <summary>Adapts the core IJobProgress to the extension IJobProgress.</summary>
     private sealed class ProgressAdapter(Cove.Core.Interfaces.IJobProgress inner) : Cove.Plugins.IJobProgress

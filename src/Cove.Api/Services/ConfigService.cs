@@ -141,6 +141,7 @@ public class ConfigService
                 Enabled = cfg.Auth.Enabled,
                 Username = cfg.Auth.Username,
                 AllowAnonymousShareLinks = cfg.Auth.AllowAnonymousShareLinks,
+                EnforceDefaultDeny = cfg.Auth.EnforceDefaultDeny,
                 KnownProxies = cfg.Auth.KnownProxies,
             },
             Scraping = new ScrapingConfigDto
@@ -361,6 +362,7 @@ public class ConfigService
         cfg.Auth.Enabled = dto.Security.Enabled;
         cfg.Auth.Username = string.IsNullOrWhiteSpace(dto.Security.Username) ? null : dto.Security.Username.Trim();
         cfg.Auth.AllowAnonymousShareLinks = dto.Security.AllowAnonymousShareLinks;
+        cfg.Auth.EnforceDefaultDeny = dto.Security.EnforceDefaultDeny;
         cfg.Auth.KnownProxies = (dto.Security.KnownProxies ?? [])
             .Where(proxy => !string.IsNullOrWhiteSpace(proxy))
             .Select(proxy => proxy.Trim())

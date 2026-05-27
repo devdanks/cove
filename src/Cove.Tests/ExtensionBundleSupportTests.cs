@@ -39,6 +39,35 @@ public class ExtensionBundleSupportTests
     }
 
     [Fact]
+    public void AggregatedManifest_IncludesListFiltersAndSorts()
+    {
+        var manager = new ExtensionManager(new ExtensionContext
+        {
+            Configuration = new ConfigurationBuilder().Build(),
+            DataDirectory = Path.GetTempPath(),
+            CoveVersion = "1.0.0",
+        });
+
+        manager.Register(new ListContributionExtension(), "local");
+
+        var manifest = manager.GetAggregatedManifest();
+        var listFilter = Assert.Single(manifest.ListFilters);
+        Assert.Equal("scene-quality-filter", listFilter.Id);
+        Assert.Equal("scenes", listFilter.EntityType);
+        Assert.Equal("quality_score", listFilter.CustomFieldKey);
+        Assert.Equal("number", listFilter.CustomFieldType);
+        Assert.Equal(ListContributionExtension.ExtensionId, listFilter.ExtensionId);
+
+        var listSort = Assert.Single(manifest.ListSorts);
+        Assert.Equal("scene-quality-sort", listSort.Id);
+        Assert.Equal("scenes", listSort.EntityType);
+        Assert.Equal("quality_score", listSort.CustomFieldKey);
+        Assert.Equal("number", listSort.CustomFieldType);
+        Assert.Equal(ListContributionExtension.ExtensionId, listSort.ExtensionId);
+    }
+
+
+    [Fact]
     public void GetExtensions_UsesManifestCategoriesForLoadedExtensions()
     {
         var manager = new ExtensionManager(new ExtensionContext
@@ -148,6 +177,96 @@ public class ExtensionBundleSupportTests
             }
         }
     }
+
+        [Fact]
+        public async Task AggregatedManifest_IncludesManifestDeclaredTutorialTopics()
+        {
+                var root = Path.Combine(Path.GetTempPath(), $"cove-manual-topics-{Guid.NewGuid():N}");
+                var dataDir = Path.Combine(root, "data");
+                var extensionsDir = Path.Combine(root, "extensions");
+                var bundleDir = Path.Combine(extensionsDir, "docs.bundle");
+
+                Directory.CreateDirectory(dataDir);
+                Directory.CreateDirectory(bundleDir);
+
+                var manifestJson = """
+                {
+                    "id": "docs.bundle",
+                    "name": "Docs Bundle",
+                    "version": "1.0.0",
+                    "kind": "bundle",
+                    "tutorialTopics": [
+                        {
+                            "id": "docs.root",
+                            "title": "Docs Root",
+                            "description": "Top-level manual topic.",
+                            "contexts": ["settings-tab:extensions/docs", "pane:docs.example"],
+                            "order": 10,
+                            "slides": [
+                                {
+                                    "id": "overview",
+                                    "title": "Overview",
+                                    "caption": "Read this first.",
+                                    "bodyMarkdown": "Use **manual pages** for extension docs instead of external metadata fields.",
+                                    "points": ["Open the manual"],
+                                    "imageSrc": "docs/overview.png",
+                                    "links": [{ "label": "External guide", "url": "https://example.com/docs" }]
+                                }
+                            ]
+                        },
+                        {
+                            "id": "docs.child",
+                            "title": "Docs Child",
+                            "parentTopicId": "docs.root",
+                            "order": 11,
+                            "slides": [
+                                {
+                                    "id": "child",
+                                    "title": "Child topic",
+                                    "caption": "Nested manual page.",
+                                    "points": ["Stay inside Cove"]
+                                }
+                            ]
+                        }
+                    ]
+                }
+                """;
+
+                await File.WriteAllTextAsync(Path.Combine(bundleDir, "extension.json"), manifestJson);
+
+                try
+                {
+                        var manager = new ExtensionManager(new ExtensionContext
+                        {
+                                Configuration = new ConfigurationBuilder().Build(),
+                                DataDirectory = dataDir,
+                                CoveVersion = "1.0.0",
+                        });
+
+                        manager.DiscoverExtensions(extensionsDir);
+
+                        var manifest = manager.GetAggregatedManifest();
+                        var rootTopic = Assert.Single(manifest.TutorialTopics, topic => topic.Id == "docs.root");
+                        var childTopic = Assert.Single(manifest.TutorialTopics, topic => topic.Id == "docs.child");
+
+                        Assert.Equal("docs.bundle", rootTopic.ExtensionId);
+                        Assert.Equal("docs.root", childTopic.ParentTopicId);
+                        Assert.Contains("settings-tab:extensions/docs", rootTopic.Contexts!);
+                        Assert.Contains("pane:docs.example", rootTopic.Contexts!);
+                        Assert.Equal("Use **manual pages** for extension docs instead of external metadata fields.", rootTopic.Slides![0].BodyMarkdown);
+                        Assert.Equal("docs/overview.png", rootTopic.Slides![0].ImageSrc);
+                        var link = Assert.Single(rootTopic.Slides![0].Links!);
+                        Assert.Equal("External guide", link.Label);
+                        Assert.Equal("https://example.com/docs", link.Url);
+                }
+                finally
+                {
+                        if (Directory.Exists(root))
+                        {
+                                Directory.Delete(root, recursive: true);
+                        }
+                }
+        }
 
     [Fact]
     public async Task DisableExtensionAsync_DisablesEnabledTransitiveDependents()
@@ -294,6 +413,21 @@ public class ExtensionBundleSupportTests
                     "Example",
                     description: "Example settings tab from a normal extension.")
                 .AddSettingsSection("extensions/example", "Example Settings", "ExampleSettingsPanel")
+                .Build();
+    }
+
+    private sealed class ListContributionExtension : CoveExtensionBase
+    {
+        public const string ExtensionId = "com.example.list-contribution";
+
+        public override string Id => ExtensionId;
+        public override string Name => "List Contribution Extension";
+        public override string Version => "1.0.0";
+
+        public override UIManifest GetUIManifest()
+            => ManifestBuilder()
+                .AddCustomFieldListFilter("scenes", "scene-quality-filter", "Quality Score", "quality_score", "number", order: 10)
+                .AddCustomFieldListSort("scenes", "scene-quality-sort", "Quality Score", "quality_score", "number", order: 10)
                 .Build();
     }
 

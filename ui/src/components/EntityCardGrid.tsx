@@ -15,7 +15,7 @@ export function EntityCardGrid({
 }: EntityCardGridProps) {
   return (
     <div
-      className={["grid", gapClassName, className].filter(Boolean).join(" ")}
+      className={["entity-card-grid", "grid", gapClassName, className].filter(Boolean).join(" ")}
       style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${minCardWidth}, 1fr))` } as CSSProperties}
     >
       {children}

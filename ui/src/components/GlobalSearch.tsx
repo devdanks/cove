@@ -1,8 +1,8 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, Film, FolderOpen, ImageIcon, Layers, Loader2, Search, Tag, Users } from "lucide-react";
-import { galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
+import { BookOpenText, Building2, Film, FolderOpen, Headphones, ImageIcon, Layers, Loader2, Search, Tag, Users } from "lucide-react";
+import { audios, galleries, groups as groupApi, images, performers, scenes, studios, tags, texts } from "../api/client";
 import type { InteractionHostType } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canReadEntity } from "../auth/visibility";
@@ -26,7 +26,9 @@ type StudioSearchItems = Awaited<ReturnType<typeof studios.find>>["items"];
 type TagSearchItems = Awaited<ReturnType<typeof tags.find>>["items"];
 type GallerySearchItems = Awaited<ReturnType<typeof galleries.find>>["items"];
 type ImageSearchItems = Awaited<ReturnType<typeof images.find>>["items"];
-type GroupSearchItems = Awaited<ReturnType<typeof groups.find>>["items"];
+type GroupSearchItems = Awaited<ReturnType<typeof groupApi.find>>["items"];
+type AudioSearchItems = Awaited<ReturnType<typeof audios.find>>["items"];
+type TextSearchItems = Awaited<ReturnType<typeof texts.find>>["items"];
 
 type SearchDefinition = {
   key: string;
@@ -35,6 +37,11 @@ type SearchDefinition = {
   hostType: InteractionHostType;
   load: () => Promise<{ items: unknown[] }>;
   mapItems: (items: unknown[]) => SearchGroup["items"];
+};
+
+type SearchResult = {
+  groups: SearchGroup[];
+  failedLabels: string[];
 };
 
 async function mergeSearches<TItem extends { id: number }>(limit: number, searches: Promise<{ items: TItem[] }>[]) {
@@ -80,6 +87,8 @@ export function GlobalSearch({ navigate }: Props) {
     galleries: canReadEntity("gallery", hasPermission),
     images: canReadEntity("image", hasPermission),
     groups: canReadEntity("group", hasPermission),
+    audios: canReadEntity("audio", hasPermission),
+    texts: canReadEntity("text", hasPermission),
   }), [hasPermission, permissions]);
 
   const searchableLabels = useMemo(() => {
@@ -91,6 +100,8 @@ export function GlobalSearch({ navigate }: Props) {
     if (readableEntities.galleries) labels.push("galleries");
     if (readableEntities.images) labels.push("images");
     if (readableEntities.groups) labels.push("groups");
+    if (readableEntities.audios) labels.push("audios");
+    if (readableEntities.texts) labels.push("texts");
     return labels;
   }, [readableEntities]);
 
@@ -240,7 +251,7 @@ export function GlobalSearch({ navigate }: Props) {
           label: "Groups",
           icon: Layers,
           hostType: "group" as const,
-          load: () => groups.find({ ...query, sort: "name", direction: "asc" }),
+          load: () => groupApi.find({ ...query, sort: "name", direction: "asc" }),
           mapItems: (items: unknown[]) => (items as GroupSearchItems).map((item) => ({
             id: item.id,
             title: item.name,
@@ -249,12 +260,42 @@ export function GlobalSearch({ navigate }: Props) {
             hostType: "group" as const,
           })),
         }] : []),
+        ...(readableEntities.audios ? [{
+          key: "audios",
+          label: "Audios",
+          icon: Headphones,
+          hostType: "audio" as const,
+          load: () => audios.find({ ...query, sort: "title", direction: "asc" }),
+          mapItems: (items: unknown[]) => (items as AudioSearchItems).map((item) => ({
+            id: item.id,
+            title: item.title || item.files[0]?.basename || `Audio ${item.id}`,
+            subtitle: item.studioName || item.date || undefined,
+            route: { page: "audio", id: item.id },
+            hostType: "audio" as const,
+          })),
+        }] : []),
+        ...(readableEntities.texts ? [{
+          key: "texts",
+          label: "Texts",
+          icon: BookOpenText,
+          hostType: "text" as const,
+          load: () => texts.find({ ...query, sort: "title", direction: "asc" }),
+          mapItems: (items: unknown[]) => (items as TextSearchItems).map((item) => ({
+            id: item.id,
+            title: item.title || item.files[0]?.basename || `Text ${item.id}`,
+            subtitle: item.studioName || item.date || undefined,
+            route: { page: "text", id: item.id },
+            hostType: "text" as const,
+          })),
+        }] : []),
       ];
 
       const results = await Promise.allSettled(searches.map((search) => search.load()));
-      return searches.flatMap((search, index) => {
+      const failedLabels: string[] = [];
+      const searchGroups = searches.flatMap((search, index) => {
         const result = results[index];
         if (result?.status !== "fulfilled") {
+          failedLabels.push(search.label);
           return [];
         }
 
@@ -263,10 +304,14 @@ export function GlobalSearch({ navigate }: Props) {
           ? [{ key: search.key, label: search.label, icon: search.icon, items }]
           : [];
       });
+
+      return { groups: searchGroups, failedLabels } satisfies SearchResult;
     },
   });
 
-  const flatResults = useMemo(() => (data ?? []).flatMap((group) => group.items), [data]);
+  const groupsData = data?.groups ?? [];
+  const failedLabels = data?.failedLabels ?? [];
+  const flatResults = useMemo(() => groupsData.flatMap((group) => group.items), [groupsData]);
 
   useEffect(() => {
     if (!open || deferredTerm.length < 2 || isFetching || searchableLabels.length === 0) {
@@ -321,11 +366,16 @@ export function GlobalSearch({ navigate }: Props) {
         <div className="flex items-center gap-2 px-4 py-6 text-sm text-secondary">
           <Loader2 className="h-4 w-4 animate-spin" /> Searching...
         </div>
-      ) : !data || data.length === 0 ? (
+      ) : groupsData.length === 0 ? (
         <div className="px-4 py-6 text-sm text-secondary">No results found for &ldquo;{deferredTerm}&rdquo;.</div>
       ) : (
         <div className="max-h-[28rem] overflow-y-auto">
-          {data.map((group) => {
+          {failedLabels.length > 0 ? (
+            <div className="border-b border-border px-3 py-2 text-xs text-amber-300">
+              Search failed for {failedLabels.join(", ")}.
+            </div>
+          ) : null}
+          {groupsData.map((group) => {
             const Icon = group.icon;
             return (
               <div key={group.key} className="border-b border-border last:border-b-0">

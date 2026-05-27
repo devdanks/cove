@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 using Cove.Core.DTOs;
 using Cove.Core.Interfaces;
 using Cove.Plugins;
@@ -10,6 +11,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[RequiresPermission(Permissions.ExtensionsRead)]
 public class PluginsController(
     ExtensionManager extensionManager,
     IJobService jobService,
@@ -60,20 +62,26 @@ public class PluginsController(
     }
 
     [HttpPost("run-task")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public ActionResult<object> RunTask([FromBody] RunPluginTaskDto dto)
     {
+        if (!IsSafePluginId(dto.PluginId))
+            return BadRequest("Invalid plugin id.");
+
         // Check if it's a Python plugin
         foreach (var pluginDir in GetPluginDirectories())
         {
-            var configPath = Path.Combine(pluginDir, dto.PluginId, "plugin.yml");
+            if (!TryResolvePluginDirectory(pluginDir, dto.PluginId, out var scriptDir))
+                continue;
+
+            var configPath = Path.Combine(scriptDir, "plugin.yml");
             if (!System.IO.File.Exists(configPath))
-                configPath = Path.Combine(pluginDir, dto.PluginId, "plugin.yaml");
+                configPath = Path.Combine(scriptDir, "plugin.yaml");
             if (!System.IO.File.Exists(configPath)) continue;
 
             var jobId = jobService.Enqueue($"plugin:{dto.PluginId}", $"Running {dto.PluginId}/{dto.TaskName}", async (progress, ct) =>
             {
                 progress.Report(0, $"Starting plugin task {dto.TaskName}...");
-                var scriptDir = Path.Combine(pluginDir, dto.PluginId);
                 var entryPoint = FindPythonEntryPoint(scriptDir);
 
                 if (entryPoint != null)
@@ -116,6 +124,7 @@ public class PluginsController(
     }
 
     [HttpPost("settings")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public async Task<IActionResult> UpdateSettings([FromBody] PluginSettingsDto dto)
     {
         foreach (var (pluginId, enabled) in dto.EnabledMap)
@@ -145,6 +154,7 @@ public class PluginsController(
     }
 
     [HttpPost("{pluginId}/config")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public async Task<IActionResult> SetPluginConfig(string pluginId, [FromBody] Dictionary<string, object?> values)
     {
         config.PluginConfigurations[pluginId] = values;
@@ -153,6 +163,7 @@ public class PluginsController(
     }
 
     [HttpPost("reload")]
+    [RequiresPermission(Permissions.ExtensionsConfigure)]
     public async Task<IActionResult> ReloadPlugins()
     {
         await extensionManager.InitializeAllAsync(HttpContext.RequestServices);
@@ -185,8 +196,12 @@ public class PluginsController(
     }
 
     [HttpPost("packages/install")]
+    [RequiresPermission(Permissions.ExtensionsInstall)]
     public ActionResult<object> InstallPackages([FromBody] InstallPackagesDto dto)
     {
+        if (dto.Packages.Any(package => !IsSafePluginId(package.Id)))
+            return BadRequest("One or more package ids are invalid.");
+
         var jobId = jobService.Enqueue("install-packages", "Installing packages", async (progress, ct) =>
         {
             for (var i = 0; i < dto.Packages.Count; i++)
@@ -203,8 +218,12 @@ public class PluginsController(
     }
 
     [HttpPost("packages/update")]
+    [RequiresPermission(Permissions.ExtensionsInstall)]
     public ActionResult<object> UpdatePackages([FromBody] InstallPackagesDto? dto)
     {
+        if (dto?.Packages.Any(package => !IsSafePluginId(package.Id)) == true)
+            return BadRequest("One or more package ids are invalid.");
+
         var jobId = jobService.Enqueue("update-packages", "Updating packages", async (progress, ct) =>
         {
             var packages = dto?.Packages ?? [];
@@ -231,21 +250,29 @@ public class PluginsController(
     }
 
     [HttpPost("packages/uninstall")]
+    [RequiresPermission(Permissions.ExtensionsUninstall)]
     public IActionResult UninstallPackages([FromBody] List<string> packageIds)
     {
+        if (packageIds.Any(id => !IsSafePluginId(id)))
+            return BadRequest("One or more package ids are invalid.");
+
+        var uninstalled = new List<string>();
         foreach (var id in packageIds)
         {
             foreach (var pluginDir in GetPluginDirectories())
             {
-                var dir = Path.Combine(pluginDir, id);
+                if (!TryResolvePluginDirectory(pluginDir, id, out var dir))
+                    continue;
+
                 if (Directory.Exists(dir))
                 {
                     Directory.Delete(dir, true);
                     logger.LogInformation("Uninstalled package {Id}", id);
+                    uninstalled.Add(id);
                 }
             }
         }
-        return Ok(new { uninstalled = packageIds.Count });
+        return Ok(new { uninstalled });
     }
 
     // ===== Helpers =====
@@ -260,6 +287,42 @@ public class PluginsController(
             dirs.AddRange(config.ExtensionPaths);
 
         return dirs;
+    }
+
+    public static bool IsSafePluginId(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id) || id is "." or ".." || Path.IsPathRooted(id))
+            return false;
+        if (id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || id.Contains('/') || id.Contains('\\'))
+            return false;
+
+        return id.All(ch => char.IsLetterOrDigit(ch) || ch is '.' or '_' or '-');
+    }
+
+    public static bool TryResolvePluginDirectory(string pluginRoot, string pluginId, out string pluginDirectory)
+    {
+        pluginDirectory = string.Empty;
+        if (!IsSafePluginId(pluginId))
+            return false;
+
+        try
+        {
+            var root = Path.GetFullPath(pluginRoot);
+            var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
+                ? root
+                : root + Path.DirectorySeparatorChar;
+            var candidate = Path.GetFullPath(Path.Combine(root, pluginId));
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!candidate.StartsWith(rootWithSeparator, comparison))
+                return false;
+
+            pluginDirectory = candidate;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static List<PluginTaskDto> GetPluginTasks(IExtension ext)

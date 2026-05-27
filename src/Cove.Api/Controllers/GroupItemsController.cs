@@ -461,7 +461,7 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
                 .Where(IsPlayableManifestItem)
                 .ToList();
             var segmentIds = playable.Where(IsSegmentManifestItem).Select(item => item.HostId).Distinct().ToArray();
-            var segments = await db.Segments.AsNoTracking()
+            var segments = await db.VisibleSegments().AsNoTracking()
                 .Include(segment => segment.Tag)
                 .Where(segment => segmentIds.Contains(segment.Id))
                 .ToDictionaryAsync(segment => segment.Id, ct);
@@ -516,7 +516,7 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
             .ToList();
 
         var staticSegmentIds = items.Where(IsSegmentManifestItem).Select(item => item.HostId).Distinct().ToArray();
-        var staticSegments = await db.Segments.AsNoTracking()
+        var staticSegments = await db.VisibleSegments().AsNoTracking()
             .Include(segment => segment.Tag)
             .Where(segment => staticSegmentIds.Contains(segment.Id))
             .ToDictionaryAsync(segment => segment.Id, ct);
@@ -941,7 +941,7 @@ public class GroupItemsController(CoveContext db, SegmentSpanResolver spanResolv
             .FirstOrDefaultAsync(ct);
 
     private Task<string?> SegmentTitleAsync(int segmentId, CancellationToken ct)
-        => db.Segments.AsNoTracking()
+        => db.VisibleSegments().AsNoTracking()
             .Where(segment => segment.Id == segmentId)
             .Select(segment => segment.Title ?? (segment.Tag != null ? segment.Tag.Name : null) ?? segment.Kind ?? $"Segment {segment.Id}")
             .FirstOrDefaultAsync(ct);

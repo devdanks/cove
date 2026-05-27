@@ -8,6 +8,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/playback")]
+[AllowWithoutPermission]
 public class PlaybackController(IUserEngagementService engagementService, ICurrentPrincipalAccessor principalAccessor) : ControllerBase
 {
     [HttpPost("intervals")]
@@ -16,10 +17,27 @@ public class PlaybackController(IUserEngagementService engagementService, ICurre
     {
         if (principalAccessor.Current?.UserId is null)
             return Forbid();
-        if (!InteractionValueMapper.TryParseHostType(dto.HostType, out _))
+        if (!InteractionValueMapper.TryParseHostType(dto.HostType, out var hostType))
             return BadRequest("Unsupported host type.");
+        if (!HasInteractionPermission(hostType))
+            return Forbid();
 
         var recorded = await engagementService.RecordPlaybackIntervalsAsync(dto, ct);
         return recorded ? NoContent() : NotFound();
+    }
+
+    private bool HasInteractionPermission(InteractionHostType hostType)
+    {
+        var permission = hostType switch
+        {
+            InteractionHostType.Scene => Permissions.ScenesRead,
+            InteractionHostType.Image => Permissions.ImagesRead,
+            InteractionHostType.Audio => Permissions.AudiosRead,
+            InteractionHostType.Text => Permissions.TextsRead,
+            InteractionHostType.Segment => Permissions.SegmentsRead,
+            _ => null,
+        };
+
+        return permission is null || principalAccessor.Current?.Has(permission) == true;
     }
 }

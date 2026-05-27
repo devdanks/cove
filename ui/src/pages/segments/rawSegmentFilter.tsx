@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { segmentLibrary } from "../../api/client";
 import { EntityMultiSelector } from "../../components/EntityMultiSelector";
 import type { FilterDialogCustomSection } from "../../components/FilterDialog";
-import type { SegmentNumberCriterionValue } from "./segmentCriteriaDefinitions";
+import type { SegmentNumberCriterionValue, SegmentStringCriterionValue, SegmentTimestampCriterionValue } from "./segmentCriteriaDefinitions";
 
 export interface RawSegmentFilterValue {
   sourceCategory?: "user" | "extensions";
@@ -13,6 +13,16 @@ export interface RawSegmentFilterValue {
   faceIds: number[];
   minConfidence?: number;
   minDurationSec?: number;
+  titleCriterion?: SegmentStringCriterionValue;
+  hostType?: string;
+  sourceRunCriterion?: SegmentStringCriterionValue;
+  colorHintCriterion?: SegmentStringCriterionValue;
+  hasImage?: boolean;
+  hasPayload?: boolean;
+  createdAtCriterion?: SegmentTimestampCriterionValue;
+  updatedAtCriterion?: SegmentTimestampCriterionValue;
+  startSecCriterion?: SegmentNumberCriterionValue;
+  endSecCriterion?: SegmentNumberCriterionValue;
   confidenceCriterion?: SegmentNumberCriterionValue;
   durationCriterion?: SegmentNumberCriterionValue;
 }

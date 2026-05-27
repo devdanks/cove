@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { entityImages, faces, images, playback, fileOps } from "../api/client";
 import { formatDate, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
-import { Check, Download, Eye, FolderOpen, Image as ImageIcon, ImageOff, Layers, Link as LinkIcon, Maximize, MoreVertical, RefreshCw, Search, Sparkles, ThumbsUp, Trash2, UserRound, X } from "lucide-react";
+import { Check, Download, Eye, FolderOpen, Image as ImageIcon, ImageOff, Layers, Link as LinkIcon, Maximize, MoreVertical, RefreshCw, Search, Sparkles, ThumbsUp, Trash2, UserRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
+import { Lightbox, type LightboxImage } from "../components/Lightbox";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { ExtensionSlot } from "../router/RouteRegistry";
@@ -120,6 +121,19 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
   const imageLikeCount = imageEngagement?.likeCount ?? 0;
   const imagePageVisitCount = imageEngagement?.pageVisitCount ?? 0;
   const displayTitle = image ? getImageDisplayTitle(image) : `Image ${id}`;
+  const lightboxImages = useMemo<LightboxImage[]>(() => {
+    if (!image) {
+      return [];
+    }
+
+    return [{
+      id: image.id,
+      src: images.imageUrl(image.id),
+      title: displayTitle,
+      interactionSource: "imageDetailPage",
+      interactionMeta: { pageKey: "imageDetail", route: `/image/${image.id}` },
+    }];
+  }, [displayTitle, image]);
   const hasVisualSimilarity = useImageVisualSimilarityAvailable(id);
   const tabs = useMemo(() => {
     const nextTabs = [
@@ -204,30 +218,12 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       return;
     }
 
-    if (trackImageActivity && !lightboxOpen) {
-      trackInteraction({
-        hostType: "image",
-        hostId: id,
-        kind: "openLightbox",
-        meta: { source: "imageDetailPage" },
-      });
-    }
-
     setLightboxOpen(true);
-  }, [id, imageLoadFailed, lightboxOpen, trackImageActivity]);
+  }, [imageLoadFailed]);
 
   const closeLightbox = useCallback(() => {
-    if (trackImageActivity && lightboxOpen) {
-      trackInteraction({
-        hostType: "image",
-        hostId: id,
-        kind: "closeLightbox",
-        meta: { source: "imageDetailPage" },
-      });
-    }
-
     setLightboxOpen(false);
-  }, [id, lightboxOpen, trackImageActivity]);
+  }, []);
   const imageKeyboardShortcuts = useMemo(() => ([
     {
       key: "e",
@@ -599,23 +595,12 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
       </Suspense>
       <ConfirmDialog open={confirmDelete} title="Delete Image" message={`Delete "${displayTitle}"? This cannot be undone.`} onConfirm={() => deleteMut.mutate()} onCancel={() => setConfirmDelete(false)} />
 
-      {/* Lightbox overlay */}
-      {lightboxOpen && (
-        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center" onClick={closeLightbox} onKeyDown={(e) => { if (e.key === "Escape") closeLightbox(); }} tabIndex={0} ref={(el) => el?.focus()}>
-          <img
-            src={images.imageUrl(id)}
-            alt={image.title || "Image"}
-            className="w-[95vw] h-[95vh] object-contain"
-          />
-          <button
-            onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
-            className="absolute top-4 right-4 p-2 bg-black/60 text-white rounded hover:bg-black/80"
-            title="Close (Esc)"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-      )}
+      <Lightbox
+        images={lightboxImages}
+        initialIndex={0}
+        open={lightboxOpen && lightboxImages.length > 0}
+        onClose={closeLightbox}
+      />
       <MediaDetailLayout
         title={<FieldProvenanceHover fieldProvenance={image.fieldProvenance} fieldKey="title">{displayTitle}</FieldProvenanceHover>}
         subtitle={

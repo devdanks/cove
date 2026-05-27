@@ -65,6 +65,8 @@ public static class InteractionValueMapper
             "filterclear" => Assign(InteractionKind.FilterClear, out parsed),
             "pagevisit" => Assign(InteractionKind.PageVisit, out parsed),
             "derivedlike" => Assign(InteractionKind.DerivedLike, out parsed),
+            "fullscreen" => Assign(InteractionKind.Fullscreen, out parsed),
+            "slideshowdelay" => Assign(InteractionKind.SlideshowDelay, out parsed),
             _ => false,
         };
     }
@@ -89,6 +91,8 @@ public static class InteractionValueMapper
         InteractionKind.FilterClear => "filterClear",
         InteractionKind.PageVisit => "pageVisit",
         InteractionKind.DerivedLike => "derivedLike",
+        InteractionKind.Fullscreen => "fullscreen",
+        InteractionKind.SlideshowDelay => "slideshowDelay",
         _ => kind.ToString(),
     };
 

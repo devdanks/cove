@@ -14,7 +14,7 @@ import { CustomFieldsEditor, formatDuration, formatFileSize, getResolutionLabel,
 import { SCENE_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
 import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
-import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX, ThumbsUp, Heart } from "lucide-react";
+import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX, ThumbsUp, Heart, Shuffle } from "lucide-react";
 import { useSceneQueue } from "../state/SceneQueueContext";
 import { SceneCard } from "../components/EntityCards";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
@@ -26,7 +26,7 @@ import { useWallColumns } from "../hooks/useWallColumns";
 import { useAppConfig } from "../state/AppConfigContext";
 import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionSelectionActions } from "../components/ExtensionSelectionActions";
-import { withSeededRandomSort } from "../utils/seededRandomSort";
+import { reshuffleRandomSort, withSeededRandomSort } from "../utils/seededRandomSort";
 import { WallMediaCard, type WallMediaVideoControlsState } from "../components/WallMediaCard";
 import { FeedActionPill, FeedCardFrame, FeedChipButton, FeedChipOverflowMenu, FeedIdentityBadge, FeedInlineRating, FeedMetadataPill, FeedPortraitMediaFrame, getFeedMediaStyle } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
@@ -499,6 +499,34 @@ export function ScenesPage({ onNavigate }: Props) {
     onNavigate({ page: "scene", id: ids[0] });
   }, [items, onNavigate, selectNone, selectedIds, setQueue]);
 
+  const playRandomMutation = useMutation({
+    mutationFn: async () => {
+      const randomFilter = reshuffleRandomSort({ ...filter, page: 1, perPage: 1, sort: "random", direction: "asc" });
+      const result = visualSearchActive && visualSimilarity
+        ? await visualSimilarity.searchScenes({
+          findFilter: randomFilter,
+          objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
+        })
+        : hasObjectFilter
+          ? await scenes.findFiltered({ findFilter: randomFilter, objectFilter: backendObjectFilter as SceneFilterCriteria })
+          : await scenes.find(randomFilter);
+      return result.items[0] ?? null;
+    },
+    onSuccess: (scene) => {
+      if (!scene) {
+        return;
+      }
+
+      setQueue([scene.id], scene.id, [{
+        id: scene.id,
+        title: scene.title || scene.files[0]?.basename || `Scene ${scene.id}`,
+        subtitle: scene.studioName || scene.date || undefined,
+        imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt),
+      }]);
+      onNavigate({ page: "scene", id: scene.id });
+    },
+  });
+
   const handleSelectAllMatching = useCallback(async () => {
     setSelectAllMatchingPending(true);
     try {
@@ -644,6 +672,18 @@ export function ScenesPage({ onNavigate }: Props) {
       selectAllPending={infinitePageSize ? selectAllMatchingPending : false}
       onSelectAllMatching={infinitePageSize ? selectAll : undefined}
       selectAllMatchingLabel="Select shown"
+      renderOperations={() => (
+        <button
+          type="button"
+          onClick={() => playRandomMutation.mutate()}
+          disabled={playRandomMutation.isPending || loading || (totalCount ?? 0) === 0}
+          className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-border bg-card/70 px-2.5 py-2 text-sm text-secondary transition-colors hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:py-1 sm:text-xs"
+          title="Play random"
+          aria-label="Play random"
+        >
+          {playRandomMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Shuffle className="h-3.5 w-3.5" />}
+        </button>
+      )}
       onNew={canWriteScene ? () => setShowCreate(true) : undefined}
       selectedIds={selectedIds}
       onSelectNone={selectNone}
@@ -1504,7 +1544,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
                 muted={!soundEnabled}
                 videoStartTimeSec={videoStartTimeSec}
                 videoPlayThreshold={0.65}
-                playbackTracking={{ hostType: "scene", hostId: scene.id, scopeKey: `scene-feed:${scene.id}` }}
+                playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "feed", scopeKey: `scene-feed:${scene.id}` }}
                 fillMedia
                 chromeless
                 imageClassName="object-contain"
@@ -1526,7 +1566,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
             muted={!soundEnabled}
             videoStartTimeSec={videoStartTimeSec}
             videoPlayThreshold={0.65}
-            playbackTracking={{ hostType: "scene", hostId: scene.id, scopeKey: `scene-feed:${scene.id}` }}
+            playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "feed", scopeKey: `scene-feed:${scene.id}` }}
             aspectRatio={aspectRatio}
             imageClassName="object-cover"
             style={mediaStyle}
@@ -1674,7 +1714,7 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnable
         muted={!soundEnabled}
         videoStartTimeSec={videoStartTimeSec}
         videoPlayThreshold={0.72}
-        playbackTracking={{ hostType: "scene", hostId: scene.id, scopeKey: `scene-vertical:${scene.id}` }}
+        playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "vertical", scopeKey: `scene-vertical:${scene.id}` }}
         aspectRatio="9 / 16"
         imageClassName="object-cover"
         fillMedia={fullscreen}

@@ -8,6 +8,7 @@ import { useExtensions } from "../extensions/ExtensionLoader";
 import { useAuth } from "../auth/AuthContext";
 import { canShowNavPage, type NavPage } from "../auth/visibility";
 import { openTutorialStoryboard } from "./TutorialStoryboardDialog";
+import { createManualOpenRequest } from "./ManualContext";
 import { buildRouteUrl, type Route } from "../router/location";
 
 interface NavbarProps {
@@ -173,7 +174,7 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
               </a>
             ) : null}
             <button
-              onClick={() => openTutorialStoryboard({ page: activePage })}
+              onClick={() => openTutorialStoryboard(createManualOpenRequest(currentPage, activePage))}
               className="p-2 rounded text-secondary hover:text-foreground"
               title="Help and tutorials"
             >

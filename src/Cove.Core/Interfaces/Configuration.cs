@@ -77,7 +77,7 @@ public class AuthConfig
     public string? Username { get; set; }
     public string? HashedPassword { get; set; } // bcrypt hash
     public string? ApiKey { get; set; }
-    public string JwtSecret { get; set; } = Guid.NewGuid().ToString();
+    public string JwtSecret { get; set; } = GenerateJwtSecret();
     public int AccessTokenMinutes { get; set; } = 15;
     public int RefreshTokenDays { get; set; } = 30;
     public bool AllowAnonymousShareLinks { get; set; } = true;
@@ -85,10 +85,12 @@ public class AuthConfig
     /// <summary>
     /// When true, every controller action MUST declare a permission policy via
     /// [RequiresPermission], [AllowWithoutPermission], or [AllowAnonymous]; actions
-    /// without any are rejected with 403. While the codebase is being migrated this
-    /// can be left false to permit attribute-less endpoints.
+    /// without any are rejected with 403.
     /// </summary>
-    public bool EnforceDefaultDeny { get; set; }
+    public bool EnforceDefaultDeny { get; set; } = true;
+
+    private static string GenerateJwtSecret()
+        => Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
 }
 
 public class PostgresConfig

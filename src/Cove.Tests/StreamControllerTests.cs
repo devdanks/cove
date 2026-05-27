@@ -2,6 +2,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Cove.Api.Controllers;
 using Cove.Api.Services;
+using Cove.Core.Entities;
+using Cove.Data;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Tests;
 
@@ -51,12 +55,120 @@ public class StreamControllerTests
         Assert.False((bool)ok.Value!.GetType().GetProperty("available")!.GetValue(ok.Value)!);
     }
 
+    [Fact]
+    public async Task GetHlsMasterPlaylist_AppendsMediaAuthQueryToVariantPlaylistUrls()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = CreateContext(connection);
+        await context.Database.EnsureCreatedAsync();
+
+        var scene = new Scene { Title = "HLS scene" };
+        var folder = new Folder { Path = Path.GetTempPath() };
+        context.AddRange(scene, folder);
+        await context.SaveChangesAsync();
+        context.VideoFiles.Add(new VideoFile
+        {
+            SceneId = scene.Id,
+            ParentFolderId = folder.Id,
+            Basename = "video.mp4",
+            Width = 1920,
+            Height = 1080,
+        });
+        await context.SaveChangesAsync();
+
+        var controller = CreateController(context, new FakeTranscodeService());
+        SetQuery(controller, "?access_token=access token&share_token=share/token&ignored=true");
+
+        var result = await controller.GetHlsMasterPlaylist(scene.Id, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.Contains($"/api/stream/scene/{scene.Id}/hls/720p.m3u8?access_token=access%20token&share_token=share%2Ftoken", content.Content);
+        Assert.DoesNotContain("ignored=", content.Content);
+    }
+
+    [Fact]
+    public async Task GetHlsPlaylist_AppendsMediaAuthQueryToSegmentUrls()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"cove-hls-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var videoPath = Path.Combine(tempDir, "video.mp4");
+        await File.WriteAllBytesAsync(videoPath, [1, 2, 3]);
+
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = CreateContext(connection);
+        await context.Database.EnsureCreatedAsync();
+
+        try
+        {
+            var scene = new Scene { Title = "HLS media scene" };
+            var folder = new Folder { Path = tempDir };
+            context.AddRange(scene, folder);
+            await context.SaveChangesAsync();
+            context.VideoFiles.Add(new VideoFile
+            {
+                SceneId = scene.Id,
+                ParentFolderId = folder.Id,
+                Basename = Path.GetFileName(videoPath),
+                Width = 1920,
+                Height = 1080,
+            });
+            await context.SaveChangesAsync();
+
+            var controller = CreateController(context, new FakeTranscodeService());
+            SetQuery(controller, "?access_token=access token&share_token=share/token&share_password=p@ss&ignored=true");
+
+            var result = await controller.GetHlsPlaylist(scene.Id, "original", CancellationToken.None);
+
+            var content = Assert.IsType<ContentResult>(result);
+            Assert.Contains($"/api/stream/scene/{scene.Id}/hls/segment/original_000.ts?access_token=access%20token&share_token=share%2Ftoken&share_password=p%40ss", content.Content);
+            Assert.Contains($"/api/stream/scene/{scene.Id}/hls/segment/original_001.ts?access_token=access%20token&share_token=share%2Ftoken&share_password=p%40ss", content.Content);
+            Assert.Contains("#EXTINF:4,", content.Content);
+            Assert.DoesNotContain("ignored=", content.Content);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
     private static StreamController CreateController(string previewPath)
     {
         return new StreamController(null!, new FakeThumbnailService(previewPath), null!, null!)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
+    }
+
+    private static StreamController CreateController(CoveContext context, ITranscodeService transcodeService)
+    {
+        return new StreamController(null!, new FakeThumbnailService("missing.mp4"), transcodeService, context)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+    }
+
+    private static CoveContext CreateContext(SqliteConnection connection)
+        => new(new DbContextOptionsBuilder<CoveContext>().UseSqlite(connection).Options);
+
+    private sealed class FakeTranscodeService : ITranscodeService
+    {
+        public Task<Stream?> TranscodeToMp4Async(string inputPath, string? resolution, double startSeconds = 0, CancellationToken ct = default)
+            => Task.FromResult<Stream?>(null);
+
+        public Task<string?> GenerateHlsManifestAsync(int sceneId, string inputPath, string? resolution, CancellationToken ct = default)
+            => Task.FromResult<string?>("#EXTM3U\n#EXTINF:4,\noriginal_000.ts\n#EXTINF:4,\noriginal_001.ts\n");
+
+        public Task<Stream?> GetHlsSegmentAsync(int sceneId, string segment, CancellationToken ct = default)
+            => Task.FromResult<Stream?>(null);
+
+        public string[] GetAvailableResolutions(int sourceWidth, int sourceHeight) => ["720p"];
+    }
+
+    private static void SetQuery(StreamController controller, string queryString)
+    {
+        controller.ControllerContext.HttpContext.Request.QueryString = new QueryString(queryString);
     }
 
     private sealed class FakeThumbnailService(string previewPath) : IThumbnailService

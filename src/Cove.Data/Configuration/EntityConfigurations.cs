@@ -946,6 +946,18 @@ public class UserEntityAffinityConfiguration : IEntityTypeConfiguration<UserEnti
         builder.Property(affinity => affinity.LikeCount).HasDefaultValue(0);
         builder.Property(affinity => affinity.DerivedLikeCount).HasDefaultValue(0);
         builder.Property(affinity => affinity.PageVisitCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.InteractionCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.OpenDetailCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.OpenLightboxCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.NavigateCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.PauseCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.SeekCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.PlayerControlCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.SearchInteractionCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.FilterInteractionCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.ShareCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.HideCount).HasDefaultValue(0);
+        builder.Property(affinity => affinity.ZoomCount).HasDefaultValue(0);
     }
 }
 

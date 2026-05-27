@@ -138,6 +138,13 @@ public partial class CoveContext : DbContext
         {
             entity.HasIndex(session => new { session.UserId, session.HostType, session.HostId, session.StartedAt });
             entity.HasIndex(session => new { session.UserId, session.SessionId }).IsUnique();
+            entity.HasIndex(session => new { session.UserId, session.Surface, session.LastSeenAt });
+            entity.Property(session => session.Surface).HasMaxLength(64);
+            entity.Property(session => session.ScopeKey).HasMaxLength(256);
+            entity.Property(session => session.Route).HasMaxLength(512);
+            entity.Property(session => session.Referrer).HasMaxLength(512);
+            entity.Property(session => session.RecommendationSource).HasMaxLength(128);
+            entity.Property(session => session.Context).HasColumnType("jsonb");
             entity.HasMany(session => session.Intervals)
                 .WithOne(interval => interval.Session)
                 .HasForeignKey(interval => interval.PlaybackSessionId)
@@ -148,6 +155,10 @@ public partial class CoveContext : DbContext
         {
             entity.HasIndex(interval => new { interval.UserId, interval.HostType, interval.HostId });
             entity.HasIndex(interval => new { interval.PlaybackSessionId, interval.StartSec });
+            entity.HasIndex(interval => new { interval.UserId, interval.Surface, interval.RecordedAt });
+            entity.Property(interval => interval.Surface).HasMaxLength(64);
+            entity.Property(interval => interval.ScopeKey).HasMaxLength(256);
+            entity.Property(interval => interval.Context).HasColumnType("jsonb");
         });
 
         foreach (var ext in _dataExtensions)
@@ -400,6 +411,7 @@ public partial class CoveContext : DbContext
         UpdateTimestamps();
         ComputeFilePaths();
         MaintainDenormalizedIdArrays();
+        CleanupEngagementRowsForDeletedEntities();
         var derivedCountTargets = CollectDerivedCountTargets();
         var postSaveDerivedCountTargets = CollectPostSaveDerivedCountTargets();
         var result = base.SaveChanges();
@@ -408,18 +420,114 @@ public partial class CoveContext : DbContext
         return result;
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         if (_persistingDerivedCounts)
-            return base.SaveChangesAsync(cancellationToken);
+            return await base.SaveChangesAsync(cancellationToken);
 
         UpdateTimestamps();
         ComputeFilePaths();
         MaintainDenormalizedIdArrays();
+        await CleanupEngagementRowsForDeletedEntitiesAsync(cancellationToken);
         var derivedCountTargets = CollectDerivedCountTargets();
         var postSaveDerivedCountTargets = CollectPostSaveDerivedCountTargets();
-        return SaveChangesWithDerivedCountsAsync(derivedCountTargets, postSaveDerivedCountTargets, cancellationToken);
+        return await SaveChangesWithDerivedCountsAsync(derivedCountTargets, postSaveDerivedCountTargets, cancellationToken);
     }
+
+    private void CleanupEngagementRowsForDeletedEntities()
+    {
+        var deletedUserIds = ChangeTracker.Entries<User>()
+            .Where(entry => entry.State == EntityState.Deleted && entry.Entity.Id > 0)
+            .Select(entry => entry.Entity.Id)
+            .Distinct()
+            .ToArray();
+        if (deletedUserIds.Length > 0)
+        {
+            UserEntityAffinities.RemoveRange(UserEntityAffinities.Where(row => deletedUserIds.Contains(row.UserId)).ToList());
+            Interactions.RemoveRange(Interactions.Where(row => deletedUserIds.Contains(row.UserId)).ToList());
+            PlaybackSessions.RemoveRange(PlaybackSessions.Where(row => deletedUserIds.Contains(row.UserId)).ToList());
+            Ratings.RemoveRange(Ratings.Where(row => deletedUserIds.Contains(row.UserId)).ToList());
+            UserBookmarks.RemoveRange(UserBookmarks.Where(row => deletedUserIds.Contains(row.UserId)).ToList());
+        }
+
+        foreach (var target in CollectDeletedEngagementTargets())
+        {
+            UserEntityAffinities.RemoveRange(UserEntityAffinities.Where(row => row.HostType == target.AffinityHostType && row.HostId == target.HostId).ToList());
+            UserBookmarks.RemoveRange(UserBookmarks.Where(row => row.HostType == target.AffinityHostType && row.HostId == target.HostId).ToList());
+            Interactions.RemoveRange(Interactions.Where(row => row.HostType == target.InteractionHostType && row.HostId == target.HostId).ToList());
+            PlaybackSessions.RemoveRange(PlaybackSessions.Where(row => row.HostType == target.InteractionHostType && row.HostId == target.HostId).ToList());
+            Ratings.RemoveRange(Ratings.Where(row => row.HostType == target.RatingHostType && row.HostId == target.HostId).ToList());
+        }
+    }
+
+    private async Task CleanupEngagementRowsForDeletedEntitiesAsync(CancellationToken cancellationToken)
+    {
+        var deletedUserIds = ChangeTracker.Entries<User>()
+            .Where(entry => entry.State == EntityState.Deleted && entry.Entity.Id > 0)
+            .Select(entry => entry.Entity.Id)
+            .Distinct()
+            .ToArray();
+        if (deletedUserIds.Length > 0)
+        {
+            UserEntityAffinities.RemoveRange(await UserEntityAffinities.Where(row => deletedUserIds.Contains(row.UserId)).ToListAsync(cancellationToken));
+            Interactions.RemoveRange(await Interactions.Where(row => deletedUserIds.Contains(row.UserId)).ToListAsync(cancellationToken));
+            PlaybackSessions.RemoveRange(await PlaybackSessions.Where(row => deletedUserIds.Contains(row.UserId)).ToListAsync(cancellationToken));
+            Ratings.RemoveRange(await Ratings.Where(row => deletedUserIds.Contains(row.UserId)).ToListAsync(cancellationToken));
+            UserBookmarks.RemoveRange(await UserBookmarks.Where(row => deletedUserIds.Contains(row.UserId)).ToListAsync(cancellationToken));
+        }
+
+        foreach (var target in CollectDeletedEngagementTargets())
+        {
+            UserEntityAffinities.RemoveRange(await UserEntityAffinities.Where(row => row.HostType == target.AffinityHostType && row.HostId == target.HostId).ToListAsync(cancellationToken));
+            UserBookmarks.RemoveRange(await UserBookmarks.Where(row => row.HostType == target.AffinityHostType && row.HostId == target.HostId).ToListAsync(cancellationToken));
+            Interactions.RemoveRange(await Interactions.Where(row => row.HostType == target.InteractionHostType && row.HostId == target.HostId).ToListAsync(cancellationToken));
+            PlaybackSessions.RemoveRange(await PlaybackSessions.Where(row => row.HostType == target.InteractionHostType && row.HostId == target.HostId).ToListAsync(cancellationToken));
+            Ratings.RemoveRange(await Ratings.Where(row => row.HostType == target.RatingHostType && row.HostId == target.HostId).ToListAsync(cancellationToken));
+        }
+    }
+
+    private IReadOnlyList<EngagementCleanupTarget> CollectDeletedEngagementTargets()
+    {
+        var targets = new List<EngagementCleanupTarget>();
+        AddDeletedTargets(targets, ChangeTracker.Entries<Scene>(), entry => entry.Entity.Id, AffinityHostType.Scene, InteractionHostType.Scene, RatingHostType.Scene);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Image>(), entry => entry.Entity.Id, AffinityHostType.Image, InteractionHostType.Image, RatingHostType.Image);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Audio>(), entry => entry.Entity.Id, AffinityHostType.Audio, InteractionHostType.Audio, RatingHostType.Audio);
+        AddDeletedTargets(targets, ChangeTracker.Entries<TextDocument>(), entry => entry.Entity.Id, AffinityHostType.Text, InteractionHostType.Text, RatingHostType.Text);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Segment>(), entry => entry.Entity.Id, AffinityHostType.Segment, InteractionHostType.Segment, RatingHostType.Segment);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Performer>(), entry => entry.Entity.Id, AffinityHostType.Performer, InteractionHostType.Performer, RatingHostType.Performer);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Face>(), entry => entry.Entity.Id, AffinityHostType.Face, InteractionHostType.Face, RatingHostType.Face);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Tag>(), entry => entry.Entity.Id, AffinityHostType.Tag, InteractionHostType.Tag, RatingHostType.Tag);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Studio>(), entry => entry.Entity.Id, AffinityHostType.Studio, InteractionHostType.Studio, RatingHostType.Studio);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Gallery>(), entry => entry.Entity.Id, AffinityHostType.Gallery, InteractionHostType.Gallery, RatingHostType.Gallery);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Group>(), entry => entry.Entity.Id, AffinityHostType.Group, InteractionHostType.Group, RatingHostType.Group);
+        return targets
+            .GroupBy(target => (target.AffinityHostType, target.HostId))
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static void AddDeletedTargets<TEntity>(
+        ICollection<EngagementCleanupTarget> targets,
+        IEnumerable<EntityEntry<TEntity>> entries,
+        Func<EntityEntry<TEntity>, int> getId,
+        AffinityHostType affinityHostType,
+        InteractionHostType interactionHostType,
+        RatingHostType ratingHostType)
+        where TEntity : class
+    {
+        foreach (var entry in entries)
+        {
+            var id = getId(entry);
+            if (entry.State == EntityState.Deleted && id > 0)
+                targets.Add(new EngagementCleanupTarget(affinityHostType, interactionHostType, ratingHostType, id));
+        }
+    }
+
+    private sealed record EngagementCleanupTarget(
+        AffinityHostType AffinityHostType,
+        InteractionHostType InteractionHostType,
+        RatingHostType RatingHostType,
+        int HostId);
 
     private async Task<int> SaveChangesWithDerivedCountsAsync(DerivedCountTargets derivedCountTargets, PostSaveDerivedCountTargets postSaveDerivedCountTargets, CancellationToken cancellationToken)
     {

@@ -55,20 +55,27 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         if (ids.Length == 0)
             return [];
 
+        var visibleIds = await GetVisibleEntityIdsAsync(hostType, ids, cancellationToken);
+        var visibleIdSet = visibleIds.ToHashSet();
+        if (visibleIds.Length == 0)
+            return ids.ToDictionary(id => id, _ => EmptySnapshot);
+
         var userId = principalAccessor.Current?.UserId;
         if (!userId.HasValue)
             return ids.ToDictionary(id => id, _ => EmptySnapshot);
 
         var ratingHostType = ToRatingHostType(hostType);
         var affinities = await db.UserEntityAffinities
-            .Where(affinity => affinity.UserId == userId.Value && affinity.HostType == hostType && ids.Contains(affinity.HostId))
+            .Where(affinity => affinity.UserId == userId.Value && affinity.HostType == hostType && visibleIds.Contains(affinity.HostId))
             .ToDictionaryAsync(affinity => affinity.HostId, cancellationToken);
 
         var ratings = await db.Ratings
-            .Where(rating => rating.UserId == userId.Value && rating.HostType == ratingHostType && rating.Aspect == "overall" && ids.Contains(rating.HostId))
+            .Where(rating => rating.UserId == userId.Value && rating.HostType == ratingHostType && rating.Aspect == "overall" && visibleIds.Contains(rating.HostId))
             .ToDictionaryAsync(rating => rating.HostId, cancellationToken);
 
-        return ids.ToDictionary(id => id, id => ToSnapshot(affinities.GetValueOrDefault(id), ratings.GetValueOrDefault(id)));
+        return ids.ToDictionary(id => id, id => visibleIdSet.Contains(id)
+            ? ToSnapshot(affinities.GetValueOrDefault(id), ratings.GetValueOrDefault(id))
+            : EmptySnapshot);
     }
 
     public Task<Dictionary<int, UserEngagementSnapshot>> GetSceneSnapshotsAsync(IEnumerable<int> sceneIds, CancellationToken cancellationToken = default)
@@ -148,12 +155,13 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         if (InteractionValueMapper.RequiresConcreteHost(hostType) && !await InteractionHostExistsAsync(hostType, normalizedHostId, cancellationToken))
             return false;
 
-        if (kind == InteractionKind.PageVisit && TryMapAffinityHostType(hostType, out var affinityHostType))
+        var now = DateTime.UtcNow;
+        if (TryMapAffinityHostType(hostType, out var affinityHostType))
         {
             var affinity = await GetOrCreateAffinityAsync(affinityHostType, normalizedHostId, cancellationToken);
             if (affinity != null)
             {
-                affinity.PageVisitCount++;
+                ApplyInteractionAggregate(affinity, kind, now);
             }
         }
 
@@ -163,7 +171,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             HostType = hostType,
             HostId = normalizedHostId,
             Kind = kind,
-            At = DateTime.UtcNow,
+            At = now,
             Meta = CloneJsonDocument(meta),
         });
 
@@ -409,6 +417,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         var now = DateTime.UtcNow;
         if (!TryParseSessionState(dto.State, out var state))
             state = PlaybackSessionState.Active;
+        var parentHostType = ParseOptionalHostType(dto.ParentHostType);
+        var itemHostType = ParseOptionalHostType(dto.ItemHostType);
 
         var session = await db.PlaybackSessions
             .Include(s => s.Intervals)
@@ -430,6 +440,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             db.PlaybackSessions.Add(session);
         }
 
+        ApplyPlaybackContext(session, dto, parentHostType, itemHostType);
+
         // Append new intervals (validate and clamp)
         var mediaDuration = dto.MediaDurationSec > 0 ? dto.MediaDurationSec : session.MediaDurationSec;
         foreach (var incoming in dto.Intervals)
@@ -448,6 +460,18 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 StartSec = start,
                 EndSec = end,
                 RecordedAt = now,
+                Surface = NormalizeOptionalText(dto.Surface, 64),
+                ScopeKey = NormalizeOptionalText(dto.ScopeKey, 256),
+                ParentHostType = parentHostType,
+                ParentHostId = dto.ParentHostId,
+                ItemHostType = itemHostType,
+                ItemHostId = dto.ItemHostId,
+                GroupItemId = dto.GroupItemId,
+                SegmentId = dto.SegmentId,
+                ClipStartSec = dto.ClipStartSec,
+                ClipEndSec = dto.ClipEndSec,
+                PlaybackRate = dto.PlaybackRate,
+                Context = CloneJsonDocument(dto.Context),
             });
         }
 
@@ -469,10 +493,16 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         var isFinalState = state is PlaybackSessionState.Ended or PlaybackSessionState.Abandoned;
         var wasCompleted = session.IsCompleted;
         var wasCountsAsView = session.CountsAsView;
+        var clipDuration = dto.ClipStartSec.HasValue && dto.ClipEndSec.HasValue && dto.ClipEndSec.Value > dto.ClipStartSec.Value
+            ? dto.ClipEndSec.Value - dto.ClipStartSec.Value
+            : (double?)null;
         var completedByPosition = isFinalState
-            && (hostType == InteractionHostType.Scene || hostType == InteractionHostType.Audio)
-            && mediaDuration > 0
-            && dto.CurrentPositionSec >= mediaDuration * tracking.ViewCompletionRatio;
+            && ((hostType == InteractionHostType.Scene || hostType == InteractionHostType.Audio)
+                && mediaDuration > 0
+                && dto.CurrentPositionSec >= mediaDuration * tracking.ViewCompletionRatio
+                || hostType == InteractionHostType.Segment
+                && clipDuration.HasValue
+                && session.TotalWatchedSec >= clipDuration.Value * tracking.ViewCompletionRatio);
         if (completedByPosition)
         {
             session.IsCompleted = true;
@@ -489,6 +519,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             InteractionHostType.Text => session.TotalWatchedSec >= tracking.MinImageDetailViewSeconds,
             InteractionHostType.Scene => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
             InteractionHostType.Audio => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
+            InteractionHostType.Segment => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
             _ => false,
         };
 
@@ -509,6 +540,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
 
                 if ((hostType == InteractionHostType.Scene || hostType == InteractionHostType.Audio) && dto.CurrentPositionSec >= 0)
                     affinity.LastPositionSec = dto.CurrentPositionSec;
+                else if (hostType == InteractionHostType.Segment && dto.CurrentPositionSec >= 0)
+                    affinity.LastPositionSec = Math.Max(0d, dto.CurrentPositionSec - (dto.ClipStartSec ?? 0d));
 
                 if (delta > 0d || countsAsView)
                     affinity.LastConsumedAt = now;
@@ -551,6 +584,46 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
 
         await db.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    private static InteractionHostType? ParseOptionalHostType(string? value)
+        => InteractionValueMapper.TryParseHostType(value, out var hostType) && InteractionValueMapper.RequiresConcreteHost(hostType)
+            ? hostType
+            : null;
+
+    private static string? NormalizeOptionalText(string? value, int maxLength)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return null;
+
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
+    }
+
+    private static void ApplyPlaybackContext(
+        PlaybackSession session,
+        PlaybackIntervalsRequestDto dto,
+        InteractionHostType? parentHostType,
+        InteractionHostType? itemHostType)
+    {
+        session.Surface = NormalizeOptionalText(dto.Surface, 64);
+        session.ScopeKey = NormalizeOptionalText(dto.ScopeKey, 256);
+        session.ParentHostType = parentHostType;
+        session.ParentHostId = dto.ParentHostId;
+        session.ItemHostType = itemHostType;
+        session.ItemHostId = dto.ItemHostId;
+        session.GroupItemId = dto.GroupItemId;
+        session.SegmentId = dto.SegmentId;
+        session.ClipStartSec = dto.ClipStartSec;
+        session.ClipEndSec = dto.ClipEndSec;
+        session.Autoplay = dto.Autoplay;
+        session.Muted = dto.Muted;
+        session.Fullscreen = dto.Fullscreen;
+        session.PlaybackRate = dto.PlaybackRate;
+        session.Route = NormalizeOptionalText(dto.Route, 512);
+        session.Referrer = NormalizeOptionalText(dto.Referrer, 512);
+        session.RecommendationSource = NormalizeOptionalText(dto.RecommendationSource, 128);
+        session.Context = CloneJsonDocument(dto.Context);
     }
 
     private static bool IsDuplicatePlaybackSessionInsert(DbUpdateException exception)
@@ -598,26 +671,29 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     }
 
     public async Task<UserEngagementSnapshot?> ResetSceneActivityAsync(int sceneId, CancellationToken cancellationToken = default)
+        => await ResetActivityAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+
+    public async Task<UserEngagementSnapshot?> ResetActivityAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
     {
-        var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == sceneId, cancellationToken);
-        if (scene is null)
+        if (!await EntityExistsAsync(hostType, hostId, cancellationToken))
             return null;
 
-        var affinity = await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken);
+        var affinity = await GetOrCreateAffinityAsync(hostType, hostId, cancellationToken);
         if (affinity != null)
         {
             affinity.LastPositionSec = 0d;
             affinity.TotalConsumedSec = 0d;
             affinity.LastConsumedAt = null;
 
+            var interactionHostType = ToInteractionHostType(hostType);
             var playbackSessions = await db.PlaybackSessions
-                .Where(session => session.UserId == affinity.UserId && session.HostType == InteractionHostType.Scene && session.HostId == sceneId)
+                .Where(session => session.UserId == affinity.UserId && session.HostType == interactionHostType && session.HostId == hostId)
                 .ToListAsync(cancellationToken);
             db.PlaybackSessions.RemoveRange(playbackSessions);
         }
         await db.SaveChangesAsync(cancellationToken);
 
-        return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
+        return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
     }
 
     public async Task<UserEngagementSnapshot?> SetSceneRatingAsync(int sceneId, int? value, string aspect = "overall", CancellationToken cancellationToken = default)
@@ -662,24 +738,32 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     }
 
     public async Task<SceneHistoryDto?> GetSceneHistoryAsync(int sceneId, CancellationToken cancellationToken = default)
+        => await GetHistoryAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+
+    public async Task<SceneHistoryDto?> GetHistoryAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
     {
-        var sceneExists = await db.Scenes.AnyAsync(item => item.Id == sceneId, cancellationToken);
-        if (!sceneExists)
+        if (!await EntityExistsAsync(hostType, hostId, cancellationToken))
             return null;
+
+        var interactionHostType = ToInteractionHostType(hostType);
 
         var userId = principalAccessor.Current?.UserId;
         if (!userId.HasValue)
         {
-            var playHistory = await db.Set<ScenePlayHistory>()
-                .Where(history => history.SceneId == sceneId)
-                .OrderByDescending(history => history.PlayedAt)
-                .Select(history => history.PlayedAt.ToString("o"))
-                .ToListAsync(cancellationToken);
-            var likeHistory = await db.Set<SceneLikeHistory>()
-                .Where(history => history.SceneId == sceneId)
-                .OrderByDescending(history => history.OccurredAt)
-                .Select(history => history.OccurredAt.ToString("o"))
-                .ToListAsync(cancellationToken);
+            var playHistory = hostType == AffinityHostType.Scene
+                ? await db.Set<ScenePlayHistory>()
+                    .Where(history => history.SceneId == hostId)
+                    .OrderByDescending(history => history.PlayedAt)
+                    .Select(history => history.PlayedAt.ToString("o"))
+                    .ToListAsync(cancellationToken)
+                : new List<string>();
+            var likeHistory = hostType == AffinityHostType.Scene
+                ? await db.Set<SceneLikeHistory>()
+                    .Where(history => history.SceneId == hostId)
+                    .OrderByDescending(history => history.OccurredAt)
+                    .Select(history => history.OccurredAt.ToString("o"))
+                    .ToListAsync(cancellationToken)
+                : new List<string>();
             var events = playHistory
                 .Select(date => (At: date, Event: new InteractionEventDto("playStart", date)))
                 .Concat(likeHistory.Select(date => (At: date, Event: new InteractionEventDto("likeCount", date))))
@@ -690,20 +774,22 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         }
 
         var interactions = await db.Interactions
-            .Where(interaction => interaction.UserId == userId.Value && interaction.HostType == InteractionHostType.Scene && interaction.HostId == sceneId)
+            .Where(interaction => interaction.UserId == userId.Value && interaction.HostType == interactionHostType && interaction.HostId == hostId)
             .OrderByDescending(interaction => interaction.At)
             .ToListAsync(cancellationToken);
         var playbackSessions = await db.PlaybackSessions
             .Include(session => session.Intervals)
-            .Where(session => session.UserId == userId.Value && session.HostType == InteractionHostType.Scene && session.HostId == sceneId)
+            .Where(session => session.UserId == userId.Value && session.HostType == interactionHostType && session.HostId == hostId)
             .OrderByDescending(session => session.StartedAt)
             .ToListAsync(cancellationToken);
 
-        var playHistoryForUser = await db.Set<ScenePlayHistory>()
-            .Where(history => history.SceneId == sceneId)
-            .OrderByDescending(history => history.PlayedAt)
-            .Select(history => history.PlayedAt.ToString("o"))
-            .ToListAsync(cancellationToken);
+        var playHistoryForUser = hostType == AffinityHostType.Scene
+            ? await db.Set<ScenePlayHistory>()
+                .Where(history => history.SceneId == hostId)
+                .OrderByDescending(history => history.PlayedAt)
+                .Select(history => history.PlayedAt.ToString("o"))
+                .ToListAsync(cancellationToken)
+            : playbackSessions.Select(session => session.StartedAt.ToString("o")).ToList();
         var likeHistoryForUser = interactions
             .Where(interaction => interaction.Kind == InteractionKind.LikeCount)
             .Select(interaction => interaction.At.ToString("o"))
@@ -734,19 +820,45 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         if (!userId.HasValue)
             return null;
 
+        var trackedAffinity = db.ChangeTracker.Entries<UserEntityAffinity>()
+            .Where(entry => entry.State != EntityState.Deleted
+                && entry.Entity.UserId == userId.Value
+                && entry.Entity.HostType == hostType
+                && entry.Entity.HostId == hostId)
+            .Select(entry => entry.Entity)
+            .FirstOrDefault();
+        if (trackedAffinity != null)
+            return trackedAffinity;
+
         var affinity = await db.UserEntityAffinities.FirstOrDefaultAsync(
             item => item.UserId == userId.Value && item.HostType == hostType && item.HostId == hostId,
             cancellationToken);
 
         if (affinity == null && createIfMissing)
         {
-            affinity = new UserEntityAffinity
+            if (db.Database.IsRelational())
             {
-                UserId = userId.Value,
-                HostType = hostType,
-                HostId = hostId,
-            };
-            db.UserEntityAffinities.Add(affinity);
+                var now = DateTime.UtcNow;
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO user_entity_affinities ("UserId", "HostType", "HostId", "IsFavorite", "CreatedAt", "UpdatedAt")
+                    VALUES ({userId.Value}, {(int)hostType}, {hostId}, {false}, {now}, {now})
+                    ON CONFLICT ("UserId", "HostType", "HostId") DO NOTHING
+                    """, cancellationToken);
+
+                affinity = await db.UserEntityAffinities.FirstOrDefaultAsync(
+                    item => item.UserId == userId.Value && item.HostType == hostType && item.HostId == hostId,
+                    cancellationToken);
+            }
+            else
+            {
+                affinity = new UserEntityAffinity
+                {
+                    UserId = userId.Value,
+                    HostType = hostType,
+                    HostId = hostId,
+                };
+                db.UserEntityAffinities.Add(affinity);
+            }
         }
 
         return affinity;
@@ -779,6 +891,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             InteractionHostType.Image => AffinityHostType.Image,
             InteractionHostType.Audio => AffinityHostType.Audio,
             InteractionHostType.Text => AffinityHostType.Text,
+            InteractionHostType.Segment => AffinityHostType.Segment,
             InteractionHostType.Performer => AffinityHostType.Performer,
             InteractionHostType.Face => AffinityHostType.Face,
             InteractionHostType.Tag => AffinityHostType.Tag,
@@ -790,12 +903,64 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         return affinityHostType != default;
     }
 
+    private static void ApplyInteractionAggregate(UserEntityAffinity affinity, InteractionKind kind, DateTime at)
+    {
+        affinity.InteractionCount++;
+        affinity.LastInteractedAt = at;
+
+        switch (kind)
+        {
+            case InteractionKind.PageVisit:
+                affinity.PageVisitCount++;
+                break;
+            case InteractionKind.OpenDetail:
+                affinity.OpenDetailCount++;
+                break;
+            case InteractionKind.OpenLightbox:
+                affinity.OpenLightboxCount++;
+                break;
+            case InteractionKind.Navigate:
+                affinity.NavigateCount++;
+                break;
+            case InteractionKind.Pause:
+                affinity.PauseCount++;
+                affinity.PlayerControlCount++;
+                break;
+            case InteractionKind.Seek:
+                affinity.SeekCount++;
+                affinity.PlayerControlCount++;
+                break;
+            case InteractionKind.Fullscreen:
+            case InteractionKind.SlideshowDelay:
+                affinity.PlayerControlCount++;
+                break;
+            case InteractionKind.SearchQuery:
+            case InteractionKind.SearchSelect:
+                affinity.SearchInteractionCount++;
+                break;
+            case InteractionKind.FilterApply:
+            case InteractionKind.FilterClear:
+                affinity.FilterInteractionCount++;
+                break;
+            case InteractionKind.Share:
+                affinity.ShareCount++;
+                break;
+            case InteractionKind.Hide:
+                affinity.HideCount++;
+                break;
+            case InteractionKind.Zoom:
+                affinity.ZoomCount++;
+                break;
+        }
+    }
+
     private static InteractionHostType ToInteractionHostType(AffinityHostType hostType) => hostType switch
     {
         AffinityHostType.Scene => InteractionHostType.Scene,
         AffinityHostType.Image => InteractionHostType.Image,
         AffinityHostType.Audio => InteractionHostType.Audio,
         AffinityHostType.Text => InteractionHostType.Text,
+        AffinityHostType.Segment => InteractionHostType.Segment,
         AffinityHostType.Performer => InteractionHostType.Performer,
         AffinityHostType.Face => InteractionHostType.Face,
         AffinityHostType.Tag => InteractionHostType.Tag,
@@ -826,6 +991,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             AffinityHostType.Image => await db.Images.AnyAsync(image => image.Id == hostId, cancellationToken),
             AffinityHostType.Audio => await db.Audios.AnyAsync(audio => audio.Id == hostId, cancellationToken),
             AffinityHostType.Text => await db.TextDocuments.AnyAsync(text => text.Id == hostId, cancellationToken),
+            AffinityHostType.Segment => await db.VisibleSegments().AnyAsync(segment => segment.Id == hostId, cancellationToken),
             AffinityHostType.Performer => await db.Performers.AnyAsync(performer => performer.Id == hostId, cancellationToken),
             AffinityHostType.Face => await db.Faces.AnyAsync(face => face.Id == hostId, cancellationToken),
             AffinityHostType.Tag => await db.Tags.AnyAsync(tag => tag.Id == hostId, cancellationToken),
@@ -833,6 +999,23 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             AffinityHostType.Gallery => await db.Galleries.AnyAsync(gallery => gallery.Id == hostId, cancellationToken),
             AffinityHostType.Group => await db.Groups.AnyAsync(group => group.Id == hostId, cancellationToken),
             _ => false,
+        };
+
+    private async Task<int[]> GetVisibleEntityIdsAsync(AffinityHostType hostType, int[] hostIds, CancellationToken cancellationToken)
+        => hostType switch
+        {
+            AffinityHostType.Scene => await db.Scenes.Where(scene => hostIds.Contains(scene.Id)).Select(scene => scene.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Image => await db.Images.Where(image => hostIds.Contains(image.Id)).Select(image => image.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Audio => await db.Audios.Where(audio => hostIds.Contains(audio.Id)).Select(audio => audio.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Text => await db.TextDocuments.Where(text => hostIds.Contains(text.Id)).Select(text => text.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Segment => await db.VisibleSegments().Where(segment => hostIds.Contains(segment.Id)).Select(segment => segment.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Performer => await db.Performers.Where(performer => hostIds.Contains(performer.Id)).Select(performer => performer.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Face => await db.Faces.Where(face => hostIds.Contains(face.Id)).Select(face => face.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Tag => await db.Tags.Where(tag => hostIds.Contains(tag.Id)).Select(tag => tag.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Studio => await db.Studios.Where(studio => hostIds.Contains(studio.Id)).Select(studio => studio.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Gallery => await db.Galleries.Where(gallery => hostIds.Contains(gallery.Id)).Select(gallery => gallery.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Group => await db.Groups.Where(group => hostIds.Contains(group.Id)).Select(group => group.Id).ToArrayAsync(cancellationToken),
+            _ => [],
         };
 
     private async Task<bool> InteractionHostExistsAsync(InteractionHostType hostType, int hostId, CancellationToken cancellationToken)
@@ -845,7 +1028,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             InteractionHostType.Performer => await db.Performers.AnyAsync(performer => performer.Id == hostId, cancellationToken),
             InteractionHostType.Tag => await db.Tags.AnyAsync(tag => tag.Id == hostId, cancellationToken),
             InteractionHostType.Face => await db.Faces.AnyAsync(face => face.Id == hostId, cancellationToken),
-            InteractionHostType.Segment => await db.Segments.AnyAsync(segment => segment.Id == hostId, cancellationToken),
+            InteractionHostType.Segment => await db.VisibleSegments().AnyAsync(segment => segment.Id == hostId, cancellationToken),
             InteractionHostType.Studio => await db.Studios.AnyAsync(studio => studio.Id == hostId, cancellationToken),
             InteractionHostType.Gallery => await db.Galleries.AnyAsync(gallery => gallery.Id == hostId, cancellationToken),
             InteractionHostType.Group => await db.Groups.AnyAsync(group => group.Id == hostId, cancellationToken),
@@ -878,6 +1061,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         AffinityHostType.Image => RatingHostType.Image,
         AffinityHostType.Audio => RatingHostType.Audio,
         AffinityHostType.Text => RatingHostType.Text,
+        AffinityHostType.Segment => RatingHostType.Segment,
         AffinityHostType.Performer => RatingHostType.Performer,
         AffinityHostType.Face => RatingHostType.Face,
         AffinityHostType.Tag => RatingHostType.Tag,

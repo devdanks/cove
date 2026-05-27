@@ -8,6 +8,7 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/engagement")]
+[AllowWithoutPermission]
 public class EntityEngagementController(IUserEngagementService engagementService, ICurrentPrincipalAccessor principalAccessor) : ControllerBase
 {
     [HttpGet("{hostType}/{hostId:int}")]
@@ -134,6 +135,8 @@ public class EntityEngagementController(IUserEngagementService engagementService
             (AffinityHostType.Gallery, true) => Permissions.GalleriesWrite,
             (AffinityHostType.Group, false) => Permissions.GroupsRead,
             (AffinityHostType.Group, true) => Permissions.GroupsWrite,
+            (AffinityHostType.Segment, false) => Permissions.SegmentsRead,
+            (AffinityHostType.Segment, true) => Permissions.SegmentsWrite,
             _ => null,
         };
 

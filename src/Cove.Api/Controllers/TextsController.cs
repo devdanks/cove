@@ -35,13 +35,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         perPage = Math.Clamp(perPage, 1, 250);
         var descending = string.Equals(direction, "desc", StringComparison.OrdinalIgnoreCase);
 
-        var query = db.TextDocuments.AsNoTracking()
-            .Include(text => text.Studio)
-            .Include(text => text.Urls)
-            .Include(text => text.Files)
-            .Include(text => text.TextTags).ThenInclude(link => link.Tag)
-            .Include(text => text.TextPerformers).ThenInclude(link => link.Performer)
-            .AsQueryable();
+        var query = db.TextDocuments.AsNoTracking().AsQueryable();
 
         query = FullTextSearchHelpers.Apply(db, query, q,
             text => text.Title,
@@ -51,13 +45,17 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
             text => text.SearchText);
 
         query = ApplySort(query, sort, descending);
-        query = FullTextSearchHelpers.OrderByRelevance(db, query, q);
+        if (FullTextSearchHelpers.ShouldOrderByRelevance(db, q, sort))
+            query = FullTextSearchHelpers.OrderByRelevance(db, query, q);
 
         var totalCount = await query.CountAsync(ct);
-        var items = await query
+        var pagedIds = await query
             .Skip((page - 1) * perPage)
             .Take(perPage)
+            .Select(text => text.Id)
             .ToListAsync(ct);
+
+        var items = await LoadListItemsAsync(pagedIds, ct);
 
         var dtos = items.Select(text => MapToDto(text, null, null)).ToList();
         return Ok(new PaginatedResponse<TextDocumentDto>(dtos, totalCount, page, perPage));
@@ -71,13 +69,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         var perPage = Math.Clamp(findFilter.PerPage, 1, 250);
         var descending = findFilter.Direction == Cove.Core.Enums.SortDirection.Desc;
 
-        var query = db.TextDocuments.AsNoTracking()
-            .Include(text => text.Studio)
-            .Include(text => text.Urls)
-            .Include(text => text.Files)
-            .Include(text => text.TextTags).ThenInclude(link => link.Tag)
-            .Include(text => text.TextPerformers).ThenInclude(link => link.Performer)
-            .AsQueryable();
+        var query = db.TextDocuments.AsNoTracking().AsQueryable();
 
         query = FullTextSearchHelpers.Apply(db, query, findFilter.Q,
             text => text.Title,
@@ -88,13 +80,17 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
 
         query = ApplyFilter(query, req.ObjectFilter);
         query = ApplySort(query, findFilter.Sort, descending);
-        query = FullTextSearchHelpers.OrderByRelevance(db, query, findFilter.Q);
+        if (FullTextSearchHelpers.ShouldOrderByRelevance(db, findFilter.Q, findFilter.Sort))
+            query = FullTextSearchHelpers.OrderByRelevance(db, query, findFilter.Q);
 
         var totalCount = await query.CountAsync(ct);
-        var items = await query
+        var pagedIds = await query
             .Skip((page - 1) * perPage)
             .Take(perPage)
+            .Select(text => text.Id)
             .ToListAsync(ct);
+
+        var items = await LoadListItemsAsync(pagedIds, ct);
 
         var dtos = items.Select(text => MapToDto(text, null, null)).ToList();
         return Ok(new PaginatedResponse<TextDocumentDto>(dtos, totalCount, page, perPage));
@@ -430,14 +426,47 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         }
     }
 
+    private async Task<List<TextDocument>> LoadListItemsAsync(IReadOnlyList<int> pagedIds, CancellationToken ct)
+    {
+        if (pagedIds.Count == 0)
+            return [];
+
+        var items = await db.TextDocuments.AsNoTracking()
+            .Include(text => text.Studio)
+            .Include(text => text.Urls)
+            .Include(text => text.Files)
+            .Include(text => text.TextTags).ThenInclude(link => link.Tag)
+            .Include(text => text.TextPerformers).ThenInclude(link => link.Performer)
+            .Where(text => pagedIds.Contains(text.Id))
+            .AsSplitQuery()
+            .ToListAsync(ct);
+
+        var orderMap = pagedIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
+        return items.OrderBy(text => orderMap.GetValueOrDefault(text.Id, int.MaxValue)).ToList();
+    }
+
     private IQueryable<TextDocument> ApplySort(IQueryable<TextDocument> query, string? sort, bool descending)
     {
+        if (FilterHelpers.TryParseCustomFieldSort(sort, out _, out _))
+            return query.ApplyCustomFieldSort(db, CustomFieldEntityTypes.Text, sort, descending);
+
         return (sort ?? string.Empty).Trim().ToLowerInvariant() switch
         {
             "title" => descending ? query.OrderByDescending(text => text.Title).ThenByDescending(text => text.Id) : query.OrderBy(text => text.Title).ThenBy(text => text.Id),
             "date" => descending ? query.OrderByDescending(text => text.Date).ThenByDescending(text => text.Id) : query.OrderBy(text => text.Date).ThenBy(text => text.Id),
             "words" => descending ? query.OrderByDescending(text => text.MaxWordCount).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxWordCount).ThenBy(text => text.Id),
             "pages" => descending ? query.OrderByDescending(text => text.MaxPageCount).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxPageCount).ThenBy(text => text.Id),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(db, query, EngagementQueryHelpers.CurrentUserId(db), RatingHostType.Text, descending),
+            "play_count" or "read_count" => EngagementQueryHelpers.ApplyAffinityIntSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.ViewCount), descending),
+            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.LikeCount), descending),
+            "play_duration" or "read_duration" => EngagementQueryHelpers.ApplyAffinityDoubleSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.TotalConsumedSec), descending),
+            "last_read_at" or "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.LastConsumedAt), descending),
+            "file_size" => descending ? query.OrderByDescending(text => text.MaxFileSize).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxFileSize).ThenBy(text => text.Id),
+            "file_mod_time" => descending ? query.OrderByDescending(text => text.MaxFileModTime).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MaxFileModTime).ThenBy(text => text.Id),
+            "file_count" => descending ? query.OrderByDescending(text => text.FileCount).ThenByDescending(text => text.Id) : query.OrderBy(text => text.FileCount).ThenBy(text => text.Id),
+            "path" => descending ? query.OrderByDescending(text => text.MaxPath).ThenByDescending(text => text.Id) : query.OrderBy(text => text.MinPath).ThenBy(text => text.Id),
+            "tag_count" => descending ? query.OrderByDescending(text => text.TextTags.Count).ThenByDescending(text => text.Id) : query.OrderBy(text => text.TextTags.Count).ThenBy(text => text.Id),
+            "performer_count" => descending ? query.OrderByDescending(text => text.TextPerformers.Count).ThenByDescending(text => text.Id) : query.OrderBy(text => text.TextPerformers.Count).ThenBy(text => text.Id),
             "updatedat" or "updated_at" => descending ? query.OrderByDescending(text => text.UpdatedAt).ThenByDescending(text => text.Id) : query.OrderBy(text => text.UpdatedAt).ThenBy(text => text.Id),
             "createdat" => descending ? query.OrderByDescending(text => text.CreatedAt).ThenByDescending(text => text.Id) : query.OrderBy(text => text.CreatedAt).ThenBy(text => text.Id),
             "created_at" => descending ? query.OrderByDescending(text => text.CreatedAt).ThenByDescending(text => text.Id) : query.OrderBy(text => text.CreatedAt).ThenBy(text => text.Id),
@@ -450,15 +479,25 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         if (filter == null)
             return query;
 
+        query = EngagementQueryHelpers.ApplyRatingCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), RatingHostType.Text, filter.RatingCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.ViewCount), filter.PlayCountCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.LikeCount), filter.LikeCounterCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityDoubleAsIntCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.TotalConsumedSec), filter.PlayDurationCriterion);
+        query = EngagementQueryHelpers.ApplyAffinityTimestampCriterion(db, query, EngagementQueryHelpers.CurrentUserId(db), AffinityHostType.Text, nameof(UserEntityAffinity.LastConsumedAt), filter.LastReadAtCriterion);
         query = FilterHelpers.ApplyString(query, filter.TitleCriterion, text => text.Title);
         query = FilterHelpers.ApplyString(query, filter.CodeCriterion, text => text.Code);
         query = FilterHelpers.ApplyString(query, filter.DetailsCriterion, text => text.Details);
+        query = FilterHelpers.ApplyString(query, filter.ContentCriterion, text => text.SearchText);
         query = FilterHelpers.ApplyFilePath(query, filter.PathCriterion, text => text.Files);
+        query = ApplyTextFileStringCriterion(query, filter.FormatCriterion);
         query = FilterHelpers.ApplyString(query, filter.UrlCriterion, text => text.Urls.Select(url => url.Url).FirstOrDefault());
         query = FilterHelpers.ApplyBool(query, filter.OrganizedCriterion, text => text.Organized);
+        query = FilterHelpers.ApplyBool(query, filter.HasCoverCriterion, text => text.ImageBlobId != null && text.ImageBlobId != string.Empty);
         query = FilterHelpers.ApplyDate(query, filter.DateCriterion, text => text.Date);
         query = FilterHelpers.ApplyInt(query, filter.WordCountCriterion, text => text.MaxWordCount ?? 0);
         query = FilterHelpers.ApplyInt(query, filter.PageCountCriterion, text => text.MaxPageCount ?? 0);
+        query = FilterHelpers.ApplyLong(query, filter.FileSizeCriterion, text => text.MaxFileSize);
+        query = FilterHelpers.ApplyNullableTimestamp(query, filter.FileModTimeCriterion, text => text.MaxFileModTime);
         query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, text => text.FileCount);
         query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, text => text.TextTags.Count);
         query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, text => text.TextPerformers.Count);
@@ -474,6 +513,25 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         query = query.ApplyCustomFieldCriteria(db, CustomFieldEntityTypes.Text, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
 
         return query;
+    }
+
+    private static IQueryable<TextDocument> ApplyTextFileStringCriterion(IQueryable<TextDocument> query, StringCriterion? criterion)
+    {
+        if (criterion == null)
+            return query;
+
+        var value = criterion.Value.Trim();
+        var lowered = value.ToLowerInvariant();
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => query.Where(text => text.Files.Any(file => file.Format == value)),
+            CriterionModifier.NotEquals => query.Where(text => !text.Files.Any(file => file.Format == value)),
+            CriterionModifier.Includes => query.Where(text => text.Files.Any(file => file.Format != null && file.Format.ToLower().Contains(lowered))),
+            CriterionModifier.Excludes => query.Where(text => !text.Files.Any(file => file.Format != null && file.Format.ToLower().Contains(lowered))),
+            CriterionModifier.IsNull => query.Where(text => !text.Files.Any(file => file.Format != string.Empty)),
+            CriterionModifier.NotNull => query.Where(text => text.Files.Any(file => file.Format != string.Empty)),
+            _ => query,
+        };
     }
 
     private static int[] GetIncludedPerformerIds(TextDocumentFilter filter)

@@ -5,6 +5,7 @@ using Cove.Core.Auth;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
+using Cove.Data.Services;
 
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -171,7 +172,7 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     [HttpGet("detection/{detectionId:int}/crop")]
     public async Task<IActionResult> GetDetectionCrop(int detectionId, [FromQuery] int? max, CancellationToken ct)
     {
-        var detection = await db.Detections
+        var detection = await db.VisibleDetections()
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == detectionId, ct);
         if (detection is null) return NotFound();
@@ -304,7 +305,7 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         {
             var bw = res switch { "240p" => 400000, "360p" => 800000, "480p" => 1200000, "720p" => 2500000, "1080p" => 5000000, "1440p" => 8000000, "4K" => 15000000, _ => 5000000 };
             lines.Add($"#EXT-X-STREAM-INF:BANDWIDTH={bw},RESOLUTION={GetResForLabel(res)},NAME=\"{res}\"");
-            lines.Add($"/api/stream/scene/{sceneId}/hls/{res}.m3u8");
+            lines.Add(AppendMediaAuthQuery($"/api/stream/scene/{sceneId}/hls/{res}.m3u8"));
         }
 
         Response.Headers["Cache-Control"] = "no-cache";
@@ -321,8 +322,7 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         var manifest = await transcodeService.GenerateHlsManifestAsync(sceneId, filePath, resolution, ct);
         if (manifest == null) return StatusCode(503, "HLS generation failed — FFmpeg not found or error occurred");
 
-        // Rewrite segment paths to use API URLs
-        manifest = manifest.Replace($"{resolution ?? "original"}_", $"/api/stream/scene/{sceneId}/hls/segment/{resolution ?? "original"}_");
+        manifest = RewriteHlsSegmentUrls(manifest, sceneId, resolution ?? "original");
 
         Response.Headers["Cache-Control"] = "no-cache";
         return Content(manifest, "application/vnd.apple.mpegurl");
@@ -331,6 +331,9 @@ public class StreamController(IStreamService streamService, IThumbnailService th
     [HttpGet("scene/{sceneId:int}/hls/segment/{segment}")]
     public async Task<IActionResult> GetHlsSegment(int sceneId, string segment, CancellationToken ct)
     {
+        if (!await db.Scenes.AsNoTracking().AnyAsync(scene => scene.Id == sceneId, ct))
+            return NotFound();
+
         var stream = await transcodeService.GetHlsSegmentAsync(sceneId, segment, ct);
         if (stream == null) return NotFound();
 
@@ -366,6 +369,49 @@ public class StreamController(IStreamService streamService, IThumbnailService th
             : videoFile.Basename;
 
         return System.IO.File.Exists(filePath) ? filePath : null;
+    }
+
+    private string RewriteHlsSegmentUrls(string manifest, int sceneId, string profile)
+    {
+        var segmentPrefix = profile + "_";
+        var apiPrefix = $"/api/stream/scene/{sceneId}/hls/segment/";
+        var lines = manifest.Replace("\r\n", "\n").Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index].TrimEnd('\r');
+            if (line.StartsWith(segmentPrefix, StringComparison.Ordinal))
+                lines[index] = AppendMediaAuthQuery(apiPrefix + line);
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    private string AppendMediaAuthQuery(string url)
+    {
+        var query = Request.Query;
+        var values = new List<string>();
+        AddQueryValue(values, query, "access_token");
+        AddQueryValue(values, query, "share_token");
+        AddQueryValue(values, query, "share_password");
+        if (values.Count == 0)
+            return url;
+
+        var separator = url.Contains('?', StringComparison.Ordinal) ? '&' : '?';
+        return url + separator + string.Join('&', values);
+    }
+
+    private static void AddQueryValue(List<string> values, IQueryCollection query, string key)
+    {
+        if (!query.TryGetValue(key, out var rawValues))
+            return;
+
+        foreach (var rawValue in rawValues)
+        {
+            if (string.IsNullOrEmpty(rawValue))
+                continue;
+
+            values.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(rawValue)}");
+        }
     }
 
     private int? ResolveSourceSceneId(int sceneId)

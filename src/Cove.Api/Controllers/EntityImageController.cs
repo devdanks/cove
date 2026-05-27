@@ -7,6 +7,7 @@ using Cove.Core.DTOs;
 using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
+using Cove.Data.Services;
 
 namespace Cove.Api.Controllers;
 
@@ -22,7 +23,7 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Segments.FirstOrDefaultAsync(segment => segment.Id == id, ct);
+        var entity = await db.VisibleSegments().FirstOrDefaultAsync(segment => segment.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId != null)
@@ -40,7 +41,7 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     [RequiresPermission(Permissions.SegmentsRead)]
     public async Task<IActionResult> GetSegmentImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Segments.FirstOrDefaultAsync(segment => segment.Id == id, ct);
+        var entity = await db.VisibleSegments().FirstOrDefaultAsync(segment => segment.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId == null)
@@ -66,7 +67,7 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     [RequiresPermission(Permissions.SegmentsWrite)]
     public async Task<IActionResult> DeleteSegmentImage(int id, CancellationToken ct)
     {
-        var entity = await db.Segments.FirstOrDefaultAsync(segment => segment.Id == id, ct);
+        var entity = await db.VisibleSegments().FirstOrDefaultAsync(segment => segment.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
@@ -81,7 +82,7 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     [RequiresPermission(Permissions.SegmentsWrite)]
     public async Task<IActionResult> SetSegmentImageFromFrame(int id, [FromBody] GenerateScreenshotDto? dto, CancellationToken ct)
     {
-        var entity = await db.Segments.FirstOrDefaultAsync(segment => segment.Id == id, ct);
+        var entity = await db.VisibleSegments().FirstOrDefaultAsync(segment => segment.Id == id, ct);
         if (entity == null) return NotFound();
         if (entity.HostType != SegmentHostType.Scene) return BadRequest("Frame covers are only available for scene-backed segments.");
 

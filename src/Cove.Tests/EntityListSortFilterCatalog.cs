@@ -15,8 +15,6 @@ public sealed record EntityListFilterDefinition(string Entity, string Key, strin
 
 public static class EntityListSortFilterCatalog
 {
-    public const string GroupRatingFilterTracking = "broken; P1.B harness exposed GroupFilter.RatingCriterion returning no group rows because GroupRepository applies Gallery rating host type";
-
     private static readonly IReadOnlyDictionary<string, Type> FilterTypesByEntity = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase)
     {
         ["scenes"] = typeof(SceneFilter),
@@ -97,6 +95,20 @@ public static class EntityListSortFilterCatalog
         new("audios", "createdAt", "Created At"),
         new("audios", "date", "Date"),
         new("audios", "duration", "Duration"),
+        new("audios", "rating", "Rating"),
+        new("audios", "play_count", "Play Count"),
+        new("audios", "like_counter", "Likes"),
+        new("audios", "play_duration", "Play Duration"),
+        new("audios", "last_played_at", "Last Played"),
+        new("audios", "file_size", "File Size"),
+        new("audios", "file_mod_time", "File Modification Time"),
+        new("audios", "file_count", "File Count"),
+        new("audios", "path", "Path"),
+        new("audios", "bitrate", "Bitrate"),
+        new("audios", "has_video_files", "Has Video Files"),
+        new("audios", "track_count", "Track Count"),
+        new("audios", "tag_count", "Tag Count"),
+        new("audios", "performer_count", "Performer Count"),
         new("audios", "title", "Title"),
 
         // Texts
@@ -105,6 +117,17 @@ public static class EntityListSortFilterCatalog
         new("texts", "date", "Date"),
         new("texts", "words", "Words"),
         new("texts", "pages", "Pages"),
+        new("texts", "rating", "Rating"),
+        new("texts", "read_count", "Read Count"),
+        new("texts", "like_counter", "Likes"),
+        new("texts", "read_duration", "Read Duration"),
+        new("texts", "last_read_at", "Last Read"),
+        new("texts", "file_size", "File Size"),
+        new("texts", "file_mod_time", "File Modification Time"),
+        new("texts", "file_count", "File Count"),
+        new("texts", "path", "Path"),
+        new("texts", "tag_count", "Tag Count"),
+        new("texts", "performer_count", "Performer Count"),
         new("texts", "title", "Title"),
 
         // Galleries
@@ -127,6 +150,26 @@ public static class EntityListSortFilterCatalog
         new("groups", "rating", "Rating"),
         new("groups", "random", "Random"),
         new("groups", "created_at", "Created At"),
+        new("groups", "updated_at", "Updated At"),
+        new("groups", "item_count", "Item Count"),
+        new("groups", "scene_count", "Scene Count"),
+        new("groups", "image_count", "Image Count"),
+        new("groups", "audio_count", "Audio Count"),
+        new("groups", "text_count", "Text Count"),
+        new("groups", "gallery_count", "Gallery Count"),
+        new("groups", "performer_count", "Performer Item Count"),
+        new("groups", "studio_count", "Studio Item Count"),
+        new("groups", "tag_item_count", "Tag Item Count"),
+        new("groups", "tag_count", "Tag Count"),
+        new("groups", "face_count", "Face Count"),
+        new("groups", "segment_count", "Segment Count"),
+        new("groups", "subgroup_count", "Subgroup Count"),
+        new("groups", "containing_group_count", "Containing Group Count"),
+        new("groups", "cached_item_count", "Cached Item Count"),
+        new("groups", "last_resolved_at", "Last Resolved"),
+        new("groups", "query_source_key", "Query Source Key"),
+        new("groups", "show_in_scene_lists", "Show In Scene Lists"),
+        new("groups", "aliases", "Aliases"),
 
         // Segments
         new("segments", "updated_at", "Updated At"),
@@ -140,6 +183,8 @@ public static class EntityListSortFilterCatalog
         new("segments", "kind", "Kind"),
         new("segments", "source_key", "Source Key"),
         new("segments", "tag_name", "Tag Name"),
+        new("segments", "performer", "Performer"),
+        new("segments", "ref", "Reference"),
 
         // Performers
         new("performers", "name", "Name"),
@@ -171,6 +216,7 @@ public static class EntityListSortFilterCatalog
         new("studios", "image_count", "Image Count"),
         new("studios", "latest_scene_date", "Latest Scene Date"),
         new("studios", "total_file_size", "Total File Size"),
+        new("studios", "parent_count", "Parent Studio Count"),
         new("studios", "child_count", "Substudios Count"),
         new("studios", "tag_count", "Tag Count"),
         new("studios", "updated_at", "Updated At"),
@@ -199,6 +245,26 @@ public static class EntityListSortFilterCatalog
         new("faces", "appearance_desc", "Most appearances"),
         new("faces", "scene_count_desc", "Most scenes"),
         new("faces", "image_count_desc", "Most images"),
+        new("faces", "label_asc", "Label A-Z"),
+        new("faces", "label_desc", "Label Z-A"),
+        new("faces", "performer_name_asc", "Performer A-Z"),
+        new("faces", "performer_name_desc", "Performer Z-A"),
+        new("faces", "primary_source_key_asc", "Primary Source A-Z"),
+        new("faces", "primary_source_key_desc", "Primary Source Z-A"),
+        new("faces", "ignored_asc", "Ignored Last"),
+        new("faces", "ignored_desc", "Ignored First"),
+        new("faces", "merged_asc", "Merged Last"),
+        new("faces", "merged_desc", "Merged First"),
+        new("faces", "cover_present_asc", "Missing Cover First"),
+        new("faces", "cover_present_desc", "Has Cover First"),
+        new("faces", "detection_count_asc", "Detection Count Asc"),
+        new("faces", "detection_count_desc", "Detection Count Desc"),
+        new("faces", "appearance_count_asc", "Appearance Count Asc"),
+        new("faces", "appearance_count_desc", "Appearance Count Desc"),
+        new("faces", "frame_sample_count_asc", "Frame Sample Count Asc"),
+        new("faces", "frame_sample_count_desc", "Frame Sample Count Desc"),
+        new("faces", "scene_count_asc", "Scene Count Asc"),
+        new("faces", "image_count_asc", "Image Count Asc"),
     ];
 
     public static IReadOnlyList<EntityListFilterDefinition> Filters { get; } = BuildFilters();
@@ -220,12 +286,7 @@ public static class EntityListSortFilterCatalog
                 if (!TryGetCriterionOperators(propertyType, out var criterionType, out var operators))
                     continue;
 
-                var knownBroken = (entity, property.Name) switch
-                {
-                    ("groups", nameof(GroupFilter.RatingCriterion)) => GroupRatingFilterTracking,
-                    _ => null,
-                };
-                rows.Add(new EntityListFilterDefinition(entity, property.Name, criterionType, operators, knownBroken));
+                rows.Add(new EntityListFilterDefinition(entity, property.Name, criterionType, operators));
             }
         }
 
@@ -234,6 +295,15 @@ public static class EntityListSortFilterCatalog
             new EntityListFilterDefinition("faces", "linked", "query-param:bool", ["true", "false"]),
             new EntityListFilterDefinition("faces", "ignored", "query-param:bool", ["true", "false"]),
             new EntityListFilterDefinition("faces", "merged", "query-param:bool", ["true", "false"]),
+            new EntityListFilterDefinition("faces", "mergedIntoFaceId", "query-param:int", ["equals"]),
+            new EntityListFilterDefinition("faces", "label", "query-param:string", ["equals", "not_equals", "includes", "excludes", "matches_regex", "not_matches_regex", "is_null", "not_null"]),
+            new EntityListFilterDefinition("faces", "primarySourceKey", "query-param:string", ["equals", "not_equals", "includes", "excludes", "matches_regex", "not_matches_regex", "is_null", "not_null"]),
+            new EntityListFilterDefinition("faces", "hasCover", "query-param:bool", ["true", "false"]),
+            new EntityListFilterDefinition("faces", "detectionCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
+            new EntityListFilterDefinition("faces", "appearanceCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
+            new EntityListFilterDefinition("faces", "frameSampleCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
+            new EntityListFilterDefinition("faces", "sceneCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
+            new EntityListFilterDefinition("faces", "imageCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
             new EntityListFilterDefinition("segments", "ids", "query-param:int-list", ["includes"]),
             new EntityListFilterDefinition("segments", "sceneId", "query-param:int", ["equals"]),
             new EntityListFilterDefinition("segments", "sceneIds", "query-param:int-list", ["includes"]),
@@ -243,6 +313,16 @@ public static class EntityListSortFilterCatalog
             new EntityListFilterDefinition("segments", "tagIds", "query-param:int-list", ["includes"]),
             new EntityListFilterDefinition("segments", "kind", "query-param:string", ["includes"]),
             new EntityListFilterDefinition("segments", "sourceKey", "query-param:string", ["includes"]),
+            new EntityListFilterDefinition("segments", "title", "query-param:string", ["equals", "not_equals", "includes", "excludes", "is_null", "not_null"]),
+            new EntityListFilterDefinition("segments", "hostType", "query-param:enum", ["equals"]),
+            new EntityListFilterDefinition("segments", "sourceRunId", "query-param:string", ["equals", "not_equals", "includes", "excludes", "is_null", "not_null"]),
+            new EntityListFilterDefinition("segments", "colorHint", "query-param:string", ["equals", "not_equals", "includes", "excludes", "is_null", "not_null"]),
+            new EntityListFilterDefinition("segments", "hasImage", "query-param:bool", ["true", "false"]),
+            new EntityListFilterDefinition("segments", "hasPayload", "query-param:bool", ["true", "false"]),
+            new EntityListFilterDefinition("segments", "startSec", "query-param:number", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
+            new EntityListFilterDefinition("segments", "endSec", "query-param:number", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
+            new EntityListFilterDefinition("segments", "createdAt", "query-param:timestamp", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
+            new EntityListFilterDefinition("segments", "updatedAt", "query-param:timestamp", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
             new EntityListFilterDefinition("segments", "tagged", "query-param:bool", ["true", "false"]),
             new EntityListFilterDefinition("segments", "minConfidence", "query-param:number", ["greater_than_or_equal"]),
             new EntityListFilterDefinition("segments", "minDurationSec", "query-param:number", ["greater_than_or_equal"]),

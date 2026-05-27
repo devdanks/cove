@@ -32,7 +32,7 @@ import {
 } from "./TaggerShared";
 import { AlertCircle, Check, FileQuestion, Loader2, Search } from "lucide-react";
 
-type SupportedScraperEntity = "image" | "audio" | "text" | "group";
+type SupportedScraperEntity = "image" | "audio" | "text" | "gallery" | "group";
 
 interface ScraperEntityItem {
   id: number;
@@ -43,6 +43,7 @@ interface ScraperEntityItem {
   code?: string;
   date?: string;
   details?: string;
+  photographer?: string;
   director?: string;
   synopsis?: string;
   studioName?: string;
@@ -260,7 +261,7 @@ function mapScraperResult(
     director: pickString(result, "Director"),
     rating: pickString(result, "Rating"),
     studioName: pickString(result, "Studio", "StudioName"),
-    creator: entityType === "image" ? pickString(result, "Photographer") : undefined,
+    creator: entityType === "image" || entityType === "gallery" ? pickString(result, "Photographer") : undefined,
     imageUrl: pickString(result, "Image", "ImageUrl", "ImageURL", "FrontImage", "FrontImageUrl", "FrontImageURL"),
     urls: pickStringList(result, "URLs", "Url", "URL"),
     performerNames: getPerformerNamesForEntity(entityType, result),
@@ -282,6 +283,7 @@ function buildCurrentReviewData(item: ScraperEntityItem): ScraperReviewData {
     urls: item.urls ?? [],
     tags: normalizeTagList((item.tags ?? []).map((tag) => tag.name)),
     performers: (item.performers ?? []).map((performer) => performer.name).filter(Boolean),
+    creator: item.photographer,
   };
 }
 
@@ -331,7 +333,7 @@ function buildDefaultApplyPlan(
   if (entityType === "group" && scrapedData.director && scrapedData.director !== currentData.director) replaceFields.push("director");
   if (entityType === "group" && scrapedData.duration && scrapedData.duration !== currentData.duration) replaceFields.push("duration");
   if (entityType === "group" && scrapedData.rating && scrapedData.rating !== currentData.rating) replaceFields.push("rating");
-  if (entityType === "image" && scrapedData.creator && scrapedData.creator !== currentData.creator) replaceFields.push("photographer");
+  if ((entityType === "image" || entityType === "gallery") && scrapedData.creator && scrapedData.creator !== currentData.creator) replaceFields.push("photographer");
   if (scrapedData.date && scrapedData.date !== currentData.date) replaceFields.push("date");
 
   return {
@@ -733,7 +735,7 @@ function ScraperResultRow({
       { key: "duration", label: "Duration", current: currentData.duration, scraped: result.duration },
       { key: "rating", label: "Rating", current: currentData.rating, scraped: result.rating },
     ] : []),
-    ...(entityType === "image" ? [{ key: "photographer", label: "Photographer", current: currentData.creator, scraped: result.creator }] : []),
+    ...(entityType === "image" || entityType === "gallery" ? [{ key: "photographer", label: "Photographer", current: currentData.creator, scraped: result.creator }] : []),
     { key: "date", label: "Date", current: currentData.date, scraped: result.date },
   ].filter((row) => Boolean(row.scraped));
 

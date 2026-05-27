@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -49,6 +50,14 @@ static async Task EnsurePostgresMigrationInfrastructureAsync(CoveContext db)
             await conn.CloseAsync();
     }
 }
+
+static bool IsWeakJwtSecret(string? secret)
+    => string.IsNullOrWhiteSpace(secret)
+        || secret == "CHANGE_ME_TO_A_RANDOM_SECRET_AT_LEAST_32_CHARS"
+        || Encoding.UTF8.GetByteCount(secret) < 32;
+
+static string GenerateJwtSecret()
+    => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
 static LogEventLevel ParseSerilogLogLevel(string? level)
     => level?.Trim().ToLowerInvariant() switch
@@ -130,6 +139,8 @@ try
 
     // Register a singleton CoveConfiguration instance so all consumers share the same mutable object
     var coveCfgInstance = coveConfig.Get<CoveConfiguration>() ?? new CoveConfiguration();
+    if (IsWeakJwtSecret(coveCfgInstance.Auth.JwtSecret))
+        coveCfgInstance.Auth.JwtSecret = GenerateJwtSecret();
     coveCfgInstance.GeneratedPath = CoveDefaultPaths.ResolveDataPath(coveCfgInstance.GeneratedPath);
     coveCfgInstance.CachePath = CoveDefaultPaths.ResolveDataPath(coveCfgInstance.CachePath);
     coveCfgInstance.ExtensionPaths = coveCfgInstance.ExtensionPaths
@@ -264,7 +275,7 @@ try
 
     // Auth
     var authConfig = coveConfig.GetSection("Auth");
-    var jwtSecret = authConfig.GetValue<string>("JwtSecret") ?? Guid.NewGuid().ToString();
+    var jwtSecret = coveCfgInstance.Auth.JwtSecret;
     var authEnabled = authConfig.GetValue<bool>("Enabled");
 
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

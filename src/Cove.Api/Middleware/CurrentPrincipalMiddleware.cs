@@ -77,13 +77,17 @@ public sealed class CurrentPrincipalMiddleware
         string? shareToken = context.Request.Headers["X-Share-Token"].ToString();
         if (string.IsNullOrWhiteSpace(shareToken))
         {
-            shareToken = context.Request.Query["share_token"].ToString();
+            var qsShareToken = context.Request.Query["share_token"].ToString();
+            if (!string.IsNullOrWhiteSpace(qsShareToken) && AllowsQueryToken(context.Request))
+                shareToken = qsShareToken;
         }
 
         string? sharePassword = context.Request.Headers["X-Share-Password"].ToString();
         if (string.IsNullOrWhiteSpace(sharePassword))
         {
-            sharePassword = context.Request.Query["share_password"].ToString();
+            var qsSharePassword = context.Request.Query["share_password"].ToString();
+            if (!string.IsNullOrWhiteSpace(qsSharePassword) && AllowsQueryToken(context.Request))
+                sharePassword = qsSharePassword;
         }
 
         // Allow SignalR / file-stream endpoints to pass the token via ?access_token=
@@ -91,7 +95,7 @@ public sealed class CurrentPrincipalMiddleware
         if (string.IsNullOrEmpty(authHeader))
         {
             var qsToken = context.Request.Query["access_token"].ToString();
-            if (!string.IsNullOrEmpty(qsToken))
+            if (!string.IsNullOrEmpty(qsToken) && AllowsQueryToken(context.Request))
                 authHeader = "Bearer " + qsToken;
         }
 
@@ -124,5 +128,37 @@ public sealed class CurrentPrincipalMiddleware
             accessor.Set(CovePrincipal.Anonymous(ip, ua));
         }
         await _next(context);
+    }
+
+    public static bool AllowsQueryToken(HttpRequest request)
+    {
+        var path = request.Path;
+        if (path.StartsWithSegments("/hubs"))
+            return true;
+
+        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
+            return false;
+
+        var value = path.Value?.ToLowerInvariant() ?? string.Empty;
+        if (value.StartsWith("/api/stream/", StringComparison.Ordinal))
+            return true;
+
+        var segments = value.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 4 || segments[0] != "api")
+            return false;
+
+        var resource = segments[1];
+        var action = segments[3];
+        if (resource == "audios" && action is "stream" or "image")
+            return true;
+        if (resource == "texts" && action is "file" or "image")
+            return true;
+        if (resource is "scenes" or "segments" or "performers" or "studios" or "tags" or "galleries"
+            && action is "image" or "cover")
+            return true;
+        if (resource == "groups" && action == "image")
+            return true;
+
+        return false;
     }
 }

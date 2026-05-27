@@ -4,7 +4,7 @@ import { scenes, performers, studios, tags, galleries, groups, savedFilters } fr
 import type { AffinityHostType, EntityEngagement, Scene, Performer, Studio, Tag, Gallery, Group, SavedFilter } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from "../components/shared";
 import { RatingBanner } from "../components/Rating";
-import { ChevronLeft, ChevronRight, Settings2, Plus, Trash2, Film, User, Building2, Tag as TagIcon, Images, Clapperboard, GripVertical } from "lucide-react";
+import { ChevronLeft, ChevronRight, Settings2, Plus, Trash2, Film, User, Building2, Tag as TagIcon, Images, Clapperboard, GripVertical, Headphones, Layers } from "lucide-react";
 import { createRouteLinkProps } from "../components/cardNavigation";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 
@@ -118,7 +118,7 @@ function ContinueWatchingRow({ onNavigate }: { onNavigate: (r: any) => void }) {
     queryFn: () => groups.items.list(continueGroup!.id),
     enabled: !!continueGroup,
   });
-  const playableItems = items.filter((item) => item.sceneId).slice(0, 12);
+  const playableItems = items.filter((item) => item.hostType === "scene" || item.hostType === "audio" || item.hostType === "segment").slice(0, 12);
   if (!isLoading && playableItems.length === 0) return null;
 
   return (
@@ -130,10 +130,17 @@ function ContinueWatchingRow({ onNavigate }: { onNavigate: (r: any) => void }) {
   );
 }
 
-function ContinueWatchingCard({ item, onNavigate }: { item: { sceneId?: number | null; sceneTitle?: string; title?: string; startSec?: number }; onNavigate: (r: any) => void }) {
-  const sceneId = item.sceneId ?? 0;
+function ContinueWatchingCard({ item, onNavigate }: { item: { hostType?: string; hostId?: number; sceneId?: number | null; sceneTitle?: string; title?: string; startSec?: number }; onNavigate: (r: any) => void }) {
+  const hostType = item.hostType ?? "scene";
+  const hostId = item.hostId ?? item.sceneId ?? 0;
+  const sceneId = item.sceneId ?? (hostType === "scene" ? hostId : 0);
   const title = item.title || item.sceneTitle || "Untitled";
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: sceneId, seekTo: item.startSec ?? 0 }, () => onNavigate({ page: "scene", id: sceneId, seekTo: item.startSec ?? 0 }));
+  const route = hostType === "audio"
+    ? { page: "audio", id: hostId }
+    : hostType === "segment"
+      ? { page: "segment", id: hostId }
+      : { page: "scene", id: sceneId, seekTo: item.startSec ?? 0 };
+  const linkProps = createRouteLinkProps<HTMLAnchorElement>(route, () => onNavigate(route));
   return (
     <a
       {...linkProps}
@@ -141,7 +148,13 @@ function ContinueWatchingCard({ item, onNavigate }: { item: { sceneId?: number |
       style={{ scrollSnapAlign: "start" }}
     >
       <div className="relative aspect-video bg-black">
-        <img src={`/api/stream/scene/${sceneId}/screenshot`} alt={title} className="h-full w-full object-cover" loading="lazy" />
+        {sceneId > 0 ? (
+          <img src={`/api/stream/scene/${sceneId}/screenshot`} alt={title} className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-accent">
+            {hostType === "audio" ? <Headphones className="h-10 w-10" /> : <Layers className="h-10 w-10" />}
+          </div>
+        )}
         <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">
           Resume
         </div>
@@ -329,12 +342,12 @@ function RecommendationRowShell({
       </div>
 
       {/* Scrollable cards */}
-      <div className="relative group">
+      <div className="relative group/row">
         {/* Left arrow */}
         {canScrollLeft && (
           <button
             onClick={() => scroll("left")}
-            className="absolute left-0 top-0 bottom-0 z-20 w-8 flex items-center justify-center bg-gradient-to-r from-background/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute left-0 top-0 bottom-0 z-20 w-8 flex items-center justify-center bg-gradient-to-r from-background/90 to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity"
           >
             <ChevronLeft className="w-6 h-6 text-white" />
           </button>
@@ -356,7 +369,7 @@ function RecommendationRowShell({
         {canScrollRight && (
           <button
             onClick={() => scroll("right")}
-            className="absolute right-0 top-0 bottom-0 z-20 w-8 flex items-center justify-center bg-gradient-to-l from-background/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute right-0 top-0 bottom-0 z-20 w-8 flex items-center justify-center bg-gradient-to-l from-background/90 to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity"
           >
             <ChevronRight className="w-6 h-6 text-white" />
           </button>

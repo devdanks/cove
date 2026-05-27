@@ -41,7 +41,7 @@ export function StatsPage(_props?: { onNavigate?: (route: Route) => void }) {
     return <div className="p-6 text-secondary">No stats available.</div>;
   }
 
-  const totalEntities = stats.sceneCount + stats.imageCount + stats.galleryCount + stats.performerCount + stats.studioCount + stats.tagCount + stats.groupCount + stats.audioCount + stats.textCount;
+  const totalEntities = stats.sceneCount + stats.imageCount + stats.galleryCount + stats.performerCount + stats.studioCount + stats.tagCount + stats.groupCount + stats.audioCount + stats.textCount + stats.segmentCount;
 
   return (
     <div className="space-y-8 p-6">
@@ -124,10 +124,12 @@ function engagementMetrics(stats: Stats): MetricCardProps[] {
     { label: "Audio Plays", value: formatCount(stats.audioPlayCount), detail: `${formatCount(stats.audioCompleteCount)} completed`, icon: Headphones, tone: "amber" },
     { label: "Text Reads", value: formatCount(stats.textReadCount), detail: `${formatCount(stats.textCompleteCount)} completed`, icon: FileText, tone: "rose" },
     { label: "Image Views", value: formatCount(stats.imageViewCount), detail: `${formatCount(stats.imageCompleteCount)} completed`, icon: Eye, tone: "emerald" },
+    { label: "Segment Plays", value: formatCount(stats.segmentViewCount), detail: `${formatCount(stats.segmentCompleteCount)} completed`, icon: Layers, tone: "cyan" },
     { label: "Scene Watch Time", value: formatDuration(stats.sceneConsumedSeconds), icon: CheckCircle2, tone: "sky" },
     { label: "Audio Listen Time", value: formatDuration(stats.audioConsumedSeconds), icon: Activity, tone: "violet" },
     { label: "Text Read Time", value: formatDuration(stats.textConsumedSeconds), icon: FileText, tone: "slate" },
     { label: "Image View Time", value: formatDuration(stats.imageConsumedSeconds), icon: ImageIcon, tone: "emerald" },
+    { label: "Segment Watch Time", value: formatDuration(stats.segmentConsumedSeconds), icon: Layers, tone: "cyan" },
   ];
 }
 

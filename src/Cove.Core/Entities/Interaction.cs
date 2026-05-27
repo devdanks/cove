@@ -40,6 +40,8 @@ public enum InteractionKind
     FilterClear = 19,
     PageVisit = 20,
     DerivedLike = 21,
+    Fullscreen = 22,
+    SlideshowDelay = 23,
 }
 
 /// <summary>Non-playback engagement event (search, filter, image open, etc.). Playback is tracked in PlaybackSession/PlaybackInterval.</summary>

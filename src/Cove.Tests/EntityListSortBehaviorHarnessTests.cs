@@ -7,6 +7,7 @@ using Cove.Data;
 using Cove.Data.Repositories;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using CoveSortDirection = Cove.Core.Enums.SortDirection;
 
 namespace Cove.Tests;
@@ -94,6 +95,18 @@ public class EntityListSortBehaviorHarnessTests
             "filter:audios:DurationCriterion/greater_than",
             fixture => QueryFilteredIdsAsync(fixture.Context, "audios", new AudioFilter { DurationCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 100 } }),
             _ => [802, 803])];
+        yield return [new FilterProbe(
+            "filter:audios:RatingCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "audios", new AudioFilter { RatingCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 4 } }),
+            _ => [802, 803])];
+        yield return [new FilterProbe(
+            "filter:audios:HasVideoFilesCriterion/true",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "audios", new AudioFilter { HasVideoFilesCriterion = new BoolCriterion { Value = true } }),
+            _ => [802, 803])];
+        yield return [new FilterProbe(
+            "filter:audios:FileSizeCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "audios", new AudioFilter { FileSizeCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 1_500 } }),
+            _ => [802, 803])];
 
         yield return [new FilterProbe(
             "filter:texts:TitleCriterion/includes",
@@ -103,6 +116,18 @@ public class EntityListSortBehaviorHarnessTests
             "filter:texts:WordCountCriterion/greater_than",
             fixture => QueryFilteredIdsAsync(fixture.Context, "texts", new TextDocumentFilter { WordCountCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 150 } }),
             _ => [902, 903])];
+        yield return [new FilterProbe(
+            "filter:texts:RatingCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "texts", new TextDocumentFilter { RatingCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 4 } }),
+            _ => [902, 903])];
+        yield return [new FilterProbe(
+            "filter:texts:FileSizeCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "texts", new TextDocumentFilter { FileSizeCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 1_500 } }),
+            _ => [902, 903])];
+        yield return [new FilterProbe(
+            "filter:texts:ContentCriterion/includes",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "texts", new TextDocumentFilter { ContentCriterion = new StringCriterion { Modifier = CriterionModifier.Includes, Value = "gamma text content" } }),
+            _ => [903])];
 
         yield return [new FilterProbe(
             "filter:galleries:TitleCriterion/includes",
@@ -121,6 +146,22 @@ public class EntityListSortBehaviorHarnessTests
             "filter:groups:DateCriterion/greater_than",
             fixture => QueryFilteredIdsAsync(fixture.Context, "groups", new GroupFilter { DateCriterion = new DateCriterion { Modifier = CriterionModifier.GreaterThan, Value = "2018-02-01" } }),
             _ => [702, 703])];
+        yield return [new FilterProbe(
+            "filter:groups:RatingCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "groups", new GroupFilter { RatingCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 5 } }),
+            _ => [702, 703])];
+        yield return [new FilterProbe(
+            "filter:groups:ImageCountCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "groups", new GroupFilter { ImageCountCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 1 } }),
+            _ => [702, 703])];
+        yield return [new FilterProbe(
+            "filter:groups:AudioCountCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "groups", new GroupFilter { AudioCountCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 2 } }),
+            _ => [703])];
+        yield return [new FilterProbe(
+            "filter:groups:CachedItemCountCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "groups", new GroupFilter { CachedItemCountCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 10 } }),
+            _ => [703])];
 
         yield return [new FilterProbe(
             "filter:segments:kind/includes",
@@ -130,6 +171,26 @@ public class EntityListSortBehaviorHarnessTests
             "filter:segments:minConfidence/greater_than_or_equal",
             fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: 0.5f, minDurationSec: null, excludeSceneIds: null),
             _ => [1002, 1003])];
+        yield return [new FilterProbe(
+            "filter:segments:title/includes",
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, title: "Beta", titleModifier: "INCLUDES"),
+            _ => [1002])];
+        yield return [new FilterProbe(
+            "filter:segments:startSec/greater_than",
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, startSec: 4, startSecModifier: "GREATER_THAN"),
+            _ => [1002, 1003])];
+        yield return [new FilterProbe(
+            "filter:segments:createdAt/greater_than",
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, createdAt: "2024-03-21T00:00:00Z", createdAtModifier: "GREATER_THAN"),
+            _ => [1002, 1003])];
+        yield return [new FilterProbe(
+            "filter:segments:hasImage/true",
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, hasImage: true),
+            _ => [1002])];
+        yield return [new FilterProbe(
+            "filter:segments:hasPayload/true",
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, hasPayload: true),
+            _ => [1003])];
 
         yield return [new FilterProbe(
             "filter:performers:NameCriterion/includes",
@@ -174,6 +235,26 @@ public class EntityListSortBehaviorHarnessTests
             "filter:faces:linked/true",
             fixture => QueryFaceIdsAsync(fixture.Context, performerId: null, linked: true, ignored: null, merged: null),
             _ => [1101, 1102, 1103])];
+        yield return [new FilterProbe(
+            "filter:faces:label/includes",
+            fixture => QueryFaceIdsAsync(fixture.Context, performerId: null, linked: null, ignored: null, merged: null, label: "Gamma", labelModifier: "INCLUDES"),
+            _ => [1103])];
+        yield return [new FilterProbe(
+            "filter:faces:ignored/true",
+            fixture => QueryFaceIdsAsync(fixture.Context, performerId: null, linked: null, ignored: true, merged: null),
+            _ => [1103])];
+        yield return [new FilterProbe(
+            "filter:faces:merged/true",
+            fixture => QueryFaceIdsAsync(fixture.Context, performerId: null, linked: null, ignored: null, merged: true),
+            _ => [1102])];
+        yield return [new FilterProbe(
+            "filter:faces:hasCover/true",
+            fixture => QueryFaceIdsAsync(fixture.Context, performerId: null, linked: null, ignored: null, merged: null, hasCover: true),
+            _ => [1102, 1103])];
+        yield return [new FilterProbe(
+            "filter:faces:detectionCount/greater_than",
+            fixture => QueryFaceIdsAsync(fixture.Context, performerId: null, linked: null, ignored: null, merged: null, detectionCount: 4, detectionCountModifier: "GREATER_THAN"),
+            _ => [1103])];
     }
 
     [Fact]
@@ -218,6 +299,45 @@ public class EntityListSortBehaviorHarnessTests
             actualIds.OrderBy(id => id).ToArray());
     }
 
+    [Fact]
+    public async Task CustomFieldFiltersAndSortsExecuteForExtensionListContributions()
+    {
+        await using var fixture = await SortHarnessFixture.CreateAsync();
+        fixture.ActivatePrincipal();
+
+        var criterion = new CustomFieldCriterion
+        {
+            Key = "extension_score",
+            Type = CustomFieldTypes.Number,
+            Modifier = CriterionModifier.GreaterThan,
+            Value = "15",
+        };
+
+        var sceneFilteredIds = await QueryFilteredIdsAsync(fixture.Context, "scenes", new SceneFilter { CustomFieldCriteria = [criterion] });
+        Assert.Equal([401, 403], sceneFilteredIds.OrderBy(id => id).ToArray());
+
+        var sceneSortedIds = await QueryIdsAsync(fixture.Context, "scenes", "custom:number:extension_score", CoveSortDirection.Asc);
+        Assert.Equal([402, 401, 403], sceneSortedIds);
+
+        var audioFilteredIds = await QueryFilteredIdsAsync(fixture.Context, "audios", new AudioFilter { CustomFieldCriteria = [criterion] });
+        Assert.Equal([801, 803], audioFilteredIds.OrderBy(id => id).ToArray());
+
+        var audioSortedIds = await QueryAudioIdsAsync(fixture.Context, "custom:number:extension_score", CoveSortDirection.Desc);
+        Assert.Equal([803, 801, 802], audioSortedIds);
+
+        var faceFilteredIds = await QueryFaceIdsAsync(
+            fixture.Context,
+            performerId: null,
+            linked: null,
+            ignored: null,
+            merged: null,
+            customFieldCriteria: "[{\"key\":\"extension_score\",\"type\":\"number\",\"modifier\":\"GREATER_THAN\",\"value\":\"15\"}]");
+        Assert.Equal([1101, 1103], faceFilteredIds.OrderBy(id => id).ToArray());
+
+        var faceSortedIds = await QueryFaceIdsAsync(fixture.Context, "custom:number:extension_score", CoveSortDirection.Desc);
+        Assert.Equal([1103, 1101, 1102], faceSortedIds);
+    }
+
     private static bool IsBehaviorTested(EntityListSortDefinition sort)
         => sort.KnownBrokenReason is null && !SortRowsWithBehaviorExemptions.Contains(sort.RowId);
 
@@ -244,7 +364,7 @@ public class EntityListSortBehaviorHarnessTests
             "audios" => await QueryAudioIdsAsync(context, sortKey, direction),
             "texts" => await QueryTextIdsAsync(context, sortKey, direction),
             "segments" => await QuerySegmentIdsAsync(context, sortKey, direction),
-            "faces" => await QueryFaceIdsAsync(context, sortKey),
+            "faces" => await QueryFaceIdsAsync(context, sortKey, direction),
             _ => throw new InvalidOperationException($"No sort behavior query configured for entity '{entity}'."),
         };
     }
@@ -311,7 +431,15 @@ public class EntityListSortBehaviorHarnessTests
         bool? tagged,
         float? minConfidence,
         double? minDurationSec,
-        string? excludeSceneIds)
+        string? excludeSceneIds,
+        string? title = null,
+        string? titleModifier = null,
+        double? startSec = null,
+        string? startSecModifier = null,
+        string? createdAt = null,
+        string? createdAtModifier = null,
+        bool? hasImage = null,
+        bool? hasPayload = null)
     {
         var controller = new SegmentsController(context, null!, null!);
         var response = await controller.List(
@@ -339,13 +467,21 @@ public class EntityListSortBehaviorHarnessTests
             sort: "updated_at",
             direction: "asc",
             excludeSceneIds: excludeSceneIds,
+            title: title,
+            titleModifier: titleModifier,
+            hasImage: hasImage,
+            hasPayload: hasPayload,
+            startSec: startSec,
+            startSecModifier: startSecModifier,
+            createdAt: createdAt,
+            createdAtModifier: createdAtModifier,
             page: 1,
             perPage: 50);
 
         return ExtractItems(response).Select(item => item.Id).ToArray();
     }
 
-    private static async Task<IReadOnlyList<int>> QueryFaceIdsAsync(CoveContext context, string sortKey)
+    private static async Task<IReadOnlyList<int>> QueryFaceIdsAsync(CoveContext context, string sortKey, CoveSortDirection direction = CoveSortDirection.Desc)
     {
         var controller = new FacesController(context, null!, null!, null!, [], null!, [], null);
         var response = await controller.List(
@@ -361,13 +497,42 @@ public class EntityListSortBehaviorHarnessTests
             suggestionConfidenceModifier: null,
             topSuggestionPerformerIds: null,
             sort: sortKey,
+            direction: direction,
+            customFieldCriteria: null,
             page: 1,
             perPage: 50);
 
         return ExtractItems(response).Select(item => item.Id).ToArray();
     }
 
-    private static async Task<IReadOnlyList<int>> QueryFaceIdsAsync(CoveContext context, int? performerId, bool? linked, bool? ignored, bool? merged)
+    private static async Task<IReadOnlyList<int>> QueryFaceIdsAsync(
+        CoveContext context,
+        int? performerId,
+        bool? linked,
+        bool? ignored,
+        bool? merged,
+        int? mergedIntoFaceId = null,
+        string? label = null,
+        string? labelModifier = null,
+        string? primarySourceKey = null,
+        string? primarySourceKeyModifier = null,
+        bool? hasCover = null,
+        int? detectionCount = null,
+        int? detectionCount2 = null,
+        string? detectionCountModifier = null,
+        int? appearanceCount = null,
+        int? appearanceCount2 = null,
+        string? appearanceCountModifier = null,
+        int? frameSampleCount = null,
+        int? frameSampleCount2 = null,
+        string? frameSampleCountModifier = null,
+        int? sceneCount = null,
+        int? sceneCount2 = null,
+        string? sceneCountModifier = null,
+        int? imageCount = null,
+        int? imageCount2 = null,
+        string? imageCountModifier = null,
+        string? customFieldCriteria = null)
     {
         var controller = new FacesController(context, null!, null!, null!, [], null!, [], null);
         var response = await controller.List(
@@ -377,12 +542,35 @@ public class EntityListSortBehaviorHarnessTests
             linked: linked,
             ignored: ignored,
             merged: merged,
+            mergedIntoFaceId: mergedIntoFaceId,
+            label: label,
+            labelModifier: labelModifier,
+            primarySourceKey: primarySourceKey,
+            primarySourceKeyModifier: primarySourceKeyModifier,
+            hasCover: hasCover,
+            detectionCount: detectionCount,
+            detectionCount2: detectionCount2,
+            detectionCountModifier: detectionCountModifier,
+            appearanceCount: appearanceCount,
+            appearanceCount2: appearanceCount2,
+            appearanceCountModifier: appearanceCountModifier,
+            frameSampleCount: frameSampleCount,
+            frameSampleCount2: frameSampleCount2,
+            frameSampleCountModifier: frameSampleCountModifier,
+            sceneCount: sceneCount,
+            sceneCount2: sceneCount2,
+            sceneCountModifier: sceneCountModifier,
+            imageCount: imageCount,
+            imageCount2: imageCount2,
+            imageCountModifier: imageCountModifier,
             minSuggestionConfidence: null,
             suggestionConfidence: null,
             suggestionConfidence2: null,
             suggestionConfidenceModifier: null,
             topSuggestionPerformerIds: null,
             sort: "created_desc",
+            direction: CoveSortDirection.Desc,
+            customFieldCriteria: customFieldCriteria,
             page: 1,
             perPage: 50);
 
@@ -508,6 +696,20 @@ public class EntityListSortBehaviorHarnessTests
             "createdat" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.CreatedAt, descending),
             "date" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.Date, descending),
             "duration" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.MaxDuration, descending),
+            "rating" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => fixture.Rating(RatingHostType.Audio, audio.Id), descending),
+            "playcount" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => fixture.Affinity(AffinityHostType.Audio, audio.Id).ViewCount, descending),
+            "likecounter" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => fixture.Affinity(AffinityHostType.Audio, audio.Id).LikeCount, descending),
+            "playduration" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => fixture.Affinity(AffinityHostType.Audio, audio.Id).TotalConsumedSec, descending),
+            "lastplayedat" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => fixture.Affinity(AffinityHostType.Audio, audio.Id).LastConsumedAt, descending),
+            "filesize" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.MaxFileSize, descending),
+            "filemodtime" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.MaxFileModTime, descending),
+            "filecount" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.FileCount, descending),
+            "path" => descending ? OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.MaxPath, true) : OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.MinPath, false),
+            "bitrate" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.MaxBitRate, descending),
+            "hasvideofiles" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.HasVideoFiles, descending),
+            "trackcount" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.Tracks.Count, descending),
+            "tagcount" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.AudioTags.Count, descending),
+            "performercount" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.AudioPerformers.Count, descending),
             "title" => OrderWithDirectionalIdTieBreaker(fixture.Audios, audio => audio.Title, descending),
             _ => throw new InvalidOperationException($"No audio sort projection configured for '{sortKey}'."),
         };
@@ -520,6 +722,17 @@ public class EntityListSortBehaviorHarnessTests
             "date" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.Date, descending),
             "words" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.MaxWordCount, descending),
             "pages" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.MaxPageCount, descending),
+            "rating" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => fixture.Rating(RatingHostType.Text, text.Id), descending),
+            "readcount" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => fixture.Affinity(AffinityHostType.Text, text.Id).ViewCount, descending),
+            "likecounter" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => fixture.Affinity(AffinityHostType.Text, text.Id).LikeCount, descending),
+            "readduration" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => fixture.Affinity(AffinityHostType.Text, text.Id).TotalConsumedSec, descending),
+            "lastreadat" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => fixture.Affinity(AffinityHostType.Text, text.Id).LastConsumedAt, descending),
+            "filesize" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.MaxFileSize, descending),
+            "filemodtime" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.MaxFileModTime, descending),
+            "filecount" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.FileCount, descending),
+            "path" => descending ? OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.MaxPath, true) : OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.MinPath, false),
+            "tagcount" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.TextTags.Count, descending),
+            "performercount" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.TextPerformers.Count, descending),
             "title" => OrderWithDirectionalIdTieBreaker(fixture.Texts, text => text.Title, descending),
             _ => throw new InvalidOperationException($"No text sort projection configured for '{sortKey}'."),
         };
@@ -548,6 +761,26 @@ public class EntityListSortBehaviorHarnessTests
             "date" => Order(fixture.Groups, group => group.Date ?? DateOnly.MinValue, descending),
             "rating" => Order(fixture.Groups, group => fixture.Rating(RatingHostType.Group, group.Id), descending),
             "created_at" => Order(fixture.Groups, group => group.CreatedAt, descending),
+            "updated_at" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.UpdatedAt, descending),
+            "item_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count, descending),
+            "scene_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Where(item => item.SceneId != null).Select(item => item.SceneId).Distinct().Count(), descending),
+            "image_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Image), descending),
+            "audio_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Audio), descending),
+            "text_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Text), descending),
+            "gallery_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Gallery), descending),
+            "performer_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Performer), descending),
+            "studio_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Studio), descending),
+            "tag_item_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Tag), descending),
+            "tag_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupTags.Count, descending),
+            "face_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Face), descending),
+            "segment_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Segment), descending),
+            "subgroup_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.SubGroupRelations.Count, descending),
+            "containing_group_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.ContainingGroupRelations.Count, descending),
+            "cached_item_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.CachedItemCount ?? 0, descending),
+            "last_resolved_at" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.LastResolvedAt, descending),
+            "query_source_key" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.QuerySourceKey, descending),
+            "show_in_scene_lists" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.ShowInSceneLists, descending),
+            "aliases" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.Aliases ?? group.Name, descending),
             _ => throw new InvalidOperationException($"No group sort projection configured for '{sortKey}'."),
         };
 
@@ -565,6 +798,8 @@ public class EntityListSortBehaviorHarnessTests
             "kind" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.Segment.Kind ?? string.Empty, descending),
             "source_key" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.Segment.SourceKey, descending),
             "tag_name" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.TagName ?? string.Empty, descending),
+            "performer" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.PerformerName ?? string.Empty, descending),
+            "ref" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.RefLabel ?? row.PerformerName ?? string.Empty, descending),
             _ => throw new InvalidOperationException($"No segment sort projection configured for '{sortKey}'."),
         };
 
@@ -603,6 +838,7 @@ public class EntityListSortBehaviorHarnessTests
             "image_count" => Order(fixture.Studios, studio => studio.ImageCount, descending),
             "latest_scene_date" => Order(fixture.Studios, studio => studio.Scenes.Max(scene => scene.Date), descending),
             "total_file_size" => Order(fixture.Studios, studio => studio.Scenes.Sum(scene => scene.MaxFileSize), descending),
+            "parent_count" => OrderWithDirectionalIdTieBreaker(fixture.Studios, studio => studio.ParentId.HasValue ? 1 : 0, descending),
             "child_count" => Order(fixture.Studios, studio => studio.ChildStudioCount, descending),
             "tag_count" => Order(fixture.Studios, studio => studio.TagCount, descending),
             "updated_at" => Order(fixture.Studios, studio => studio.UpdatedAt, descending),
@@ -637,8 +873,34 @@ public class EntityListSortBehaviorHarnessTests
             "scene_count_desc" => fixture.Faces.OrderByDescending(face => face.SceneCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "image_count_desc" => fixture.Faces.OrderByDescending(face => face.ImageCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "suggestion_confidence" => fixture.Faces.OrderByDescending(face => face.UpdatedAt).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "label_asc" => fixture.Faces.OrderBy(FaceLabel).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "label_desc" => fixture.Faces.OrderByDescending(FaceLabel).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "performer_name_asc" => fixture.Faces.OrderBy(FacePerformerName).ThenBy(face => face.Label).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "performer_name_desc" => fixture.Faces.OrderByDescending(FacePerformerName).ThenByDescending(face => face.Label).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "primary_source_key_asc" => fixture.Faces.OrderBy(face => face.PrimarySourceKey ?? string.Empty).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "primary_source_key_desc" => fixture.Faces.OrderByDescending(face => face.PrimarySourceKey ?? string.Empty).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "ignored_asc" => fixture.Faces.OrderBy(face => face.Ignored).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "ignored_desc" => fixture.Faces.OrderByDescending(face => face.Ignored).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "merged_asc" => fixture.Faces.OrderBy(face => face.MergedIntoFaceId != null).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "merged_desc" => fixture.Faces.OrderByDescending(face => face.MergedIntoFaceId != null).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "cover_present_asc" => fixture.Faces.OrderBy(face => !string.IsNullOrEmpty(face.CoverBlobId)).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "cover_present_desc" => fixture.Faces.OrderByDescending(face => !string.IsNullOrEmpty(face.CoverBlobId)).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "detection_count_asc" => fixture.Faces.OrderBy(face => face.DetectionCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "detection_count_desc" => fixture.Faces.OrderByDescending(face => face.DetectionCount).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "appearance_count_asc" => fixture.Faces.OrderBy(face => face.AppearanceCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "appearance_count_desc" => fixture.Faces.OrderByDescending(face => face.AppearanceCount).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "frame_sample_count_asc" => fixture.Faces.OrderBy(face => face.FrameSampleCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "frame_sample_count_desc" => fixture.Faces.OrderByDescending(face => face.FrameSampleCount).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
+            "scene_count_asc" => fixture.Faces.OrderBy(face => face.SceneCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "image_count_asc" => fixture.Faces.OrderBy(face => face.ImageCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             _ => throw new InvalidOperationException($"No face sort projection configured for '{sortKey}'."),
         };
+
+    private static string FaceLabel(Face face)
+        => face.Label ?? FacePerformerName(face);
+
+    private static string FacePerformerName(Face face)
+        => face.Performer?.Name ?? string.Empty;
 
     private static IReadOnlyList<int> Order<T, TKey>(IEnumerable<T> items, Func<T, TKey> keySelector, bool descending)
         where T : BaseEntity
@@ -954,9 +1216,9 @@ public class EntityListSortBehaviorHarnessTests
 
             var groups = new[]
             {
-                new Group { Id = 701, Name = "Alpha Group", SortOrder = 3, Date = new DateOnly(2018, 1, 2), CreatedAt = now.AddDays(-73), UpdatedAt = now.AddHours(-42) },
-                new Group { Id = 702, Name = "Beta Group", SortOrder = 1, Date = new DateOnly(2018, 2, 3), CreatedAt = now.AddDays(-72), UpdatedAt = now.AddHours(-40) },
-                new Group { Id = 703, Name = "Gamma Group", SortOrder = 2, Date = new DateOnly(2018, 3, 4), CreatedAt = now.AddDays(-71), UpdatedAt = now.AddHours(-38) },
+                new Group { Id = 701, Name = "Alpha Group", Aliases = "A One", SortOrder = 3, Date = new DateOnly(2018, 1, 2), CreatedAt = now.AddDays(-73), UpdatedAt = now.AddHours(-42), AllowedHostTypes = ["scene", "image", "audio"] },
+                new Group { Id = 702, Name = "Beta Group", Aliases = "B Two", QuerySourceKey = "manual", QueryJson = "{}", LastResolvedAt = now.AddDays(-3), CachedItemCount = 6, ShowInSceneLists = true, SortOrder = 1, Date = new DateOnly(2018, 2, 3), CreatedAt = now.AddDays(-72), UpdatedAt = now.AddHours(-40), AllowedHostTypes = ["scene", "image", "audio", "text", "gallery"] },
+                new Group { Id = 703, Name = "Gamma Group", Aliases = "C Three", Kind = GroupKind.Dynamic, QuerySourceKey = "filter", QueryJson = "{\"entityType\":\"scene\"}", LastResolvedAt = now.AddDays(-1), CachedItemCount = 16, SortOrder = 2, Date = new DateOnly(2018, 3, 4), CreatedAt = now.AddDays(-71), UpdatedAt = now.AddHours(-38) },
             };
 
             LinkGalleryImage(galleries[0], images[0]);
@@ -980,31 +1242,78 @@ public class EntityListSortBehaviorHarnessTests
 
             var audios = new[]
             {
-                new Audio { Id = 801, Title = "Alpha Audio", Date = new DateOnly(2017, 1, 2), MaxDuration = 60, CreatedAt = now.AddDays(-83), UpdatedAt = now.AddHours(-52), FileCount = 1 },
-                new Audio { Id = 802, Title = "Beta Audio", Date = new DateOnly(2017, 2, 3), MaxDuration = 120, CreatedAt = now.AddDays(-82), UpdatedAt = now.AddHours(-50), FileCount = 1 },
-                new Audio { Id = 803, Title = "Gamma Audio", Date = new DateOnly(2017, 3, 4), MaxDuration = 180, CreatedAt = now.AddDays(-81), UpdatedAt = now.AddHours(-48), FileCount = 1 },
+                new Audio { Id = 801, Title = "Alpha Audio", Date = new DateOnly(2017, 1, 2), MaxDuration = 60, MaxBitRate = 96_000, MaxFileSize = 1_000, MaxFileModTime = now.AddDays(-15), MinPath = "Z:/cove/a/alpha.mp3", MaxPath = "Z:/cove/a/alpha.mp3", CreatedAt = now.AddDays(-83), UpdatedAt = now.AddHours(-52), FileCount = 1, HasVideoFiles = false, Files = [new AudioFile { Id = 1801, Basename = "alpha.mp3", ParentFolder = folderA, ParentFolderId = folderA.Id, Path = "Z:/cove/a/alpha.mp3", Format = "mp3", AudioCodec = "mp3", BitRate = 96_000, Size = 1_000, ModTime = now.AddDays(-15), Duration = 60, SampleRate = 44100, Channels = 2 }], Tracks = [new AudioTrack { Id = 1851, OrderIndex = 1, Title = "Alpha Track", StartSec = 0, EndSec = 60 }] },
+                new Audio { Id = 802, Title = "Beta Audio", Date = new DateOnly(2017, 2, 3), MaxDuration = 120, MaxBitRate = 192_000, MaxFileSize = 2_000, MaxFileModTime = now.AddDays(-14), MinPath = "Z:/cove/b/beta.m4a", MaxPath = "Z:/cove/b/beta.m4a", ImageBlobId = "audio-beta-cover", CreatedAt = now.AddDays(-82), UpdatedAt = now.AddHours(-50), FileCount = 2, HasVideoFiles = true, Files = [new AudioFile { Id = 1802, Basename = "beta.m4a", ParentFolder = folderB, ParentFolderId = folderB.Id, Path = "Z:/cove/b/beta.m4a", Format = "m4a", AudioCodec = "aac", BitRate = 192_000, Size = 2_000, ModTime = now.AddDays(-14), Duration = 120, SampleRate = 48000, Channels = 2, HasVideoTrack = true }], Tracks = [new AudioTrack { Id = 1852, OrderIndex = 1, Title = "Beta Intro", StartSec = 0, EndSec = 40 }, new AudioTrack { Id = 1853, OrderIndex = 2, Title = "Beta Main", StartSec = 40, EndSec = 120 }] },
+                new Audio { Id = 803, Title = "Gamma Audio", Date = new DateOnly(2017, 3, 4), MaxDuration = 180, MaxBitRate = 320_000, MaxFileSize = 3_000, MaxFileModTime = now.AddDays(-13), MinPath = "Z:/cove/c/gamma.flac", MaxPath = "Z:/cove/c/gamma.flac", ImageBlobId = "audio-gamma-cover", CreatedAt = now.AddDays(-81), UpdatedAt = now.AddHours(-48), FileCount = 3, HasVideoFiles = true, Files = [new AudioFile { Id = 1803, Basename = "gamma.flac", ParentFolder = folderC, ParentFolderId = folderC.Id, Path = "Z:/cove/c/gamma.flac", Format = "flac", AudioCodec = "flac", BitRate = 320_000, Size = 3_000, ModTime = now.AddDays(-13), Duration = 180, SampleRate = 96000, Channels = 6, HasVideoTrack = true }], Tracks = [new AudioTrack { Id = 1854, OrderIndex = 1, Title = "Gamma Intro", StartSec = 0, EndSec = 30 }, new AudioTrack { Id = 1855, OrderIndex = 2, Title = "Gamma Middle", StartSec = 30, EndSec = 100 }, new AudioTrack { Id = 1856, OrderIndex = 3, Title = "Gamma Finale", StartSec = 100, EndSec = 180 }] },
             };
+
+            LinkAudioTag(audios[0], tags[0]);
+            LinkAudioTag(audios[1], tags[0], tags[1]);
+            LinkAudioTag(audios[2], tags[0], tags[1], tags[2]);
+            LinkAudioPerformer(audios[0], performers[0]);
+            LinkAudioPerformer(audios[1], performers[0], performers[1]);
+            LinkAudioPerformer(audios[2], performers[0], performers[1], performers[2]);
 
             var texts = new[]
             {
-                new TextDocument { Id = 901, Title = "Alpha Text", Date = new DateOnly(2016, 1, 2), MaxWordCount = 100, MaxPageCount = 10, CreatedAt = now.AddDays(-93), UpdatedAt = now.AddHours(-62), FileCount = 1 },
-                new TextDocument { Id = 902, Title = "Beta Text", Date = new DateOnly(2016, 2, 3), MaxWordCount = 200, MaxPageCount = 20, CreatedAt = now.AddDays(-92), UpdatedAt = now.AddHours(-60), FileCount = 1 },
-                new TextDocument { Id = 903, Title = "Gamma Text", Date = new DateOnly(2016, 3, 4), MaxWordCount = 300, MaxPageCount = 30, CreatedAt = now.AddDays(-91), UpdatedAt = now.AddHours(-58), FileCount = 1 },
+                new TextDocument { Id = 901, Title = "Alpha Text", Date = new DateOnly(2016, 1, 2), MaxWordCount = 100, MaxPageCount = 10, MaxFileSize = 1_000, MaxFileModTime = now.AddDays(-12), MinPath = "Z:/cove/a/alpha.txt", MaxPath = "Z:/cove/a/alpha.txt", SearchText = "alpha text content", CreatedAt = now.AddDays(-93), UpdatedAt = now.AddHours(-62), FileCount = 1, Files = [new TextFile { Id = 1901, Basename = "alpha.txt", ParentFolder = folderA, ParentFolderId = folderA.Id, Path = "Z:/cove/a/alpha.txt", Format = "txt", WordCount = 100, PageCount = 10, Size = 1_000, ModTime = now.AddDays(-12), ExcerptText = "alpha text content" }] },
+                new TextDocument { Id = 902, Title = "Beta Text", Date = new DateOnly(2016, 2, 3), MaxWordCount = 200, MaxPageCount = 20, MaxFileSize = 2_000, MaxFileModTime = now.AddDays(-11), MinPath = "Z:/cove/b/beta.pdf", MaxPath = "Z:/cove/b/beta.pdf", SearchText = "beta text content", ImageBlobId = "text-beta-cover", CreatedAt = now.AddDays(-92), UpdatedAt = now.AddHours(-60), FileCount = 2, Files = [new TextFile { Id = 1902, Basename = "beta.pdf", ParentFolder = folderB, ParentFolderId = folderB.Id, Path = "Z:/cove/b/beta.pdf", Format = "pdf", WordCount = 200, PageCount = 20, Size = 2_000, ModTime = now.AddDays(-11), ExcerptText = "beta text content" }] },
+                new TextDocument { Id = 903, Title = "Gamma Text", Date = new DateOnly(2016, 3, 4), MaxWordCount = 300, MaxPageCount = 30, MaxFileSize = 3_000, MaxFileModTime = now.AddDays(-10), MinPath = "Z:/cove/c/gamma.epub", MaxPath = "Z:/cove/c/gamma.epub", SearchText = "gamma text content", ImageBlobId = "text-gamma-cover", CreatedAt = now.AddDays(-91), UpdatedAt = now.AddHours(-58), FileCount = 3, Files = [new TextFile { Id = 1903, Basename = "gamma.epub", ParentFolder = folderC, ParentFolderId = folderC.Id, Path = "Z:/cove/c/gamma.epub", Format = "epub", WordCount = 300, PageCount = 30, Size = 3_000, ModTime = now.AddDays(-10), ExcerptText = "gamma text content" }] },
             };
+
+            LinkTextTag(texts[0], tags[0]);
+            LinkTextTag(texts[1], tags[0], tags[1]);
+            LinkTextTag(texts[2], tags[0], tags[1], tags[2]);
+            LinkTextPerformer(texts[0], performers[0]);
+            LinkTextPerformer(texts[1], performers[0], performers[1]);
+            LinkTextPerformer(texts[2], performers[0], performers[1], performers[2]);
 
             var segments = new[]
             {
-                new Segment { Id = 1001, HostType = SegmentHostType.Scene, HostId = scenes[0].Id, StartSec = 1, EndSec = 4, Tag = tags[0], Kind = "action", SourceKey = "alpha-source", Confidence = 0.2f, Title = "Alpha Segment", CreatedAt = now.AddDays(-103), UpdatedAt = now.AddHours(-72) },
-                new Segment { Id = 1002, HostType = SegmentHostType.Scene, HostId = scenes[1].Id, StartSec = 5, EndSec = 12, Tag = tags[1], Kind = "beat", SourceKey = "beta-source", Confidence = 0.6f, Title = "Beta Segment", CreatedAt = now.AddDays(-102), UpdatedAt = now.AddHours(-70) },
-                new Segment { Id = 1003, HostType = SegmentHostType.Scene, HostId = scenes[2].Id, StartSec = 9, EndSec = 20, Tag = tags[2], Kind = "closeup", SourceKey = "gamma-source", Confidence = 0.9f, Title = "Gamma Segment", CreatedAt = now.AddDays(-101), UpdatedAt = now.AddHours(-68) },
+                new Segment { Id = 1001, HostType = SegmentHostType.Scene, HostId = scenes[0].Id, StartSec = 1, EndSec = 4, Tag = tags[0], Kind = "action", RefId = 1101, SourceKey = "alpha-source", SourceRunId = "run-alpha", ColorHint = "red", Confidence = 0.2f, Title = "Alpha Segment", CreatedAt = now.AddDays(-103), UpdatedAt = now.AddHours(-72) },
+                new Segment { Id = 1002, HostType = SegmentHostType.Scene, HostId = scenes[1].Id, StartSec = 5, EndSec = 12, Tag = tags[1], Kind = "beat", RefId = 1102, SourceKey = "beta-source", SourceRunId = "run-beta", ColorHint = "green", Confidence = 0.6f, Title = "Beta Segment", ImageBlobId = "segment-beta-image", CreatedAt = now.AddDays(-102), UpdatedAt = now.AddHours(-70) },
+                new Segment { Id = 1003, HostType = SegmentHostType.Scene, HostId = scenes[2].Id, StartSec = 9, EndSec = 20, Tag = tags[2], Kind = "performer", RefId = performers[2].Id, SourceKey = "gamma-source", SourceRunId = "run-gamma", ColorHint = "blue", Confidence = 0.9f, Title = "Gamma Segment", Payload = JsonDocument.Parse("{\"source\":\"harness\"}"), CreatedAt = now.AddDays(-101), UpdatedAt = now.AddHours(-68) },
             };
 
             var faces = new[]
             {
-                new Face { Id = 1101, Label = "Alpha Face", Performer = performers[0], AppearanceCount = 2, FrameSampleCount = 20, SceneCount = 1, ImageCount = 3, DetectionCount = 4, CreatedAt = now.AddDays(-113), UpdatedAt = now.AddHours(-82) },
-                new Face { Id = 1102, Label = "Beta Face", Performer = performers[1], AppearanceCount = 6, FrameSampleCount = 60, SceneCount = 3, ImageCount = 1, DetectionCount = 8, CreatedAt = now.AddDays(-112), UpdatedAt = now.AddHours(-80) },
-                new Face { Id = 1103, Label = "Gamma Face", Performer = performers[2], AppearanceCount = 4, FrameSampleCount = 40, SceneCount = 2, ImageCount = 2, DetectionCount = 6, CreatedAt = now.AddDays(-111), UpdatedAt = now.AddHours(-78) },
+                new Face { Id = 1101, Label = "Alpha Face", Performer = performers[0], AppearanceCount = 2, FrameSampleCount = 20, SceneCount = 1, ImageCount = 0, DetectionCount = 2, PrimarySourceKey = "source-c", CreatedAt = now.AddDays(-113), UpdatedAt = now.AddHours(-82) },
+                new Face { Id = 1102, Label = "Beta Face", Performer = performers[1], CoverBlobId = "face-beta-cover", MergedIntoFaceId = 1101, AppearanceCount = 3, FrameSampleCount = 30, SceneCount = 1, ImageCount = 1, DetectionCount = 4, PrimarySourceKey = "source-b", CreatedAt = now.AddDays(-112), UpdatedAt = now.AddHours(-80) },
+                new Face { Id = 1103, Label = "Gamma Face", Performer = performers[2], CoverBlobId = "face-gamma-cover", Ignored = true, AppearanceCount = 4, FrameSampleCount = 40, SceneCount = 2, ImageCount = 2, DetectionCount = 6, PrimarySourceKey = "source-a", CreatedAt = now.AddDays(-111), UpdatedAt = now.AddHours(-78) },
             };
+
+            LinkGroupRelation(groups[0], groups[1]);
+            LinkGroupRelation(groups[2], groups[0]);
+            LinkGroupRelation(groups[2], groups[1]);
+            LinkGroupItem(groups[0], 1701, GroupItemKind.Scene, "scene", scenes[0].Id, sceneId: scenes[0].Id);
+            LinkGroupItem(groups[0], 1702, GroupItemKind.Image, "image", images[0].Id);
+            LinkGroupItem(groups[0], 1703, GroupItemKind.Audio, "audio", audios[0].Id);
+            LinkGroupItem(groups[1], 1704, GroupItemKind.Scene, "scene", scenes[0].Id, sceneId: scenes[0].Id);
+            LinkGroupItem(groups[1], 1705, GroupItemKind.Scene, "scene", scenes[1].Id, sceneId: scenes[1].Id);
+            LinkGroupItem(groups[1], 1706, GroupItemKind.Image, "image", images[0].Id);
+            LinkGroupItem(groups[1], 1707, GroupItemKind.Image, "image", images[1].Id);
+            LinkGroupItem(groups[1], 1708, GroupItemKind.Audio, "audio", audios[0].Id);
+            LinkGroupItem(groups[1], 1709, GroupItemKind.Audio, "audio", audios[1].Id);
+            LinkGroupItem(groups[1], 1710, GroupItemKind.Text, "text", texts[0].Id);
+            LinkGroupItem(groups[1], 1711, GroupItemKind.Gallery, "gallery", galleries[0].Id);
+            LinkGroupItem(groups[2], 1712, GroupItemKind.Scene, "scene", scenes[0].Id, sceneId: scenes[0].Id);
+            LinkGroupItem(groups[2], 1713, GroupItemKind.Scene, "scene", scenes[1].Id, sceneId: scenes[1].Id);
+            LinkGroupItem(groups[2], 1714, GroupItemKind.Scene, "scene", scenes[2].Id, sceneId: scenes[2].Id);
+            LinkGroupItem(groups[2], 1715, GroupItemKind.Image, "image", images[0].Id);
+            LinkGroupItem(groups[2], 1716, GroupItemKind.Image, "image", images[1].Id);
+            LinkGroupItem(groups[2], 1717, GroupItemKind.Image, "image", images[2].Id);
+            LinkGroupItem(groups[2], 1718, GroupItemKind.Audio, "audio", audios[0].Id);
+            LinkGroupItem(groups[2], 1719, GroupItemKind.Audio, "audio", audios[1].Id);
+            LinkGroupItem(groups[2], 1720, GroupItemKind.Audio, "audio", audios[2].Id);
+            LinkGroupItem(groups[2], 1721, GroupItemKind.Text, "text", texts[0].Id);
+            LinkGroupItem(groups[2], 1722, GroupItemKind.Text, "text", texts[1].Id);
+            LinkGroupItem(groups[2], 1723, GroupItemKind.Gallery, "gallery", galleries[0].Id);
+            LinkGroupItem(groups[2], 1724, GroupItemKind.Gallery, "gallery", galleries[1].Id);
+            LinkGroupItem(groups[2], 1725, GroupItemKind.Performer, "performer", performers[0].Id);
+            LinkGroupItem(groups[2], 1726, GroupItemKind.Studio, "studio", studios[0].Id);
+            LinkGroupItem(groups[2], 1727, GroupItemKind.Tag, "tag", tags[0].Id);
+            LinkGroupItem(groups[2], 1728, GroupItemKind.Face, "face", faces[0].Id);
+            LinkGroupItem(groups[2], 1729, GroupItemKind.Segment, "segment", segments[0].Id);
 
             Context.Folders.AddRange(folderA, folderB, folderC);
             Context.TagGroups.AddRange(tagGroups);
@@ -1020,6 +1329,29 @@ public class EntityListSortBehaviorHarnessTests
             Context.Segments.AddRange(segments);
             Context.Faces.AddRange(faces);
 
+            var extensionScoreDefinition = new CustomFieldDefinition
+            {
+                Id = 2101,
+                Key = "extension_score",
+                Label = "Extension Score",
+                Type = CustomFieldTypes.Number,
+                EntityTypes = [CustomFieldEntityTypes.Scene, CustomFieldEntityTypes.Audio, CustomFieldEntityTypes.Face],
+                Filterable = true,
+                Sortable = true,
+            };
+
+            Context.CustomFieldDefinitions.Add(extensionScoreDefinition);
+            Context.CustomFieldValues.AddRange(
+                CustomNumberValue(21101, extensionScoreDefinition, CustomFieldEntityTypes.Scene, scenes[0].Id, 20),
+                CustomNumberValue(21102, extensionScoreDefinition, CustomFieldEntityTypes.Scene, scenes[1].Id, 10),
+                CustomNumberValue(21103, extensionScoreDefinition, CustomFieldEntityTypes.Scene, scenes[2].Id, 30),
+                CustomNumberValue(21104, extensionScoreDefinition, CustomFieldEntityTypes.Audio, audios[0].Id, 20),
+                CustomNumberValue(21105, extensionScoreDefinition, CustomFieldEntityTypes.Audio, audios[1].Id, 10),
+                CustomNumberValue(21106, extensionScoreDefinition, CustomFieldEntityTypes.Audio, audios[2].Id, 30),
+                CustomNumberValue(21107, extensionScoreDefinition, CustomFieldEntityTypes.Face, faces[0].Id, 20),
+                CustomNumberValue(21108, extensionScoreDefinition, CustomFieldEntityTypes.Face, faces[1].Id, 10),
+                CustomNumberValue(21109, extensionScoreDefinition, CustomFieldEntityTypes.Face, faces[2].Id, 30));
+
             AddRating(RatingHostType.Scene, scenes[0].Id, 1);
             AddRating(RatingHostType.Scene, scenes[1].Id, 3);
             AddRating(RatingHostType.Scene, scenes[2].Id, 5);
@@ -1032,6 +1364,12 @@ public class EntityListSortBehaviorHarnessTests
             AddRating(RatingHostType.Group, groups[0].Id, 3);
             AddRating(RatingHostType.Group, groups[1].Id, 6);
             AddRating(RatingHostType.Group, groups[2].Id, 9);
+            AddRating(RatingHostType.Audio, audios[0].Id, 2);
+            AddRating(RatingHostType.Audio, audios[1].Id, 5);
+            AddRating(RatingHostType.Audio, audios[2].Id, 8);
+            AddRating(RatingHostType.Text, texts[0].Id, 2);
+            AddRating(RatingHostType.Text, texts[1].Id, 5);
+            AddRating(RatingHostType.Text, texts[2].Id, 8);
             AddRating(RatingHostType.Performer, performers[0].Id, 4);
             AddRating(RatingHostType.Performer, performers[1].Id, 7);
             AddRating(RatingHostType.Performer, performers[2].Id, 10);
@@ -1045,6 +1383,12 @@ public class EntityListSortBehaviorHarnessTests
             AddAffinity(AffinityHostType.Image, images[0].Id, viewCount: 1, likeCount: 5, totalConsumedSec: 0, lastPositionSec: null, lastConsumedAt: now.AddDays(-30));
             AddAffinity(AffinityHostType.Image, images[1].Id, viewCount: 1, likeCount: 15, totalConsumedSec: 0, lastPositionSec: null, lastConsumedAt: now.AddDays(-20));
             AddAffinity(AffinityHostType.Image, images[2].Id, viewCount: 1, likeCount: 25, totalConsumedSec: 0, lastPositionSec: null, lastConsumedAt: now.AddDays(-10));
+            AddAffinity(AffinityHostType.Audio, audios[0].Id, viewCount: 2, likeCount: 4, totalConsumedSec: 40, lastPositionSec: 4, lastConsumedAt: now.AddDays(-25));
+            AddAffinity(AffinityHostType.Audio, audios[1].Id, viewCount: 4, likeCount: 8, totalConsumedSec: 80, lastPositionSec: 8, lastConsumedAt: now.AddDays(-15));
+            AddAffinity(AffinityHostType.Audio, audios[2].Id, viewCount: 6, likeCount: 12, totalConsumedSec: 120, lastPositionSec: 12, lastConsumedAt: now.AddDays(-5));
+            AddAffinity(AffinityHostType.Text, texts[0].Id, viewCount: 2, likeCount: 4, totalConsumedSec: 40, lastPositionSec: 4, lastConsumedAt: now.AddDays(-24));
+            AddAffinity(AffinityHostType.Text, texts[1].Id, viewCount: 4, likeCount: 8, totalConsumedSec: 80, lastPositionSec: 8, lastConsumedAt: now.AddDays(-14));
+            AddAffinity(AffinityHostType.Text, texts[2].Id, viewCount: 6, likeCount: 12, totalConsumedSec: 120, lastPositionSec: 12, lastConsumedAt: now.AddDays(-4));
 
             await Context.SaveChangesAsync();
             await CorruptCountColumnsAsync(performers, images, studios);
@@ -1057,9 +1401,9 @@ public class EntityListSortBehaviorHarnessTests
             Groups = groups;
             SegmentRows =
             [
-                new(segments[0], scenes[0].Title, tags[0].Name),
-                new(segments[1], scenes[1].Title, tags[1].Name),
-                new(segments[2], scenes[2].Title, tags[2].Name),
+                new(segments[0], scenes[0].Title, tags[0].Name, "Alpha Face", performers[0].Name),
+                new(segments[1], scenes[1].Title, tags[1].Name, "Beta Face", performers[1].Name),
+                new(segments[2], scenes[2].Title, tags[2].Name, performers[2].Name, performers[2].Name),
             ];
             Performers = performers;
             Studios = studios;
@@ -1129,6 +1473,17 @@ public class EntityListSortBehaviorHarnessTests
             }
         }
 
+        private static CustomFieldValue CustomNumberValue(int id, CustomFieldDefinition definition, string entityType, int entityId, decimal value)
+            => new()
+            {
+                Id = id,
+                Definition = definition,
+                DefinitionId = definition.Id,
+                EntityType = entityType,
+                EntityId = entityId,
+                NumberValue = value,
+            };
+
         private static void LinkSceneTag(Scene scene, Tag tag)
         {
             var sceneTag = new SceneTag { Scene = scene, SceneId = scene.Id, Tag = tag, TagId = tag.Id };
@@ -1196,6 +1551,71 @@ public class EntityListSortBehaviorHarnessTests
             }
         }
 
+        private static void LinkGroupItem(Group group, int id, GroupItemKind kind, string hostType, int hostId, int? sceneId = null)
+        {
+            group.GroupItems.Add(new GroupItem
+            {
+                Id = id,
+                Group = group,
+                GroupId = group.Id,
+                Kind = kind,
+                HostType = hostType,
+                HostId = hostId,
+                SceneId = sceneId,
+                OrderIndex = group.GroupItems.Count + 1,
+            });
+        }
+
+        private static void LinkGroupRelation(Group containingGroup, Group subGroup)
+        {
+            var relation = new GroupRelation
+            {
+                ContainingGroup = containingGroup,
+                ContainingGroupId = containingGroup.Id,
+                SubGroup = subGroup,
+                SubGroupId = subGroup.Id,
+                OrderIndex = containingGroup.SubGroupRelations.Count + 1,
+            };
+            containingGroup.SubGroupRelations.Add(relation);
+            subGroup.ContainingGroupRelations.Add(relation);
+        }
+
+        private static void LinkAudioTag(Audio audio, params Tag[] tags)
+        {
+            foreach (var tag in tags)
+            {
+                var audioTag = new AudioTag { Audio = audio, AudioId = audio.Id, Tag = tag, TagId = tag.Id };
+                audio.AudioTags.Add(audioTag);
+            }
+        }
+
+        private static void LinkAudioPerformer(Audio audio, params Performer[] performers)
+        {
+            foreach (var performer in performers)
+            {
+                var audioPerformer = new AudioPerformer { Audio = audio, AudioId = audio.Id, Performer = performer, PerformerId = performer.Id };
+                audio.AudioPerformers.Add(audioPerformer);
+            }
+        }
+
+        private static void LinkTextTag(TextDocument text, params Tag[] tags)
+        {
+            foreach (var tag in tags)
+            {
+                var textTag = new TextTag { TextDocument = text, TextDocumentId = text.Id, Tag = tag, TagId = tag.Id };
+                text.TextTags.Add(textTag);
+            }
+        }
+
+        private static void LinkTextPerformer(TextDocument text, params Performer[] performers)
+        {
+            foreach (var performer in performers)
+            {
+                var textPerformer = new TextPerformer { TextDocument = text, TextDocumentId = text.Id, Performer = performer, PerformerId = performer.Id };
+                text.TextPerformers.Add(textPerformer);
+            }
+        }
+
         private static void LinkPerformerTag(Performer performer, params Tag[] tags)
         {
             foreach (var tag in tags)
@@ -1217,7 +1637,7 @@ public class EntityListSortBehaviorHarnessTests
         }
     }
 
-    public sealed record SegmentHarnessRow(Segment Segment, string? SceneTitle, string? TagName);
+    public sealed record SegmentHarnessRow(Segment Segment, string? SceneTitle, string? TagName, string? RefLabel, string? PerformerName);
 
     private sealed class HarnessCoveContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor principalAccessor) : CoveContext(options, principalAccessor)
     {

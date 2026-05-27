@@ -113,16 +113,6 @@ public class SystemController(
     [RequiresPermission(Permissions.SystemRead)]
     public async Task<ActionResult<StatsDto>> GetStats(CancellationToken ct)
     {
-        async Task<(long ViewCount, long CompleteCount, double ConsumedSeconds)> GetEngagementStats(AffinityHostType hostType)
-        {
-            var query = db.UserEntityAffinities.Where(affinity => affinity.HostType == hostType);
-            var viewCount = await query.SumAsync(affinity => (long?)affinity.ViewCount, ct) ?? 0L;
-            var completeCount = await query.SumAsync(affinity => (long?)affinity.CompleteCount, ct) ?? 0L;
-            var consumedSeconds = await query.SumAsync(affinity => (double?)affinity.TotalConsumedSec, ct) ?? 0d;
-
-            return (viewCount, completeCount, consumedSeconds);
-        }
-
         var sceneCt = await db.Scenes.CountAsync(ct);
         var imageCt = await db.Images.CountAsync(ct);
         var galleryCt = await db.Galleries.CountAsync(ct);
@@ -150,14 +140,55 @@ public class SystemController(
         var sceneDuration = await db.VideoFiles.SumAsync(file => (double?)file.Duration, ct) ?? 0d;
         var audioDuration = await db.AudioFiles.SumAsync(file => (double?)file.Duration, ct) ?? 0d;
 
-        var sceneEngagement = await GetEngagementStats(AffinityHostType.Scene);
-        var audioEngagement = await GetEngagementStats(AffinityHostType.Audio);
-        var textEngagement = await GetEngagementStats(AffinityHostType.Text);
-        var imageEngagement = await GetEngagementStats(AffinityHostType.Image);
+        var engagementHostTypes = new[]
+        {
+            AffinityHostType.Scene,
+            AffinityHostType.Audio,
+            AffinityHostType.Text,
+            AffinityHostType.Image,
+            AffinityHostType.Segment,
+        };
+        var engagementByHost = (await db.UserEntityAffinities
+                .Where(affinity => engagementHostTypes.Contains(affinity.HostType))
+                .GroupBy(affinity => affinity.HostType)
+                .Select(group => new
+                {
+                    HostType = group.Key,
+                    ViewCount = group.Sum(affinity => (long?)affinity.ViewCount) ?? 0L,
+                    CompleteCount = group.Sum(affinity => (long?)affinity.CompleteCount) ?? 0L,
+                    ConsumedSeconds = group.Sum(affinity => (double?)affinity.TotalConsumedSec) ?? 0d,
+                })
+                .ToListAsync(ct))
+            .ToDictionary(
+                row => row.HostType,
+                row => (row.ViewCount, row.CompleteCount, row.ConsumedSeconds));
 
-        var totalLikes = await db.UserEntityAffinities.SumAsync(affinity => (long?)affinity.LikeCount, ct) ?? 0L;
-        var totalDerivedLikes = await db.UserEntityAffinities.SumAsync(affinity => (long?)affinity.DerivedLikeCount, ct) ?? 0L;
-        var totalFavorites = await db.UserEntityAffinities.LongCountAsync(affinity => affinity.IsFavorite, ct);
+        (long ViewCount, long CompleteCount, double ConsumedSeconds) GetEngagementStats(AffinityHostType hostType)
+        {
+            return engagementByHost.TryGetValue(hostType, out var stats)
+                ? stats
+                : (0L, 0L, 0d);
+        }
+
+        var affinityTotals = await db.UserEntityAffinities
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                TotalLikes = group.Sum(affinity => (long?)affinity.LikeCount) ?? 0L,
+                TotalDerivedLikes = group.Sum(affinity => (long?)affinity.DerivedLikeCount) ?? 0L,
+                TotalFavorites = group.Sum(affinity => affinity.IsFavorite ? 1L : 0L),
+            })
+            .FirstOrDefaultAsync(ct);
+
+        var sceneEngagement = GetEngagementStats(AffinityHostType.Scene);
+        var audioEngagement = GetEngagementStats(AffinityHostType.Audio);
+        var textEngagement = GetEngagementStats(AffinityHostType.Text);
+        var imageEngagement = GetEngagementStats(AffinityHostType.Image);
+        var segmentEngagement = GetEngagementStats(AffinityHostType.Segment);
+
+        var totalLikes = affinityTotals?.TotalLikes ?? 0L;
+        var totalDerivedLikes = affinityTotals?.TotalDerivedLikes ?? 0L;
+        var totalFavorites = affinityTotals?.TotalFavorites ?? 0L;
 
         return Ok(new StatsDto(
             sceneCt,
@@ -183,19 +214,22 @@ public class SystemController(
             totalFileSize,
             sceneDuration,
             audioDuration,
-            sceneEngagement.ConsumedSeconds + audioEngagement.ConsumedSeconds,
+            sceneEngagement.ConsumedSeconds + audioEngagement.ConsumedSeconds + segmentEngagement.ConsumedSeconds,
             sceneEngagement.ViewCount,
             audioEngagement.ViewCount,
             textEngagement.ViewCount,
             imageEngagement.ViewCount,
+            segmentEngagement.ViewCount,
             sceneEngagement.CompleteCount,
             audioEngagement.CompleteCount,
             textEngagement.CompleteCount,
             imageEngagement.CompleteCount,
+            segmentEngagement.CompleteCount,
             sceneEngagement.ConsumedSeconds,
             audioEngagement.ConsumedSeconds,
             textEngagement.ConsumedSeconds,
             imageEngagement.ConsumedSeconds,
+            segmentEngagement.ConsumedSeconds,
             totalLikes,
             totalDerivedLikes,
             totalFavorites));

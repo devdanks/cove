@@ -301,6 +301,117 @@ public class ScrapeAttemptServiceTests
         Assert.Equal(["New Tag"], updatedGroup.GroupTags.Select(item => item.Tag!.Name).OrderBy(item => item).ToArray());
     }
 
+    [Fact]
+    public async Task ApplyAttemptAsync_GalleryAttemptAppliesMetadataRelationsAndProvenance()
+    {
+        var dbName = $"scrape-attempt-service-{Guid.NewGuid():N}";
+        await using var db = CreateDbContext(dbName);
+
+        var existingTag = new Tag { Name = "Legacy" };
+        var existingPerformer = new Performer { Name = "Existing Performer" };
+        var gallery = new Gallery
+        {
+            Title = "Current Gallery",
+            Urls = [new GalleryUrl { Url = "https://existing.example/gallery" }],
+            GalleryTags = [new GalleryTag { Tag = existingTag }],
+            GalleryPerformers = [new GalleryPerformer { Performer = existingPerformer }],
+            TagIds = [],
+            PerformerIds = [],
+        };
+
+        db.Galleries.Add(gallery);
+        await db.SaveChangesAsync();
+
+        gallery.TagIds = [existingTag.Id];
+        gallery.PerformerIds = [existingPerformer.Id];
+
+        var attempt = new ScrapeAttempt
+        {
+            ScraperId = "tests.fake-scraper/gallery",
+            EntityType = EntityKinds.Gallery,
+            EntityId = gallery.Id,
+            InputKind = "url",
+            InputJson = JsonSerializer.Serialize(new { url = "https://example.com/gallery" }),
+            ResultJson = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["Title"] = "Scraped Gallery",
+                ["Code"] = "G-001",
+                ["Details"] = "Scraped details",
+                ["Photographer"] = "Scraped Photographer",
+                ["Date"] = "2025-02-03",
+                ["URLs"] = new[] { "https://existing.example/gallery", "https://new.example/gallery" },
+                ["TagNames"] = new[] { "New Tag" },
+                ["PerformerNames"] = new[] { "New Performer" },
+                ["StudioName"] = "Scraped Studio",
+            }),
+        };
+
+        db.ScrapeAttempts.Add(attempt);
+        await db.SaveChangesAsync();
+
+        var service = new ScrapeAttemptService(
+            db,
+            null!,
+            null!,
+            null!,
+            new NoOpTagProvenanceService(),
+            null!,
+            NullLogger<ScrapeAttemptService>.Instance,
+            new FieldProvenanceService(db));
+
+        var result = await service.ApplyAttemptAsync(
+            attempt.Id,
+            new ApplySceneScrapeAttemptDto(
+                ReplaceFields: ["title", "code", "details", "photographer", "date"],
+                CollectionModes: new Dictionary<string, string>
+                {
+                    ["urls"] = "merge",
+                    ["tags"] = "replace",
+                    ["performers"] = "merge",
+                    ["studio"] = "replace",
+                },
+                CreateMissingTags: true,
+                CreateMissingPerformers: true,
+                CreateMissingStudio: true,
+                MarkOrganized: true),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal("Applied", result!.Status);
+        Assert.NotNull(result.EntitySnapshotJson);
+
+        var updatedGallery = await db.Galleries
+            .Include(item => item.Urls)
+            .Include(item => item.GalleryTags).ThenInclude(item => item.Tag)
+            .Include(item => item.GalleryPerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.Studio)
+            .SingleAsync(item => item.Id == gallery.Id);
+
+        Assert.Equal("Scraped Gallery", updatedGallery.Title);
+        Assert.Equal("G-001", updatedGallery.Code);
+        Assert.Equal("Scraped details", updatedGallery.Details);
+        Assert.Equal("Scraped Photographer", updatedGallery.Photographer);
+        Assert.Equal(new DateOnly(2025, 2, 3), updatedGallery.Date);
+        Assert.True(updatedGallery.Organized);
+        Assert.Equal("Scraped Studio", updatedGallery.Studio?.Name);
+        Assert.Equal(
+            ["https://existing.example/gallery", "https://new.example/gallery"],
+            updatedGallery.Urls.Select(item => item.Url).OrderBy(item => item).ToArray());
+        Assert.Equal(["New Tag"], updatedGallery.GalleryTags.Select(item => item.Tag!.Name).OrderBy(item => item).ToArray());
+        Assert.Equal(
+            ["Existing Performer", "New Performer"],
+            updatedGallery.GalleryPerformers.Select(item => item.Performer!.Name).OrderBy(item => item).ToArray());
+        Assert.Single(updatedGallery.TagIds);
+        Assert.Equal(2, updatedGallery.PerformerIds.Length);
+
+        var provenance = await db.FieldProvenance
+            .Where(item => item.HostType == AffinityHostType.Gallery && item.HostId == gallery.Id)
+            .ToListAsync();
+
+        Assert.Contains(provenance, item => item.FieldKey == "title" && item.SourceKey == "scraper:tests.fake-scraper/gallery");
+        Assert.Contains(provenance, item => item.FieldKey == "tags" && item.SourceKey == "scraper:tests.fake-scraper/gallery");
+    }
+
     private static CoveContext CreateDbContext(string dbName)
     {
         var options = new DbContextOptionsBuilder<CoveContext>()

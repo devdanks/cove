@@ -357,6 +357,7 @@ public class FilterCriteriaParityTests
         Assert.Null(filter.DetailsCriterion);
         Assert.Null(filter.AliasesCriterion);
         Assert.Null(filter.ParentsCriterion);
+        Assert.Null(filter.ParentCountCriterion);
         Assert.Null(filter.ChildCountCriterion);
         Assert.Null(filter.TagCountCriterion);
         Assert.Null(filter.GroupCountCriterion);
@@ -703,6 +704,7 @@ public class FilterCriteriaParityTests
             DetailsCriterion = new StringCriterion { Value = "detail", Modifier = CriterionModifier.Includes },
             AliasesCriterion = new StringCriterion { Value = "alias", Modifier = CriterionModifier.Includes },
             ParentsCriterion = new MultiIdCriterion { Value = [1], Modifier = CriterionModifier.Includes },
+            ParentCountCriterion = new IntCriterion { Value = 1, Modifier = CriterionModifier.Equals },
             ChildCountCriterion = new IntCriterion { Value = 3, Modifier = CriterionModifier.GreaterThan },
             TagCountCriterion = new IntCriterion { Value = 2, Modifier = CriterionModifier.Equals },
             GroupCountCriterion = new IntCriterion { Value = 1, Modifier = CriterionModifier.GreaterThan },
@@ -715,6 +717,7 @@ public class FilterCriteriaParityTests
 
         Assert.NotNull(deserialized);
         Assert.Equal("studio", deserialized.NameCriterion?.Value);
+        Assert.Equal(1, deserialized.ParentCountCriterion?.Value);
         Assert.Equal(3, deserialized.ChildCountCriterion?.Value);
         Assert.True(deserialized.OrganizedCriterion?.Value);
     }

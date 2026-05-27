@@ -132,6 +132,11 @@ function renderPage() {
   return { onNavigate };
 }
 
+function getPrimaryDetailTabs() {
+  const tablists = screen.getAllByRole("tablist", { name: /detail tabs/i });
+  return tablists.find((tablist) => tablist.getAttribute("aria-orientation") === "vertical") ?? tablists[0];
+}
+
 describe("ImageDetailPage", () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -157,7 +162,7 @@ describe("ImageDetailPage", () => {
     expect(await screen.findByRole("heading", { name: "Sunset Poster" })).toBeInTheDocument();
     expect(screen.getByTestId("media-detail-layout-media")).toBeInTheDocument();
 
-    const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
+    const tabs = getPrimaryDetailTabs();
     expect(within(tabs).queryByRole("tab", { name: /related/i })).not.toBeInTheDocument();
 
     fireEvent.click(within(tabs).getByRole("tab", { name: /faces/i }));
@@ -189,5 +194,26 @@ describe("ImageDetailPage", () => {
 
     fireEvent.keyDown(window, { key: "l" });
     await waitFor(() => expect(mockImages.incrementLike).toHaveBeenCalledWith(12));
+  });
+
+  it("records a lightbox dwell interval when the shared lightbox closes", async () => {
+    mockImages.get.mockResolvedValue(buildImage());
+    mockFaces.imageFaces.mockResolvedValue([]);
+
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Sunset Poster" });
+
+    fireEvent.keyDown(window, { key: "f" });
+    fireEvent.click(await screen.findByRole("button", { name: "Close (Esc)" }));
+
+    await waitFor(() => expect(mockPlayback.recordIntervals).toHaveBeenCalledWith(expect.objectContaining({
+      hostType: "image",
+      hostId: 12,
+      state: "ended",
+      surface: "lightbox",
+      scopeKey: "image:12:lightbox",
+      intervals: [expect.objectContaining({ startSec: 0, endSec: expect.any(Number) })],
+    })));
   });
 });

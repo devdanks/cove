@@ -654,6 +654,26 @@ public class ExtensionManager
     public UIManifest GetAggregatedManifest()
     {
         var manifest = _context.UI.ToManifest();
+        var tutorialTopicIds = new HashSet<string>(manifest.TutorialTopics.Select(t => t.Id), StringComparer.OrdinalIgnoreCase);
+
+        void AddTutorialTopics(IEnumerable<UITutorialTopic> topics, string? extensionId)
+        {
+            foreach (var topic in topics)
+            {
+                if (string.IsNullOrWhiteSpace(topic.Id) || string.IsNullOrWhiteSpace(topic.Title))
+                    continue;
+
+                var normalized = string.IsNullOrWhiteSpace(topic.ExtensionId) && !string.IsNullOrWhiteSpace(extensionId)
+                    ? topic with { ExtensionId = extensionId }
+                    : topic;
+
+                if (tutorialTopicIds.Add(normalized.Id))
+                {
+                    manifest.TutorialTopics.Add(normalized);
+                }
+            }
+        }
+
         foreach (var ext in GetInitializationOrder().OfType<IUIExtension>())
         {
             if (!IsEnabled(ext.Id)) continue;
@@ -673,7 +693,24 @@ public class ExtensionManager
             manifest.PageOverrides.AddRange(extManifest.PageOverrides);
             manifest.DialogOverrides.AddRange(extManifest.DialogOverrides);
             manifest.Actions.AddRange(extManifest.Actions);
-            manifest.TutorialTopics.AddRange(extManifest.TutorialTopics);
+            AddTutorialTopics(extManifest.TutorialTopics, ext.Id);
+            manifest.ListFilters.AddRange(extManifest.ListFilters);
+            manifest.ListSorts.AddRange(extManifest.ListSorts);
+        }
+
+        var manifestIds = _manifestFiles.Keys
+            .Concat(_installations.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var extensionId in manifestIds)
+        {
+            if (!IsEnabled(extensionId)) continue;
+            var manifestFile = GetManifestFile(extensionId);
+            if (manifestFile?.TutorialTopics.Count > 0)
+            {
+                AddTutorialTopics(manifestFile.TutorialTopics, manifestFile.Id);
+            }
         }
 
         // Collect actions from IActionExtension instances
@@ -691,6 +728,8 @@ public class ExtensionManager
         manifest.SelectorOverrides.Sort((a, b) => b.Priority.CompareTo(a.Priority));
         manifest.Actions.Sort((a, b) => a.Order.CompareTo(b.Order));
         manifest.TutorialTopics.Sort((a, b) => a.Order.CompareTo(b.Order));
+        manifest.ListFilters.Sort((a, b) => a.Order.CompareTo(b.Order));
+        manifest.ListSorts.Sort((a, b) => a.Order.CompareTo(b.Order));
         return manifest;
     }
 

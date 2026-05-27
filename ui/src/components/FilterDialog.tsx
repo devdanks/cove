@@ -21,6 +21,7 @@ import type {
   DateCriterion,
   TimestampCriterion,
   FingerprintCriterion,
+  CustomFieldCriterion,
   TagDurationClause,
   TagDurationCriterion,
   SceneFilterCriteria,
@@ -47,6 +48,8 @@ export interface CriterionDefinition<TFilterKey extends string = string> {
   type: CriterionType;
   entityType?: EntityType;
   filterKey: TFilterKey;
+  customFieldKey?: string;
+  customFieldType?: string;
   modifiers?: CriterionModifier[];
   options?: { value: string; label: string }[];
   multiSelectOptions?: boolean;
@@ -208,16 +211,114 @@ function isCriterionValueValid(value: unknown, criterion: CriterionDefinition) {
   }
 }
 
-function sanitizeFilterCriteria(filter: Record<string, unknown>, criteria: CriterionDefinition[]) {
-  const sanitized: Record<string, unknown> = {};
+function getCustomFieldCriteria(filter: Record<string, unknown>) {
+  return Array.isArray(filter.customFieldCriteria)
+    ? filter.customFieldCriteria.filter((item): item is CustomFieldCriterion => Boolean(item && typeof item === "object"))
+    : [];
+}
+
+function findCustomFieldCriterion(filter: Record<string, unknown>, criterion: CriterionDefinition) {
+  if (!criterion.customFieldKey) return undefined;
+  return getCustomFieldCriteria(filter).find((item) => item.key === criterion.customFieldKey);
+}
+
+function coerceCustomFieldCriterionForEditor(value: CustomFieldCriterion | undefined, criterion: CriterionDefinition) {
+  if (!value) return undefined;
+  const next: Record<string, unknown> = { ...value };
+  const coerceNumber = (rawValue: unknown) => {
+    if (rawValue == null || rawValue === "") return undefined;
+    const numericValue = Number(rawValue);
+    return Number.isFinite(numericValue) ? numericValue : undefined;
+  };
+
+  switch (criterion.type) {
+    case "number":
+    case "duration":
+    case "careerLength":
+    case "rating":
+    case "resolution":
+      next.value = coerceNumber(value.value);
+      next.value2 = coerceNumber(value.value2);
+      break;
+    case "bool":
+      next.value = String(value.value).toLowerCase() === "true";
+      break;
+  }
+
+  return next;
+}
+
+function getCriterionFilterValue(filter: Record<string, unknown>, criterion: CriterionDefinition) {
+  return criterion.customFieldKey ? coerceCustomFieldCriterionForEditor(findCustomFieldCriterion(filter, criterion), criterion) : filter[criterion.filterKey];
+}
+
+function normalizeCustomFieldCriterion(value: unknown, criterion: CriterionDefinition): CustomFieldCriterion | undefined {
+  if (!criterion.customFieldKey || !value || typeof value !== "object") return undefined;
+
+  const raw = value as Record<string, unknown>;
+  const normalized: CustomFieldCriterion = {
+    ...(raw as Partial<CustomFieldCriterion>),
+    key: criterion.customFieldKey,
+    type: (criterion.customFieldType ?? "text") as CustomFieldCriterion["type"],
+    modifier: (raw.modifier as CriterionModifier | undefined) ?? "EQUALS",
+    value: raw.value == null ? "" : String(raw.value),
+  };
+
+  if (raw.value2 != null) {
+    normalized.value2 = String(raw.value2);
+  } else {
+    delete normalized.value2;
+  }
+
+  return normalized;
+}
+
+function removeCriterionFilterValue(filter: Record<string, unknown>, criterion: CriterionDefinition) {
+  const next = { ...filter };
+  if (criterion.customFieldKey) {
+    const remaining = getCustomFieldCriteria(next).filter((item) => item.key !== criterion.customFieldKey);
+    if (remaining.length > 0) next.customFieldCriteria = remaining;
+    else delete next.customFieldCriteria;
+    return next;
+  }
+
+  delete next[criterion.filterKey];
+  if (criterion.auxiliaryToggleKey) {
+    delete next[criterion.auxiliaryToggleKey];
+  }
+  return next;
+}
+
+function setCriterionFilterValue(filter: Record<string, unknown>, criterion: CriterionDefinition, value: unknown) {
+  if (value === undefined) {
+    return removeCriterionFilterValue(filter, criterion);
+  }
+
+  if (criterion.customFieldKey) {
+    const customFieldCriterion = normalizeCustomFieldCriterion(value, criterion);
+    if (!customFieldCriterion) return removeCriterionFilterValue(filter, criterion);
+
+    const remaining = getCustomFieldCriteria(filter).filter((item) => item.key !== criterion.customFieldKey);
+    return { ...filter, customFieldCriteria: [...remaining, customFieldCriterion] };
+  }
+
+  return { ...filter, [criterion.filterKey]: value };
+}
+
+function sanitizeFilterCriteria(filter: Record<string, unknown>, criteria: CriterionDefinition[], baseFilter: Record<string, unknown> = {}) {
+  let sanitized: Record<string, unknown> = { ...baseFilter };
 
   for (const criterion of criteria) {
-    const value = filter[criterion.filterKey];
+    const value = getCriterionFilterValue(filter, criterion);
     if (!isCriterionValueValid(value, criterion)) {
       continue;
     }
 
-    sanitized[criterion.filterKey] = value;
+    if (criterion.customFieldKey) {
+      sanitized = setCriterionFilterValue(sanitized, criterion, value);
+    } else {
+      sanitized[criterion.filterKey] = value;
+    }
 
     if (criterion.auxiliaryToggleKey && typeof filter[criterion.auxiliaryToggleKey] === "boolean") {
       sanitized[criterion.auxiliaryToggleKey] = filter[criterion.auxiliaryToggleKey];
@@ -373,6 +474,7 @@ export const STUDIO_CRITERIA: CriteriaDefinitionList<StudioFilterCriteria> = [
   { id: "aliases", label: "Aliases", type: "string", filterKey: "aliasesCriterion" },
   { id: "parents", label: "Parent Studios", type: "multiId", entityType: "studios", filterKey: "parentsCriterion" },
   { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "parentCount", label: "Parent Studio Count", type: "number", filterKey: "parentCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "childCount", label: "Substudios Count", type: "number", filterKey: "childCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "groupCount", label: "Group Count", type: "number", filterKey: "groupCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "galleryCount", label: "Gallery Count", type: "number", filterKey: "galleryCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
@@ -441,15 +543,31 @@ export const IMAGE_CRITERIA: CriteriaDefinitionList<ImageFilterCriteria> = [
 ];
 
 export const AUDIO_CRITERIA: CriteriaDefinitionList<AudioFilterCriteria> = [
+  { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
   { id: "code", label: "Code", type: "string", filterKey: "codeCriterion" },
   { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
   { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
+  { id: "format", label: "File Format", type: "string", filterKey: "formatCriterion" },
+  { id: "audioCodec", label: "Audio Codec", type: "string", filterKey: "audioCodecCriterion" },
   { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
   { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
+  { id: "hasVideoFiles", label: "Has Video Track", type: "bool", filterKey: "hasVideoFilesCriterion" },
+  { id: "hasCover", label: "Has Cover", type: "bool", filterKey: "hasCoverCriterion" },
   { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
   { id: "duration", label: "Duration", type: "number", filterKey: "durationCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "bitRate", label: "Bitrate", type: "number", filterKey: "bitRateCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "fileSize", label: "File Size", type: "number", filterKey: "fileSizeCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "fileModTime", label: "File Modified", type: "timestamp", filterKey: "fileModTimeCriterion" },
   { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "trackCount", label: "Track Count", type: "number", filterKey: "trackCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "trackTitle", label: "Track Title", type: "string", filterKey: "trackTitleCriterion" },
+  { id: "sampleRate", label: "Sample Rate", type: "number", filterKey: "sampleRateCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "channels", label: "Channels", type: "number", filterKey: "channelsCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "playCount", label: "Play Count", type: "number", filterKey: "playCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "likeCounter", label: "Likes", type: "number", filterKey: "likeCounterCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "playDuration", label: "Play Duration", type: "number", filterKey: "playDurationCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "lastPlayedAt", label: "Last Played", type: "timestamp", filterKey: "lastPlayedAtCriterion" },
   { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "performerTags", label: "Performer Tags", type: "multiId", entityType: "tags", filterKey: "performerTagsCriterion" },
@@ -462,16 +580,26 @@ export const AUDIO_CRITERIA: CriteriaDefinitionList<AudioFilterCriteria> = [
 ];
 
 export const TEXT_CRITERIA: CriteriaDefinitionList<TextFilterCriteria> = [
+  { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
   { id: "code", label: "Code", type: "string", filterKey: "codeCriterion" },
   { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
+  { id: "content", label: "Content", type: "string", filterKey: "contentCriterion" },
   { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
+  { id: "format", label: "File Format", type: "string", filterKey: "formatCriterion" },
   { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
   { id: "organized", label: "Organized", type: "bool", filterKey: "organizedCriterion" },
+  { id: "hasCover", label: "Has Cover", type: "bool", filterKey: "hasCoverCriterion" },
   { id: "date", label: "Date", type: "date", filterKey: "dateCriterion" },
   { id: "wordCount", label: "Word Count", type: "number", filterKey: "wordCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "pageCount", label: "Page Count", type: "number", filterKey: "pageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "fileSize", label: "File Size", type: "number", filterKey: "fileSizeCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "fileModTime", label: "File Modified", type: "timestamp", filterKey: "fileModTimeCriterion" },
   { id: "fileCount", label: "File Count", type: "number", filterKey: "fileCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "readCount", label: "Read Count", type: "number", filterKey: "playCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "likeCounter", label: "Likes", type: "number", filterKey: "likeCounterCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "readDuration", label: "Read Duration", type: "number", filterKey: "playDurationCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "lastReadAt", label: "Last Read", type: "timestamp", filterKey: "lastReadAtCriterion" },
   { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "performerTags", label: "Performer Tags", type: "multiId", entityType: "tags", filterKey: "performerTagsCriterion" },
@@ -485,7 +613,15 @@ export const TEXT_CRITERIA: CriteriaDefinitionList<TextFilterCriteria> = [
 
 export const GROUP_CRITERIA: CriteriaDefinitionList<GroupFilterCriteria> = [
   { id: "name", label: "Name", type: "string", filterKey: "nameCriterion" },
+  { id: "aliases", label: "Aliases", type: "string", filterKey: "aliasesCriterion" },
   { id: "kind", label: "Kind", type: "enum", filterKey: "kindCriterion", modifiers: VALUE_ONLY_ENUM_MODIFIERS, options: [{ value: "static", label: "Static" }, { value: "dynamic", label: "Dynamic" }] },
+  { id: "querySourceKey", label: "Query Source", type: "string", filterKey: "querySourceKeyCriterion" },
+  { id: "hasQuery", label: "Has Dynamic Query", type: "bool", filterKey: "hasQueryCriterion" },
+  { id: "lastResolvedAt", label: "Last Resolved", type: "timestamp", filterKey: "lastResolvedAtCriterion" },
+  { id: "cachedItemCount", label: "Cached Item Count", type: "number", filterKey: "cachedItemCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "showInSceneLists", label: "Show In Scene Lists", type: "bool", filterKey: "showInSceneListsCriterion" },
+  { id: "allowedHostTypes", label: "Allowed Host Type", type: "string", filterKey: "allowedHostTypesCriterion" },
+  { id: "sortOrder", label: "Manual Sort Order", type: "number", filterKey: "sortOrderCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "director", label: "Director", type: "string", filterKey: "directorCriterion" },
   { id: "description", label: "Description", type: "string", filterKey: "synopsisCriterion" },
@@ -495,7 +631,19 @@ export const GROUP_CRITERIA: CriteriaDefinitionList<GroupFilterCriteria> = [
   { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
   { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
   { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
+  { id: "itemCount", label: "Item Count", type: "number", filterKey: "itemCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "sceneCount", label: "Scene Count", type: "number", filterKey: "sceneCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "imageCount", label: "Image Count", type: "number", filterKey: "imageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "audioCount", label: "Audio Count", type: "number", filterKey: "audioCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "textCount", label: "Text Count", type: "number", filterKey: "textCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "galleryCount", label: "Gallery Count", type: "number", filterKey: "galleryCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "performerItemCount", label: "Performer Item Count", type: "number", filterKey: "performerItemCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "studioItemCount", label: "Studio Item Count", type: "number", filterKey: "studioItemCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "tagItemCount", label: "Tag Item Count", type: "number", filterKey: "tagItemCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "faceCount", label: "Face Count", type: "number", filterKey: "faceCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "segmentCount", label: "Segment Count", type: "number", filterKey: "segmentCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "subGroupCount", label: "Subgroup Count", type: "number", filterKey: "subGroupCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "containingGroupCount", label: "Containing Group Count", type: "number", filterKey: "containingGroupCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "tagCount", label: "Tag Count", type: "number", filterKey: "tagCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "createdAt", label: "Created At", type: "timestamp", filterKey: "createdAtCriterion" },
   { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "updatedAtCriterion" },
@@ -591,20 +739,13 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
   }, [activeFilterSignature, lastSyncedFilterSignature, open]);
 
   const activeCriterionCount = useMemo(() => {
-    const criteriaCount = criteria.filter((criterion) => isCriterionValueValid(editFilter[criterion.filterKey], criterion)).length;
+    const criteriaCount = criteria.filter((criterion) => isCriterionValueValid(getCriterionFilterValue(editFilter, criterion), criterion)).length;
     const customCount = (customSections ?? []).filter((section) => section.isActive(editFilter[section.filterKey])).length;
     return criteriaCount + customCount;
   }, [criteria, customSections, editFilter]);
 
   const handleRemoveCriterion = useCallback((criterion: CriterionDefinition, criterionId?: string) => {
-    setEditFilter((prev) => {
-      const next = { ...prev };
-      delete next[criterion.filterKey];
-      if (criterion.auxiliaryToggleKey) {
-        delete next[criterion.auxiliaryToggleKey];
-      }
-      return next;
-    });
+    setEditFilter((prev) => removeCriterionFilterValue(prev, criterion));
 
     if (criterionId && expandedCriterion === criterionId) {
       setExpandedCriterion(null);
@@ -612,17 +753,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
   }, [expandedCriterion]);
 
   const handleSetCriterion = useCallback((criterion: CriterionDefinition, value: unknown) => {
-    setEditFilter((prev) => {
-      if (value === undefined) {
-        const next = { ...prev };
-        delete next[criterion.filterKey];
-        if (criterion.auxiliaryToggleKey) {
-          delete next[criterion.auxiliaryToggleKey];
-        }
-        return next;
-      }
-      return { ...prev, [criterion.filterKey]: value };
-    });
+    setEditFilter((prev) => setCriterionFilterValue(prev, criterion, value));
   }, []);
 
   const handleSetAuxiliaryToggle = useCallback((criterion: CriterionDefinition, checked: boolean) => {
@@ -643,13 +774,15 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
   }, []);
 
   const handleApply = () => {
-    const nextFilter = sanitizeFilterCriteria(editFilter, criteria);
+    const sectionFilter: Record<string, unknown> = {};
     for (const section of customSections ?? []) {
       const value = section.sanitize ? section.sanitize(editFilter[section.filterKey]) : editFilter[section.filterKey];
       if (section.isActive(value)) {
-        nextFilter[section.filterKey] = value;
+        sectionFilter[section.filterKey] = value;
       }
     }
+
+    const nextFilter = sanitizeFilterCriteria(editFilter, criteria, sectionFilter);
 
     onApply(nextFilter);
     onClose();
@@ -736,7 +869,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
                 </span>
               ))}
             {criteria
-              .filter((c) => isCriterionValueValid(editFilter[c.filterKey], c))
+              .filter((c) => isCriterionValueValid(getCriterionFilterValue(editFilter, c), c))
               .map((c) => (
                 <span
                   key={c.id}
@@ -824,7 +957,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
                   <CriterionRow
                     key={criterion.id}
                     criterion={criterion}
-                    value={editFilter[criterion.filterKey]}
+                    value={getCriterionFilterValue(editFilter, criterion)}
                     auxiliaryToggleChecked={criterion.auxiliaryToggleKey ? Boolean(editFilter[criterion.auxiliaryToggleKey]) : undefined}
                     onAuxiliaryToggleChange={(checked) => handleSetAuxiliaryToggle(criterion, checked)}
                     onChange={(v) => handleSetCriterion(criterion, v)}
@@ -844,7 +977,7 @@ export function FilterDialog({ open, onClose, criteria, activeFilter, onApply, p
               <CriterionRow
                 key={criterion.id}
                 criterion={criterion}
-                value={editFilter[criterion.filterKey]}
+                value={getCriterionFilterValue(editFilter, criterion)}
                 auxiliaryToggleChecked={criterion.auxiliaryToggleKey ? Boolean(editFilter[criterion.auxiliaryToggleKey]) : undefined}
                 onAuxiliaryToggleChange={(checked) => handleSetAuxiliaryToggle(criterion, checked)}
                 onChange={(v) => handleSetCriterion(criterion, v)}
@@ -1690,11 +1823,12 @@ function TimestampEditor({ value, onChange, modifiers }: { value?: TimestampCrit
 
 function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggleLabel }: { value?: MultiIdCriterion; onChange: (v: unknown) => void; entityType: EntityType; modifiers: CriterionModifier[]; hierarchyToggleLabel?: string }) {
   const includeModifiers = modifiers.filter((modifier) => modifier === "INCLUDES" || modifier === "INCLUDES_ALL");
+  const supportsExclude = modifiers.some((modifier) => modifier === "EXCLUDES" || modifier === "EXCLUDES_ALL");
   const modifier = value?.modifier ?? (includeModifiers.includes("INCLUDES_ALL") ? "INCLUDES_ALL" : "INCLUDES");
   const nullModifiers = modifiers.filter((item) => NULL_VALUE_MODIFIERS.has(item));
   const isNullModifier = NULL_VALUE_MODIFIERS.has(modifier);
   const includedIds = value?.value ?? [];
-  const excludedIds = value?.excludes ?? [];
+  const excludedIds = supportsExclude ? value?.excludes ?? [] : [];
   const includeHierarchy = (value as any)?.depth === -1;
   const existingNames: Record<string, string> = (value as any)?._names ?? {};
   const [searchText, setSearchText] = useState("");
@@ -1772,6 +1906,10 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
   };
 
   const addExclude = (id: number) => {
+    if (!supportsExclude) {
+      return;
+    }
+
     const nextInc = includedIds.filter((i) => i !== id);
     const nextExc = excludedIds.includes(id) ? excludedIds : [...excludedIds, id];
     onChange(buildCriterion(nextInc, nextExc, modifier, includeHierarchy));
@@ -1862,7 +2000,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
         </div>
       )}
       {/* Selected items: excluded */}
-      {excludedIds.length > 0 && (
+      {supportsExclude && excludedIds.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {excludedIds.map((id) => {
             const entity = entities?.find((e: any) => e.id === id);
@@ -1906,13 +2044,15 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
                   >
                     <Plus className="w-3 h-3" />
                   </button>
-                  <button
-                    onClick={() => isExcluded ? removeId(entity.id) : addExclude(entity.id)}
-                    className={`hover:text-red-400 ${isExcluded ? "text-red-400" : "text-muted"}`}
-                    title="Exclude"
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
+                  {supportsExclude && (
+                    <button
+                      onClick={() => isExcluded ? removeId(entity.id) : addExclude(entity.id)}
+                      className={`hover:text-red-400 ${isExcluded ? "text-red-400" : "text-muted"}`}
+                      title="Exclude"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                  )}
                   <span className="min-w-0 flex-1 truncate">{getName(entity)}</span>
                 </div>
               );
@@ -1933,13 +2073,15 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
               >
                 <Plus className="w-3 h-3" />
               </button>
-              <button
-                onClick={() => isExcluded ? removeId(entity.id) : addExclude(entity.id)}
-                className={`hover:text-red-400 ${isExcluded ? "text-red-400" : "text-muted"}`}
-                title="Exclude"
-              >
-                <Minus className="w-3 h-3" />
-              </button>
+              {supportsExclude && (
+                <button
+                  onClick={() => isExcluded ? removeId(entity.id) : addExclude(entity.id)}
+                  className={`hover:text-red-400 ${isExcluded ? "text-red-400" : "text-muted"}`}
+                  title="Exclude"
+                >
+                  <Minus className="w-3 h-3" />
+                </button>
+              )}
               <span className="flex-1">{getName(entity)}</span>
             </div>
           );

@@ -248,6 +248,36 @@ public static class FilterHelpers
         };
     }
 
+    public static IQueryable<T> ApplyLong<T>(IQueryable<T> query, IntCriterion? criterion, Expression<Func<T, long>> selector)
+    {
+        if (criterion == null) return query;
+        var val = (long)criterion.Value;
+        var val2 = (long)(criterion.Value2 ?? criterion.Value);
+        var param = selector.Parameters[0];
+        var body = selector.Body;
+
+        return criterion.Modifier switch
+        {
+            CriterionModifier.Equals => query.Where(Expression.Lambda<Func<T, bool>>(
+                Expression.Equal(body, Expression.Constant(val)), param)),
+            CriterionModifier.NotEquals => query.Where(Expression.Lambda<Func<T, bool>>(
+                Expression.NotEqual(body, Expression.Constant(val)), param)),
+            CriterionModifier.GreaterThan => query.Where(Expression.Lambda<Func<T, bool>>(
+                Expression.GreaterThan(body, Expression.Constant(val)), param)),
+            CriterionModifier.LessThan => query.Where(Expression.Lambda<Func<T, bool>>(
+                Expression.LessThan(body, Expression.Constant(val)), param)),
+            CriterionModifier.Between => query.Where(Expression.Lambda<Func<T, bool>>(
+                Expression.AndAlso(
+                    Expression.GreaterThanOrEqual(body, Expression.Constant(val)),
+                    Expression.LessThanOrEqual(body, Expression.Constant(val2))), param)),
+            CriterionModifier.NotBetween => query.Where(Expression.Lambda<Func<T, bool>>(
+                Expression.OrElse(
+                    Expression.LessThan(body, Expression.Constant(val)),
+                    Expression.GreaterThan(body, Expression.Constant(val2))), param)),
+            _ => query,
+        };
+    }
+
     /// <summary>Apply a resolution bucket criterion using a max-dimension selector.</summary>
     public static IQueryable<T> ApplyResolution<T>(IQueryable<T> query, IntCriterion? criterion, Expression<Func<T, int>> selector)
     {

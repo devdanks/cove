@@ -288,6 +288,7 @@ public class StudioFilter
     public StringCriterion? DetailsCriterion { get; set; }
     public StringCriterion? AliasesCriterion { get; set; }
     public MultiIdCriterion? ParentsCriterion { get; set; }
+    public IntCriterion? ParentCountCriterion { get; set; }
     public IntCriterion? ChildCountCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
     public IntCriterion? GroupCountCriterion { get; set; }
@@ -380,15 +381,31 @@ public class ImageFilter
 
 public class AudioFilter
 {
+    public IntCriterion? RatingCriterion { get; set; }
     public StringCriterion? TitleCriterion { get; set; }
     public StringCriterion? CodeCriterion { get; set; }
     public StringCriterion? DetailsCriterion { get; set; }
     public StringCriterion? PathCriterion { get; set; }
+    public StringCriterion? FormatCriterion { get; set; }
+    public StringCriterion? AudioCodecCriterion { get; set; }
     public StringCriterion? UrlCriterion { get; set; }
     public BoolCriterion? OrganizedCriterion { get; set; }
+    public BoolCriterion? HasVideoFilesCriterion { get; set; }
+    public BoolCriterion? HasCoverCriterion { get; set; }
     public DateCriterion? DateCriterion { get; set; }
     public IntCriterion? DurationCriterion { get; set; }
+    public IntCriterion? BitRateCriterion { get; set; }
+    public IntCriterion? FileSizeCriterion { get; set; }
+    public TimestampCriterion? FileModTimeCriterion { get; set; }
     public IntCriterion? FileCountCriterion { get; set; }
+    public IntCriterion? TrackCountCriterion { get; set; }
+    public StringCriterion? TrackTitleCriterion { get; set; }
+    public IntCriterion? SampleRateCriterion { get; set; }
+    public IntCriterion? ChannelsCriterion { get; set; }
+    public IntCriterion? PlayCountCriterion { get; set; }
+    public IntCriterion? LikeCounterCriterion { get; set; }
+    public IntCriterion? PlayDurationCriterion { get; set; }
+    public TimestampCriterion? LastPlayedAtCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
     public IntCriterion? PerformerCountCriterion { get; set; }
     public MultiIdCriterion? PerformerTagsCriterion { get; set; }
@@ -404,16 +421,26 @@ public class AudioFilter
 
 public class TextDocumentFilter
 {
+    public IntCriterion? RatingCriterion { get; set; }
     public StringCriterion? TitleCriterion { get; set; }
     public StringCriterion? CodeCriterion { get; set; }
     public StringCriterion? DetailsCriterion { get; set; }
+    public StringCriterion? ContentCriterion { get; set; }
     public StringCriterion? PathCriterion { get; set; }
+    public StringCriterion? FormatCriterion { get; set; }
     public StringCriterion? UrlCriterion { get; set; }
     public BoolCriterion? OrganizedCriterion { get; set; }
+    public BoolCriterion? HasCoverCriterion { get; set; }
     public DateCriterion? DateCriterion { get; set; }
     public IntCriterion? WordCountCriterion { get; set; }
     public IntCriterion? PageCountCriterion { get; set; }
+    public IntCriterion? FileSizeCriterion { get; set; }
+    public TimestampCriterion? FileModTimeCriterion { get; set; }
     public IntCriterion? FileCountCriterion { get; set; }
+    public IntCriterion? PlayCountCriterion { get; set; }
+    public IntCriterion? LikeCounterCriterion { get; set; }
+    public IntCriterion? PlayDurationCriterion { get; set; }
+    public TimestampCriterion? LastReadAtCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
     public IntCriterion? PerformerCountCriterion { get; set; }
     public MultiIdCriterion? PerformerTagsCriterion { get; set; }
@@ -447,8 +474,28 @@ public class GroupFilter
     public StringCriterion? DirectorCriterion { get; set; }
     public StringCriterion? SynopsisCriterion { get; set; }
     public StringCriterion? KindCriterion { get; set; }
+    public StringCriterion? AliasesCriterion { get; set; }
+    public StringCriterion? QuerySourceKeyCriterion { get; set; }
+    public StringCriterion? AllowedHostTypesCriterion { get; set; }
+    public BoolCriterion? HasQueryCriterion { get; set; }
+    public BoolCriterion? ShowInSceneListsCriterion { get; set; }
+    public TimestampCriterion? LastResolvedAtCriterion { get; set; }
+    public IntCriterion? SortOrderCriterion { get; set; }
+    public IntCriterion? CachedItemCountCriterion { get; set; }
     public MultiIdCriterion? PerformersCriterion { get; set; }
+    public IntCriterion? ItemCountCriterion { get; set; }
     public IntCriterion? SceneCountCriterion { get; set; }
+    public IntCriterion? ImageCountCriterion { get; set; }
+    public IntCriterion? AudioCountCriterion { get; set; }
+    public IntCriterion? TextCountCriterion { get; set; }
+    public IntCriterion? GalleryCountCriterion { get; set; }
+    public IntCriterion? PerformerItemCountCriterion { get; set; }
+    public IntCriterion? StudioItemCountCriterion { get; set; }
+    public IntCriterion? TagItemCountCriterion { get; set; }
+    public IntCriterion? FaceCountCriterion { get; set; }
+    public IntCriterion? SegmentCountCriterion { get; set; }
+    public IntCriterion? SubGroupCountCriterion { get; set; }
+    public IntCriterion? ContainingGroupCountCriterion { get; set; }
     public IntCriterion? TagCountCriterion { get; set; }
     public CustomFieldCriterion? CustomFieldCriterion { get; set; }
     public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];

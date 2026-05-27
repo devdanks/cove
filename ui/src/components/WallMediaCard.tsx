@@ -83,8 +83,19 @@ export function WallMediaCard({
       return null;
     }
 
-    return playbackTracking ?? null;
-  }, [playbackTracking?.groupItemId, playbackTracking?.hostId, playbackTracking?.hostType, playbackTracking?.scopeKey, trackingEnabled]);
+    if (!playbackTracking) {
+      return null;
+    }
+
+    return {
+      ...playbackTracking,
+      muted,
+      autoplay: shouldPlayVideo,
+      fullscreen: isFullscreen,
+      route: typeof window === "undefined" ? playbackTracking.route : playbackTracking.route ?? `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    };
+  }, [isFullscreen, muted, playbackTracking, shouldPlayVideo, trackingEnabled]);
+  const playbackTrackingSignature = useMemo(() => JSON.stringify(playbackTrackingTarget), [playbackTrackingTarget]);
 
   useEffect(() => {
     setVideoFailed(false);
@@ -98,7 +109,7 @@ export function WallMediaCard({
 
   useEffect(() => {
     void playbackTracker.current.setTarget(playbackTrackingTarget);
-  }, [playbackTrackingTarget?.groupItemId, playbackTrackingTarget?.hostId, playbackTrackingTarget?.hostType, playbackTrackingTarget?.scopeKey]);
+  }, [playbackTrackingSignature]);
 
   useEffect(() => () => {
     void playbackTracker.current.dispose();

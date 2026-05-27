@@ -215,17 +215,107 @@ public class UIManifestBuilder
         string title,
         string? description = null,
         string[]? pages = null,
+        string[]? contexts = null,
         IEnumerable<UITutorialSlide>? slides = null,
-        int order = 100)
+        int order = 100,
+        string? parentTopicId = null)
     {
         _manifest.TutorialTopics.Add(new UITutorialTopic(
+            Id: id,
+            Title: title,
+            Description: description,
+            Pages: pages,
+            Contexts: contexts,
+            ExtensionId: _extensionId,
+            Order: order,
+            Slides: slides?.ToList() ?? [],
+            ParentTopicId: parentTopicId));
+        return this;
+    }
+
+    /// <summary>Add a first-class advanced filter row backed by an existing object-filter key.</summary>
+    public UIManifestBuilder AddListFilter(
+        string entityType,
+        string id,
+        string label,
+        string criterionType,
+        string filterKey,
+        int order = 100,
+        string? entityReferenceType = null,
+        IEnumerable<string>? modifiers = null,
+        IEnumerable<UIListFilterOption>? options = null)
+    {
+        _manifest.ListFilters.Add(new UIListFilterContribution(
             id,
-            title,
-            description,
-            pages,
+            entityType,
+            label,
+            criterionType,
             _extensionId,
-            order,
-            slides?.ToList() ?? []));
+            FilterKey: filterKey,
+            EntityReferenceType: entityReferenceType,
+            Modifiers: modifiers?.ToList(),
+            Options: options?.ToList(),
+            Order: order));
+        return this;
+    }
+
+    /// <summary>Add a first-class advanced filter row backed by a persisted custom field.</summary>
+    public UIManifestBuilder AddCustomFieldListFilter(
+        string entityType,
+        string id,
+        string label,
+        string customFieldKey,
+        string customFieldType,
+        string? criterionType = null,
+        int order = 100,
+        string? entityReferenceType = null,
+        IEnumerable<string>? modifiers = null,
+        IEnumerable<UIListFilterOption>? options = null)
+    {
+        _manifest.ListFilters.Add(new UIListFilterContribution(
+            id,
+            entityType,
+            label,
+            criterionType ?? customFieldType,
+            _extensionId,
+            CustomFieldKey: customFieldKey,
+            CustomFieldType: customFieldType,
+            EntityReferenceType: entityReferenceType,
+            Modifiers: modifiers?.ToList(),
+            Options: options?.ToList(),
+            Order: order));
+        return this;
+    }
+
+    /// <summary>Add a first-class sort option backed by an existing backend sort key.</summary>
+    public UIManifestBuilder AddListSort(
+        string entityType,
+        string id,
+        string label,
+        string sortKey,
+        int order = 100)
+    {
+        _manifest.ListSorts.Add(new UIListSortContribution(id, entityType, label, _extensionId, SortKey: sortKey, Order: order));
+        return this;
+    }
+
+    /// <summary>Add a first-class sort option backed by a persisted custom field.</summary>
+    public UIManifestBuilder AddCustomFieldListSort(
+        string entityType,
+        string id,
+        string label,
+        string customFieldKey,
+        string customFieldType,
+        int order = 100)
+    {
+        _manifest.ListSorts.Add(new UIListSortContribution(
+            id,
+            entityType,
+            label,
+            _extensionId,
+            CustomFieldKey: customFieldKey,
+            CustomFieldType: customFieldType,
+            Order: order));
         return this;
     }
 

@@ -11,7 +11,8 @@ import {
   Maximize2,
   Minimize2,
 } from "lucide-react";
-import { trackInteraction } from "../utils/interactionTracking";
+import { playback } from "../api/client";
+import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 
 export interface LightboxImage {
   id: number;
@@ -108,6 +109,50 @@ export function Lightbox({
       lastTrackedIndex.current = index;
     }
   }, [count, current, index, open, trackCurrentImageInteraction]);
+
+  useEffect(() => {
+    if (!open || !current) {
+      return;
+    }
+
+    const imageId = current.id;
+    const startedAt = typeof performance === "undefined" ? Date.now() : performance.now();
+    const sessionId = createPlaybackSessionId();
+    const elapsedSeconds = () => {
+      const now = typeof performance === "undefined" ? Date.now() : performance.now();
+      return Math.max(0.001, (now - startedAt) / 1000);
+    };
+    let flushed = false;
+    const flushDwell = (state: "ended" | "abandoned") => {
+      if (flushed) return;
+      flushed = true;
+      const durationSec = elapsedSeconds();
+      void playback.recordIntervals({
+        hostType: "image",
+        hostId: imageId,
+        sessionId,
+        mediaDurationSec: durationSec,
+        currentPositionSec: durationSec,
+        state,
+        surface: "lightbox",
+        scopeKey: `image:${imageId}:lightbox`,
+        context: {
+          index: index + 1,
+          count,
+          source: current.interactionSource ?? "lightbox",
+          ...(current.interactionMeta ?? {}),
+        },
+        intervals: [{ startSec: 0, endSec: durationSec }],
+      }).catch(() => {});
+    };
+
+    const handlePageHide = () => flushDwell("abandoned");
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      flushDwell("ended");
+    };
+  }, [count, current?.id, index, open]);
 
   // Lock body scroll
   useEffect(() => {
@@ -392,7 +437,8 @@ export function Lightbox({
           <button
             onClick={handleClose}
             className="p-2 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
-            aria-label="Close"
+            aria-label="Close (Esc)"
+            title="Close (Esc)"
           >
             <X size={20} />
           </button>

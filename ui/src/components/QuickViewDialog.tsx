@@ -1,11 +1,13 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { scenes, images, entityImages } from "../api/client";
+import { scenes, images, playback } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, getResolutionLabel, TagBadge } from "./shared";
 import { X, ExternalLink, Star, User, Tag, Building2, Calendar, Film, Clock, HardDrive, Monitor } from "lucide-react";
 import { RatingBadge } from "./Rating";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { VideoPlayer } from "./VideoPlayer";
+import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 
 interface SceneQuickViewProps {
   type: "scene";
@@ -34,6 +36,19 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
     queryKey: ["scene", id],
     queryFn: () => scenes.get(id),
   });
+
+  useEffect(() => {
+    if (!scene) {
+      return;
+    }
+
+    trackInteraction({
+      hostType: "scene",
+      hostId: scene.id,
+      kind: "openDetail",
+      meta: { surface: "quickView" },
+    });
+  }, [scene?.id]);
 
   if (isLoading || !scene) {
     return (
@@ -76,7 +91,12 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
             format={file.format}
             duration={duration}
             sceneId={scene.id}
-            trackingEnabled={false}
+            playbackTracking={{
+              hostType: "scene",
+              hostId: scene.id,
+              surface: "quickView",
+              scopeKey: `scene:${scene.id}:quickView`,
+            }}
             showAbLoop={false}
           />
         ) : (
@@ -186,6 +206,52 @@ function ImageQuickView({ id, onClose, onNavigate }: Omit<ImageQuickViewProps, "
     queryKey: ["image", id],
     queryFn: () => images.get(id),
   });
+
+  useEffect(() => {
+    if (!image) {
+      return;
+    }
+
+    const imageId = image.id;
+    const startedAt = typeof performance === "undefined" ? Date.now() : performance.now();
+    const sessionId = createPlaybackSessionId();
+    const elapsedSeconds = () => {
+      const now = typeof performance === "undefined" ? Date.now() : performance.now();
+      return Math.max(0.001, (now - startedAt) / 1000);
+    };
+
+    trackInteraction({
+      hostType: "image",
+      hostId: imageId,
+      kind: "openDetail",
+      meta: { surface: "quickView" },
+    });
+
+    let flushed = false;
+    const flushDwell = (state: "ended" | "abandoned") => {
+      if (flushed) return;
+      flushed = true;
+      const durationSec = elapsedSeconds();
+      void playback.recordIntervals({
+        hostType: "image",
+        hostId: imageId,
+        sessionId,
+        mediaDurationSec: durationSec,
+        currentPositionSec: durationSec,
+        state,
+        surface: "quickView",
+        scopeKey: `image:${imageId}:quickView`,
+        intervals: [{ startSec: 0, endSec: durationSec }],
+      }).catch(() => {});
+    };
+
+    const handlePageHide = () => flushDwell("abandoned");
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      flushDwell("ended");
+    };
+  }, [image?.id]);
 
   if (isLoading || !image) {
     return (

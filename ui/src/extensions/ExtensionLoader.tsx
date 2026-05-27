@@ -30,6 +30,8 @@ import type {
   ExtensionComponentStyleDef,
   ExtensionLayoutStyleDef,
   ExtensionAction,
+  ExtensionListFilterContribution,
+  ExtensionListSortContribution,
 } from "../api/types";
 
 // ============================================================================
@@ -82,6 +84,8 @@ interface ExtensionState {
   activeComponentStyles: Set<string>;
   toggleComponentStyle: (id: string) => void;
   availableComponentStyles: ExtensionComponentStyleDef[];
+  activeLayoutStyles: Set<string>;
+  toggleLayoutStyle: (id: string) => void;
   activeLayoutStyle: string;
   setActiveLayoutStyle: (id: string) => void;
   availableLayoutStyles: ExtensionLayoutStyleDef[];
@@ -108,6 +112,10 @@ interface ExtensionState {
   actions: ExtensionAction[];
   /** Get actions applicable to a given context */
   getActionsForContext: (entityType?: string, page?: string, actionType?: string) => ExtensionAction[];
+  /** List filters contributed by extensions */
+  getListFiltersForEntity: (entityType: string) => ExtensionListFilterContribution[];
+  /** List sorts contributed by extensions */
+  getListSortsForEntity: (entityType: string) => ExtensionListSortContribution[];
   /** Resolve a React component by name */
   resolveComponent: (name: string) => FC<any> | undefined;
   /** Resolve a runtime action handler by name */
@@ -123,6 +131,8 @@ const ExtensionContext = createContext<ExtensionState>({
   activeComponentStyles: new Set(["default"]),
   toggleComponentStyle: () => {},
   availableComponentStyles: [],
+  activeLayoutStyles: new Set(["default"]),
+  toggleLayoutStyle: () => {},
   activeLayoutStyle: "default",
   setActiveLayoutStyle: () => {},
   availableLayoutStyles: [],
@@ -138,6 +148,8 @@ const ExtensionContext = createContext<ExtensionState>({
   getSettingsPanelsForTab: () => [],
   actions: [],
   getActionsForContext: () => [],
+  getListFiltersForEntity: () => [],
+  getListSortsForEntity: () => [],
   resolveComponent: () => undefined,
   resolveActionHandler: () => undefined,
 });
@@ -151,6 +163,11 @@ const COMPONENT_STYLE_STORAGE_KEY = "cove-component-style";
 const LAYOUT_STYLE_STORAGE_KEY = "cove-layout-style";
 const CUSTOM_THEME_STORAGE_KEY = "cove-custom-theme-colors";
 const STYLE_OPTIONS_STORAGE_KEY = "cove-style-options";
+
+function normalizeListEntityType(entityType: string) {
+  const normalized = entityType.trim().toLowerCase();
+  return normalized.endsWith("s") ? normalized.slice(0, -1) : normalized;
+}
 
 const FALLBACK_DEFAULT_THEME: ExtensionThemeDef = {
   id: "default",
@@ -178,6 +195,13 @@ const FALLBACK_DEFAULT_THEME: ExtensionThemeDef = {
 function parseStyleSet(raw: string | null): Set<string> {
   if (!raw) return new Set(["default"]);
   const items = raw.split(" ").filter(Boolean);
+  return items.length > 0 ? new Set(items) : new Set(["default"]);
+}
+
+function parseLayoutSet(raw: string | null): Set<string> {
+  if (!raw) return new Set(["default"]);
+  const removedBuiltInLayouts = new Set(["compact", "wide", "control-rail"]);
+  const items = raw.split(" ").filter((item) => item && !removedBuiltInLayouts.has(item));
   return items.length > 0 ? new Set(items) : new Set(["default"]);
 }
 
@@ -213,9 +237,10 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
   const [activeComponentStyles, setActiveComponentStylesState] = useState<Set<string>>(
     () => parseStyleSet(userThemePreferences?.activeComponentStyles?.join(" ") ?? localStorage.getItem(COMPONENT_STYLE_STORAGE_KEY))
   );
-  const [activeLayoutStyle, setActiveLayoutStyleState] = useState<string>(
-    () => userThemePreferences?.activeLayoutStyle ?? localStorage.getItem(LAYOUT_STYLE_STORAGE_KEY) ?? "default"
+  const [activeLayoutStyles, setActiveLayoutStylesState] = useState<Set<string>>(
+    () => parseLayoutSet(userThemePreferences?.activeLayoutStyle ?? localStorage.getItem(LAYOUT_STYLE_STORAGE_KEY))
   );
+  const activeLayoutStyle = useMemo(() => [...activeLayoutStyles].join(" "), [activeLayoutStyles]);
   const [customThemeColors, setCustomThemeColorsState] = useState<Record<string, string>>(
     () => userThemePreferences?.customThemeColors ?? readStoredThemeColors()
   );
@@ -230,6 +255,18 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
       ? availableThemes.find((theme) => theme.id === activeThemeId) ?? (activeThemeId === FALLBACK_DEFAULT_THEME.id ? FALLBACK_DEFAULT_THEME : null)
       : null,
     [activeThemeId, availableThemes],
+  );
+  const hasUserComponentStyleOverride = useMemo(
+    () => supportsServerBackedUiPreferences(user)
+      ? (userThemePreferences?.activeComponentStyles?.length ?? 0) > 0
+      : Boolean(localStorage.getItem(COMPONENT_STYLE_STORAGE_KEY)),
+    [user, userThemePreferences],
+  );
+  const hasUserLayoutStyleOverride = useMemo(
+    () => supportsServerBackedUiPreferences(user)
+      ? Boolean(userThemePreferences?.activeLayoutStyle?.trim())
+      : Boolean(localStorage.getItem(LAYOUT_STYLE_STORAGE_KEY)),
+    [user, userThemePreferences],
   );
 
   const setActiveTheme = useCallback((id: string | null) => {
@@ -283,17 +320,40 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setActiveLayoutStyle = useCallback((id: string) => {
-    setActiveLayoutStyleState(id);
-    localStorage.setItem(LAYOUT_STYLE_STORAGE_KEY, id);
+  const persistLayoutStyles = useCallback((next: Set<string>) => {
+    const value = [...next].join(" ");
+    localStorage.setItem(LAYOUT_STYLE_STORAGE_KEY, value);
     updateAuthenticatedUserUiPreferences((current) => ({
       ...(current ?? {}),
       theme: {
         ...(current?.theme ?? {}),
-        activeLayoutStyle: id,
+        activeLayoutStyle: value,
       },
     }));
   }, []);
+
+  const setActiveLayoutStyle = useCallback((id: string) => {
+    const next = parseLayoutSet(id);
+    setActiveLayoutStylesState(next);
+    persistLayoutStyles(next);
+  }, [persistLayoutStyles]);
+
+  const toggleLayoutStyle = useCallback((id: string) => {
+    setActiveLayoutStylesState((prev) => {
+      const next = new Set(prev);
+      if (id === "default") {
+        const onlyDefault = new Set(["default"]);
+        persistLayoutStyles(onlyDefault);
+        return onlyDefault;
+      }
+      next.delete("default");
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      if (next.size === 0) next.add("default");
+      persistLayoutStyles(next);
+      return next;
+    });
+  }, [persistLayoutStyles]);
 
   const setCustomThemeColors = useCallback((colors: Record<string, string>) => {
     setCustomThemeColorsState(colors);
@@ -319,7 +379,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
 
     setActiveThemeIdState(nextTheme.activeThemeId ?? "default");
     setActiveComponentStylesState(parseStyleSet(nextTheme.activeComponentStyles?.join(" ") ?? null));
-    setActiveLayoutStyleState(nextTheme.activeLayoutStyle ?? "default");
+    setActiveLayoutStylesState(parseLayoutSet(nextTheme.activeLayoutStyle ?? null));
     setCustomThemeColorsState(nextTheme.customThemeColors ?? {});
   }, [user, userThemePreferences]);
 
@@ -492,12 +552,12 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
 
     document.documentElement.setAttribute("data-theme", theme.id);
 
-    // If the theme bundles component styles, auto-apply them (unless user overrode)
-    if (theme.componentStyle) {
-      const userOverride = localStorage.getItem(COMPONENT_STYLE_STORAGE_KEY);
-      if (!userOverride) {
-        setActiveComponentStylesState(parseStyleSet(theme.componentStyle));
-      }
+    // If the theme bundles styles/layouts, auto-apply them unless the user explicitly overrode them.
+    if (!hasUserComponentStyleOverride) {
+      setActiveComponentStylesState(parseStyleSet(theme.componentStyle ?? "default"));
+    }
+    if (!hasUserLayoutStyleOverride) {
+      setActiveLayoutStylesState(parseLayoutSet(theme.layoutStyle ?? "default"));
     }
 
     if (theme.cssVariables && Object.keys(theme.cssVariables).length > 0) {
@@ -539,7 +599,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
       document.documentElement.removeAttribute("data-theme-bg-animation");
       document.documentElement.removeAttribute("data-color-scheme");
     };
-  }, [activeThemeId, customThemeColors, manifest, selectedTheme, troubleshootingMode]);
+  }, [activeThemeId, customThemeColors, hasUserComponentStyleOverride, hasUserLayoutStyleOverride, manifest, selectedTheme, troubleshootingMode]);
 
   // Apply component style data attribute (space-separated for composability)
   useEffect(() => {
@@ -565,7 +625,7 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
       // CSS custom property mapping for range-type style configs
       const cssVarMap: Record<string, Record<string, string>> = {
         gradient: { animated: "--sv-anim-speed", background: "--sv-bg-intensity", cards: "--sv-card-gradient" },
-        glass: { cardblur: "--sv-card-blur", surfaceblur: "--sv-surface-blur", opacity: "--sv-surface-opacity" },
+        glass: { cardblur: "--sv-card-blur", surfaceblur: "--sv-surface-blur", opacity: "--sv-surface-opacity", cardopacity: "--sv-card-opacity", buttonopacity: "--sv-button-opacity" },
         animated: { hover: "--sv-hover-glow" },
       };
       delete document.documentElement.dataset.styleGradientSpeed;
@@ -627,6 +687,8 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
   const settingsTabs = [...(manifest?.settingsTabs ?? [])].sort((a, b) => a.order - b.order);
   const settingsPanels = manifest?.settingsPanels ?? [];
   const actions = manifest?.actions ?? [];
+  const listFilters = manifest?.listFilters ?? [];
+  const listSorts = manifest?.listSorts ?? [];
 
   const getFeature = useCallback(
     (key: string) => {
@@ -664,6 +726,26 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
     [actions, hasPermission]
   );
 
+  const getListFiltersForEntity = useCallback(
+    (entityType: string) => {
+      const normalized = normalizeListEntityType(entityType);
+      return listFilters
+        .filter((filter) => normalizeListEntityType(filter.entityType) === normalized)
+        .sort((a, b) => a.order - b.order);
+    },
+    [listFilters]
+  );
+
+  const getListSortsForEntity = useCallback(
+    (entityType: string) => {
+      const normalized = normalizeListEntityType(entityType);
+      return listSorts
+        .filter((sort) => normalizeListEntityType(sort.entityType) === normalized)
+        .sort((a, b) => a.order - b.order);
+    },
+    [listSorts]
+  );
+
   return (
     <ExtensionContext.Provider
       value={{
@@ -676,6 +758,8 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         activeComponentStyles,
         toggleComponentStyle,
         availableComponentStyles,
+        activeLayoutStyles,
+        toggleLayoutStyle,
         activeLayoutStyle,
         setActiveLayoutStyle,
         availableLayoutStyles,
@@ -691,6 +775,8 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         getSettingsPanelsForTab,
         actions,
         getActionsForContext,
+        getListFiltersForEntity,
+        getListSortsForEntity,
         resolveComponent,
         resolveActionHandler,
       }}

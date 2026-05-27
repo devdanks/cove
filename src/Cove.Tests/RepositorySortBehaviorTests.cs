@@ -161,14 +161,22 @@ public class RepositorySortBehaviorTests
         await context.SaveChangesAsync();
 
         var repository = new StudioRepository(context);
+        var rootStudioFilter = new StudioFilter
+        {
+            ParentCountCriterion = new IntCriterion { Value = 0, Modifier = CriterionModifier.Equals },
+        };
 
-        var (galleryItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "gallery_count", Direction = Cove.Core.Enums.SortDirection.Desc });
-        var (imageItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "image_count", Direction = Cove.Core.Enums.SortDirection.Desc });
-        var (ratingItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "rating", Direction = Cove.Core.Enums.SortDirection.Desc });
-        var (childItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "child_count", Direction = Cove.Core.Enums.SortDirection.Desc });
-        var (tagItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "tag_count", Direction = Cove.Core.Enums.SortDirection.Desc });
-        var (updatedItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "updated_at", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (allItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "name", Direction = Cove.Core.Enums.SortDirection.Asc });
+        var (parentItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "parent_count", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (galleryItems, _) = await repository.FindAsync(rootStudioFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "gallery_count", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (imageItems, _) = await repository.FindAsync(rootStudioFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "image_count", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (ratingItems, _) = await repository.FindAsync(rootStudioFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "rating", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (childItems, _) = await repository.FindAsync(rootStudioFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "child_count", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (tagItems, _) = await repository.FindAsync(rootStudioFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "tag_count", Direction = Cove.Core.Enums.SortDirection.Desc });
+        var (updatedItems, _) = await repository.FindAsync(rootStudioFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "updated_at", Direction = Cove.Core.Enums.SortDirection.Desc });
 
+        Assert.Contains(allItems, studio => studio.Name == "Child Studio");
+    Assert.Equal("Child Studio", parentItems.First().Name);
         Assert.Equal(["Counts Leader", "Highest Rated", "Unrated"], galleryItems.Select(studio => studio.Name).ToArray());
         Assert.Equal(["Counts Leader", "Highest Rated", "Unrated"], imageItems.Select(studio => studio.Name).ToArray());
         Assert.Equal(["Highest Rated", "Counts Leader", "Unrated"], ratingItems.Select(studio => studio.Name).ToArray());

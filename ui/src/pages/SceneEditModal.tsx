@@ -22,6 +22,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   const [title, setTitle] = useState(scene.title || "");
   const [code, setCode] = useState(scene.code || "");
   const [details, setDetails] = useState(scene.details || "");
+  const [captions, setCaptions] = useState(scene.captions || "");
   const [director, setDirector] = useState(scene.director || "");
   const [date, setDate] = useState(scene.date || "");
   const [isVr, setIsVr] = useState(scene.isVr ?? false);
@@ -45,6 +46,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
     setTitle(scene.title || "");
     setCode(scene.code || "");
     setDetails(scene.details || "");
+    setCaptions(scene.captions || "");
     setDirector(scene.director || "");
     setDate(scene.date || "");
     setIsVr(scene.isVr ?? false);
@@ -80,6 +82,7 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       title: title || undefined,
       code: code || undefined,
       details: details || undefined,
+      captions: captions || undefined,
       director: director || undefined,
       date: date || undefined,
       isVr,
@@ -138,6 +141,10 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
 
       <Field label="Details" fieldProvenance={scene.fieldProvenance} fieldKey="details">
         <TextArea value={details} onChange={setDetails} placeholder="Scene description" />
+      </Field>
+
+      <Field label="Captions" fieldProvenance={scene.fieldProvenance} fieldKey="captions">
+        <TextInput value={captions} onChange={setCaptions} placeholder="Subtitle languages or notes" />
       </Field>
 
       <div className="grid grid-cols-2 gap-4">

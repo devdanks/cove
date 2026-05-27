@@ -6,6 +6,7 @@ import type { AiVisualSimilarImage, AiVisualSimilarScene } from "../api/types";
 import { formatDuration } from "./shared";
 import { EntityCardGrid } from "./EntityCardGrid";
 import { ImageTile, SceneCard } from "./EntityCards";
+import { useManualContext } from "./ManualContext";
 
 const SIMILAR_PER_PAGE = 8;
 const AVAILABILITY_PER_PAGE = 1;
@@ -46,6 +47,7 @@ export function useImageVisualSimilarityAvailable(imageId?: number) {
 }
 
 export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {
+  useManualContext(["panel:visual-similarity", "feature:cove.ai.visual.similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
   const similarScenes = useQuery({
     queryKey: ["visual-similarity", "scene", sceneId, "similar-scenes"],
@@ -71,6 +73,7 @@ export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps &
 }
 
 export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps & { imageId: number }) {
+  useManualContext(["panel:visual-similarity", "feature:cove.ai.visual.similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
   const similarScenes = useQuery({
     queryKey: ["visual-similarity", "image", imageId, "similar-scenes"],
@@ -119,6 +122,7 @@ export function useSegmentVisualSimilarityAvailable({ sceneId, startSec, endSec,
 }
 
 export function SegmentVisualSimilarityPanel({ sceneId, startSec, endSec, intervals, onNavigate }: PanelProps & { sceneId: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
+  useManualContext(["panel:visual-similarity", "feature:cove.ai.visual.similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
   const queryIntervals = normalizeIntervals(intervals, startSec, endSec);
   const intervalKey = queryIntervals.map((interval) => `${interval.startSec}:${interval.endSec ?? ""}`).join("|");

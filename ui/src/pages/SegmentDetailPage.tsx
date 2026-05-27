@@ -12,7 +12,7 @@ import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLa
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
-import { formatDate, ProvenanceBadge, TagBadge } from "../components/shared";
+import { FieldProvenanceHover, formatDate, ProvenanceBadge, TagBadge } from "../components/shared";
 import { EntityReferenceSelector } from "../components/EntityReferenceSelector";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { SegmentVisualSimilarityPanel, useSegmentVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
@@ -509,6 +509,20 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
     return <div className="py-16 text-center text-secondary">Segment not found</div>;
   }
 
+  const displayTitleWithProvenance = (
+    <FieldProvenanceHover fieldProvenance={segment.fieldProvenance} fieldKey={["title", "tag_id", "performer_id", "ref_id", "kind"]}>
+      {displayTitle}
+    </FieldProvenanceHover>
+  );
+  const subtitleWithProvenance = (
+    <>
+      <FieldProvenanceHover fieldProvenance={segment.fieldProvenance} fieldKey={["start_sec", "end_sec"]}>
+        {formatSegmentRange(segment.startSec, segment.endSec)}
+      </FieldProvenanceHover>
+      <span> • {formatSegmentDuration(segment.startSec, segment.endSec)}</span>
+    </>
+  );
+
   const editContent = (
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -780,8 +794,8 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
         ) : null}
       />
       <MediaDetailLayout
-        title={displayTitle}
-        subtitle={`${formatSegmentRange(segment.startSec, segment.endSec)} • ${formatSegmentDuration(segment.startSec, segment.endSec)}`}
+        title={displayTitleWithProvenance}
+        subtitle={subtitleWithProvenance}
         backLabel={backLabel}
         onGoBack={goBack}
         media={
@@ -978,8 +992,16 @@ function SegmentSummaryCard({
     <section className="space-y-4">
       {showHeading ? (
         <div>
-          <h1 className="text-xl font-semibold text-foreground">{displayTitle}</h1>
-          <p className="mt-1 text-sm text-secondary">{formatSegmentRange(segment.startSec, segment.endSec)}</p>
+          <h1 className="text-xl font-semibold text-foreground">
+            <FieldProvenanceHover fieldProvenance={segment.fieldProvenance} fieldKey={["title", "tag_id", "performer_id", "ref_id", "kind"]}>
+              {displayTitle}
+            </FieldProvenanceHover>
+          </h1>
+          <p className="mt-1 text-sm text-secondary">
+            <FieldProvenanceHover fieldProvenance={segment.fieldProvenance} fieldKey={["start_sec", "end_sec"]}>
+              {formatSegmentRange(segment.startSec, segment.endSec)}
+            </FieldProvenanceHover>
+          </p>
         </div>
       ) : null}
 
@@ -992,7 +1014,11 @@ function SegmentSummaryCard({
       <dl className="mt-4 space-y-2 text-sm text-secondary">
         <div className="flex items-start justify-between gap-3">
           <dt className="text-muted">Range</dt>
-          <dd className="text-right text-foreground">{formatSegmentRange(segment.startSec, segment.endSec)}</dd>
+          <dd className="text-right text-foreground">
+            <FieldProvenanceHover fieldProvenance={segment.fieldProvenance} fieldKey={["start_sec", "end_sec"]}>
+              {formatSegmentRange(segment.startSec, segment.endSec)}
+            </FieldProvenanceHover>
+          </dd>
         </div>
         <div className="flex items-start justify-between gap-3">
           <dt className="text-muted">Created</dt>
@@ -1112,7 +1138,20 @@ function SegmentPlaybackPanel({
               captions={file.captions}
               onPlay={() => {}}
               onTimeUpdate={onTimeUpdate}
-              trackingEnabled={false}
+              trackingEnabled
+              playbackTracking={{
+                hostType: "segment",
+                hostId: segment.id,
+                surface: "segmentDetail",
+                scopeKey: `segment:${segment.id}`,
+                parentHostType: "scene",
+                parentHostId: segment.hostId,
+                itemHostType: "scene",
+                itemHostId: segment.hostId,
+                segmentId: segment.id,
+                clipStartSec: segment.startSec,
+                clipEndSec: segment.endSec ?? file.duration,
+              }}
               clip={{ start: segment.startSec, end: segment.endSec ?? file.duration, loop: false }}
             />
           </div>

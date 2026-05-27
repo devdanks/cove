@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Data.Repositories;
 
-internal static class EngagementQueryHelpers
+public static class EngagementQueryHelpers
 {
     public static int? CurrentUserId(CoveContext db) => db.CurrentPrincipalForReadOptimization?.UserId;
 

@@ -22,6 +22,7 @@ import { WallMediaCard } from "../components/WallMediaCard";
 import { BatchDownloadOptionsDialog } from "../components/BatchDownloadOptionsDialog";
 import { GalleryDownloadDialog } from "../components/GalleryDownloadDialog";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
+import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
@@ -55,7 +56,7 @@ export function GalleriesPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "list", "wall"] as const,
+    allowedDisplayModes: ["grid", "list", "wall", "tagger"] as const,
     allowInfinitePageSize: true,
   });
   const [showBulkEdit, setShowBulkEdit] = useState(false);
@@ -177,7 +178,7 @@ export function GalleriesPage({ onNavigate }: Props) {
       sortOptions={GALLERY_SORT_OPTIONS}
       displayMode={displayMode}
       onDisplayModeChange={setDisplayMode}
-      availableDisplayModes={["grid", "list", "wall"]}
+      availableDisplayModes={["grid", "list", "wall", "tagger"]}
       allowInfinitePageSize
       showPagingControls={!listData.infinitePageSize}
       selectAllPending={listData.infinitePageSize ? selectAllMatchingPending : false}
@@ -197,7 +198,20 @@ export function GalleriesPage({ onNavigate }: Props) {
       onInvertSelection={invertSelection}
       selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} />}
     >
-      {displayMode === "grid" ? (
+      {displayMode === "tagger" ? (
+        <ScraperEntityTagger
+          entityType="gallery"
+          label="Gallery"
+          items={items}
+          selectedIds={selectedIds}
+          selecting={selecting}
+          onSelect={toggle}
+          getTitle={(gallery) => gallery.title || `Gallery #${gallery.id}`}
+          getImageUrl={(gallery) => gallery.coverPath ?? galleries.coverUrl(gallery.id, gallery.updatedAt, 640)}
+          getRoute={(gallery) => ({ page: "gallery", id: gallery.id })}
+          queryKey="galleries"
+        />
+      ) : displayMode === "grid" ? (
         <VirtualizedEntityGrid
           items={items}
           getItemKey={(gallery) => gallery.id}

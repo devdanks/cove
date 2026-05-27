@@ -210,6 +210,7 @@ query Me {
     private readonly CoveConfiguration _config;
     private readonly CoveContext _db;
     private readonly IBlobService _blobService;
+    private readonly ISceneCoverService _sceneCoverService;
     private readonly ITagProvenanceService _tagProvenanceService;
     private readonly IFieldProvenanceService? _fieldProvenanceService;
     private readonly ILogger<MetadataServerService> _logger;
@@ -219,12 +220,13 @@ query Me {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public MetadataServerService(HttpClient httpClient, CoveConfiguration config, CoveContext db, IBlobService blobService, ITagProvenanceService tagProvenanceService, ILogger<MetadataServerService> logger, IFieldProvenanceService? fieldProvenanceService = null)
+    public MetadataServerService(HttpClient httpClient, CoveConfiguration config, CoveContext db, IBlobService blobService, ISceneCoverService sceneCoverService, ITagProvenanceService tagProvenanceService, ILogger<MetadataServerService> logger, IFieldProvenanceService? fieldProvenanceService = null)
     {
         _httpClient = httpClient;
         _config = config;
         _db = db;
         _blobService = blobService;
+        _sceneCoverService = sceneCoverService;
         _tagProvenanceService = tagProvenanceService;
         _fieldProvenanceService = fieldProvenanceService;
         _logger = logger;
@@ -1257,7 +1259,7 @@ query Me {
         // Download scene cover image
         if (setCoverImage && remote.Images.Count > 0)
         {
-            await DownloadSceneCoverAsync(scene.Id, remote.Images[0].Url, ct);
+            await _sceneCoverService.TryApplyRemoteCoverAsync(scene, remote.Images[0].Url, ct);
             fieldProvenance["image_url"] = remote.Images[0].Url;
         }
 
@@ -1917,31 +1919,6 @@ query Me {
             return "image/jxl";
 
         return null;
-    }
-
-    private async Task DownloadSceneCoverAsync(int sceneId, string imageUrl, CancellationToken ct)
-    {
-        try
-        {
-            var generatedPath = _config.GeneratedPath;
-            if (string.IsNullOrEmpty(generatedPath)) return;
-
-            var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(BitConverter.GetBytes(sceneId)));
-            var thumbPath = Path.Combine(generatedPath, "screenshots", hash[..2], $"{sceneId}.jpg");
-
-            using var response = await _httpClient.GetAsync(imageUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (!response.IsSuccessStatusCode) return;
-
-            var dir = Path.GetDirectoryName(thumbPath)!;
-            Directory.CreateDirectory(dir);
-            await using var stream = await response.Content.ReadAsStreamAsync(ct);
-            await using var fileStream = new FileStream(thumbPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            await stream.CopyToAsync(fileStream, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to download scene cover for scene {SceneId}", sceneId);
-        }
     }
 
     private static void MergeAliases(Performer performer, IEnumerable<string> aliases)

@@ -13,14 +13,14 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/scenes/{sceneId:int}/segments")]
 [RequiresPermission(Permissions.SegmentsRead)]
-public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IBlobService blobService) : ControllerBase
+public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IBlobService blobService, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<SegmentDto>>> GetByScene(int sceneId, CancellationToken ct)
     {
         if (!await SceneExistsAsync(sceneId, ct)) return NotFound();
 
-        var segments = await db.Segments
+            var segments = await db.VisibleSegments()
             .AsNoTracking()
             .Include(segment => segment.Tag)
             .Where(segment => segment.HostType == SegmentHostType.Scene && segment.HostId == sceneId)
@@ -28,7 +28,7 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
             .ThenBy(segment => segment.Id)
             .ToListAsync(ct);
 
-        return Ok(segments.Select(MapToDto).ToList());
+        return Ok(segments.Select(segment => MapToDto(segment)).ToList());
     }
 
     [HttpGet("spans")]
@@ -84,12 +84,15 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
     [HttpGet("{id:int}")]
     public async Task<ActionResult<SegmentDto>> GetById(int sceneId, int id, CancellationToken ct)
     {
-        var segment = await db.Segments
+        var segment = await db.VisibleSegments()
             .AsNoTracking()
             .Include(item => item.Tag)
             .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Scene && item.HostId == sceneId, ct);
 
-        return segment is null ? NotFound() : Ok(MapToDto(segment));
+        if (segment is null)
+            return NotFound();
+
+        return Ok(MapToDto(segment, await LoadSegmentFieldProvenanceAsync(segment.Id, ct)));
     }
 
     [HttpPost]
@@ -119,6 +122,7 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
         };
 
         db.Segments.Add(segment);
+        await RecordManualSegmentFieldProvenanceAsync(segment, ct);
         await db.SaveChangesAsync(ct);
         spanResolver.EvictScene(sceneId);
         await LoadTagAsync(segment, ct);
@@ -139,6 +143,18 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
             .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Scene && item.HostId == sceneId, ct);
         if (segment is null) return NotFound();
 
+        var originalStartSec = segment.StartSec;
+        var originalEndSec = segment.EndSec;
+        var originalTagId = segment.TagId;
+        var originalKind = segment.Kind;
+        var originalRefId = segment.RefId;
+        var originalPayload = segment.Payload?.RootElement.GetRawText();
+        var originalSourceKey = segment.SourceKey;
+        var originalSourceRunId = segment.SourceRunId;
+        var originalConfidence = segment.Confidence;
+        var originalTitle = segment.Title;
+        var originalColorHint = segment.ColorHint;
+
         segment.StartSec = dto.StartSec;
         segment.EndSec = dto.EndSec;
         segment.TagId = dto.TagId;
@@ -152,10 +168,25 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
         segment.ColorHint = dto.ColorHint;
         segment.Tag = null;
 
+        var manualFields = new Dictionary<string, object?>();
+        if (!originalStartSec.Equals(segment.StartSec)) manualFields["start_sec"] = segment.StartSec;
+        if (originalEndSec != segment.EndSec) manualFields["end_sec"] = segment.EndSec;
+        if (originalTagId != segment.TagId) manualFields["tag_id"] = segment.TagId;
+        if (!string.Equals(originalKind, segment.Kind, StringComparison.Ordinal)) manualFields["kind"] = segment.Kind;
+        if (originalRefId != segment.RefId) manualFields["ref_id"] = segment.RefId;
+        var updatedPayload = segment.Payload?.RootElement.GetRawText();
+        if (!string.Equals(originalPayload, updatedPayload, StringComparison.Ordinal)) manualFields["payload"] = dto.Payload;
+        if (!string.Equals(originalSourceKey, segment.SourceKey, StringComparison.Ordinal)) manualFields["source_key"] = segment.SourceKey;
+        if (!string.Equals(originalSourceRunId, segment.SourceRunId, StringComparison.Ordinal)) manualFields["source_run_id"] = segment.SourceRunId;
+        if (originalConfidence != segment.Confidence) manualFields["confidence"] = segment.Confidence;
+        if (!string.Equals(originalTitle, segment.Title, StringComparison.Ordinal)) manualFields["title"] = segment.Title;
+        if (!string.Equals(originalColorHint, segment.ColorHint, StringComparison.Ordinal)) manualFields["color_hint"] = segment.ColorHint;
+        await RecordManualSegmentFieldProvenanceAsync(segment.Id, manualFields, ct);
+
         await db.SaveChangesAsync(ct);
         spanResolver.EvictScene(sceneId);
         await LoadTagAsync(segment, ct);
-        return Ok(MapToDto(segment));
+        return Ok(MapToDto(segment, await LoadSegmentFieldProvenanceAsync(segment.Id, ct)));
     }
 
     [HttpDelete("{id:int}")]
@@ -187,7 +218,7 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
             await db.Entry(segment).Reference(item => item.Tag).LoadAsync(ct);
     }
 
-    private static SegmentDto MapToDto(Segment segment) => new(
+    private static SegmentDto MapToDto(Segment segment, IReadOnlyList<FieldProvenanceDto>? fieldProvenance = null) => new(
         segment.Id,
         segment.HostType,
         segment.HostId,
@@ -204,7 +235,38 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
         segment.Title,
         segment.ColorHint,
         segment.CreatedAt.ToString("o"),
-        segment.UpdatedAt.ToString("o"));
+        segment.UpdatedAt.ToString("o"),
+        fieldProvenance?.ToList());
+
+    private async Task<IReadOnlyList<FieldProvenanceDto>?> LoadSegmentFieldProvenanceAsync(int segmentId, CancellationToken cancellationToken)
+        => fieldProvenanceService == null
+            ? null
+            : await fieldProvenanceService.GetForHostAsync(AffinityHostType.Segment, segmentId, cancellationToken);
+
+    private async Task RecordManualSegmentFieldProvenanceAsync(Segment segment, CancellationToken cancellationToken)
+    {
+        await db.SaveChangesAsync(cancellationToken);
+        var fields = new Dictionary<string, object?>
+        {
+            ["start_sec"] = segment.StartSec,
+            ["end_sec"] = segment.EndSec,
+            ["tag_id"] = segment.TagId,
+            ["kind"] = segment.Kind,
+            ["ref_id"] = segment.RefId,
+            ["payload"] = segment.Payload?.RootElement.Clone(),
+            ["source_key"] = segment.SourceKey,
+            ["source_run_id"] = segment.SourceRunId,
+            ["confidence"] = segment.Confidence,
+            ["title"] = segment.Title,
+            ["color_hint"] = segment.ColorHint,
+        };
+        await RecordManualSegmentFieldProvenanceAsync(segment.Id, fields, cancellationToken);
+    }
+
+    private Task RecordManualSegmentFieldProvenanceAsync(int segmentId, IReadOnlyDictionary<string, object?> fields, CancellationToken cancellationToken)
+        => fieldProvenanceService == null || fields.Count == 0
+            ? Task.CompletedTask
+            : fieldProvenanceService.RecordManyAsync(AffinityHostType.Segment, segmentId, fields, "user", cancellationToken: cancellationToken);
 
     private static JsonDocument? ToDocument(JsonElement? payload) =>
         payload.HasValue ? JsonDocument.Parse(payload.Value.GetRawText()) : null;

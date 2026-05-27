@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Gauge, Headphones, MonitorPlay, Pause, Play, SkipBack, SkipForward, SlidersHorizontal, Volume2, VolumeX } from "lucide-react";
-import { createPlaybackTracker, type PlaybackTrackingTarget } from "../utils/interactionTracking";
+import { createPlaybackTracker, trackInteraction, type PlaybackTrackingTarget } from "../utils/interactionTracking";
 import { usePlaybackPreferences } from "../utils/playbackPreferences";
 
 const VOLUME_KEY = "cove-audio-player-volume";
@@ -411,13 +411,53 @@ export function AudioPlayer({
   const [remotePlaybackAvailable, setRemotePlaybackAvailable] = useState(false);
   const nativeAudioOutput = useMemo(() => shouldUseNativeAudioOutput(), []);
 
-  const trackingTarget = useMemo(() => {
+  const trackingTarget = useMemo<PlaybackTrackingTarget | null>(() => {
     if (!trackingEnabled) {
       return null;
     }
 
-    return playbackTracking ?? null;
-  }, [playbackTracking, trackingEnabled]);
+    if (!playbackTracking) {
+      return null;
+    }
+
+    return {
+      ...playbackTracking,
+      clipStartSec: clip?.start ?? playbackTracking.clipStartSec,
+      clipEndSec: clip?.end ?? playbackTracking.clipEndSec,
+      autoplay: autostart ?? playbackTracking.autoplay,
+      muted,
+      playbackRate: rate,
+      route: typeof window === "undefined" ? playbackTracking.route : playbackTracking.route ?? `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    };
+  }, [autostart, clip?.end, clip?.start, muted, playbackTracking, rate, trackingEnabled]);
+  const trackingTargetSignature = useMemo(() => JSON.stringify(trackingTarget), [trackingTarget]);
+
+  const trackAudioInteraction = useCallback((kind: "pause" | "seek", meta: Record<string, unknown> = {}) => {
+    if (!trackingTarget) {
+      return;
+    }
+
+    trackInteraction({
+      hostType: trackingTarget.hostType as never,
+      hostId: trackingTarget.hostId,
+      kind,
+      meta: {
+        surface: trackingTarget.surface,
+        scopeKey: trackingTarget.scopeKey,
+        groupItemId: trackingTarget.groupItemId,
+        parentHostType: trackingTarget.parentHostType,
+        parentHostId: trackingTarget.parentHostId,
+        itemHostType: trackingTarget.itemHostType,
+        itemHostId: trackingTarget.itemHostId,
+        segmentId: trackingTarget.segmentId,
+        clipStartSec: trackingTarget.clipStartSec,
+        clipEndSec: trackingTarget.clipEndSec,
+        playbackRate: rate,
+        muted,
+        ...meta,
+      },
+    });
+  }, [muted, rate, trackingTarget]);
 
   const disposePitchGraph = useCallback(() => {
     const graph = pitchGraphRef.current;
@@ -498,7 +538,7 @@ export function AudioPlayer({
     return () => {
       void playbackTracker.current.dispose();
     };
-  }, [trackingTarget]);
+  }, [trackingTargetSignature]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -740,12 +780,17 @@ export function AudioPlayer({
           setPlaying(false);
           flushInterval("paused");
           intervalStart.current = null;
+          trackAudioInteraction("pause", { positionSec: lastSeenTime.current });
         }}
         onSeeking={() => {
           if (intervalStart.current != null) {
             flushInterval("active");
             intervalStart.current = null;
           }
+          trackAudioInteraction("seek", {
+            fromSec: lastSeenTime.current,
+            toSec: roundTime(audioRef.current?.currentTime ?? currentTime),
+          });
         }}
         onSeeked={() => {
           const audio = audioRef.current;

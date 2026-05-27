@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { scenes } from "../api/client";
 import type { Detection, Face, Segment } from "../api/types";
-import { createPlaybackTracker, type PlaybackTrackingTarget } from "../utils/interactionTracking";
+import { createPlaybackTracker, trackInteraction, type PlaybackTrackingTarget } from "../utils/interactionTracking";
 import { useAppConfig } from "../state/AppConfigContext";
 
 type FaceOverlayInfo = Pick<Face, "id" | "label" | "performerName" | "performerId">;
@@ -204,8 +204,19 @@ export function VideoPlayer({
       return null;
     }
 
-    return playbackTracking ?? { hostType: "scene", hostId: sceneId, scopeKey: `scene:${sceneId}` };
-  }, [playbackTracking, sceneId, trackingEnabled]);
+    const baseTarget = playbackTracking ?? { hostType: "scene", hostId: sceneId, scopeKey: `scene:${sceneId}`, surface: "detail" };
+    return {
+      ...baseTarget,
+      clipStartSec: clip?.start ?? baseTarget.clipStartSec,
+      clipEndSec: clip?.end ?? baseTarget.clipEndSec,
+      autoplay: autostart ?? baseTarget.autoplay,
+      muted,
+      fullscreen,
+      playbackRate: rate,
+      route: typeof window === "undefined" ? baseTarget.route : baseTarget.route ?? `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    };
+  }, [autostart, clip?.end, clip?.start, fullscreen, muted, playbackTracking, rate, sceneId, trackingEnabled]);
+  const playbackTrackingSignature = useMemo(() => JSON.stringify(playbackTrackingTarget), [playbackTrackingTarget]);
 
   useEffect(() => {
     intervalStart.current = null;
@@ -219,7 +230,35 @@ export function VideoPlayer({
 
   useEffect(() => {
     void playbackTracker.current.setTarget(playbackTrackingTarget);
-  }, [playbackTrackingTarget?.groupItemId, playbackTrackingTarget?.hostId, playbackTrackingTarget?.hostType, playbackTrackingTarget?.scopeKey]);
+  }, [playbackTrackingSignature]);
+
+  const trackPlayerInteraction = useCallback((kind: "pause" | "seek" | "fullscreen", meta: Record<string, unknown> = {}) => {
+    if (!playbackTrackingTarget) {
+      return;
+    }
+
+    trackInteraction({
+      hostType: playbackTrackingTarget.hostType as never,
+      hostId: playbackTrackingTarget.hostId,
+      kind,
+      meta: {
+        surface: playbackTrackingTarget.surface,
+        scopeKey: playbackTrackingTarget.scopeKey,
+        groupItemId: playbackTrackingTarget.groupItemId,
+        parentHostType: playbackTrackingTarget.parentHostType,
+        parentHostId: playbackTrackingTarget.parentHostId,
+        itemHostType: playbackTrackingTarget.itemHostType,
+        itemHostId: playbackTrackingTarget.itemHostId,
+        segmentId: playbackTrackingTarget.segmentId,
+        clipStartSec: playbackTrackingTarget.clipStartSec,
+        clipEndSec: playbackTrackingTarget.clipEndSec,
+        playbackRate: rate,
+        muted,
+        fullscreen,
+        ...meta,
+      },
+    });
+  }, [fullscreen, muted, playbackTrackingTarget, rate]);
 
   useEffect(() => {
     clipEndedHandled.current = false;
@@ -728,8 +767,7 @@ export function VideoPlayer({
           localStorage.setItem(MUTED_KEY, String(v.muted));
           break;
         case "f":
-          if (document.fullscreenElement) document.exitFullscreen();
-          else containerRef.current?.requestFullscreen();
+          toggleFullscreen();
           break;
         case "0": case "1": case "2": case "3": case "4":
         case "5": case "6": case "7": case "8": case "9":
@@ -792,6 +830,8 @@ export function VideoPlayer({
   };
 
   const toggleFullscreen = () => {
+    const nextFullscreen = !document.fullscreenElement;
+    trackPlayerInteraction("fullscreen", { active: nextFullscreen, positionSec: currentTime });
     if (document.fullscreenElement) document.exitFullscreen();
     else containerRef.current?.requestFullscreen();
   };
@@ -921,12 +961,18 @@ export function VideoPlayer({
           setPlaying(false);
           flushInterval("paused");
           intervalStart.current = null;
+          trackPlayerInteraction("pause", { positionSec: lastSeenTime.current });
         }}
         onSeeking={() => {
           if (intervalStart.current !== null) {
             flushInterval("active");
             intervalStart.current = null;
           }
+          const video = videoRef.current;
+          trackPlayerInteraction("seek", {
+            fromSec: lastSeenTime.current,
+            toSec: video ? roundPlaybackTime(toAbsoluteTime(video.currentTime)) : undefined,
+          });
         }}
         onSeeked={() => {
           const video = videoRef.current;

@@ -359,6 +359,8 @@ public class ExtensionManifestFile
     public List<ExtensionExternalDependency> ExternalDependencies { get; set; } = [];
     /// <summary>Generic key/value settings surfaced in the Extensions settings UI.</summary>
     public List<ExtensionSettingManifest> Settings { get; set; } = [];
+    /// <summary>In-app Cove Manual topics contributed by this extension.</summary>
+    public List<UITutorialTopic> TutorialTopics { get; set; } = [];
     /// <summary>The DLL filename containing the IExtension implementation.</summary>
     public string? EntryDll { get; set; }
     /// <summary>Assembly names that must be unified across extension load contexts.</summary>
@@ -523,6 +525,8 @@ public class UIManifest
     public List<UIDialogOverride> DialogOverrides { get; set; } = [];
     public List<ExtensionAction> Actions { get; set; } = [];
     public List<UITutorialTopic> TutorialTopics { get; set; } = [];
+    public List<UIListFilterContribution> ListFilters { get; set; } = [];
+    public List<UIListSortContribution> ListSorts { get; set; } = [];
 
     /// <summary>Version of the frontend runtime contract used to load extension bundles.</summary>
     public string? FrontendRuntimeVersion { get; set; }
@@ -538,21 +542,28 @@ public record UITutorialTopic(
     string Title,
     string? Description = null,
     string[]? Pages = null,
+    string[]? Contexts = null,
     string? ExtensionId = null,
     int Order = 100,
-    List<UITutorialSlide>? Slides = null
+    List<UITutorialSlide>? Slides = null,
+    string? ParentTopicId = null
 );
 
 /// <summary>Single tutorial slide shown inside a tutorial topic.</summary>
 public record UITutorialSlide(
     string Id,
     string Title,
-    string Caption,
+    string? Caption = null,
     string[]? Points = null,
     string? ImageSrc = null,
     string? ImageAlt = null,
-    string? MockKind = null
+    string? MockKind = null,
+    List<UITutorialLink>? Links = null,
+    string? BodyMarkdown = null
 );
+
+/// <summary>External link rendered from an in-app manual slide.</summary>
+public record UITutorialLink(string Label, string Url);
 
 /// <summary>A new page contributed by an extension.</summary>
 public record UIPageDefinition(
@@ -581,7 +592,6 @@ public record UISlotContribution(
     int Order = 100
 );
 
-/// <summary>Add a tab to an entity detail page.</summary>
 public record UITabContribution(
     string Key,
     string Label,
@@ -714,6 +724,37 @@ public record UIDialogOverride(
     int Priority = 100
 );
 
+/// <summary>Declare a first-class advanced filter row for a built-in entity list.</summary>
+public record UIListFilterContribution(
+    string Id,
+    string EntityType,
+    string Label,
+    string CriterionType,
+    string ExtensionId,
+    string? FilterKey = null,
+    string? CustomFieldKey = null,
+    string? CustomFieldType = null,
+    string? EntityReferenceType = null,
+    List<string>? Modifiers = null,
+    List<UIListFilterOption>? Options = null,
+    int Order = 100
+);
+
+/// <summary>Static option for an extension-contributed enum/multi-select list filter.</summary>
+public record UIListFilterOption(string Value, string Label);
+
+/// <summary>Declare a first-class sort option for a built-in entity list.</summary>
+public record UIListSortContribution(
+    string Id,
+    string EntityType,
+    string Label,
+    string ExtensionId,
+    string? SortKey = null,
+    string? CustomFieldKey = null,
+    string? CustomFieldType = null,
+    int Order = 100
+);
+
 // ============================================================================
 // UI REGISTRY — Aggregates contributions before serialization
 // ============================================================================
@@ -737,6 +778,8 @@ public class UIRegistry
     private readonly List<UIDialogOverride> _dialogOverrides = [];
     private readonly List<ExtensionAction> _actions = [];
     private readonly List<UITutorialTopic> _tutorialTopics = [];
+    private readonly List<UIListFilterContribution> _listFilters = [];
+    private readonly List<UIListSortContribution> _listSorts = [];
 
     public IReadOnlyList<UIPageDefinition> Pages => _pages;
     public IReadOnlyList<UISlotContribution> Slots => _slots;
@@ -754,6 +797,8 @@ public class UIRegistry
     public IReadOnlyList<UIDialogOverride> DialogOverrides => _dialogOverrides;
     public IReadOnlyList<ExtensionAction> Actions => _actions;
     public IReadOnlyList<UITutorialTopic> TutorialTopics => _tutorialTopics;
+    public IReadOnlyList<UIListFilterContribution> ListFilters => _listFilters;
+    public IReadOnlyList<UIListSortContribution> ListSorts => _listSorts;
 
     public void RegisterPage(UIPageDefinition page) => _pages.Add(page);
     public void RegisterSlot(UISlotContribution slot) => _slots.Add(slot);
@@ -771,6 +816,8 @@ public class UIRegistry
     public void RegisterDialogOverride(UIDialogOverride ov) => _dialogOverrides.Add(ov);
     public void RegisterAction(ExtensionAction action) => _actions.Add(action);
     public void RegisterTutorialTopic(UITutorialTopic topic) => _tutorialTopics.Add(topic);
+    public void RegisterListFilter(UIListFilterContribution filter) => _listFilters.Add(filter);
+    public void RegisterListSort(UIListSortContribution sort) => _listSorts.Add(sort);
 
     public UIManifest ToManifest() => new()
     {
@@ -790,5 +837,7 @@ public class UIRegistry
         DialogOverrides = [.. _dialogOverrides],
         Actions = [.. _actions],
         TutorialTopics = [.. _tutorialTopics],
+        ListFilters = [.. _listFilters],
+        ListSorts = [.. _listSorts],
     };
 }

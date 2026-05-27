@@ -168,6 +168,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             EntityKinds.Audio => await ApplyAudioAttemptInternalAsync(attempt, dto, resultJson, ct),
             EntityKinds.Text => await ApplyTextAttemptInternalAsync(attempt, dto, resultJson, ct),
             EntityKinds.Image => await ApplyImageAttemptInternalAsync(attempt, dto, resultJson, ct),
+            EntityKinds.Gallery => await ApplyGalleryAttemptInternalAsync(attempt, dto, resultJson, ct),
             EntityKinds.Group => await ApplyGroupAttemptInternalAsync(attempt, dto, resultJson, ct),
             _ => throw new InvalidOperationException($"Scrape apply is not supported for entity type '{attempt.EntityType}'."),
         };
@@ -337,6 +338,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             EntityKinds.Audio => await BuildAudioSnapshotJsonAsync(entityId.Value, ct),
             EntityKinds.Text => await BuildTextSnapshotJsonAsync(entityId.Value, ct),
             EntityKinds.Image => await BuildImageSnapshotJsonAsync(entityId.Value, ct),
+            EntityKinds.Gallery => await BuildGallerySnapshotJsonAsync(entityId.Value, ct),
             EntityKinds.Group => await BuildGroupSnapshotJsonAsync(entityId.Value, ct),
             _ => null,
         };
@@ -455,6 +457,36 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             tags = image.ImageTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
             performers = image.ImagePerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
             organized = image.Organized,
+        };
+
+        return JsonSerializer.Serialize(snapshot, JsonOptions);
+    }
+
+    private async Task<string?> BuildGallerySnapshotJsonAsync(int galleryId, CancellationToken ct)
+    {
+        var gallery = await db.Galleries
+            .AsNoTracking()
+            .Include(item => item.Urls)
+            .Include(item => item.GalleryTags).ThenInclude(item => item.Tag)
+            .Include(item => item.GalleryPerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.Studio)
+            .FirstOrDefaultAsync(item => item.Id == galleryId, ct);
+
+        if (gallery == null)
+            return null;
+
+        var snapshot = new
+        {
+            title = gallery.Title,
+            code = gallery.Code,
+            details = gallery.Details,
+            photographer = gallery.Photographer,
+            date = gallery.Date?.ToString("yyyy-MM-dd"),
+            urls = gallery.Urls.Select(item => item.Url).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            studio = gallery.Studio?.Name,
+            tags = gallery.GalleryTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            performers = gallery.GalleryPerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            organized = gallery.Organized,
         };
 
         return JsonSerializer.Serialize(snapshot, JsonOptions);
@@ -724,6 +756,89 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return MapAttempt(attempt);
     }
 
+    private async Task<ScrapeAttemptDto?> ApplyGalleryAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
+    {
+        if (!string.Equals(attempt.EntityType, EntityKinds.Gallery, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
+            return null;
+
+        var gallery = await db.Galleries
+            .Include(item => item.Urls)
+            .Include(item => item.GalleryTags).ThenInclude(item => item.Tag)
+            .Include(item => item.GalleryPerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.Studio)
+            .FirstOrDefaultAsync(item => item.Id == attempt.EntityId.Value, ct);
+
+        if (gallery == null)
+            return null;
+
+        attempt.EntitySnapshotJson = await BuildGallerySnapshotJsonAsync(gallery.Id, ct);
+
+        using var resultDocument = JsonDocument.Parse(resultJson);
+        var root = resultDocument.RootElement;
+        var replaceFields = new HashSet<string>(dto.ReplaceFields ?? [], StringComparer.OrdinalIgnoreCase);
+        var collectionModes = new Dictionary<string, string>(dto.CollectionModes ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
+        var tagSelections = BuildSelectionLookup(dto.TagSelections);
+        var performerSelections = BuildSelectionLookup(dto.PerformerSelections);
+        var availableFields = GetAvailableGalleryFields(root);
+
+        if (replaceFields.Contains("title"))
+        {
+            var title = GetString(root, "Title", "Name");
+            if (!string.IsNullOrWhiteSpace(title))
+                gallery.Title = title;
+        }
+
+        if (replaceFields.Contains("code"))
+        {
+            var code = GetString(root, "Code");
+            if (!string.IsNullOrWhiteSpace(code))
+                gallery.Code = code;
+        }
+
+        if (replaceFields.Contains("details"))
+        {
+            var details = GetString(root, "Details", "Description", "Synopsis");
+            if (!string.IsNullOrWhiteSpace(details))
+                gallery.Details = details;
+        }
+
+        if (replaceFields.Contains("photographer"))
+        {
+            var photographer = GetString(root, "Photographer");
+            if (!string.IsNullOrWhiteSpace(photographer))
+                gallery.Photographer = photographer;
+        }
+
+        if (replaceFields.Contains("date"))
+        {
+            var date = GetString(root, "Date", "ReleaseDate");
+            if (ScrapedSceneDateParser.TryParse(date, out var parsedDate))
+                gallery.Date = parsedDate;
+        }
+
+        var sourceKey = BuildScraperSourceKey(attempt.ScraperId);
+        var sourceRunId = attempt.Id.ToString();
+
+        ApplyGalleryUrls(gallery, root, collectionModes);
+        await ApplyGalleryTagsAsync(gallery, root, collectionModes, dto.CreateMissingTags, tagSelections, sourceKey, sourceRunId, ct);
+        await ApplyGalleryPerformersAsync(gallery, root, collectionModes, dto.CreateMissingPerformers, performerSelections, ct);
+        await ApplyGalleryStudioAsync(gallery, root, collectionModes, dto.CreateMissingStudio, ct);
+
+        var fieldProvenance = BuildAppliedGalleryFieldProvenance(root, replaceFields, collectionModes, tagSelections, performerSelections);
+        if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Gallery, gallery.Id, fieldProvenance, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
+
+        if (dto.MarkOrganized)
+            gallery.Organized = true;
+
+        attempt.AppliedAt = DateTime.UtcNow;
+        attempt.Status = DetermineApplyStatus(availableFields, replaceFields, collectionModes, dto);
+
+        await db.SaveChangesAsync(ct);
+        await RefreshGalleryArraysAsync(gallery, ct);
+        return MapAttempt(attempt);
+    }
+
     private async Task<ScrapeAttemptDto?> ApplyGroupAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
     {
         if (!string.Equals(attempt.EntityType, EntityKinds.Group, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
@@ -838,6 +953,33 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         {
             if (existing.Add(url))
                 image.Urls.Add(new ImageUrl { ImageId = image.Id, Url = url });
+        }
+    }
+
+    private static void ApplyGalleryUrls(Gallery gallery, JsonElement root, IDictionary<string, string> collectionModes)
+    {
+        var mode = GetMode(collectionModes, "urls");
+        if (mode == "skip")
+            return;
+
+        var scrapedUrls = GetStringList(root, "URLs", "Url", "URL");
+        if (scrapedUrls.Count == 0)
+            return;
+
+        var existing = gallery.Urls.Select(item => item.Url).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (mode == "replace")
+        {
+            gallery.Urls.Clear();
+            foreach (var url in scrapedUrls)
+                gallery.Urls.Add(new GalleryUrl { GalleryId = gallery.Id, Url = url });
+            return;
+        }
+
+        foreach (var url in scrapedUrls)
+        {
+            if (existing.Add(url))
+                gallery.Urls.Add(new GalleryUrl { GalleryId = gallery.Id, Url = url });
         }
     }
 
@@ -1012,6 +1154,63 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         }
     }
 
+    private async Task ApplyGalleryTagsAsync(Gallery gallery, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, string sourceKey, string sourceRunId, CancellationToken ct)
+    {
+        var mode = GetMode(collectionModes, "tags");
+        if (mode == "skip")
+            return;
+
+        var tagNames = GetTagNames(root, "Tags", "Tag", "TagNames");
+        if (tagNames.Count == 0)
+            return;
+
+        var selectedTagNames = ResolveSelectedRelationNames(tagNames, selections, createMissing);
+        if (selectedTagNames.Count == 0)
+        {
+            if (mode == "replace")
+                gallery.GalleryTags.Clear();
+            return;
+        }
+
+        var normalizedTagNames = selectedTagNames.Select(item => item.Name.ToLowerInvariant()).ToHashSet();
+        var tagLookup = await db.Tags
+            .Where(tag => normalizedTagNames.Contains(tag.Name.ToLower()))
+            .ToDictionaryAsync(tag => tag.Name, StringComparer.OrdinalIgnoreCase, ct);
+
+        var existingTagNames = gallery.GalleryTags
+            .Where(item => item.Tag != null)
+            .Select(item => item.Tag!.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (mode == "replace")
+        {
+            gallery.GalleryTags.Clear();
+            existingTagNames.Clear();
+        }
+
+        foreach (var selectedTag in selectedTagNames)
+        {
+            var tagName = selectedTag.Name;
+            if (!tagLookup.TryGetValue(tagName, out var tag))
+            {
+                if (!selectedTag.AllowCreate)
+                    continue;
+
+                tag = new Tag { Name = tagName };
+                db.Tags.Add(tag);
+                await db.SaveChangesAsync(ct);
+                tagLookup[tagName] = tag;
+            }
+
+            await tagProvenanceService.RecordAsync(AffinityHostType.Gallery, gallery.Id, tag, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
+
+            if (!existingTagNames.Add(tag.Name))
+                continue;
+
+            gallery.GalleryTags.Add(new GalleryTag { GalleryId = gallery.Id, TagId = tag.Id, Tag = tag });
+        }
+    }
+
     private async Task ApplyAudioPerformersAsync(Audio audio, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "performers");
@@ -1171,6 +1370,59 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         }
     }
 
+    private async Task ApplyGalleryPerformersAsync(Gallery gallery, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, CancellationToken ct)
+    {
+        var mode = GetMode(collectionModes, "performers");
+        if (mode == "skip")
+            return;
+
+        var performerNames = GetNamedItems(root, "Performers", "Performer", "PerformerNames");
+        if (performerNames.Count == 0)
+            return;
+
+        var selectedPerformerNames = ResolveSelectedRelationNames(performerNames, selections, createMissing);
+        if (selectedPerformerNames.Count == 0)
+        {
+            if (mode == "replace")
+                gallery.GalleryPerformers.Clear();
+            return;
+        }
+
+        var normalizedPerformerNames = selectedPerformerNames.Select(item => item.Name.ToLowerInvariant()).ToHashSet();
+        var performerLookup = await db.Performers
+            .Where(performer => normalizedPerformerNames.Contains(performer.Name.ToLower()))
+            .ToDictionaryAsync(performer => performer.Name, StringComparer.OrdinalIgnoreCase, ct);
+
+        var existingPerformerNames = gallery.GalleryPerformers
+            .Where(item => item.Performer != null)
+            .Select(item => item.Performer!.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (mode == "replace")
+        {
+            gallery.GalleryPerformers.Clear();
+            existingPerformerNames.Clear();
+        }
+
+        foreach (var selectedPerformer in selectedPerformerNames)
+        {
+            var performerName = selectedPerformer.Name;
+            if (!performerLookup.TryGetValue(performerName, out var performer))
+            {
+                if (!selectedPerformer.AllowCreate)
+                    continue;
+
+                performer = new Performer { Name = performerName };
+                db.Performers.Add(performer);
+                await db.SaveChangesAsync(ct);
+                performerLookup[performerName] = performer;
+            }
+
+            if (existingPerformerNames.Add(performer.Name))
+                gallery.GalleryPerformers.Add(new GalleryPerformer { GalleryId = gallery.Id, PerformerId = performer.Id, Performer = performer });
+        }
+    }
+
     private async Task ApplyAudioStudioAsync(Audio audio, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "studio");
@@ -1222,6 +1474,24 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         {
             image.Studio = studio;
             image.StudioId = studio.Id;
+        }
+    }
+
+    private async Task ApplyGalleryStudioAsync(Gallery gallery, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, CancellationToken ct)
+    {
+        var mode = GetMode(collectionModes, "studio");
+        if (mode == "skip")
+            return;
+
+        var studioName = GetNamedItems(root, "Studio", "StudioName").FirstOrDefault() ?? GetString(root, "Studio", "StudioName");
+        if (string.IsNullOrWhiteSpace(studioName))
+            return;
+
+        var studio = await ResolveStudioAsync(studioName, createMissing, ct);
+        if (studio != null)
+        {
+            gallery.Studio = studio;
+            gallery.StudioId = studio.Id;
         }
     }
 
@@ -1310,6 +1580,29 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
 
         image.TagIds = nextTagIds;
         image.PerformerIds = nextPerformerIds;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task RefreshGalleryArraysAsync(Gallery gallery, CancellationToken ct)
+    {
+        var nextTagIds = gallery.GalleryTags
+            .Select(item => item.TagId != 0 ? item.TagId : item.Tag?.Id ?? 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+        var nextPerformerIds = gallery.GalleryPerformers
+            .Select(item => item.PerformerId != 0 ? item.PerformerId : item.Performer?.Id ?? 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+
+        if (gallery.TagIds.SequenceEqual(nextTagIds) && gallery.PerformerIds.SequenceEqual(nextPerformerIds))
+            return;
+
+        gallery.TagIds = nextTagIds;
+        gallery.PerformerIds = nextPerformerIds;
         await db.SaveChangesAsync(ct);
     }
 
@@ -1639,6 +1932,21 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return available;
     }
 
+    private static HashSet<string> GetAvailableGalleryFields(JsonElement root)
+    {
+        var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Title", "Name"))) available.Add("title");
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Code"))) available.Add("code");
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Details", "Description", "Synopsis"))) available.Add("details");
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Photographer"))) available.Add("photographer");
+        if (!string.IsNullOrWhiteSpace(GetString(root, "Date", "ReleaseDate"))) available.Add("date");
+        if (GetStringList(root, "URLs", "Url", "URL").Count > 0) available.Add("urls");
+        if (GetTagNames(root, "Tags", "Tag", "TagNames").Count > 0) available.Add("tags");
+        if (GetNamedItems(root, "Performers", "Performer", "PerformerNames").Count > 0) available.Add("performers");
+        if (!string.IsNullOrWhiteSpace(GetNamedItems(root, "Studio", "StudioName").FirstOrDefault() ?? GetString(root, "Studio", "StudioName"))) available.Add("studio");
+        return available;
+    }
+
     private static HashSet<string> GetAvailableGroupFields(JsonElement root)
     {
         var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1736,6 +2044,28 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
     }
 
     private static Dictionary<string, object?> BuildAppliedImageFieldProvenance(JsonElement root, HashSet<string> replaceFields, IDictionary<string, string> collectionModes, IReadOnlyDictionary<string, string>? tagSelections, IReadOnlyDictionary<string, string>? performerSelections)
+    {
+        var fields = new Dictionary<string, object?>();
+
+        AddStringField(fields, "title", replaceFields.Contains("title"), GetString(root, "Title", "Name"));
+        AddStringField(fields, "code", replaceFields.Contains("code"), GetString(root, "Code"));
+        AddStringField(fields, "details", replaceFields.Contains("details"), GetString(root, "Details", "Description", "Synopsis"));
+        AddStringField(fields, "photographer", replaceFields.Contains("photographer"), GetString(root, "Photographer"));
+
+        if (replaceFields.Contains("date") && ScrapedSceneDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
+            fields["date"] = parsedDate.ToString("yyyy-MM-dd");
+
+        AddListField(fields, "urls", GetMode(collectionModes, "urls") != "skip", GetStringList(root, "URLs", "Url", "URL"));
+        AddListField(fields, "tags", GetMode(collectionModes, "tags") != "skip", FilterSelectedRelationNames(GetTagNames(root, "Tags", "Tag", "TagNames"), tagSelections));
+        AddListField(fields, "performers", GetMode(collectionModes, "performers") != "skip", FilterSelectedRelationNames(GetNamedItems(root, "Performers", "Performer", "PerformerNames"), performerSelections));
+
+        var studioName = GetNamedItems(root, "Studio", "StudioName").FirstOrDefault() ?? GetString(root, "Studio", "StudioName");
+        AddStringField(fields, "studio", GetMode(collectionModes, "studio") != "skip", studioName);
+
+        return fields;
+    }
+
+    private static Dictionary<string, object?> BuildAppliedGalleryFieldProvenance(JsonElement root, HashSet<string> replaceFields, IDictionary<string, string> collectionModes, IReadOnlyDictionary<string, string>? tagSelections, IReadOnlyDictionary<string, string>? performerSelections)
     {
         var fields = new Dictionary<string, object?>();
 

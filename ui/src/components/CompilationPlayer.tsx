@@ -249,6 +249,28 @@ export function CompilationPlayer({
   ], [items.length, visibleItems.length]);
 
   const currentTitle = item ? getItemTitle(item) : "No playable item";
+  const currentPlaybackTracking = item ? {
+    hostType: "group",
+    hostId: groupId,
+    surface: "compilation",
+    scopeKey: `group:${groupId}`,
+    parentHostType: "group",
+    parentHostId: groupId,
+    itemHostType: item.hostType,
+    itemHostId: item.hostId,
+    groupItemId: item.groupItemId,
+    segmentId: item.segmentId ?? undefined,
+    clipStartSec: item.startSec,
+    clipEndSec: item.endSec ?? null,
+    context: {
+      sceneId: item.sceneId ?? undefined,
+      audioId: item.audioId ?? undefined,
+      imageId: item.imageId ?? undefined,
+      textId: item.textId ?? undefined,
+      segmentId: item.segmentId ?? undefined,
+      itemIndex: currentItemIndex,
+    },
+  } : undefined;
   const playerMedia = (
     <div className="relative flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black">
       {renderPreloads(nextSceneId, nextAudioId, nextImageId)}
@@ -280,12 +302,7 @@ export function CompilationPlayer({
             }}
             autostart={autostart}
             autostartToken={autostartToken}
-            playbackTracking={{
-              hostType: "group",
-              hostId: groupId,
-              scopeKey: `group:${groupId}`,
-              groupItemId: item.groupItemId,
-            }}
+            playbackTracking={currentPlaybackTracking}
             onEnded={advanceToNextItem}
             clip={{ start: item.startSec, end: item.endSec ?? currentFile.duration, loop: false }}
           />
@@ -309,12 +326,7 @@ export function CompilationPlayer({
             }}
             autostart={autostart}
             autostartToken={autostartToken}
-            playbackTracking={{
-              hostType: "group",
-              hostId: groupId,
-              scopeKey: `group:${groupId}`,
-              groupItemId: item.groupItemId,
-            }}
+            playbackTracking={currentPlaybackTracking}
             onEnded={advanceToNextItem}
             clip={{ start: item.startSec, end: item.endSec ?? null, loop: false }}
           />

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowDown, ArrowUp, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, Plus, X, Rows3, MonitorPlay, Play, Pause, Shuffle } from "lucide-react";
-import type { CriterionModifier, CustomFieldCriterion, CustomFieldDefinition, CustomFieldEntityType, CustomFieldType, FindFilter } from "../api/types";
+import type { CriterionModifier, CustomFieldCriterion, CustomFieldDefinition, CustomFieldEntityType, CustomFieldType, ExtensionListFilterContribution, ExtensionListSortContribution, FindFilter } from "../api/types";
 import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, tagGroups as tagGroupsApi } from "../api/client";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { SavedFilterMenu } from "./SavedFilterMenu";
 import { InfiniteScrollSentinel } from "./InfiniteScrollSentinel";
-import { FilterDialog, FilterButton, type CriterionDefinition, type FilterDialogCustomSection } from "./FilterDialog";
+import { FilterDialog, FilterButton, type CriterionDefinition, type CriterionType, type EntityType, type FilterDialogCustomSection } from "./FilterDialog";
 import { EntityReferenceSelector, getEntityReferenceLabel, isEntityReferenceType, parseEntityReferenceId } from "./EntityReferenceSelector";
 import { useResolvedKeybindingOverrides } from "../hooks/useResolvedKeybindingOverrides";
 import { useKeySequence } from "../hooks/useKeySequence";
@@ -18,6 +18,7 @@ import { reshuffleRandomSort, withSeededRandomSort } from "../utils/seededRandom
 import { trackInteraction } from "../utils/interactionTracking";
 import { LIST_PER_PAGE_OPTIONS, toolbarIconButtonClass, toolbarSegmentClass, toolbarSelectClass } from "./listToolbarStyles";
 import { ListPageCardSizeContext } from "./ListPageCardSizeContext";
+import { useExtensions } from "../extensions/ExtensionLoader";
 
 export type DisplayMode = "grid" | "list" | "wall" | "tagger" | "graph" | "byGroup" | "feed" | "vertical";
 
@@ -88,6 +89,41 @@ const CUSTOM_FIELD_ENTITY_BY_FILTER_MODE: Record<string, CustomFieldEntityType> 
   galleries: "gallery",
   images: "image",
   groups: "group",
+  faces: "face",
+};
+
+const LIST_ENTITY_BY_FILTER_MODE: Record<string, string> = {
+  scenes: "scene",
+  audios: "audio",
+  texts: "text",
+  performers: "performer",
+  tags: "tag",
+  studios: "studio",
+  galleries: "gallery",
+  images: "image",
+  groups: "group",
+  faces: "face",
+  segments: "segment",
+};
+
+const REFERENCE_ENTITY_TYPE_BY_EXTENSION_VALUE: Record<string, EntityType> = {
+  tag: "tags",
+  tags: "tags",
+  taggroup: "tagGroups",
+  taggroups: "tagGroups",
+  tag_group: "tagGroups",
+  performer: "performers",
+  performers: "performers",
+  studio: "studios",
+  studios: "studios",
+  group: "groups",
+  groups: "groups",
+  gallery: "galleries",
+  galleries: "galleries",
+  scene: "scenes",
+  scenes: "scenes",
+  face: "faces",
+  faces: "faces",
 };
 
 const CUSTOM_FIELD_MODIFIER_LABELS: Record<CriterionModifier, string> = {
@@ -151,6 +187,71 @@ function getCustomFieldModifiers(type: CustomFieldType) {
     default:
       return TEXT_CUSTOM_FIELD_MODIFIERS;
   }
+}
+
+function normalizeListEntityType(entityType?: string) {
+  const normalized = (entityType ?? "").trim().toLowerCase();
+  const singular = normalized.endsWith("s") ? normalized.slice(0, -1) : normalized;
+  return LIST_ENTITY_BY_FILTER_MODE[normalized] ?? singular;
+}
+
+function normalizeCriterionType(value: string | undefined): CriterionType {
+  const normalized = (value ?? "string").trim().toLowerCase();
+  switch (normalized) {
+    case "bool":
+    case "boolean":
+      return "bool";
+    case "int":
+    case "integer":
+    case "number":
+      return "number";
+    case "date":
+      return "date";
+    case "datetime":
+    case "timestamp":
+      return "timestamp";
+    case "duration":
+      return "duration";
+    case "percent":
+      return "number";
+    case "rating":
+      return "rating";
+    case "multiid":
+    case "reference":
+      return "multiId";
+    case "enum":
+      return "enum";
+    default:
+      return "string";
+  }
+}
+
+function normalizeReferenceEntityType(value?: string): EntityType | undefined {
+  if (!value) return undefined;
+  return REFERENCE_ENTITY_TYPE_BY_EXTENSION_VALUE[value.trim().toLowerCase()];
+}
+
+function createExtensionCriterionDefinition(contribution: ExtensionListFilterContribution): CriterionDefinition | null {
+  const criterionType = normalizeCriterionType(contribution.criterionType || contribution.customFieldType);
+  const filterKey = contribution.filterKey || (contribution.customFieldKey ? `extension:${contribution.extensionId}:${contribution.id}` : undefined);
+  if (!filterKey) return null;
+
+  return {
+    id: `extension:${contribution.extensionId}:${contribution.id}`,
+    label: contribution.label,
+    type: criterionType,
+    entityType: normalizeReferenceEntityType(contribution.entityReferenceType),
+    filterKey,
+    customFieldKey: contribution.customFieldKey,
+    customFieldType: contribution.customFieldType,
+    modifiers: contribution.modifiers,
+    options: contribution.options,
+  };
+}
+
+function createExtensionSortOption(contribution: ExtensionListSortContribution) {
+  const value = contribution.sortKey || (contribution.customFieldKey ? `custom:${contribution.customFieldType || "text"}:${contribution.customFieldKey}` : undefined);
+  return value ? { value, label: contribution.label } : null;
 }
 
 function formatCustomFieldCriterionValue(
@@ -634,8 +735,22 @@ export function ListPage({
   const [autoScrollControlsAwake, setAutoScrollControlsAwake] = useState(true);
   const restoredPrefsRef = useRef(false);
   const { config } = useAppConfig();
+  const { getListFiltersForEntity, getListSortsForEntity } = useExtensions();
   const keybindingOverrides = useResolvedKeybindingOverrides();
   const customFieldEntityType = filterMode ? CUSTOM_FIELD_ENTITY_BY_FILTER_MODE[filterMode] : undefined;
+  const listEntityType = normalizeListEntityType(filterMode ?? pageKey);
+  const extensionCriteriaDefinitions = useMemo(
+    () => getListFiltersForEntity(listEntityType).map(createExtensionCriterionDefinition).filter((item): item is CriterionDefinition => item != null),
+    [getListFiltersForEntity, listEntityType]
+  );
+  const mergedCriteriaDefinitions = useMemo(() => {
+    const merged = [...(criteriaDefinitions ?? []), ...extensionCriteriaDefinitions];
+    return merged.length > 0 ? merged : undefined;
+  }, [criteriaDefinitions, extensionCriteriaDefinitions]);
+  const extensionSortOptions = useMemo(
+    () => getListSortsForEntity(listEntityType).map(createExtensionSortOption).filter((item): item is { value: string; label: string } => item != null),
+    [getListSortsForEntity, listEntityType]
+  );
   const { data: customFieldDefinitions = [] } = useCustomFieldDefinitions(customFieldEntityType, Boolean(customFieldEntityType));
   const generatedCustomFieldSection = useMemo(() => {
     const definitions = customFieldDefinitions.filter((definition) => definition.filterable);
@@ -649,14 +764,14 @@ export function ListPage({
 
   // Determine which entity types are used in active filters for name resolution
   const activeEntityTypes = useMemo(() => {
-    if (!objectFilter || !criteriaDefinitions) return new Set<string>();
+    if (!objectFilter || !mergedCriteriaDefinitions) return new Set<string>();
     const types = new Set<string>();
     for (const key of Object.keys(objectFilter)) {
-      const def = criteriaDefinitions.find((d) => d.id === key || d.filterKey === key);
+      const def = mergedCriteriaDefinitions.find((d) => d.id === key || d.filterKey === key);
       if ((def?.type === "multiId" || def?.type === "tagDuration") && def.entityType) types.add(def.entityType);
     }
     return types;
-  }, [objectFilter, criteriaDefinitions]);
+  }, [objectFilter, mergedCriteriaDefinitions]);
 
   // Fetch entity names for active multiId filters (uses same cache key as FilterDialog)
   const { data: tagEntities } = useQuery({
@@ -727,9 +842,9 @@ export function ListPage({
     const customSortOptions = customFieldDefinitions
       .filter((definition) => definition.sortable)
       .map((definition) => ({ value: `custom:${definition.type}:${definition.key}`, label: `Custom: ${definition.label || definition.key}` }));
-    const mergedOptions = [...(sortOptions ?? []), ...customSortOptions];
+    const mergedOptions = [...(sortOptions ?? []), ...extensionSortOptions, ...customSortOptions];
     return mergedOptions.length > 0 ? mergedOptions.sort((left, right) => left.label.localeCompare(right.label)) : undefined;
-  }, [customFieldDefinitions, sortOptions]);
+  }, [customFieldDefinitions, extensionSortOptions, sortOptions]);
   const slotContext = { pageKey, title, filter, onFilterChange, totalCount, isLoading };
   const selecting = selectedIds && selectedIds.size > 0;
   const showSelectionBar = Boolean(selectedIds && selecting);
@@ -921,11 +1036,11 @@ export function ListPage({
       { keys: resolveKeybinding(keybindingOverrides, "list.page.last", "Ctrl+End"), action: () => goTo(totalPages) },
     ] : []),
     // Filter dialog
-    ...(criteriaDefinitions && onObjectFilterChange ? [{ keys: resolveKeybinding(keybindingOverrides, "list.filters", "f"), action: () => setFilterDialogOpen(true) }] : []),
+    ...(mergedCriteriaDefinitions && onObjectFilterChange ? [{ keys: resolveKeybinding(keybindingOverrides, "list.filters", "f"), action: () => setFilterDialogOpen(true) }] : []),
     // Zoom
     { keys: resolveKeybinding(keybindingOverrides, "list.zoom.in", "+"), action: () => setZoomLevel((v) => clampEntityCardSizeLevel(cardSizeEntityType, v + 0.25)) },
     { keys: resolveKeybinding(keybindingOverrides, "list.zoom.out", "-"), action: () => setZoomLevel((v) => clampEntityCardSizeLevel(cardSizeEntityType, v - 0.25)) },
-  ], [availableDisplayModes, cardSizeEntityType, criteriaDefinitions, goTo, keybindingOverrides, onDisplayModeChange, onInvertSelection, onObjectFilterChange, onSelectAll, onSelectNone, page, setZoomLevel, showPagingControls, totalPages]);
+  ], [availableDisplayModes, cardSizeEntityType, goTo, keybindingOverrides, mergedCriteriaDefinitions, onDisplayModeChange, onInvertSelection, onObjectFilterChange, onSelectAll, onSelectNone, page, setZoomLevel, showPagingControls, totalPages]);
 
   useKeySequence(listBindings);
 
@@ -936,11 +1051,11 @@ export function ListPage({
   }, [title]);
 
   return (
-    <div className="space-y-0">
+    <div className="list-page space-y-0">
       {/* Toolbar - matches standard FilteredListToolbar */}
-      <div className="mx-1 mt-1 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/90 px-3 py-3 shadow-sm shadow-black/20 sm:px-2.5 sm:py-2">
+      <div className="list-page-toolbar mx-1 mt-1 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/90 px-3 py-3 shadow-sm shadow-black/20 sm:px-2.5 sm:py-2">
         {/* Title + count + byline */}
-        <div className="mr-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pr-2">
+        <div className="list-page-title-group mr-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pr-2">
           <h1 className="text-sm font-semibold text-foreground whitespace-nowrap">{title}</h1>
           <span className="text-xs text-muted hidden sm:inline">
             {totalCount > 0 ? `${start}-${end} of ${totalCount.toLocaleString()}` : "0 items"}
@@ -952,7 +1067,7 @@ export function ListPage({
         </div>
 
         {/* Search */}
-        <form onSubmit={handleSearch} className={["flex w-full shrink-0 items-center gap-1", searchModes && searchModes.length > 1 ? "sm:w-[22rem]" : "sm:w-[18rem]"].join(" ")}>
+        <form onSubmit={handleSearch} className={["list-page-search flex w-full shrink-0 items-center gap-1", searchModes && searchModes.length > 1 ? "sm:w-[22rem]" : "sm:w-[18rem]"].join(" ")}>
           {searchModes && searchModes.length > 1 && onSearchModeChange && (
             <select
               value={searchMode ?? searchModes[0]?.value ?? "text"}
@@ -974,6 +1089,13 @@ export function ListPage({
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && searchText.trim().length > 0) {
+                  e.preventDefault();
+                  setSearchText("");
+                  commitSearch("", "clear");
+                }
+              }}
               placeholder={searchPlaceholder ?? "Search names, titles, tags..."}
               aria-label="Search list"
               data-list-search="true"
@@ -1050,7 +1172,7 @@ export function ListPage({
         )}
 
         {/* Advanced filter button */}
-        {criteriaDefinitions && onObjectFilterChange && (
+        {mergedCriteriaDefinitions && onObjectFilterChange && (
           <FilterButton
             activeCount={Object.keys(objectFilter ?? {}).length}
             onClick={() => setFilterDialogOpen(true)}
@@ -1188,7 +1310,7 @@ export function ListPage({
         </div>
 
         {/* Operations */}
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        <div className="list-page-operations ml-auto flex flex-wrap items-center justify-end gap-2">
           {renderOperations?.()}
           <ExtensionSlot slot="list-page-toolbar-end" context={slotContext} />
           {pageKey && <ExtensionSlot slot={`${pageKey}-list-toolbar-end`} context={slotContext} />}
@@ -1246,11 +1368,11 @@ export function ListPage({
       )}
 
       {/* Active filter tags (criterion badges) */}
-      {objectFilter && onObjectFilterChange && criteriaDefinitions && Object.keys(objectFilter).length > 0 && (
+      {objectFilter && onObjectFilterChange && mergedCriteriaDefinitions && Object.keys(objectFilter).length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 bg-surface/50 border border-border rounded-lg px-3 py-1.5 mx-1 mt-1">
           {Object.entries(objectFilter).map(([key, value]) => {
             const customSection = mergedCustomFilterSections?.find((section) => section.filterKey === key);
-            const def = criteriaDefinitions.find((d) => d.id === key || d.filterKey === key);
+            const def = mergedCriteriaDefinitions.find((d) => d.id === key || d.filterKey === key);
             const label = customSection?.label ?? def?.label ?? key;
             const nameMap = def?.entityType ? entityNameMaps[def.entityType] : undefined;
             const displayValue = customSection?.summarize?.(value) ?? formatFilterChipValue(def, value, nameMap);
@@ -1340,7 +1462,7 @@ export function ListPage({
         </div>
       ) : (
         <ListPageCardSizeContext.Provider value={{ cardMinWidthPx, zoomLevel }}>
-          <div className="pt-3" style={{ "--card-min-width": `${cardMinWidthPx}px` } as React.CSSProperties}>
+          <div className="list-page-content pt-3" style={{ "--card-min-width": `${cardMinWidthPx}px` } as React.CSSProperties}>
             {children}
             {infinitePageSize && infiniteScroll && !contentOwnsInfiniteLoading && (
               <InfiniteScrollSentinel
@@ -1363,11 +1485,11 @@ export function ListPage({
       )}
 
       {/* Filter Dialog */}
-      {criteriaDefinitions && onObjectFilterChange && (
+      {mergedCriteriaDefinitions && onObjectFilterChange && (
         <FilterDialog
           open={filterDialogOpen}
           onClose={() => { setFilterDialogOpen(false); setFilterDialogPreselect(undefined); }}
-          criteria={criteriaDefinitions}
+          criteria={mergedCriteriaDefinitions}
           activeFilter={objectFilter ?? {}}
           customSections={mergedCustomFilterSections}
           showCustomSectionDivider={showCustomFilterDivider}

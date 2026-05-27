@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using Cove.Api.Services;
+using Cove.Core.Auth;
 
 namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/stash-migration")]
+[RequiresPermission(Permissions.ImportStash)]
 public class StashMigrationController(StashMigrationService migrationService) : ControllerBase
 {
     public record PreviewRequest(string StashDbPath);

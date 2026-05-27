@@ -850,6 +850,210 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
+    public async Task SegmentsController_SearchSpans_AppliesRawSegmentFieldFiltersAndSorts()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+
+        var scene = new Scene { Title = "Span Filter Scene" };
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        var profile = new SegmentDisplayProfile
+        {
+            Name = "Raw Field Profile",
+            IsDefault = true,
+            Version = 1,
+        };
+        context.SegmentDisplayProfiles.Add(profile);
+        await context.SaveChangesAsync();
+
+        context.SegmentDisplayRules.Add(new SegmentDisplayRule
+        {
+            ProfileId = profile.Id,
+            SourceKey = "ext:%",
+            Visible = true,
+            MergeGapSec = 0,
+        });
+
+        var older = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 20,
+            EndSec = 24,
+            Kind = "action",
+            SourceKey = "ext:ai.actions",
+            SourceRunId = "run-a",
+            Title = "Older segment",
+            ColorHint = "#111111",
+            CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+        };
+        var matching = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 5,
+            EndSec = 9,
+            Kind = "face",
+            SourceKey = "ext:ai.faces",
+            SourceRunId = "run-b",
+            Title = "Needle segment",
+            ColorHint = "#222222",
+            ImageBlobId = "cover-1",
+            Payload = JsonDocument.Parse("{" + "\"score\":0.91}"),
+            Confidence = 0.91f,
+            CreatedAt = new DateTime(2024, 1, 5, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2024, 1, 6, 0, 0, 0, DateTimeKind.Utc),
+        };
+        context.Segments.AddRange(older, matching);
+        await context.SaveChangesAsync();
+
+        using var serviceProvider = CreateSegmentControllerServiceProvider(scope.Connection);
+        var controller = new SegmentsController(
+            context,
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
+            serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        var sortedResult = await controller.SearchSpans(new SegmentSpanSearchRequestDto(profile.Id, null, 1, 10, "segment_created_at", "asc", null, null, null, null), CancellationToken.None);
+        var sorted = Assert.IsType<SegmentSpanSearchResponseDto>(Assert.IsType<OkObjectResult>(sortedResult.Result).Value);
+        Assert.Equal([older.Id, matching.Id], sorted.Items.Select(item => Assert.Single(item.Span.SegmentIds)).ToArray());
+
+        var filteredResult = await controller.SearchSpans(new SegmentSpanSearchRequestDto(
+            profile.Id,
+            null,
+            1,
+            10,
+            "span_start",
+            "asc",
+            null,
+            null,
+            null,
+            null,
+            Title: "Needle",
+            TitleModifier: "INCLUDES",
+            HostType: "scene",
+            SourceCategory: "extensions",
+            SourceRunId: "run-b",
+            SourceRunIdModifier: "EQUALS",
+            ColorHint: "#222222",
+            ColorHintModifier: "EQUALS",
+            HasImage: true,
+            HasPayload: true,
+            StartSec: 4,
+            StartSecModifier: "GREATER_THAN",
+            EndSec: 10,
+            EndSecModifier: "LESS_THAN",
+            CreatedAt: "2024-01-04T00:00:00Z",
+            CreatedAtModifier: "GREATER_THAN",
+            UpdatedAt: "2024-01-07T00:00:00Z",
+            UpdatedAtModifier: "LESS_THAN"), CancellationToken.None);
+        var filtered = Assert.IsType<SegmentSpanSearchResponseDto>(Assert.IsType<OkObjectResult>(filteredResult.Result).Value);
+        var item = Assert.Single(filtered.Items);
+        Assert.Equal(matching.Id, Assert.Single(item.Span.SegmentIds));
+        Assert.Equal(5, item.Span.StartSec);
+    }
+
+    [Fact]
+    public async Task SegmentsController_SearchSpans_SortsSegmentUpdatedByLatestSegmentUpdate()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+
+        var scene = new Scene { Title = "Span Updated Sort Scene" };
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        var profile = new SegmentDisplayProfile
+        {
+            Name = "Updated Sort Profile",
+            IsDefault = true,
+            Version = 1,
+        };
+        context.SegmentDisplayProfiles.Add(profile);
+        await context.SaveChangesAsync();
+
+        context.SegmentDisplayRules.Add(new SegmentDisplayRule
+        {
+            ProfileId = profile.Id,
+            SourceKey = "ext:ai.actions",
+            Kind = "action",
+            Visible = true,
+            MergeGapSec = 1,
+        });
+
+        var stableOld = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 1,
+            EndSec = 2,
+            Kind = "action",
+            SourceKey = "ext:ai.actions",
+            CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2024, 1, 10, 0, 0, 0, DateTimeKind.Utc),
+        };
+        var mid = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 5,
+            EndSec = 6,
+            Kind = "action",
+            SourceKey = "ext:ai.actions",
+            CreatedAt = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2024, 1, 20, 0, 0, 0, DateTimeKind.Utc),
+        };
+        var mergedOldPart = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 10,
+            EndSec = 11,
+            Kind = "action",
+            SourceKey = "ext:ai.actions",
+            CreatedAt = new DateTime(2024, 1, 3, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        };
+        var mergedNewestPart = new Segment
+        {
+            HostType = SegmentHostType.Scene,
+            HostId = scene.Id,
+            StartSec = 11.5,
+            EndSec = 12,
+            Kind = "action",
+            SourceKey = "ext:ai.actions",
+            CreatedAt = new DateTime(2024, 1, 4, 0, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2024, 1, 30, 0, 0, 0, DateTimeKind.Utc),
+        };
+        context.Segments.AddRange(stableOld, mid, mergedOldPart, mergedNewestPart);
+        await context.SaveChangesAsync();
+
+        using var serviceProvider = CreateSegmentControllerServiceProvider(scope.Connection);
+        var controller = new SegmentsController(
+            context,
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
+            serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        var ascResult = await controller.SearchSpans(new SegmentSpanSearchRequestDto(profile.Id, null, 1, 10, "segment_updated_at", "asc", null, null, null, null), CancellationToken.None);
+        var asc = Assert.IsType<SegmentSpanSearchResponseDto>(Assert.IsType<OkObjectResult>(ascResult.Result).Value);
+        Assert.Equal([
+            stableOld.Id,
+            mid.Id,
+            mergedOldPart.Id,
+        ], asc.Items.Select(item => item.Span.SegmentIds.First()).ToArray());
+
+        var descResult = await controller.SearchSpans(new SegmentSpanSearchRequestDto(profile.Id, null, 1, 10, "segment_updated_at", "desc", null, null, null, null), CancellationToken.None);
+        var desc = Assert.IsType<SegmentSpanSearchResponseDto>(Assert.IsType<OkObjectResult>(descResult.Result).Value);
+        Assert.Equal([
+            mergedOldPart.Id,
+            mid.Id,
+            stableOld.Id,
+        ], desc.Items.Select(item => item.Span.SegmentIds.First()).ToArray());
+    }
+
+    [Fact]
     public async Task SceneDetectionsController_CanCreateUpdateListAndDeleteSceneDetections()
     {
         await using var scope = await CreateContextAsync();

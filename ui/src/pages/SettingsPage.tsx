@@ -5465,7 +5465,7 @@ function ThemeSelector() {
   const {
     availableThemes, activeThemeId, setActiveTheme,
     availableComponentStyles, activeComponentStyles, toggleComponentStyle,
-    availableLayoutStyles, activeLayoutStyle, setActiveLayoutStyle,
+    availableLayoutStyles, activeLayoutStyles, activeLayoutStyle, toggleLayoutStyle,
     customThemeColors, setCustomThemeColors,
   } = useExtensions();
 
@@ -5515,6 +5515,8 @@ function ThemeSelector() {
           cardblur: { off: "0", light: "27", full: "83" },
           surfaceblur: { low: "25", medium: "50", high: "75" },
           opacity: { light: "25", medium: "40", heavy: "65" },
+          cardopacity: { light: "25", medium: "40", heavy: "65" },
+          buttonopacity: { light: "35", medium: "55", heavy: "75" },
         },
         animated: {
           hover: { off: "0", subtle: "33", on: "67" },
@@ -5601,15 +5603,17 @@ function ThemeSelector() {
       { key: "animated", label: "Animation Speed", type: "range", cssVar: "--sv-anim-speed", min: 0, max: 100, defaultValue: 55 },
       { key: "background", label: "Background Intensity", type: "range", cssVar: "--sv-bg-intensity", min: 0, max: 100, defaultValue: 45 },
       { key: "cards", label: "Card Gradient", type: "range", cssVar: "--sv-card-gradient", min: 0, max: 100, defaultValue: 50 },
-      { key: "carddir", label: "Card Direction", options: [{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }, { value: "diagonal", label: "Diagonal" }] },
-      { key: "bgdir", label: "Background Direction", options: [{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }, { value: "diagonal", label: "Diagonal" }] },
-      { key: "surfacedir", label: "Surface Direction", options: [{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }, { value: "diagonal", label: "Diagonal" }] },
+      { key: "carddir", label: "Card Direction", options: [{ value: "diagonal", label: "Diagonal" }, { value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] },
+      { key: "bgdir", label: "Background Direction", options: [{ value: "diagonal", label: "Diagonal" }, { value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] },
+      { key: "surfacedir", label: "Surface Direction", options: [{ value: "diagonal", label: "Diagonal" }, { value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] },
       { key: "scenepause", label: "Pause on Scene Player", options: [{ value: "on", label: "On (recommended)" }, { value: "off", label: "Off" }] },
     ],
     glass: [
       { key: "cardblur", label: "Card Blur", type: "range", cssVar: "--sv-card-blur", min: 0, max: 100, defaultValue: 27 },
       { key: "surfaceblur", label: "Surface Blur", type: "range", cssVar: "--sv-surface-blur", min: 0, max: 100, defaultValue: 50 },
       { key: "opacity", label: "Surface Opacity", type: "range", cssVar: "--sv-surface-opacity", min: 0, max: 100, defaultValue: 40 },
+      { key: "cardopacity", label: "Card Opacity", type: "range", cssVar: "--sv-card-opacity", min: 0, max: 100, defaultValue: 40 },
+      { key: "buttonopacity", label: "Button Opacity", type: "range", cssVar: "--sv-button-opacity", min: 0, max: 100, defaultValue: 55 },
     ],
     animated: [
       { key: "hover", label: "Card Hover Glow", type: "range", cssVar: "--sv-hover-glow", min: 0, max: 100, defaultValue: 67 },
@@ -5666,7 +5670,7 @@ function ThemeSelector() {
               <button
                 key={theme.id}
                 onClick={() => setActiveTheme(theme.id)}
-                className={`rounded-xl border p-4 text-left transition-colors ${
+                className={`theme-option-card rounded-xl border p-4 text-left transition-colors ${
                   activeThemeId === theme.id
                     ? "border-accent bg-accent/10"
                     : "border-border bg-card hover:border-accent/50"
@@ -5682,7 +5686,7 @@ function ThemeSelector() {
 
             {/* Custom theme */}
             <div
-              className={`rounded-xl border transition-colors ${
+              className={`theme-option-card rounded-xl border transition-colors ${
                 activeThemeId === "custom"
                   ? "border-accent bg-accent/10"
                   : "border-border bg-card hover:border-accent/50"
@@ -5856,22 +5860,30 @@ function ThemeSelector() {
         {availableLayoutStyles.length > 0 && (
           <CollapsibleSection title="Layout" subtitle={activeLayoutStyle || "Default"} expanded={expandedSections.has("layout")} onToggle={() => toggleSection("layout")}>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {availableLayoutStyles.map((layout) => (
-                <button
-                  key={layout.id}
-                  onClick={() => setActiveLayoutStyle(layout.id)}
-                  className={`rounded-xl border p-4 text-left transition-colors ${
-                    activeLayoutStyle === layout.id
-                      ? "border-accent bg-accent/10"
-                      : "border-border bg-card hover:border-accent/50"
-                  }`}
-                >
-                  <div className="text-sm font-medium text-foreground">{layout.name}</div>
-                  {layout.description && (
-                    <div className="text-xs text-secondary mt-1">{layout.description}</div>
-                  )}
-                </button>
-              ))}
+              {availableLayoutStyles.map((layout) => {
+                const isActive = activeLayoutStyles.has(layout.id);
+                return (
+                  <button
+                    key={layout.id}
+                    onClick={() => toggleLayoutStyle(layout.id)}
+                    className={`layout-option-card rounded-xl border p-4 text-left transition-colors ${
+                      isActive
+                        ? "border-accent bg-accent/10"
+                        : "border-border bg-card hover:border-accent/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${isActive ? "border-accent bg-accent" : "border-border"}`}>
+                        {isActive && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                      </div>
+                      <div className="text-sm font-medium text-foreground">{layout.name}</div>
+                    </div>
+                    {layout.description && (
+                      <div className="text-xs text-secondary mt-1 ml-6">{layout.description}</div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </CollapsibleSection>
         )}

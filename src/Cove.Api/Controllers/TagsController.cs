@@ -184,7 +184,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         count = Math.Clamp(count, 1, 250);
 
         var segments = await (
-            from segment in db.Segments.AsNoTracking()
+            from segment in db.VisibleSegments().AsNoTracking()
             join scene in db.Scenes.AsNoTracking() on segment.HostId equals scene.Id
             where segment.HostType == SegmentHostType.Scene && segment.TagId == id
             orderby segment.UpdatedAt descending, segment.Id descending
@@ -717,7 +717,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (ids.Count == 0)
             return [];
 
-        return await db.Segments
+        return await db.VisibleSegments()
             .AsNoTracking()
             .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
             .GroupBy(segment => segment.TagId!.Value)
@@ -871,7 +871,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<List<string>>> GetMarkerStrings([FromQuery] string? q, [FromQuery] string? sort, CancellationToken ct)
     {
-        var query = db.Segments
+        var query = db.VisibleSegments()
             .AsNoTracking()
             .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Title != null && segment.Title != string.Empty)
             .Select(segment => segment.Title!)
@@ -890,7 +890,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         }
 
         var result = sort == "count"
-            ? await db.Segments
+            ? await db.VisibleSegments()
                 .AsNoTracking()
                 .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Title != null && segment.Title != string.Empty)
                 .GroupBy(segment => segment.Title!)

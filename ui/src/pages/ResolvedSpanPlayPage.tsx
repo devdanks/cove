@@ -304,7 +304,16 @@ function ResolvedSpanPlayerCard({
             playbackTracking={{
               hostType: "scene",
               hostId: detail.sceneId,
+              surface: "resolvedSpan",
               scopeKey: `scene:${detail.sceneId}:span:${detail.span.spanKey}`,
+              itemHostType: "scene",
+              itemHostId: detail.sceneId,
+              clipStartSec: currentInterval.startSec,
+              clipEndSec: currentInterval.endSec,
+              context: {
+                spanKey: detail.span.spanKey,
+                intervalIndex: activeIntervalIndex,
+              },
             }}
             onEnded={advanceInterval}
             clip={{ start: currentInterval.startSec, end: currentInterval.endSec, loop: false }}

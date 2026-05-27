@@ -12,9 +12,7 @@ namespace Cove.Api.Middleware;
 /// Global default-deny authorization filter.
 /// Rejects any controller action that does not declare a <see cref="RequiresPermissionAttribute"/>,
 /// <see cref="AllowAnonymousAttribute"/>, or <see cref="AllowWithoutPermissionAttribute"/>
-/// — but ONLY when <see cref="AuthConfig.EnforceDefaultDeny"/> is enabled. During migration we
-/// keep enforcement in "permissive default" mode so legacy controllers without attributes
-/// still work.
+/// — but ONLY when <see cref="AuthConfig.EnforceDefaultDeny"/> is enabled.
 /// </summary>
 public sealed class PermissionAuthorizationFilter : IAsyncAuthorizationFilter
 {

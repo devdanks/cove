@@ -5,6 +5,7 @@ export interface Scene {
   title?: string;
   code?: string;
   details?: string;
+  captions?: string;
   director?: string;
   date?: string;
   organized: boolean;
@@ -46,6 +47,7 @@ export interface SceneCreate {
   title?: string;
   code?: string;
   details?: string;
+  captions?: string;
   director?: string;
   date?: string;
   rating?: number;
@@ -1005,7 +1007,7 @@ export interface TagSegmentWall {
 
 export type SegmentHostType = "scene" | "image" | "audio";
 export type DetectionHostType = "scene" | "image";
-export type AffinityHostType = "scene" | "audio" | "text" | "image" | "performer" | "face" | "tag" | "studio" | "gallery" | "group";
+export type AffinityHostType = "scene" | "audio" | "text" | "image" | "performer" | "face" | "tag" | "studio" | "gallery" | "group" | "segment";
 export type InteractionHostType = AffinityHostType | "segment" | "search" | "collection";
 
 export interface Segment {
@@ -1029,6 +1031,7 @@ export interface Segment {
   colorHint?: string;
   createdAt: string;
   updatedAt: string;
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface SegmentRecord extends Segment {
@@ -1179,6 +1182,28 @@ export interface SegmentSpanSearchRequest {
   durationSec?: number;
   durationSec2?: number;
   durationModifier?: CriterionModifier;
+  title?: string;
+  titleModifier?: CriterionModifier;
+  hostType?: string;
+  sourceCategory?: "user" | "extensions";
+  sourceRunId?: string;
+  sourceRunIdModifier?: CriterionModifier;
+  colorHint?: string;
+  colorHintModifier?: CriterionModifier;
+  hasImage?: boolean;
+  hasPayload?: boolean;
+  startSec?: number;
+  startSec2?: number;
+  startSecModifier?: CriterionModifier;
+  endSec?: number;
+  endSec2?: number;
+  endSecModifier?: CriterionModifier;
+  createdAt?: string;
+  createdAt2?: string;
+  createdAtModifier?: CriterionModifier;
+  updatedAt?: string;
+  updatedAt2?: string;
+  updatedAtModifier?: CriterionModifier;
 }
 
 export interface SegmentSpanSearchResultItem {
@@ -1318,6 +1343,7 @@ export interface Face {
   appearanceCount: number;
   frameSampleCount: number;
   topSuggestion?: FaceTopSuggestion;
+  fieldProvenance?: FieldProvenance[];
 }
 
 export interface FaceAppearance {
@@ -1571,6 +1597,24 @@ export interface PlaybackIntervalsRequest {
   currentPositionSec: number;
   state: string;
   intervals: PlaybackIntervalInput[];
+  surface?: string;
+  scopeKey?: string;
+  parentHostType?: string;
+  parentHostId?: number;
+  itemHostType?: string;
+  itemHostId?: number;
+  groupItemId?: number;
+  segmentId?: number;
+  clipStartSec?: number;
+  clipEndSec?: number | null;
+  autoplay?: boolean;
+  muted?: boolean;
+  fullscreen?: boolean;
+  playbackRate?: number;
+  route?: string;
+  referrer?: string;
+  recommendationSource?: string;
+  context?: Record<string, unknown>;
 }
 
 export interface PlaybackInterval {
@@ -1642,14 +1686,17 @@ export interface Stats {
   audioPlayCount: number;
   textReadCount: number;
   imageViewCount: number;
+  segmentViewCount: number;
   sceneCompleteCount: number;
   audioCompleteCount: number;
   textCompleteCount: number;
   imageCompleteCount: number;
+  segmentCompleteCount: number;
   sceneConsumedSeconds: number;
   audioConsumedSeconds: number;
   textConsumedSeconds: number;
   imageConsumedSeconds: number;
+  segmentConsumedSeconds: number;
   totalLikes: number;
   totalDerivedLikes: number;
   totalFavorites: number;
@@ -2584,6 +2631,7 @@ export interface StudioFilterCriteria {
   detailsCriterion?: StringCriterion;
   aliasesCriterion?: StringCriterion;
   parentsCriterion?: MultiIdCriterion;
+  parentCountCriterion?: IntCriterion;
   childCountCriterion?: IntCriterion;
   tagCountCriterion?: IntCriterion;
   groupCountCriterion?: IntCriterion;
@@ -2670,15 +2718,31 @@ export interface ImageFilterCriteria {
 }
 
 export interface AudioFilterCriteria {
+  ratingCriterion?: IntCriterion;
   titleCriterion?: StringCriterion;
   codeCriterion?: StringCriterion;
   detailsCriterion?: StringCriterion;
   pathCriterion?: StringCriterion;
+  formatCriterion?: StringCriterion;
+  audioCodecCriterion?: StringCriterion;
   urlCriterion?: StringCriterion;
   organizedCriterion?: BoolCriterion;
+  hasVideoFilesCriterion?: BoolCriterion;
+  hasCoverCriterion?: BoolCriterion;
   dateCriterion?: DateCriterion;
   durationCriterion?: IntCriterion;
+  bitRateCriterion?: IntCriterion;
+  fileSizeCriterion?: IntCriterion;
+  fileModTimeCriterion?: TimestampCriterion;
   fileCountCriterion?: IntCriterion;
+  trackCountCriterion?: IntCriterion;
+  trackTitleCriterion?: StringCriterion;
+  sampleRateCriterion?: IntCriterion;
+  channelsCriterion?: IntCriterion;
+  playCountCriterion?: IntCriterion;
+  likeCounterCriterion?: IntCriterion;
+  playDurationCriterion?: IntCriterion;
+  lastPlayedAtCriterion?: TimestampCriterion;
   tagCountCriterion?: IntCriterion;
   performerCountCriterion?: IntCriterion;
   performerTagsCriterion?: MultiIdCriterion;
@@ -2693,16 +2757,26 @@ export interface AudioFilterCriteria {
 }
 
 export interface TextFilterCriteria {
+  ratingCriterion?: IntCriterion;
   titleCriterion?: StringCriterion;
   codeCriterion?: StringCriterion;
   detailsCriterion?: StringCriterion;
+  contentCriterion?: StringCriterion;
   pathCriterion?: StringCriterion;
+  formatCriterion?: StringCriterion;
   urlCriterion?: StringCriterion;
   organizedCriterion?: BoolCriterion;
+  hasCoverCriterion?: BoolCriterion;
   dateCriterion?: DateCriterion;
   wordCountCriterion?: IntCriterion;
   pageCountCriterion?: IntCriterion;
+  fileSizeCriterion?: IntCriterion;
+  fileModTimeCriterion?: TimestampCriterion;
   fileCountCriterion?: IntCriterion;
+  playCountCriterion?: IntCriterion;
+  likeCounterCriterion?: IntCriterion;
+  playDurationCriterion?: IntCriterion;
+  lastReadAtCriterion?: TimestampCriterion;
   tagCountCriterion?: IntCriterion;
   performerCountCriterion?: IntCriterion;
   performerTagsCriterion?: MultiIdCriterion;
@@ -2729,11 +2803,31 @@ export interface GroupFilterCriteria {
   createdAtCriterion?: TimestampCriterion;
   updatedAtCriterion?: TimestampCriterion;
   kindCriterion?: StringCriterion;
+  aliasesCriterion?: StringCriterion;
+  querySourceKeyCriterion?: StringCriterion;
+  allowedHostTypesCriterion?: StringCriterion;
+  hasQueryCriterion?: BoolCriterion;
+  showInSceneListsCriterion?: BoolCriterion;
+  lastResolvedAtCriterion?: TimestampCriterion;
+  sortOrderCriterion?: IntCriterion;
+  cachedItemCountCriterion?: IntCriterion;
   isMissingCriterion?: BoolCriterion;
   directorCriterion?: StringCriterion;
   synopsisCriterion?: StringCriterion;
   performersCriterion?: MultiIdCriterion;
+  itemCountCriterion?: IntCriterion;
   sceneCountCriterion?: IntCriterion;
+  imageCountCriterion?: IntCriterion;
+  audioCountCriterion?: IntCriterion;
+  textCountCriterion?: IntCriterion;
+  galleryCountCriterion?: IntCriterion;
+  performerItemCountCriterion?: IntCriterion;
+  studioItemCountCriterion?: IntCriterion;
+  tagItemCountCriterion?: IntCriterion;
+  faceCountCriterion?: IntCriterion;
+  segmentCountCriterion?: IntCriterion;
+  subGroupCountCriterion?: IntCriterion;
+  containingGroupCountCriterion?: IntCriterion;
   tagCountCriterion?: IntCriterion;
   customFieldCriterion?: CustomFieldCriterion;
   customFieldCriteria?: CustomFieldCriterion[];
@@ -2945,9 +3039,42 @@ export interface ExtensionManifest {
   dialogOverrides: ExtensionDialogOverride[];
   actions: ExtensionAction[];
   tutorialTopics?: ExtensionTutorialTopic[];
+  listFilters?: ExtensionListFilterContribution[];
+  listSorts?: ExtensionListSortContribution[];
   frontendRuntimeVersion?: string;
   jsBundleUrl?: string;
   cssBundleUrl?: string;
+}
+
+export interface ExtensionListFilterOption {
+  value: string;
+  label: string;
+}
+
+export interface ExtensionListFilterContribution {
+  id: string;
+  entityType: string;
+  label: string;
+  criterionType: string;
+  extensionId: string;
+  filterKey?: string;
+  customFieldKey?: string;
+  customFieldType?: string;
+  entityReferenceType?: string;
+  modifiers?: CriterionModifier[];
+  options?: ExtensionListFilterOption[];
+  order: number;
+}
+
+export interface ExtensionListSortContribution {
+  id: string;
+  entityType: string;
+  label: string;
+  extensionId: string;
+  sortKey?: string;
+  customFieldKey?: string;
+  customFieldType?: string;
+  order: number;
 }
 
 export interface ExtensionTutorialTopic {
@@ -2955,19 +3082,28 @@ export interface ExtensionTutorialTopic {
   title: string;
   description?: string;
   pages?: string[];
+  contexts?: string[];
   extensionId?: string;
   order: number;
   slides?: ExtensionTutorialSlide[];
+  parentTopicId?: string;
 }
 
 export interface ExtensionTutorialSlide {
   id: string;
   title: string;
-  caption: string;
+  caption?: string;
+  bodyMarkdown?: string;
   points?: string[];
   imageSrc?: string;
   imageAlt?: string;
   mockKind?: string;
+  links?: ExtensionTutorialLink[];
+}
+
+export interface ExtensionTutorialLink {
+  label: string;
+  url: string;
 }
 
 export interface ExtensionPageDef {
