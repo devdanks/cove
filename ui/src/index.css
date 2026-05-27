@@ -2292,6 +2292,13 @@ html[data-component-style*="animated"] .bg-accent:hover {
 }
 
 @media (min-width: 1024px) {
+  /* MediaDetailLayout reads these variables so external layout extensions can
+     switch desktop tab presentation without adding token-specific logic. */
+  html {
+    --cove-media-detail-desktop-tab-nav: rail;
+    --cove-media-detail-sidebar-collapsible: true;
+  }
+
   html[data-layout*="detail-theater"] .media-detail-layout-shell {
     background: #000;
   }
@@ -2312,8 +2319,9 @@ html[data-component-style*="animated"] .bg-accent:hover {
     max-width: 560px;
   }
 
-  html[data-layout*="detail-tabs"] .media-detail-layout-tabs-rail {
-    display: none;
+  html[data-layout*="detail-tabs"] {
+    --cove-media-detail-desktop-tab-nav: row;
+    --cove-media-detail-sidebar-collapsible: false;
   }
 
   html[data-layout*="detail-tabs"] .media-detail-layout-tabs-row {
@@ -2323,12 +2331,6 @@ html[data-component-style*="animated"] .bg-accent:hover {
 
   html[data-layout*="detail-tabs"] .media-detail-layout-sidebar-content {
     display: block !important;
-  }
-
-  html[data-layout*="detail-tabs"] [data-testid="media-detail-layout-sidebar"][data-sidebar-collapsed="true"] {
-    width: min(34vw, 520px);
-    min-width: 360px;
-    max-width: 560px;
   }
 
   html[data-layout*="detail-tabs"] .media-detail-layout-tabs-row nav {

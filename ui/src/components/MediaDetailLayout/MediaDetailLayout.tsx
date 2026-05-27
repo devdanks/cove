@@ -27,6 +27,134 @@ import { useMediaDetailLayout } from "./useMediaDetailLayout";
 import type { MediaDetailLayoutProps, MediaDetailTab } from "./types";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "cove.detailSidebarCollapsed";
+const MEDIA_DETAIL_DESKTOP_TAB_NAV_VAR = "--cove-media-detail-desktop-tab-nav";
+const MEDIA_DETAIL_SIDEBAR_COLLAPSIBLE_VAR = "--cove-media-detail-sidebar-collapsible";
+
+type MediaDetailDesktopTabNav = "rail" | "row";
+
+interface MediaDetailPresentation {
+  desktopTabNav: MediaDetailDesktopTabNav;
+  sidebarCollapsible: boolean;
+}
+
+const DEFAULT_MEDIA_DETAIL_PRESENTATION: MediaDetailPresentation = {
+  desktopTabNav: "rail",
+  sidebarCollapsible: true,
+};
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined") return false;
+    if (typeof window.matchMedia !== "function") return true;
+    return window.matchMedia(query).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia(query);
+    const sync = () => setMatches(mediaQuery.matches);
+    sync();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", sync);
+      return () => mediaQuery.removeEventListener("change", sync);
+    }
+
+    mediaQuery.addListener(sync);
+    return () => mediaQuery.removeListener(sync);
+  }, [query]);
+
+  return matches;
+}
+
+function parseBooleanCssValue(value: string, fallback: boolean) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  return !["0", "false", "off", "no"].includes(normalized);
+}
+
+function readCssCustomProperty(name: string) {
+  if (typeof document === "undefined") {
+    return "";
+  }
+
+  const inlineValue = document.documentElement.style.getPropertyValue(name).trim();
+  if (inlineValue) {
+    return inlineValue;
+  }
+
+  if (typeof getComputedStyle !== "function") {
+    return "";
+  }
+
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function readMediaDetailPresentation(): MediaDetailPresentation {
+  if (typeof document === "undefined") {
+    return DEFAULT_MEDIA_DETAIL_PRESENTATION;
+  }
+
+  const desktopTabNav = readCssCustomProperty(MEDIA_DETAIL_DESKTOP_TAB_NAV_VAR).toLowerCase();
+  const sidebarCollapsible = readCssCustomProperty(MEDIA_DETAIL_SIDEBAR_COLLAPSIBLE_VAR);
+
+  return {
+    desktopTabNav: desktopTabNav === "row" ? "row" : "rail",
+    sidebarCollapsible: parseBooleanCssValue(sidebarCollapsible, DEFAULT_MEDIA_DETAIL_PRESENTATION.sidebarCollapsible),
+  };
+}
+
+function useMediaDetailPresentation(): MediaDetailPresentation {
+  const [presentation, setPresentation] = useState<MediaDetailPresentation>(readMediaDetailPresentation);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return;
+    }
+
+    let frameHandle = 0;
+    const sync = () => setPresentation(readMediaDetailPresentation());
+    const scheduleSync = () => {
+      if (frameHandle && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(frameHandle);
+      }
+      if (typeof window.requestAnimationFrame === "function") {
+        frameHandle = window.requestAnimationFrame(() => {
+          frameHandle = 0;
+          sync();
+        });
+        return;
+      }
+      sync();
+    };
+
+    scheduleSync();
+
+    const observer = typeof MutationObserver === "function"
+      ? new MutationObserver(scheduleSync)
+      : null;
+    observer?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-layout", "data-theme", "data-component-style", "style", "class"],
+    });
+    window.addEventListener("resize", scheduleSync);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleSync);
+      if (frameHandle && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(frameHandle);
+      }
+    };
+  }, []);
+
+  return presentation;
+}
 
 function useSidebarCollapsed(): [boolean, (next: boolean) => void] {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -148,33 +276,39 @@ function MediaDetailLayoutRoot({
 }: MediaDetailLayoutProps) {
   useMediaDetailLayout({ keyboardShortcuts });
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed();
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const presentation = useMediaDetailPresentation();
 
   const hasTabs = tabs.length > 0;
-  const canCollapseSidebar = Boolean(media);
+  const showDesktopHorizontalTabs = hasTabs && isDesktop && presentation.desktopTabNav === "row";
+  const showVerticalTabs = hasTabs && isDesktop && presentation.desktopTabNav === "rail";
+  const showMobileTabs = hasTabs && !isDesktop;
+  const canCollapseSidebar = Boolean(media) && presentation.sidebarCollapsible && showVerticalTabs;
+  const effectiveSidebarCollapsed = canCollapseSidebar && sidebarCollapsed;
 
   const handleTabChange = (key: string) => {
     onTabChange?.(key);
-    if (canCollapseSidebar && sidebarCollapsed) {
+    if (canCollapseSidebar && effectiveSidebarCollapsed) {
       setSidebarCollapsed(false);
     }
   };
 
-  const tabsNav = hasTabs ? (
+  const tabsNav = showVerticalTabs ? (
     <div className="media-detail-layout-tabs-rail hidden w-11 shrink-0 flex-col border-r border-border bg-background/70 py-2 lg:flex">
       {canCollapseSidebar ? (
         <>
           <button
             type="button"
-            aria-label={sidebarCollapsed ? "Expand details sidebar" : "Collapse details sidebar"}
-            aria-pressed={sidebarCollapsed}
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            aria-label={effectiveSidebarCollapsed ? "Expand details sidebar" : "Collapse details sidebar"}
+            aria-pressed={effectiveSidebarCollapsed}
+            onClick={() => setSidebarCollapsed(!effectiveSidebarCollapsed)}
             className="group relative mx-1 hidden h-8 items-center justify-center rounded-md text-secondary transition hover:bg-card hover:text-foreground lg:flex"
-            title={sidebarCollapsed ? "Expand details sidebar" : "Collapse details sidebar"}
+            title={effectiveSidebarCollapsed ? "Expand details sidebar" : "Collapse details sidebar"}
             data-testid="media-detail-layout-sidebar-toggle"
           >
-            {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            {effectiveSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-2 -translate-y-1/2 whitespace-nowrap rounded bg-card px-2 py-1 text-[11px] text-foreground opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-              {sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              {effectiveSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             </span>
           </button>
           <div className="mx-2 my-1 hidden h-px bg-border/80 lg:block" />
@@ -246,7 +380,7 @@ function MediaDetailLayoutRoot({
     </div>
   ) : null;
 
-  const mobileTabsNav = hasTabs ? (
+  const mobileTabsNav = showMobileTabs ? (
     <div className="media-detail-layout-tabs-mobile border-b border-border bg-background/70 lg:hidden">
       <nav
         className="flex gap-1 overflow-x-auto px-3 py-2"
@@ -284,7 +418,7 @@ function MediaDetailLayoutRoot({
     </div>
   ) : null;
 
-  const horizontalTabsNav = hasTabs ? (
+  const horizontalTabsNav = showDesktopHorizontalTabs ? (
     <div className="media-detail-layout-tabs-row hidden border-b border-border/80 bg-background/35 py-2">
       <nav
         className="flex gap-1 overflow-x-auto"
@@ -350,17 +484,17 @@ function MediaDetailLayoutRoot({
         "media-detail-layout-sidebar relative w-full shrink-0 border-b border-border bg-background/40 transition-[width] duration-150",
         media ? "order-2 lg:order-1" : "",
         media ? (
-          sidebarCollapsed
+          effectiveSidebarCollapsed
             ? "lg:w-11 lg:min-w-11 lg:max-w-11 lg:border-b-0 lg:border-r lg:max-h-[calc(100vh-49px)]"
             : "lg:w-[456px] xl:w-[480px] 2xl:w-[540px] lg:min-w-[408px] lg:max-w-[600px] lg:border-b-0 lg:border-r lg:max-h-[calc(100vh-49px)]"
         ) : "max-h-[calc(100vh-49px)]",
       ].join(" ")}
       data-testid="media-detail-layout-sidebar"
-      data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
+      data-sidebar-collapsed={effectiveSidebarCollapsed ? "true" : "false"}
     >
       <div className={["flex min-h-0 overflow-hidden", media ? "h-full" : "max-h-[calc(100vh-49px)]"].join(" ")}>
         {tabsNav}
-        <div className={["media-detail-layout-sidebar-content min-w-0 flex-1 overflow-y-auto", sidebarCollapsed ? "lg:hidden" : ""].join(" ")}>
+        <div className={["media-detail-layout-sidebar-content min-w-0 flex-1 overflow-y-auto", effectiveSidebarCollapsed ? "lg:hidden" : ""].join(" ")}>
           {mobileTabsNav}
           <div className="px-4 pt-4 pb-2 sm:pl-7 sm:pr-6 lg:pl-8">
             {onGoBack ? (
@@ -424,7 +558,11 @@ function MediaDetailLayoutRoot({
   ) : null;
 
   return (
-    <div className="media-detail-layout -mx-3 sm:-mx-4 md:-mx-6 -mt-5 -mb-5 overflow-x-hidden">
+    <div
+      className="media-detail-layout -mx-3 sm:-mx-4 md:-mx-6 -mt-5 -mb-5 overflow-x-hidden"
+      data-desktop-tab-nav={presentation.desktopTabNav}
+      data-sidebar-collapsible={canCollapseSidebar ? "true" : "false"}
+    >
       <div
         className={
           !media

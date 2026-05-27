@@ -1,6 +1,15 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
+
+afterEach(() => {
+  cleanup();
+  document.documentElement.style.removeProperty("--cove-media-detail-desktop-tab-nav");
+  document.documentElement.style.removeProperty("--cove-media-detail-sidebar-collapsible");
+  if (typeof window.localStorage?.removeItem === "function") {
+    window.localStorage.removeItem("cove.detailSidebarCollapsed");
+  }
+});
 
 describe("MediaDetailLayout", () => {
   it("renders media, tabs, and content", () => {
@@ -80,6 +89,33 @@ describe("MediaDetailLayout", () => {
     fireEvent.click(screen.getByRole("tab", { name: /segments/i }));
     expect(onTabChange).toHaveBeenCalledWith("segments");
     expect(sidebar).toHaveAttribute("data-sidebar-collapsed", "false");
+  });
+
+  it("lets extension CSS choose the desktop tab presentation", () => {
+    document.documentElement.style.setProperty("--cove-media-detail-desktop-tab-nav", "row");
+    document.documentElement.style.setProperty("--cove-media-detail-sidebar-collapsible", "false");
+
+    render(
+      <MediaDetailLayout
+        title="Scene Title"
+        media={<div>Player Surface</div>}
+        tabs={[
+          { key: "details", label: "Details" },
+          { key: "segments", label: "Segments" },
+        ]}
+        activeTab="details"
+      >
+        <MediaDetailLayout.Content>
+          <div>Body content</div>
+        </MediaDetailLayout.Content>
+      </MediaDetailLayout>,
+    );
+
+    const tablist = screen.getByRole("tablist", { name: /detail tabs/i });
+
+    expect(tablist.closest(".media-detail-layout-tabs-row")).not.toBeNull();
+    expect(screen.queryByTestId("media-detail-layout-sidebar-toggle")).not.toBeInTheDocument();
+    expect(screen.getByText("Body content")).toBeInTheDocument();
   });
 
   it("uses tab semantics and arrow-key navigation for tabs", () => {

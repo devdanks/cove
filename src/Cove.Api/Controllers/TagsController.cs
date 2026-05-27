@@ -871,7 +871,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     [OutputCache(PolicyName = "ShortCache")]
     public async Task<ActionResult<List<string>>> GetMarkerStrings([FromQuery] string? q, [FromQuery] string? sort, CancellationToken ct)
     {
-        var query = db.VisibleSegments()
+        var query = db.Segments
             .AsNoTracking()
             .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Title != null && segment.Title != string.Empty)
             .Select(segment => segment.Title!)
@@ -890,7 +890,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         }
 
         var result = sort == "count"
-            ? await db.VisibleSegments()
+            ? await db.Segments
                 .AsNoTracking()
                 .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Title != null && segment.Title != string.Empty)
                 .GroupBy(segment => segment.Title!)
