@@ -76,7 +76,7 @@ jobs:
           -r ${{ matrix.rid }}
           --self-contained
           -p:PublishSingleFile=true
-          -p:SkipPgvectorPayloadStage=true
+          -p:PgvectorPayloadRepository=${{ github.repository }}
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=none
           -p:DebugSymbols=false
@@ -94,18 +94,47 @@ jobs:
           -p:DebugSymbols=false
           -o publish/
 
-      - name: Stage bundled pgvector payload
-        shell: pwsh
-        run: ./scripts/stage-pgvector-payload.ps1 -Rid ${{ matrix.rid }} -OutputDir publish -PayloadRepository ${{ github.repository }}
-
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path publish/* -DestinationPath ${{ matrix.artifact }}${{ matrix.ext }}
+        run: |
+          $packageDir = "package"
+          New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+          $files = @("Cove.Api.exe", "Cove.InstanceManager.exe")
+          foreach ($file in $files) {
+            $source = Join-Path "publish" $file
+            if (-not (Test-Path $source)) { throw "Missing native executable: $source" }
+            Copy-Item -Path $source -Destination $packageDir -Force
+          }
+          Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath ${{ matrix.artifact }}${{ matrix.ext }}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead("${{ matrix.artifact }}${{ matrix.ext }}")
+          try {
+            $entries = $zip.Entries | ForEach-Object { $_.FullName } | Sort-Object
+          }
+          finally {
+            $zip.Dispose()
+          }
+          $expected = $files | Sort-Object
+          $diff = Compare-Object -ReferenceObject $expected -DifferenceObject $entries
+          if ($diff) { throw "Unexpected archive contents: $($entries -join ', ')" }
 
       - name: Package (Linux/macOS)
         if: runner.os != 'Windows'
-        run: tar -czf ${{ matrix.artifact }}${{ matrix.ext }} -C publish .
+        run: |
+          mkdir -p package
+          for file in Cove.Api Cove.InstanceManager; do
+            test -f "publish/$file" || { echo "Missing native executable: publish/$file" >&2; exit 1; }
+            cp "publish/$file" package/
+          done
+          tar -czf ${{ matrix.artifact }}${{ matrix.ext }} -C package Cove.Api Cove.InstanceManager
+          entries="$(tar -tzf ${{ matrix.artifact }}${{ matrix.ext }} | sort)"
+          expected="$(printf 'Cove.Api\nCove.InstanceManager')"
+          if [ "$entries" != "$expected" ]; then
+            echo "Unexpected archive contents:" >&2
+            printf '%s\n' "$entries" >&2
+            exit 1
+          fi
 
       - name: Generate checksums
         shell: bash

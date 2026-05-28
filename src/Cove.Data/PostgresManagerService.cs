@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,7 @@ public class PostgresManagerService : IHostedService
     private const string PgMajor = "18";
     private const string PgFullVersion = "18.3";
     private const string PgvectorVersion = "0.8.2";
+    private const string EmbeddedPgvectorResourcePrefix = "cove.pgvector/";
 
     // Windows: EDB portable binaries (still available for Windows/macOS)
     private const string WinUrl = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260146";
@@ -39,10 +41,13 @@ public class PostgresManagerService : IHostedService
         ? CoveDefaultPaths.GetDataRoot()
         : CoveDefaultPaths.ResolveDataPath(_config.DataPath);
 
-    private string BinDir => Path.Combine(CoveDir, "pgsql", "bin");
+    private string PgsqlDir => Path.Combine(CoveDir, "pgsql");
+    private string BinDir => Path.Combine(PgsqlDir, "bin");
+    private string PgLibDir => Path.Combine(PgsqlDir, "lib");
+    private string PgShareDir => Path.Combine(PgsqlDir, "share");
     private string DataDir => Path.Combine(CoveDir, "pgdata");
     private string LogFile => Path.Combine(CoveDir, "pg.log");
-    private string BundledPgvectorDir => BundledPgvectorCandidateDirs().First();
+    private string EmbeddedPgvectorExtractDir => Path.Combine(CoveDir, "_embedded_pgvector", $"pg{PgMajor}", CurrentRuntimeId());
 
     private string Exe(string name) =>
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? Path.Combine(BinDir, $"{name}.exe")
@@ -142,8 +147,8 @@ public class PostgresManagerService : IHostedService
         }
         else
         {
-            // Linux: EDB no longer provides portable binaries.
-            // Install from PGDG APT repository packages extracted locally.
+            // Linux: EDB no longer provides portable binaries, so Cove downloads PGDG
+            // .deb packages and extracts them into CoveDir without installing system packages.
             await InstallLinuxPostgresAsync(ct);
         }
 
@@ -187,16 +192,13 @@ public class PostgresManagerService : IHostedService
         File.Delete(archivePath);
     }
 
-    /// <summary>Find pg_ctl in common system paths.</summary>
+    /// <summary>Find a system pg_ctl for the exact PostgreSQL major Cove manages.</summary>
     private string? FindSystemPgCtl()
     {
         // Common system install locations
         var candidates = new[]
         {
             $"/usr/lib/postgresql/{PgMajor}/bin/pg_ctl",
-            $"/usr/lib/postgresql/{int.Parse(PgMajor) - 1}/bin/pg_ctl", // one version back
-            "/usr/bin/pg_ctl",
-            "/usr/local/bin/pg_ctl",
         };
         return candidates.FirstOrDefault(File.Exists);
     }
@@ -220,51 +222,7 @@ public class PostgresManagerService : IHostedService
 
     private async Task InstallLinuxPostgresAsync(CancellationToken ct)
     {
-        // Strategy 1: try apt-get (works on Debian/Ubuntu without root if postgresql is already
-        // in the package cache, otherwise tries with sudo).  If apt-get is not available or
-        // fails, fall back to downloading .deb packages manually.
-
-        // Check if apt-get is available
-        var hasAptGet = File.Exists("/usr/bin/apt-get");
-        if (hasAptGet)
-        {
-            _logger.LogInformation("Attempting to install PostgreSQL {Version} via apt-get…", PgMajor);
-            // Add PGDG repo key + source if not already present
-            await TryAddPgdgRepoAsync(ct);
-
-            var installCode = await RunAsync(
-                "/usr/bin/apt-get",
-                $"install -y postgresql-{PgMajor} postgresql-client-{PgMajor} postgresql-{PgMajor}-pgvector",
-                CoveDir, ct);
-
-            if (installCode == 0)
-            {
-                // Link the system-installed binaries
-                var sysPgCtl = FindSystemPgCtl();
-                if (sysPgCtl != null)
-                    LinkSystemPostgresBinDir(sysPgCtl);
-
-                // If still not found, make explicit symlinks
-                if (!File.Exists(Exe("pg_ctl")))
-                {
-                    var systemBin = $"/usr/lib/postgresql/{PgMajor}/bin";
-                    if (Directory.Exists(systemBin))
-                    {
-                        var pgsqlDir = Path.Combine(CoveDir, "pgsql");
-                        Directory.CreateDirectory(pgsqlDir);
-                        try { Directory.CreateSymbolicLink(BinDir, systemBin); }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to link system PostgreSQL bin directory {SystemBin} to {BinDir}; falling back to package extraction", systemBin, BinDir);
-                        }
-                    }
-                }
-                return;
-            }
-            _logger.LogWarning("apt-get install failed (exit {Code}) — falling back to .deb extraction", installCode);
-        }
-
-        // Strategy 2: Download .deb packages from the PGDG APT repository and extract locally.
+        // Download .deb packages from the PGDG APT repository and extract locally.
         var tempDir = Path.Combine(CoveDir, "_pg_install_tmp");
         var extractDir = Path.Combine(CoveDir, "_pg_extract_tmp");
         Directory.CreateDirectory(tempDir);
@@ -302,81 +260,43 @@ public class PostgresManagerService : IHostedService
             var arch = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "amd64";
             var pgdgBase = $"https://apt.postgresql.org/pub/repos/apt/pool/main/p/postgresql-{PgMajor}";
 
-            // Try both naming conventions: with and without pgdg codename suffix
-            var packageNames = new[]
+            var serverDownloaded = await TryDownloadDebPackageAsync(pgdgBase, tempDir, new[]
             {
                 $"postgresql-{PgMajor}_{PgFullVersion}-1.pgdg{pgdgSuffix}+1_{arch}.deb",
                 $"postgresql-{PgMajor}_{PgFullVersion}-1_{arch}.deb",
-            };
+            }, ct);
 
-            foreach (var (baseName, isServer) in new[] { (packageNames, true) })
-            {
-                string? downloaded = null;
-                foreach (var pkgName in baseName)
-                {
-                    var pkgUrl = $"{pgdgBase}/{pkgName}";
-                    var pkgPath = Path.Combine(tempDir, pkgName);
-                    _logger.LogInformation("Trying {Url}…", pkgUrl);
-                    try
-                    {
-                        await DownloadFileAsync(pkgUrl, pkgPath, ct);
-                        downloaded = pkgPath;
-                        break;
-                    }
-                    catch (HttpRequestException ex)
-                    {
-                        _logger.LogWarning(ex, "Not found at {Url}", pkgUrl);
-                    }
-                }
-                if (downloaded == null)
-                    throw new InvalidOperationException(
-                        $"Could not download postgresql-{PgMajor} for {codename}/{arch}. " +
-                        "Please install PostgreSQL manually (apt-get install postgresql) or configure an external connection string.");
-            }
+            if (!serverDownloaded)
+                throw new InvalidOperationException(
+                    $"Could not download postgresql-{PgMajor} for {codename}/{arch}. " +
+                    "Configure Cove with an external PostgreSQL connection string or use the Docker package.");
 
-            // Also try to get the client package (best-effort, not required)
-            foreach (var pkgName in new[]
+            // Client utilities and libpq are required for initdb, readiness checks, and database creation.
+            await TryDownloadDebPackageAsync(pgdgBase, tempDir, new[]
             {
                 $"postgresql-client-{PgMajor}_{PgFullVersion}-1.pgdg{pgdgSuffix}+1_{arch}.deb",
                 $"postgresql-client-{PgMajor}_{PgFullVersion}-1_{arch}.deb",
-            })
+            }, ct);
+
+            await TryDownloadDebPackageAsync(pgdgBase, tempDir, new[]
             {
-                try
-                {
-                    await DownloadFileAsync($"{pgdgBase}/{pkgName}", Path.Combine(tempDir, pkgName), ct);
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogInformation(ex, "Optional PostgreSQL client package {PackageName} was not available; continuing", pkgName);
-                }
-            }
+                $"libpq5_{PgFullVersion}-1.pgdg{pgdgSuffix}+1_{arch}.deb",
+                $"libpq5_{PgFullVersion}-1_{arch}.deb",
+            }, ct);
+            await TryDownloadLinuxRuntimeDependencyAsync("liburing2", codename, arch, tempDir, ct);
 
             var pgvectorBase = "https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector";
-            var pgvectorDownloaded = false;
-            foreach (var pkgName in new[]
+            var pgvectorDownloaded = await TryDownloadDebPackageAsync(pgvectorBase, tempDir, new[]
             {
                 $"postgresql-{PgMajor}-pgvector_{PgvectorVersion}-1.pgdg{pgdgSuffix}+1_{arch}.deb",
                 $"postgresql-{PgMajor}-pgvector_{PgvectorVersion}-1_{arch}.deb",
-            })
-            {
-                try
-                {
-                    await DownloadFileAsync($"{pgvectorBase}/{pkgName}", Path.Combine(tempDir, pkgName), ct);
-                    pgvectorDownloaded = true;
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogInformation(ex, "PostgreSQL pgvector package {PackageName} was not available at {BaseUrl}", pkgName, pgvectorBase);
-                }
-            }
+            }, ct, required: false);
 
             if (!pgvectorDownloaded)
             {
                 throw new InvalidOperationException(
                     $"Could not download postgresql-{PgMajor}-pgvector {PgvectorVersion} for {codename}/{arch}. " +
-                    "Install PostgreSQL and pgvector with your OS package manager or configure an external pgvector-enabled connection string.");
+                    "Configure Cove with an external pgvector-enabled PostgreSQL connection string or use the Docker package.");
             }
 
             // Extract .deb packages
@@ -402,15 +322,16 @@ public class PostgresManagerService : IHostedService
             var pgBinSrc = Path.Combine(extractDir, "usr", "lib", "postgresql", PgMajor, "bin");
             var pgLibSrc = Path.Combine(extractDir, "usr", "lib", "postgresql", PgMajor, "lib");
             var pgShareSrc = Path.Combine(extractDir, "usr", "share", "postgresql", PgMajor);
-            var pgsqlDir = Path.Combine(CoveDir, "pgsql");
-            Directory.CreateDirectory(pgsqlDir);
+            Directory.CreateDirectory(PgsqlDir);
 
             if (Directory.Exists(pgBinSrc))
                 Directory.Move(pgBinSrc, BinDir);
             if (Directory.Exists(pgLibSrc))
-                Directory.Move(pgLibSrc, Path.Combine(pgsqlDir, "lib"));
+                Directory.Move(pgLibSrc, PgLibDir);
             if (Directory.Exists(pgShareSrc))
-                Directory.Move(pgShareSrc, Path.Combine(pgsqlDir, "share"));
+                Directory.Move(pgShareSrc, PgShareDir);
+
+            CopyLinuxRuntimeLibraries(extractDir, PgLibDir);
 
             await RunAsync("/bin/chmod", $"-R +x \"{BinDir}\"", CoveDir, ct);
         }
@@ -435,32 +356,20 @@ public class PostgresManagerService : IHostedService
             return;
         }
 
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            var installed = await TryInstallLinuxPgvectorPackageAsync(ct);
-            if (installed && await PgvectorFilesAvailableAsync(ct))
-            {
-                _logger.LogInformation("Installed pgvector extension files for managed PostgreSQL");
-                return;
-            }
-        }
-
         throw new InvalidOperationException(BuildPgvectorUnavailableMessage());
     }
 
     private async Task<bool> TryInstallBundledPgvectorAsync(CancellationToken ct)
     {
-        var bundleRoot = FindBundledPgvectorRoot();
+        var bundleRoot = FindBundledPgvectorRoot() ?? await ExtractEmbeddedPgvectorPayloadAsync(ct);
         if (bundleRoot == null)
         {
             _logger.LogInformation("Bundled pgvector payload was not found. Searched: {BundleDirs}", string.Join(Path.PathSeparator, BundledPgvectorCandidateDirs()));
             return false;
         }
 
-        var pkglibDir = await PgConfigPathAsync("--pkglibdir", ct)
-            ?? throw new InvalidOperationException("Could not resolve managed PostgreSQL pkglibdir with pg_config.");
-        var sharedDir = await PgConfigPathAsync("--sharedir", ct)
-            ?? throw new InvalidOperationException("Could not resolve managed PostgreSQL sharedir with pg_config.");
+        var pkglibDir = await ResolveManagedPgLibDirAsync(ct);
+        var sharedDir = await ResolveManagedPgShareDirAsync(ct);
 
         var libraryPath = FindPgvectorLibrary(bundleRoot)
             ?? throw new InvalidOperationException($"Bundled pgvector payload at '{bundleRoot}' does not contain one of: {string.Join(", ", ExpectedPgvectorLibraryNames())}.");
@@ -497,6 +406,8 @@ public class PostgresManagerService : IHostedService
 
     private IEnumerable<string> BundledPgvectorCandidateDirs()
     {
+        yield return EmbeddedPgvectorExtractDir;
+
         foreach (var baseDir in RuntimeBaseDirs())
         {
             yield return Path.Combine(baseDir, "runtimes", CurrentRuntimeId(), "native", "postgresql", $"pg{PgMajor}", "pgvector");
@@ -583,7 +494,9 @@ public class PostgresManagerService : IHostedService
 
         var includeServerDir = await PgConfigPathAsync("--includedir-server", ct);
         if (string.IsNullOrWhiteSpace(includeServerDir))
-            return;
+            includeServerDir = Path.Combine(PgsqlDir, "include", "server");
+        else if (!IsPathUnderCoveDir(includeServerDir))
+            includeServerDir = Path.Combine(PgsqlDir, "include", "server");
 
         var targetHeadersDir = Path.Combine(includeServerDir, "extension", "vector");
         Directory.CreateDirectory(targetHeadersDir);
@@ -593,48 +506,17 @@ public class PostgresManagerService : IHostedService
         }
     }
 
-    private async Task<bool> TryInstallLinuxPgvectorPackageAsync(CancellationToken ct)
-    {
-        if (!File.Exists("/usr/bin/apt-get"))
-            return false;
-
-        try
-        {
-            await TryAddPgdgRepoAsync(ct);
-            var exitCode = await RunAsync(
-                "/usr/bin/apt-get",
-                $"install -y postgresql-{PgMajor}-pgvector",
-                CoveDir,
-                ct);
-            if (exitCode == 0)
-                return true;
-
-            _logger.LogWarning("apt-get install postgresql-{Major}-pgvector failed (exit {Code})", PgMajor, exitCode);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to install postgresql-{Major}-pgvector via apt-get", PgMajor);
-        }
-
-        return false;
-    }
-
     private async Task<bool> PgvectorFilesAvailableAsync(CancellationToken ct)
     {
-        var sharedDir = await PgConfigPathAsync("--sharedir", ct);
-        if (string.IsNullOrWhiteSpace(sharedDir))
+        var hasControlFile = (await PgShareDirsAsync(ct))
+            .Select(path => Path.Combine(path, "extension", "vector.control"))
+            .Any(File.Exists);
+        if (!hasControlFile)
             return false;
 
-        var controlFile = Path.Combine(sharedDir, "extension", "vector.control");
-        if (!File.Exists(controlFile))
-            return false;
-
-        var pkglibDir = await PgConfigPathAsync("--pkglibdir", ct);
-        if (string.IsNullOrWhiteSpace(pkglibDir) || !Directory.Exists(pkglibDir))
-            return true;
-
-        return ExpectedPgvectorLibraryNames()
-            .Select(name => Path.Combine(pkglibDir, name))
+        return (await PgLibDirsAsync(ct))
+            .Where(Directory.Exists)
+            .SelectMany(path => ExpectedPgvectorLibraryNames().Select(name => Path.Combine(path, name)))
             .Any(File.Exists);
     }
 
@@ -660,44 +542,85 @@ public class PostgresManagerService : IHostedService
             return "Managed PostgreSQL could not install pgvector automatically because this Cove build does not include the macOS pgvector payload for PostgreSQL " + PgMajor + ". Reinstall the full Cove native package, use Docker, or configure Cove with an external PostgreSQL server that already has pgvector installed.";
         }
 
-        return "Managed PostgreSQL could not install pgvector automatically. Reinstall the full Cove native package, install the official PostgreSQL pgvector package for PostgreSQL " + PgMajor + ", use Docker, or configure Cove with an external PostgreSQL server that already has pgvector installed.";
+        return "Managed PostgreSQL could not install pgvector automatically because this Cove build does not include the Linux pgvector payload for PostgreSQL " + PgMajor + ". Reinstall the full Cove native package, use Docker, or configure Cove with an external PostgreSQL server that already has pgvector installed.";
     }
 
     private static string BuildPgvectorCreateExtensionFailureMessage(string database)
         => $"Could not enable pgvector in database '{database}'. Install pgvector extension files for this PostgreSQL server and rerun Cove migrations.";
 
-    private async Task TryAddPgdgRepoAsync(CancellationToken ct)
+    private async Task<bool> TryDownloadDebPackageAsync(string baseUrl, string tempDir, IEnumerable<string> packageNames, CancellationToken ct, bool required = true)
     {
-        const string pgdgListPath = "/etc/apt/sources.list.d/pgdg.list";
-        if (File.Exists(pgdgListPath)) return; // Already configured
-
-        try
+        foreach (var pkgName in packageNames)
         {
-            // Download and add PGDG signing key
-            await RunAsync("/bin/bash", "-c \"curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg\"", CoveDir, ct);
-
-            // Detect codename
-            var codename = "noble";
-            if (File.Exists("/etc/os-release"))
+            var pkgUrl = $"{baseUrl}/{pkgName}";
+            var pkgPath = Path.Combine(tempDir, pkgName);
+            _logger.LogInformation("Trying {Url}…", pkgUrl);
+            try
             {
-                var osRelease = await File.ReadAllTextAsync("/etc/os-release", ct);
-                foreach (var line in osRelease.Split('\n'))
-                {
-                    if (line.StartsWith("VERSION_CODENAME="))
-                    {
-                        codename = line.Split('=')[1].Trim().Trim('"');
-                        break;
-                    }
-                }
+                await DownloadFileAsync(pkgUrl, pkgPath, ct);
+                return true;
             }
-
-            await File.WriteAllTextAsync(pgdgListPath,
-                $"deb https://apt.postgresql.org/pub/repos/apt {codename}-pgdg main\n", ct);
-            await RunAsync("/usr/bin/apt-get", "update -qq", CoveDir, ct);
+            catch (HttpRequestException ex)
+            {
+                _logger.LogInformation(ex, "Package {PackageName} was not available at {Url}", pkgName, pkgUrl);
+            }
         }
-        catch (Exception ex)
+
+        if (required)
+            throw new InvalidOperationException($"Could not download any of these packages: {string.Join(", ", packageNames)}");
+
+        return false;
+    }
+
+    private async Task TryDownloadLinuxRuntimeDependencyAsync(string packageName, string codename, string arch, string tempDir, CancellationToken ct)
+    {
+        var urls = LinuxRuntimeDependencyPackageUrls(packageName, codename, arch);
+        if (urls.Length == 0)
+            return;
+
+        foreach (var url in urls)
         {
-            _logger.LogWarning(ex, "Could not add PGDG repo — will try default apt packages");
+            var fileName = Path.GetFileName(new Uri(url).LocalPath);
+            try
+            {
+                await DownloadFileAsync(url, Path.Combine(tempDir, fileName), ct);
+                return;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogInformation(ex, "Optional Linux runtime dependency {PackageName} was not available at {Url}", packageName, url);
+            }
+        }
+    }
+
+    private static string[] LinuxRuntimeDependencyPackageUrls(string packageName, string codename, string arch)
+    {
+        if (!string.Equals(packageName, "liburing2", StringComparison.OrdinalIgnoreCase) || !string.Equals(arch, "amd64", StringComparison.OrdinalIgnoreCase))
+            return [];
+
+        return codename switch
+        {
+            "noble" => ["https://archive.ubuntu.com/ubuntu/pool/main/libu/liburing/liburing2_2.5-1build1_amd64.deb"],
+            "jammy" => ["https://archive.ubuntu.com/ubuntu/pool/main/libu/liburing/liburing2_2.1-2build1_amd64.deb"],
+            "bookworm" => ["https://deb.debian.org/debian/pool/main/libu/liburing/liburing2_2.3-3_amd64.deb"],
+            _ => [],
+        };
+    }
+
+    private static void CopyLinuxRuntimeLibraries(string extractDir, string pgLibDir)
+    {
+        Directory.CreateDirectory(pgLibDir);
+        var runtimeLibraryNames = new[] { "libpq.so*", "liburing.so*" };
+        var usrLibDir = Path.Combine(extractDir, "usr", "lib");
+        if (!Directory.Exists(usrLibDir))
+            return;
+
+        foreach (var pattern in runtimeLibraryNames)
+        {
+            foreach (var libraryPath in Directory.EnumerateFiles(usrLibDir, pattern, SearchOption.AllDirectories))
+            {
+                File.Copy(libraryPath, Path.Combine(pgLibDir, Path.GetFileName(libraryPath)), overwrite: true);
+            }
         }
     }
 
@@ -743,8 +666,12 @@ public class PostgresManagerService : IHostedService
     private async Task InitDbAsync(CancellationToken ct)
     {
         Directory.CreateDirectory(DataDir);
+        var initDbArgs = $"-D \"{DataDir}\" -U postgres --encoding=UTF8 --locale=C --auth=trust";
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && Directory.Exists(PgShareDir))
+            initDbArgs += $" -L \"{PgShareDir}\"";
+
         var exitCode = await RunAsync(Exe("initdb"),
-            $"-D \"{DataDir}\" -U postgres --encoding=UTF8 --locale=C --auth=trust",
+            initDbArgs,
             BinDir, ct);
 
         if (exitCode != 0)
@@ -787,6 +714,8 @@ public class PostgresManagerService : IHostedService
             ["shared_buffers"] = "128MB",
             ["log_destination"] = "'stderr'",
             ["logging_collector"] = "off",
+            ["dynamic_library_path"] = QuotePostgresSettingValue(string.Join(Path.PathSeparator, new[] { PgLibDir, "$libdir" })),
+            ["extension_control_path"] = QuotePostgresSettingValue(string.Join(Path.PathSeparator, new[] { PgShareDir, "$system" })),
         };
 
         var lines = (await File.ReadAllLinesAsync(configPath, ct)).ToList();
@@ -841,6 +770,9 @@ public class PostgresManagerService : IHostedService
             || char.IsWhiteSpace(trimmedLine[settingName.Length])
             || trimmedLine[settingName.Length] == '=';
     }
+
+    private static string QuotePostgresSettingValue(string value)
+        => "'" + value.Replace("'", "''") + "'";
 
     private async Task PgCtlAsync(string args, CancellationToken ct)
     {
@@ -967,9 +899,7 @@ public class PostgresManagerService : IHostedService
             CreateNoWindow = true,
         };
 
-        // Ensure the PG bin dir is on PATH so sub-processes can find each other
-        var path = psi.Environment.TryGetValue("PATH", out var existing) ? existing : "";
-        psi.Environment["PATH"] = $"{BinDir}{Path.PathSeparator}{path}";
+        ApplyPostgresProcessEnvironment(psi);
 
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start {exe}");
         await proc.WaitForExitAsync(ct);
@@ -990,8 +920,7 @@ public class PostgresManagerService : IHostedService
             CreateNoWindow = true,
         };
 
-        var path = psi.Environment.TryGetValue("PATH", out var existing) ? existing : "";
-        psi.Environment["PATH"] = $"{BinDir}{Path.PathSeparator}{path}";
+        ApplyPostgresProcessEnvironment(psi);
 
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start {exe}");
         var stdout = await proc.StandardOutput.ReadToEndAsync(ct);
@@ -999,5 +928,159 @@ public class PostgresManagerService : IHostedService
         await proc.WaitForExitAsync(ct);
         await stderrTask;
         return (proc.ExitCode, stdout);
+    }
+
+    private async Task<string> ResolveManagedPgLibDirAsync(CancellationToken ct)
+    {
+        var pgConfigDir = await PgConfigPathAsync("--pkglibdir", ct);
+        if (!string.IsNullOrWhiteSpace(pgConfigDir) && IsPathUnderCoveDir(pgConfigDir))
+            return pgConfigDir;
+
+        return PgLibDir;
+    }
+
+    private async Task<string> ResolveManagedPgShareDirAsync(CancellationToken ct)
+    {
+        var pgConfigDir = await PgConfigPathAsync("--sharedir", ct);
+        if (!string.IsNullOrWhiteSpace(pgConfigDir) && IsPathUnderCoveDir(pgConfigDir))
+            return pgConfigDir;
+
+        return PgShareDir;
+    }
+
+    private async Task<IReadOnlyList<string>> PgLibDirsAsync(CancellationToken ct)
+    {
+        var candidates = new List<string> { PgLibDir };
+        var pgConfigDir = await PgConfigPathAsync("--pkglibdir", ct);
+        if (!string.IsNullOrWhiteSpace(pgConfigDir))
+            candidates.Add(pgConfigDir);
+
+        return DistinctPaths(candidates);
+    }
+
+    private async Task<IReadOnlyList<string>> PgShareDirsAsync(CancellationToken ct)
+    {
+        var candidates = new List<string> { PgShareDir };
+        var pgConfigDir = await PgConfigPathAsync("--sharedir", ct);
+        if (!string.IsNullOrWhiteSpace(pgConfigDir))
+            candidates.Add(pgConfigDir);
+
+        return DistinctPaths(candidates);
+    }
+
+    private static IReadOnlyList<string> DistinctPaths(IEnumerable<string> paths)
+    {
+        var comparer = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        var seen = new HashSet<string>(comparer);
+        var result = new List<string>();
+        foreach (var path in paths)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                continue;
+
+            var fullPath = Path.GetFullPath(path);
+            if (seen.Add(fullPath))
+                result.Add(fullPath);
+        }
+
+        return result;
+    }
+
+    private bool IsPathUnderCoveDir(string path)
+    {
+        var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var root = Path.GetFullPath(CoveDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(root, comparison);
+    }
+
+    private async Task<string?> ExtractEmbeddedPgvectorPayloadAsync(CancellationToken ct)
+    {
+        var assembly = Assembly.GetEntryAssembly() ?? typeof(PostgresManagerService).Assembly;
+        var resourceNames = assembly.GetManifestResourceNames()
+            .Select(resourceName => new { Original = resourceName, Normalized = NormalizeResourceName(resourceName) })
+            .Where(resource => resource.Normalized.StartsWith(EmbeddedPgvectorResourcePrefix, StringComparison.Ordinal))
+            .ToArray();
+        if (resourceNames.Length == 0)
+            return null;
+
+        var ridSegment = $"runtimes/{CurrentRuntimeId()}/";
+        var matchingResources = resourceNames
+            .Where(resource => resource.Normalized.Contains(ridSegment, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (matchingResources.Length == 0)
+            matchingResources = resourceNames;
+
+        if (Directory.Exists(EmbeddedPgvectorExtractDir)
+            && FindPgvectorLibrary(EmbeddedPgvectorExtractDir) != null
+            && FindPgvectorControlFile(EmbeddedPgvectorExtractDir) != null)
+        {
+            return EmbeddedPgvectorExtractDir;
+        }
+
+        if (Directory.Exists(EmbeddedPgvectorExtractDir))
+            Directory.Delete(EmbeddedPgvectorExtractDir, recursive: true);
+        Directory.CreateDirectory(EmbeddedPgvectorExtractDir);
+
+        var extractRoot = Path.GetFullPath(EmbeddedPgvectorExtractDir);
+        foreach (var resource in matchingResources)
+        {
+            var relativePath = resource.Normalized[EmbeddedPgvectorResourcePrefix.Length..];
+            if (string.IsNullOrWhiteSpace(relativePath))
+                continue;
+
+            var targetPath = Path.GetFullPath(Path.Combine(new[] { EmbeddedPgvectorExtractDir }.Concat(relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries)).ToArray()));
+            if (!IsPathUnderRoot(targetPath, extractRoot))
+                throw new InvalidOperationException($"Embedded pgvector resource path escaped extraction root: {resource.Original}");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+            await using var resourceStream = assembly.GetManifestResourceStream(resource.Original)
+                ?? throw new InvalidOperationException($"Embedded pgvector resource '{resource.Original}' could not be opened.");
+            await using var fileStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920);
+            await resourceStream.CopyToAsync(fileStream, ct);
+        }
+
+        if (FindPgvectorLibrary(EmbeddedPgvectorExtractDir) != null && FindPgvectorControlFile(EmbeddedPgvectorExtractDir) != null)
+            return EmbeddedPgvectorExtractDir;
+
+        throw new InvalidOperationException("Embedded pgvector payload was present but did not contain vector library and control files after extraction.");
+    }
+
+    private static string NormalizeResourceName(string resourceName)
+        => resourceName.Replace('\\', '/');
+
+    private static bool IsPathUnderRoot(string path, string root)
+    {
+        var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var normalizedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return normalizedPath.StartsWith(normalizedRoot, comparison);
+    }
+
+    private void ApplyPostgresProcessEnvironment(ProcessStartInfo psi)
+    {
+        PrependEnvironmentPath(psi, "PATH", BinDir);
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            PrependEnvironmentPath(psi, "LD_LIBRARY_PATH", PgLibDir);
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            PrependEnvironmentPath(psi, "DYLD_LIBRARY_PATH", PgLibDir);
+    }
+
+    private static void PrependEnvironmentPath(ProcessStartInfo psi, string variableName, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        var existing = psi.Environment.TryGetValue(variableName, out var value) ? value : string.Empty;
+        psi.Environment[variableName] = string.IsNullOrWhiteSpace(existing)
+            ? path
+            : $"{path}{Path.PathSeparator}{existing}";
     }
 }
