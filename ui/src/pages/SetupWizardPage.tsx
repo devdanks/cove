@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { database, jobs, system, stashMigration } from "../api/client";
-import type { StashPreviewResult, StashImportOptions, StashImportResult } from "../api/client";
+import type { StashPreviewResult, StashImportOptions, StashImportResult, StashPathMapping } from "../api/client";
 import type { CoveConfig, CovePathConfig, JobInfo } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
 import { navigateToUrl } from "../router/location";
@@ -357,18 +357,30 @@ export function SetupWizardPage({ config, onComplete }: Props) {
   const [stashImportJobId, setStashImportJobId] = useState<string | null>(null);
   const [coveGeneratedPath, setCoveGeneratedPath] = useState(config.generatedPath ?? "");
   const [migrateGeneratedContent, setMigrateGeneratedContent] = useState(true);
-  const [aiDataSource, setAiDataSource] = useState("");
+  const [pathMappings, setPathMappings] = useState<StashPathMapping[]>([{ source: "", target: "" }]);
   const [restoreBackupPath, setRestoreBackupPath] = useState("");
   const [restoreConfigBackupPath, setRestoreConfigBackupPath] = useState("");
   const [restoreConfirmed, setRestoreConfirmed] = useState(false);
   const [backupRestoreResult, setBackupRestoreResult] = useState<BackupRestoreResultSummary | null>(null);
   const queryClient = useQueryClient();
   const { availableThemes, activeThemeId, setActiveTheme } = useExtensions();
+  const importPathMappings = pathMappings
+    .map((mapping) => ({ source: mapping.source.trim(), target: mapping.target.trim() }))
+    .filter((mapping) => mapping.source !== "" || mapping.target !== "");
   const stashImportOptions: StashImportOptions = {
     coveGeneratedPath: coveGeneratedPath.trim() || undefined,
     migrateGeneratedContent,
-    aiDataSource: aiDataSource.trim() || undefined,
+    pathMappings: importPathMappings.length > 0 ? importPathMappings : undefined,
   };
+  const updatePathMapping = (index: number, field: keyof StashPathMapping, value: string) => {
+    setPathMappings((current) => current.map((mapping, mappingIndex) => (
+      mappingIndex === index ? { ...mapping, [field]: value } : mapping
+    )));
+  };
+  const addPathMapping = () => setPathMappings((current) => [...current, { source: "", target: "" }]);
+  const removePathMapping = (index: number) => setPathMappings((current) => (
+    current.length <= 1 ? [{ source: "", target: "" }] : current.filter((_, mappingIndex) => mappingIndex !== index)
+  ));
   const activeMode = setupMode
     ?? (step === "stash-config" || stashImportJobId !== null || stashResult !== null
       ? "stash"
@@ -780,18 +792,52 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                       <span className="block mt-1 text-xs text-muted">This updates Cove's generated-assets destination before the import runs. Stash's source path is still read from config.yml.</span>
                     </label>
 
-                    <label className="block text-sm text-secondary">
-                      <span className="block mb-1 font-medium text-foreground">AI Overhaul data source</span>
-                      <input
-                        type="text"
-                        value={aiDataSource}
-                        onChange={(e) => setAiDataSource(e.target.value)}
-                        placeholder="postgresql+psycopg://postgres:postgres@localhost:5432/stash_ai_server or C:\\AI\\app.db"
-                        disabled={isStashImportActive}
-                        className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none disabled:opacity-60"
-                      />
-                      <span className="block mt-1 text-xs text-muted">Optional. If provided, Cove also imports stash-ai-server AI runs and raw tag segments. SQLite paths, PostgreSQL URLs, and Npgsql connection strings are accepted.</span>
-                    </label>
+                    <div className="space-y-2 text-sm text-secondary">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium text-foreground">Stash path mappings</span>
+                        <button
+                          onClick={addPathMapping}
+                          disabled={isStashImportActive}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-secondary hover:text-foreground disabled:opacity-50"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Add
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {pathMappings.map((mapping, index) => (
+                          <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                            <input
+                              type="text"
+                              value={mapping.source}
+                              onChange={(e) => updatePathMapping(index, "source", e.target.value)}
+                              placeholder="E:\\test\\Content"
+                              aria-label="Stash source path"
+                              disabled={isStashImportActive}
+                              className="min-w-0 bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none disabled:opacity-60"
+                            />
+                            <input
+                              type="text"
+                              value={mapping.target}
+                              onChange={(e) => updatePathMapping(index, "target", e.target.value)}
+                              placeholder="/media"
+                              aria-label="Cove target path"
+                              disabled={isStashImportActive}
+                              className="min-w-0 bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none disabled:opacity-60"
+                            />
+                            <button
+                              onClick={() => removePathMapping(index)}
+                              disabled={isStashImportActive}
+                              aria-label="Remove path mapping"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-muted hover:text-foreground disabled:opacity-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <span className="block text-xs text-muted">Map the paths stored in Stash to the paths Cove can access, such as a Docker mount at /media.</span>
+                    </div>
                   </div>
                 </details>
 

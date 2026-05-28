@@ -1231,14 +1231,14 @@ export interface StashImportResult {
   images: number;
   galleries: number;
 }
-export interface StashAiImportResult {
-  aiRuns: number;
-  segments: number;
+export interface StashPathMapping {
+  source: string;
+  target: string;
 }
 export interface StashImportOptions {
   coveGeneratedPath?: string;
   migrateGeneratedContent?: boolean;
-  aiDataSource?: string;
+  pathMappings?: StashPathMapping[];
 }
 export const stashMigration = {
   preview: (stashDbPath: string) =>
@@ -1255,17 +1255,10 @@ export const stashMigration = {
         stashDbPath,
         generatedPath: options?.coveGeneratedPath,
         migrateGeneratedContent: options?.migrateGeneratedContent ?? true,
-        aiDataSource: options?.aiDataSource,
+        pathMappings: options?.pathMappings,
       }),
     }),
   importResult: (jobId: string) => requestOptional<StashImportResult>(`/stash-migration/import/${jobId}`),
-  startAiImport: (stashDbPath: string, aiDataSource: string) =>
-    request<{ jobId: string }>("/stash-migration/import-ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stashDbPath, aiDataSource }),
-    }),
-  aiImportResult: (jobId: string) => requestOptional<StashAiImportResult>(`/stash-migration/import-ai/${jobId}`),
 };
 
 // ===== Logs =====

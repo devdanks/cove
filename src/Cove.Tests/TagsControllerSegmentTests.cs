@@ -28,7 +28,7 @@ public class TagsControllerSegmentTests
                 HostId = scene.Id,
                 TagId = tag.Id,
                 Kind = "tag",
-                SourceKey = "import:stash-ai-server",
+                SourceKey = "import:test",
                 StartSec = 8.0,
                 EndSec = 11.0,
                 Title = "AI body",
@@ -59,7 +59,7 @@ public class TagsControllerSegmentTests
                 HostId = scene.Id,
                 TagId = otherTag.Id,
                 Kind = "tag",
-                SourceKey = "import:stash-ai-server",
+                SourceKey = "import:test",
                 StartSec = 20.0,
                 EndSec = 25.0,
             });

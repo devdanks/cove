@@ -36,8 +36,8 @@ import {
   UserCog,
   X,
 } from "lucide-react";
-import { customFields, system, jobs, metadata, database, stashMigration, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi } from "../api/client";
-import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, StashAiImportResult, UserRow } from "../api/client";
+import { customFields, system, jobs, metadata, database, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi } from "../api/client";
+import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, UserRow } from "../api/client";
 import type {
   JobInfo,
   Plugin,
@@ -399,7 +399,7 @@ const settingsSearchKeywords: Partial<Record<BuiltInSettingsTab, string[]>> = {
   "operations-scan-generate": ["scan", "generate", "covers", "thumbnails", "previews", "sprites", "phash", "md5"],
   "operations-downloads": ["download", "download from file", "url file", "batch download", "import urls"],
   "operations-duplicates": ["duplicates", "duplicate finder", "exact duplicate", "cleanup"],
-  "operations-maintenance": ["clean", "clean generated", "orphaned", "optimize", "vacuum", "analyse", "import ai tag data"],
+  "operations-maintenance": ["clean", "clean generated", "orphaned", "optimize", "vacuum", "analyse"],
   "operations-backup-restore": ["backup", "restore", "export", "import", "config backup", "wipe", "danger zone"],
   "data-sources-auto-tagging": ["auto tag", "auto tagging", "tags", "aliases", "path patterns"],
   "data-sources-downloader-paths": ["downloader", "save path", "path override", "site override"],
@@ -4696,49 +4696,11 @@ function DataManagementSection({ refetchJobs, mode }: { refetchJobs: () => void;
   const [importFilePath, setImportFilePath] = useState("");
   const [importOverwrite, setImportOverwrite] = useState(false);
   const [showImportOpts, setShowImportOpts] = useState(false);
-  const [stashAiImportStashDbPath, setStashAiImportStashDbPath] = useState("");
-  const [stashAiDataSource, setStashAiDataSource] = useState("");
-  const [showStashAiImportOpts, setShowStashAiImportOpts] = useState(false);
-  const [stashAiImportJobId, setStashAiImportJobId] = useState<string | null>(null);
   const [restoreBackupPath, setRestoreBackupPath] = useState("");
   const [restoreConfirmed, setRestoreConfirmed] = useState(false);
   const importMut = useMutation({
     mutationFn: () => metadata.import({ filePath: importFilePath, duplicateHandling: importOverwrite }),
     onSuccess: () => refetchJobs(),
-  });
-  const stashAiImportMut = useMutation({
-    mutationFn: async () => {
-      const stashDbPath = stashAiImportStashDbPath.trim();
-      const aiDataSource = stashAiDataSource.trim();
-      if (!stashDbPath) {
-        throw new Error("Stash database path is required.");
-      }
-      if (!aiDataSource) {
-        throw new Error("AI data source is required.");
-      }
-      return stashMigration.startAiImport(stashDbPath, aiDataSource);
-    },
-    onSuccess: ({ jobId }) => {
-      setStashAiImportJobId(jobId);
-      refetchJobs();
-    },
-  });
-  const stashAiImportJobQuery = useQuery({
-    queryKey: ["settings", "stash-ai-import-job", stashAiImportJobId],
-    queryFn: () => jobs.get(stashAiImportJobId!),
-    enabled: stashAiImportJobId !== null,
-    retry: false,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "pending" || status === "running" ? 1000 : false;
-    },
-  });
-  const stashAiImportResultQuery = useQuery({
-    queryKey: ["settings", "stash-ai-import-result", stashAiImportJobId],
-    queryFn: () => stashMigration.aiImportResult(stashAiImportJobId!),
-    enabled: stashAiImportJobId !== null && stashAiImportJobQuery.data?.status === "completed",
-    retry: false,
-    refetchInterval: (query) => query.state.data ? false : 500,
   });
   const latestBackupQuery = useQuery({
     queryKey: ["settings", "latest-backup"],
@@ -4823,20 +4785,6 @@ function DataManagementSection({ refetchJobs, mode }: { refetchJobs: () => void;
     : optimizeMut.isError
     ? { type: "error" as const, text: `Optimize failed: ${optimizeMut.error instanceof Error ? optimizeMut.error.message : "Unknown error"}` }
     : null;
-  const stashAiImportJob = stashAiImportJobQuery.data;
-  const stashAiImportResult: StashAiImportResult | null = stashAiImportResultQuery.data ?? null;
-  const stashAiImportPending = stashAiImportMut.isPending || stashAiImportJob?.status === "pending" || stashAiImportJob?.status === "running";
-  const stashAiImportStatus = stashAiImportResult
-    ? { type: "success" as const, text: `Imported ${stashAiImportResult.aiRuns} AI runs and ${stashAiImportResult.segments} segments.` }
-    : stashAiImportMut.isError
-    ? { type: "error" as const, text: `AI tag import failed: ${stashAiImportMut.error instanceof Error ? stashAiImportMut.error.message : "Unknown error"}` }
-    : stashAiImportResultQuery.isError
-    ? { type: "error" as const, text: `AI tag import result failed: ${stashAiImportResultQuery.error instanceof Error ? stashAiImportResultQuery.error.message : "Unknown error"}` }
-    : stashAiImportJob?.status === "failed"
-    ? { type: "error" as const, text: `AI tag import failed: ${stashAiImportJob.error ?? "Unknown error"}` }
-    : stashAiImportJob?.status === "cancelled"
-    ? { type: "error" as const, text: "AI tag import was cancelled." }
-    : null;
   const restoreStatus = restoreMut.isSuccess
     ? {
         type: "success" as const,
@@ -4851,7 +4799,7 @@ function DataManagementSection({ refetchJobs, mode }: { refetchJobs: () => void;
   return (
     <SectionCard
       title={mode === "maintenance" ? "Maintenance" : "Backup & Restore"}
-      description={mode === "maintenance" ? "Clean orphaned data, generated files, import AI tag data, and optimize the database." : "Export/import metadata, manage database or config backups, and wipe after snapshots are created."}
+      description={mode === "maintenance" ? "Clean orphaned data, generated files, and optimize the database." : "Export/import metadata, manage database or config backups, and wipe after snapshots are created."}
     >
       <div className="space-y-4">
         {mode === "maintenance" && (
@@ -4938,51 +4886,6 @@ function DataManagementSection({ refetchJobs, mode }: { refetchJobs: () => void;
         </TaskCard>
         </>
         )}
-
-        {mode === "maintenance" && (
-        <TaskCard
-          label="Import AI Tag Data"
-          description="Import stash-ai-server AI runs and raw tag segments after an existing Stash migration."
-          onRun={() => stashAiImportMut.mutate()}
-          isPending={stashAiImportPending}
-          expandable
-          expanded={showStashAiImportOpts}
-          onToggleExpand={() => setShowStashAiImportOpts(!showStashAiImportOpts)}
-          statusMessage={stashAiImportStatus}
-        >
-          <div className="space-y-3 pt-3 border-t border-border/50">
-            <div>
-              <label className="block text-xs text-secondary mb-1">Stash database path</label>
-              <input
-                type="text"
-                value={stashAiImportStashDbPath}
-                onChange={(e) => setStashAiImportStashDbPath(e.target.value)}
-                placeholder="C:\\path\\to\\stash-go.sqlite"
-                className="w-full rounded border border-border bg-surface px-3 py-1.5 text-sm text-foreground"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-secondary mb-1">AI Overhaul data source</label>
-              <input
-                type="text"
-                value={stashAiDataSource}
-                onChange={(e) => setStashAiDataSource(e.target.value)}
-                placeholder="postgresql+psycopg://user:pass@host/db or C:\\path\\to\\stash-ai.sqlite"
-                className="w-full rounded border border-border bg-surface px-3 py-1.5 text-sm text-foreground"
-              />
-            </div>
-            <p className="text-xs text-secondary">
-              This only imports AI runs and raw tag segments. It expects the main Stash migration to have already imported your scenes and tags.
-            </p>
-            {stashAiImportJob && (
-              <p className="text-xs text-secondary">
-                Job status: {stashAiImportJob.status}{stashAiImportJob.subTask ? ` • ${stashAiImportJob.subTask}` : ""}
-              </p>
-            )}
-          </div>
-        </TaskCard>
-        )}
-
         {/* Database Operations */}
         <div className="grid gap-3 sm:grid-cols-2">
           {mode === "backup" && (

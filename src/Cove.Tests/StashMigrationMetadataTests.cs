@@ -372,6 +372,33 @@ stashBoxes:
     }
 
     [Fact]
+    public void ApplyStashPathMappings_UsesLongestSegmentAwarePrefix()
+    {
+        var mappings = Assert.IsAssignableFrom<IReadOnlyList<StashPathMapping>>(InvokePrivateStatic(
+            typeof(StashMigrationService),
+            "NormalizeStashPathMappings",
+            (object)new StashPathMapping[]
+            {
+                new(@"E:\test", "/wrong"),
+                new(@"E:\test\Content", "/media"),
+            }));
+
+        var mappedPath = Assert.IsType<string>(InvokePrivateStatic(
+            typeof(StashMigrationService),
+            "ApplyStashPathMappings",
+            @"E:\test\Content\Nested\clip.mp4",
+            mappings));
+        var siblingPath = Assert.IsType<string>(InvokePrivateStatic(
+            typeof(StashMigrationService),
+            "ApplyStashPathMappings",
+            @"E:\test\Content2\clip.mp4",
+            mappings));
+
+        Assert.Equal("/media/Nested/clip.mp4", mappedPath);
+        Assert.Equal("/wrong/Content2/clip.mp4", siblingPath);
+    }
+
+    [Fact]
     public async Task ImportPerformersAsync_UsesCustomPerformerImageLocationFallback()
     {
         await using var context = CreateContext();
@@ -725,6 +752,7 @@ INSERT INTO folders (id, path, parent_folder_id, mod_time, created_at) VALUES
             service,
             "ImportFoldersAsync",
             stash,
+            Array.Empty<StashPathMapping>(),
             NullJobProgress.Instance,
             0d,
             1d,
@@ -878,6 +906,7 @@ INSERT INTO galleries_files (gallery_id, file_id, [primary]) VALUES (200, 10, 1)
                         service,
                         "ImportFoldersAsync",
                         stash,
+                        Array.Empty<StashPathMapping>(),
                         NullJobProgress.Instance,
                         0d,
                         1d,
@@ -1046,277 +1075,6 @@ VALUES
                 Assert.Equal("Manual marker", segment.Title);
         }
 
-        [Fact]
-        public async Task ImportAiTagDataAsync_ImportsRunsAndSegmentsFromSqliteAiDb()
-        {
-                await using var context = CreateContext();
-                var scene = new Scene { Title = "Imported Scene" };
-                var tag = new Tag { Name = "Body" };
-                context.AddRange(scene, tag);
-                await context.SaveChangesAsync();
-
-                var aiDbPath = await CreateAiSqliteDatabaseAsync(@"
-CREATE TABLE ai_models (
-    id INTEGER PRIMARY KEY,
-    service TEXT NOT NULL,
-    plugin_name TEXT,
-    model_id INTEGER,
-    name TEXT NOT NULL,
-    version REAL,
-    model_type TEXT,
-    categories TEXT,
-    extra TEXT,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE ai_model_runs (
-    id INTEGER PRIMARY KEY,
-    service TEXT NOT NULL,
-    plugin_name TEXT,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    input_params TEXT,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    result_metadata TEXT
-);
-CREATE TABLE ai_model_run_models (
-    id INTEGER PRIMARY KEY,
-    run_id INTEGER NOT NULL,
-    model_id INTEGER,
-    input_params TEXT,
-    frame_interval REAL,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE ai_result_timespans (
-    id INTEGER PRIMARY KEY,
-    run_id INTEGER NOT NULL,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    payload_type TEXT NOT NULL,
-    category TEXT,
-    str_value TEXT,
-    value_id INTEGER,
-    start_s REAL NOT NULL,
-    end_s REAL,
-    value_json TEXT,
-    created_at TEXT NOT NULL
-);
-INSERT INTO ai_models (id, service, plugin_name, model_id, name, version, model_type, categories, extra, created_at)
-VALUES (1, 'aioverhaul', 'AIOverhaul', 17, 'wd14', 2.0, 'tagger', '[""body""]', '{""provider"":""local""}', '2024-02-01T00:00:00Z');
-INSERT INTO ai_model_runs (id, service, plugin_name, entity_type, entity_id, status, input_params, started_at, completed_at, result_metadata)
-VALUES (10, 'aioverhaul', 'AIOverhaul', 'scene', 3, 'completed', '{""frame_interval"":2.5,""vr"":true}', '2024-02-01T00:00:00Z', '2024-02-01T00:05:00Z', '{""schema_version"":1}');
-INSERT INTO ai_model_run_models (id, run_id, model_id, input_params, frame_interval, created_at)
-VALUES (20, 10, 1, '{""threshold"":0.3}', 2.5, '2024-02-01T00:00:00Z');
-INSERT INTO ai_result_timespans (id, run_id, entity_type, entity_id, payload_type, category, str_value, value_id, start_s, end_s, value_json, created_at)
-VALUES (30, 10, 'scene', 3, 'tag', 'body', NULL, 7, 12.0, 15.0, '{""confidence"":0.82}', '2024-02-01T00:00:00Z');
-");
-
-                try
-                {
-                        var service = CreateService(context);
-                        var (runCount, segmentCount) = ((ValueTuple<int, int>)(await InvokePrivateAsync(
-                                service,
-                                "ImportAiTagDataAsync",
-                                aiDbPath,
-                                new Dictionary<int, int> { [3] = scene.Id },
-                                new Dictionary<int, int>(),
-                                new Dictionary<int, int> { [7] = tag.Id },
-                                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
-                                NullJobProgress.Instance,
-                                0d,
-                                1d,
-                                CancellationToken.None))!);
-
-                        Assert.Equal(1, runCount);
-                        Assert.Equal(1, segmentCount);
-
-                        var aiRun = await context.AiRuns.SingleAsync();
-                        Assert.Equal("import:stash-ai-server", aiRun.SourceKey);
-                        Assert.Equal(AiRunTargetType.Scene, aiRun.TargetType);
-                        Assert.Equal(scene.Id, aiRun.TargetId);
-                        Assert.Equal(AiRunStatus.Completed, aiRun.Status);
-                        Assert.Equal("AIOverhaul", aiRun.Trigger);
-                        Assert.Equal(2.5, aiRun.FrameIntervalSec);
-                        Assert.True(aiRun.Vr);
-                        Assert.NotNull(aiRun.Request);
-                        Assert.Equal(2.5, aiRun.Request!.RootElement.GetProperty("frame_interval").GetDouble());
-                        Assert.NotNull(aiRun.Models);
-                        Assert.Equal("wd14", aiRun.Models!.RootElement[0].GetProperty("name").GetString());
-                        Assert.NotNull(aiRun.Summary);
-                        Assert.Equal(10, aiRun.Summary!.RootElement.GetProperty("legacyRunId").GetInt32());
-
-                        var segment = await context.Segments.SingleAsync();
-                        Assert.Equal(SegmentHostType.Scene, segment.HostType);
-                        Assert.Equal(scene.Id, segment.HostId);
-                        Assert.Equal(tag.Id, segment.TagId);
-                        Assert.Equal("import:stash-ai-server", segment.SourceKey);
-                        Assert.Equal(aiRun.RunKey, segment.SourceRunId);
-                        Assert.Equal(12.0, segment.StartSec);
-                        Assert.Equal(15.0, segment.EndSec);
-                        Assert.Equal(30L, segment.RefId);
-                        Assert.Equal(0.82f, segment.Confidence);
-                        Assert.NotNull(segment.Payload);
-                        Assert.Equal("body", segment.Payload!.RootElement.GetProperty("category").GetString());
-                }
-                finally
-                {
-                    TryDeleteFile(aiDbPath);
-                }
-        }
-
-        [Fact]
-        public async Task ImportAiTagDataAsync_FallsBackToTagNameMappingWhenValueIdMissing()
-        {
-                await using var context = CreateContext();
-                var scene = new Scene { Title = "Imported Scene" };
-                var tag = new Tag { Name = "Body" };
-                context.AddRange(scene, tag);
-                await context.SaveChangesAsync();
-
-                var aiDbPath = await CreateAiSqliteDatabaseAsync(@"
-CREATE TABLE ai_model_runs (
-    id INTEGER PRIMARY KEY,
-    service TEXT NOT NULL,
-    plugin_name TEXT,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    input_params TEXT,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    result_metadata TEXT
-);
-CREATE TABLE ai_result_timespans (
-    id INTEGER PRIMARY KEY,
-    run_id INTEGER NOT NULL,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    payload_type TEXT NOT NULL,
-    category TEXT,
-    str_value TEXT,
-    value_id INTEGER,
-    start_s REAL NOT NULL,
-    end_s REAL,
-    value_json TEXT,
-    created_at TEXT NOT NULL
-);
-INSERT INTO ai_model_runs (id, service, plugin_name, entity_type, entity_id, status, input_params, started_at, completed_at, result_metadata)
-VALUES (11, 'aioverhaul', 'AIOverhaul', 'scene', 3, 'completed', NULL, '2024-02-01T00:00:00Z', '2024-02-01T00:05:00Z', NULL);
-INSERT INTO ai_result_timespans (id, run_id, entity_type, entity_id, payload_type, category, str_value, value_id, start_s, end_s, value_json, created_at)
-VALUES (31, 11, 'scene', 3, 'tag', NULL, 'Body', NULL, 1.0, 2.0, NULL, '2024-02-01T00:00:00Z');
-");
-
-                try
-                {
-                        var service = CreateService(context);
-                        var (runCount, segmentCount) = ((ValueTuple<int, int>)(await InvokePrivateAsync(
-                                service,
-                                "ImportAiTagDataAsync",
-                                aiDbPath,
-                                new Dictionary<int, int> { [3] = scene.Id },
-                                new Dictionary<int, int>(),
-                                new Dictionary<int, int>(),
-                                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["Body"] = tag.Id },
-                                NullJobProgress.Instance,
-                                0d,
-                                1d,
-                                CancellationToken.None))!);
-
-                        Assert.Equal(1, runCount);
-                        Assert.Equal(1, segmentCount);
-
-                        var segment = await context.Segments.SingleAsync();
-                        Assert.Equal(tag.Id, segment.TagId);
-                        Assert.Equal(31L, segment.RefId);
-                        Assert.Equal(1.0, segment.StartSec);
-                        Assert.Equal(2.0, segment.EndSec);
-                }
-                finally
-                {
-                    TryDeleteFile(aiDbPath);
-                }
-        }
-
-    [Fact]
-    public async Task RunAiTagImportAsync_ImportsFromExistingStashMappings()
-    {
-        await using var context = CreateContext();
-        var scene = new Scene
-        {
-            Title = "Imported Scene",
-            RemoteIds = [new SceneRemoteId { Endpoint = "StashDB", RemoteId = "3" }],
-        };
-        var tag = new Tag { Name = "Body" };
-        context.AddRange(scene, tag);
-        await context.SaveChangesAsync();
-
-        var stashDbPath = await CreateSqliteDatabaseAsync(@"
-CREATE TABLE tags (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL
-);
-INSERT INTO tags (id, name) VALUES (7, 'Body');
-");
-        var aiDbPath = await CreateAiSqliteDatabaseAsync(@"
-CREATE TABLE ai_model_runs (
-    id INTEGER PRIMARY KEY,
-    service TEXT NOT NULL,
-    plugin_name TEXT,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    input_params TEXT,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    result_metadata TEXT
-);
-CREATE TABLE ai_result_timespans (
-    id INTEGER PRIMARY KEY,
-    run_id INTEGER NOT NULL,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    payload_type TEXT NOT NULL,
-    category TEXT,
-    str_value TEXT,
-    value_id INTEGER,
-    start_s REAL NOT NULL,
-    end_s REAL,
-    value_json TEXT,
-    created_at TEXT NOT NULL
-);
-INSERT INTO ai_model_runs (id, service, plugin_name, entity_type, entity_id, status, input_params, started_at, completed_at, result_metadata)
-VALUES (41, 'aioverhaul', 'AIOverhaul', 'scene', 3, 'completed', NULL, '2024-02-01T00:00:00Z', '2024-02-01T00:05:00Z', NULL);
-INSERT INTO ai_result_timespans (id, run_id, entity_type, entity_id, payload_type, category, str_value, value_id, start_s, end_s, value_json, created_at)
-VALUES (51, 41, 'scene', 3, 'tag', 'body', NULL, 7, 8.0, 11.0, '{""confidence"":0.75}', '2024-02-01T00:00:00Z');
-");
-
-        try
-        {
-            var service = CreateService(context);
-            var result = await service.RunAiTagImportAsync(stashDbPath, aiDbPath, NullJobProgress.Instance, CancellationToken.None);
-
-            Assert.Equal(1, result.AiRuns);
-            Assert.Equal(1, result.Segments);
-
-            var aiRun = await context.AiRuns.SingleAsync();
-            Assert.Equal(AiRunTargetType.Scene, aiRun.TargetType);
-            Assert.Equal(scene.Id, aiRun.TargetId);
-
-            var segment = await context.Segments.SingleAsync();
-            Assert.Equal(tag.Id, segment.TagId);
-            Assert.Equal(scene.Id, segment.HostId);
-            Assert.Equal(51L, segment.RefId);
-            Assert.Equal(8.0, segment.StartSec);
-            Assert.Equal(11.0, segment.EndSec);
-        }
-        finally
-        {
-            TryDeleteFile(stashDbPath);
-            TryDeleteFile(aiDbPath);
-        }
-    }
-
     private static StashMigrationService CreateService(CoveContext context, IBlobService? blobService = null)
     {
         var config = new CoveConfiguration();
@@ -1379,9 +1137,6 @@ VALUES (51, 41, 'scene', 3, 'tag', 'body', NULL, 7, 8.0, 11.0, '{""confidence"":
         await ExecuteSqlAsync(connection, sql);
         return dbPath;
     }
-
-    private static Task<string> CreateAiSqliteDatabaseAsync(string sql)
-        => CreateSqliteDatabaseAsync(sql, "cove-ai-import");
 
     private static void TryDeleteFile(string path)
     {

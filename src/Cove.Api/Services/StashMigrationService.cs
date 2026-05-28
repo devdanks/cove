@@ -19,8 +19,8 @@ namespace Cove.Api.Services;
 
 public record StashPreviewResult(bool IsValid, string? Error, int Scenes, int Performers, int Tags, int Studios, int Groups, int Images, int Galleries);
 public record StashImportResult(int Scenes, int Performers, int Tags, int Studios, int Groups, int Images, int Galleries);
-public record StashAiImportResult(int AiRuns, int Segments);
-public record StashImportOptions(string? CoveGeneratedPath, bool MigrateGeneratedContent = true, string? AiDataSource = null);
+public record StashPathMapping(string Source, string Target);
+public record StashImportOptions(string? CoveGeneratedPath, bool MigrateGeneratedContent = true, IReadOnlyList<StashPathMapping>? PathMappings = null);
 
 public sealed class StashMigrationInProgressException(string message) : InvalidOperationException(message);
 
@@ -87,12 +87,8 @@ public partial class StashMigrationService
     private static readonly object ImportSync = new();
     private static readonly Queue<string> importResultOrder = new();
     private static readonly Dictionary<string, StashImportResult> importResults = [];
-    private static readonly Queue<string> aiImportResultOrder = new();
-    private static readonly Dictionary<string, StashAiImportResult> aiImportResults = [];
     private static string? activeImportPath;
     private static string? activeImportJobId;
-    private static string? activeAiImportPath;
-    private static string? activeAiImportJobId;
 
     private const double BlobsStart = 0.02;
     private const double BlobsEnd = 0.08;
@@ -114,11 +110,9 @@ public partial class StashMigrationService
     private const double ImagesEnd = 0.93;
     private const double GalleriesStart = 0.93;
     private const double GalleriesEnd = 0.97;
-    private const double AiDataStart = 0.97;
-    private const double AiDataEnd = 0.985;
-    private const double LibraryPathsStart = 0.985;
-    private const double LibraryPathsEnd = 0.9925;
-    private const double GeneratedAssetsStart = 0.9925;
+    private const double LibraryPathsStart = 0.97;
+    private const double LibraryPathsEnd = 0.985;
+    private const double GeneratedAssetsStart = 0.985;
     private const double GeneratedAssetsEnd = 1.0;
 
     public StashMigrationService(
@@ -310,11 +304,11 @@ public partial class StashMigrationService
         if (string.IsNullOrWhiteSpace(stashDbPath))
             throw new ArgumentException("Stash database path is required.", nameof(stashDbPath));
 
-        options ??= new StashImportOptions(null, true);
+        options = NormalizeImportOptions(options);
 
         lock (ImportSync)
         {
-            if (!string.IsNullOrWhiteSpace(activeImportJobId) || !string.IsNullOrWhiteSpace(activeAiImportJobId))
+            if (!string.IsNullOrWhiteSpace(activeImportJobId))
             {
                 if (!string.IsNullOrWhiteSpace(activeImportJobId)
                     && string.Equals(activeImportPath, stashDbPath, StringComparison.OrdinalIgnoreCase))
@@ -323,8 +317,7 @@ public partial class StashMigrationService
                     return activeImportJobId;
                 }
 
-                var activePath = activeImportPath ?? activeAiImportPath;
-                throw new StashMigrationInProgressException($"A Stash migration is already running for {activePath}.");
+                throw new StashMigrationInProgressException($"A Stash migration is already running for {activeImportPath}.");
             }
 
             activeImportPath = stashDbPath;
@@ -362,63 +355,6 @@ public partial class StashMigrationService
         }
     }
 
-    public string StartAiTagImport(string stashDbPath, string aiDataSource)
-    {
-        if (string.IsNullOrWhiteSpace(stashDbPath))
-            throw new ArgumentException("Stash database path is required.", nameof(stashDbPath));
-        if (string.IsNullOrWhiteSpace(aiDataSource))
-            throw new ArgumentException("AI data source is required.", nameof(aiDataSource));
-
-        lock (ImportSync)
-        {
-            if (!string.IsNullOrWhiteSpace(activeImportJobId) || !string.IsNullOrWhiteSpace(activeAiImportJobId))
-            {
-                if (!string.IsNullOrWhiteSpace(activeAiImportJobId)
-                    && string.Equals(activeAiImportPath, stashDbPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogInformation("AI tag import already running for {Path}; joining existing job", stashDbPath);
-                    return activeAiImportJobId;
-                }
-
-                var activePath = activeImportPath ?? activeAiImportPath;
-                throw new StashMigrationInProgressException($"A Stash migration is already running for {activePath}.");
-            }
-
-            activeAiImportPath = stashDbPath;
-            string? jobId = null;
-            jobId = _jobService.Enqueue("stash-ai-import", "Importing AI tag data", async (progress, ct) =>
-            {
-                try
-                {
-                    using var scope = _scopeFactory.CreateScope();
-                    var scopedMigration = scope.ServiceProvider.GetRequiredService<StashMigrationService>();
-                    var result = await scopedMigration.RunAiTagImportAsync(stashDbPath, aiDataSource, progress, ct);
-
-                    lock (ImportSync)
-                    {
-                        aiImportResults[jobId!] = result;
-                        aiImportResultOrder.Enqueue(jobId!);
-                        TrimAiImportResultsLocked();
-                    }
-                }
-                finally
-                {
-                    lock (ImportSync)
-                    {
-                        if (string.Equals(activeAiImportJobId, jobId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            activeAiImportJobId = null;
-                            activeAiImportPath = null;
-                        }
-                    }
-                }
-            });
-
-            activeAiImportJobId = jobId;
-            return jobId;
-        }
-    }
-
     public StashImportResult? GetImportResult(string jobId)
     {
         lock (ImportSync)
@@ -427,56 +363,13 @@ public partial class StashMigrationService
         }
     }
 
-    public StashAiImportResult? GetAiImportResult(string jobId)
-    {
-        lock (ImportSync)
-        {
-            return aiImportResults.TryGetValue(jobId, out var result) ? result : null;
-        }
-    }
-
     public async Task<StashImportResult> RunImportAsync(string stashDbPath, StashImportOptions? options, IJobProgress progress, CancellationToken ct = default)
     {
-        options ??= new StashImportOptions(null, true);
+        options = NormalizeImportOptions(options);
         progress.Report(0.01, "Opening Stash database...");
         var result = await ImportCoreAsync(stashDbPath, options, progress, ct);
         progress.Report(1.0, "Import complete");
         return result;
-    }
-
-    public async Task<StashAiImportResult> RunAiTagImportAsync(string stashDbPath, string aiDataSource, IJobProgress progress, CancellationToken ct = default)
-    {
-        if (!File.Exists(stashDbPath))
-            throw new FileNotFoundException($"Database file not found: {stashDbPath}", stashDbPath);
-        if (string.IsNullOrWhiteSpace(aiDataSource))
-            throw new ArgumentException("AI data source is required.", nameof(aiDataSource));
-
-        progress.Report(0.02, "Opening Stash database...");
-        await using var conn = new SqliteConnection(OpenReadOnly(stashDbPath));
-        await conn.OpenAsync(ct);
-
-        var sceneIdMap = await BuildExistingSceneIdMapAsync(ct);
-        if (sceneIdMap.Count == 0)
-            throw new InvalidOperationException("No imported Stash scenes were found. Run the main Stash migration before importing AI tag data.");
-
-        var tagNameToCoveIdMap = await BuildCoveTagNameMapAsync(ct);
-        var tagIdMap = await BuildExistingTagIdMapAsync(conn, tagNameToCoveIdMap, ct);
-        if (tagIdMap.Count == 0)
-            throw new InvalidOperationException("No imported Stash tag mappings were found. Ensure your Stash tags were imported before importing AI tag data.");
-
-        var (aiRunCount, segmentCount) = await ImportAiTagDataAsync(
-            aiDataSource,
-            sceneIdMap,
-            new Dictionary<int, int>(),
-            tagIdMap,
-            tagNameToCoveIdMap,
-            progress,
-            0.08,
-            1.0,
-            ct);
-
-        progress.Report(1.0, "AI tag import complete");
-        return new StashAiImportResult(aiRunCount, segmentCount);
     }
 
     private async Task<StashImportResult> ImportCoreAsync(string stashDbPath, StashImportOptions options, IJobProgress progress, CancellationToken ct)
@@ -497,6 +390,7 @@ public partial class StashMigrationService
         var stashConfig = File.Exists(configPath)
             ? ParseStashConfig(configPath)
             : new StashConfigData([], null, "OSHASH", null, null, []);
+        stashConfig = ApplyStashConfigPathMappings(stashConfig, options.PathMappings ?? []);
 
         _currentImportCustomPerformerImageLocation = stashConfig.CustomPerformerImageLocation;
         try
@@ -509,7 +403,7 @@ public partial class StashMigrationService
             var folderIdMap = await RunBulkInsertPhaseAsync(
                 "folders",
                 sw,
-                () => ImportFoldersAsync(conn, progress, FoldersStart, FoldersEnd, ct));
+                () => ImportFoldersAsync(conn, options.PathMappings ?? [], progress, FoldersStart, FoldersEnd, ct));
             _db.ChangeTracker.Clear();
 
             var studioIdMap = await RunBulkInsertPhaseAsync(
@@ -566,26 +460,13 @@ public partial class StashMigrationService
                 () => ReconcileImportedZipLinksAsync(conn, folderIdMap, imageIdMap, galleryFileIdMap, ct));
             _db.ChangeTracker.Clear();
 
-            IReadOnlyDictionary<string, int> tagNameToCoveIdMap = string.IsNullOrWhiteSpace(options.AiDataSource)
-                ? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-                : await RunMigrationPhaseAsync(
-                    "build AI tag name map",
-                    sw,
-                    () => BuildStashTagNameToCoveIdMapAsync(conn, tagIdMap, ct));
-
-            await RunBulkInsertPhaseAsync(
-                "AI tag data",
-                sw,
-                () => ImportAiTagDataAsync(options.AiDataSource, sceneIdMap, imageIdMap, tagIdMap, tagNameToCoveIdMap, progress, AiDataStart, AiDataEnd, ct));
-            _db.ChangeTracker.Clear();
-
             await RunMigrationPhaseAsync(
                 "stash config",
                 sw,
                 async () =>
                 {
                     progress.Report(LibraryPathsStart, "Importing Stash config...");
-                    await ImportStashConfigAsync(stashDbPath, ct);
+                    await ImportStashConfigAsync(stashConfig, ct);
                     progress.Report(LibraryPathsEnd, "Stash config imported");
                 });
 

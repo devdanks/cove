@@ -98,7 +98,7 @@ public partial class StashMigrationService
         return map;
     }
 
-    private async Task<Dictionary<int, int>> ImportFoldersAsync(SqliteConnection conn, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
+    private async Task<Dictionary<int, int>> ImportFoldersAsync(SqliteConnection conn, IReadOnlyList<StashPathMapping> pathMappings, IJobProgress progress, double startProgress, double endProgress, CancellationToken ct)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var folderData = new Dictionary<int, (string Path, int? ParentId, DateTime ModTime, DateTime CreatedAt)>();
@@ -116,7 +116,7 @@ public partial class StashMigrationService
             id => folderData[id].ParentId.HasValue ? [folderData[id].ParentId!.Value] : (IEnumerable<int>)[]);
 
         var allPaths = folderData.Values
-            .SelectMany(fd => GetImportedPathLookupCandidates(fd.Path))
+            .SelectMany(fd => GetImportedPathLookupCandidates(ApplyStashPathMappings(fd.Path, pathMappings) ?? fd.Path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         var existingFoldersByPath = _db.Folders
@@ -164,7 +164,7 @@ public partial class StashMigrationService
         foreach (var stashFolderId in ordered)
         {
             var fd = folderData[stashFolderId];
-            var normalizedPath = NormalizeImportedPath(fd.Path);
+            var normalizedPath = NormalizeImportedPath(ApplyStashPathMappings(fd.Path, pathMappings) ?? fd.Path);
             if (existingFoldersByPath.TryGetValue(normalizedPath, out var existingId))
             {
                 folderIdMap[stashFolderId] = existingId;
@@ -354,19 +354,10 @@ WHERE files.zip_file_id IS NOT NULL";
     private static string GetImportedBaseFileKey(int parentFolderId, string basename)
         => $"{parentFolderId}|{basename}";
 
-    private async Task ImportStashConfigAsync(string stashDbPath, CancellationToken ct)
+    private async Task ImportStashConfigAsync(StashConfigData stashConfig, CancellationToken ct)
     {
         try
         {
-            var configDir = Path.GetDirectoryName(stashDbPath)!;
-            var configPath = Path.Combine(configDir, "config.yml");
-            if (!File.Exists(configPath))
-            {
-                _logger.LogWarning("Stash config.yml not found at {Path}, skipping config import", configPath);
-                return;
-            }
-
-            var stashConfig = ParseStashConfig(configPath);
             var dto = _configService.GetConfig();
             var (addedPaths, addedMetadataServers, updatedMetadataServers) = MergeStashConfigIntoCoveConfig(dto, stashConfig);
             if (addedPaths == 0 && addedMetadataServers == 0 && updatedMetadataServers == 0)
