@@ -285,7 +285,7 @@ public sealed class BootstrapAuthService : IHostedService
         }
         else
         {
-            // Generate a random initial password and surface it in the log + a sentinel file.
+            // Generate a random initial password and surface it in a sentinel file.
             var seed = TokenService.NewOpaqueToken();
             var plain = seed.plain[..16];
             passwordHash = PasswordHasher.HashPassword(plain);
@@ -303,7 +303,7 @@ public sealed class BootstrapAuthService : IHostedService
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Failed to write owner_password sentinel; password is: {Password}", plain);
+                _log.LogError(ex, "Failed to write owner_password sentinel for generated owner password.");
             }
         }
 

@@ -19,6 +19,7 @@ import {
   type UserRow,
 } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { SettingsButton as Btn, SettingsField as Field, SettingsSection as Section } from "../../components/SettingsPrimitives";
 import { buildRoutePath } from "../../router/location";
 import { EntityReferenceSelector } from "../../components/EntityReferenceSelector";
 
@@ -386,31 +387,6 @@ function ContentRuleScopeFields({ scopeKind, draft, onChange }: { scopeKind: Sim
       ) : null}
     </div>
   );
-}
-
-function Section({ title, description, children, actions }: { title: string; description?: string; children: React.ReactNode; actions?: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-app bg-surface p-5 shadow-sm">
-      <header className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">{title}</h2>
-          {description ? <p className="mt-1 text-sm text-secondary">{description}</p> : null}
-        </div>
-        {actions}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function Btn(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "danger" | "ghost" }) {
-  const { variant = "ghost", className = "", ...rest } = props;
-  const base = "inline-flex min-h-10 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition sm:min-h-0 sm:py-1.5";
-  const v =
-    variant === "primary" ? "bg-blue-600 text-white hover:bg-blue-500" :
-    variant === "danger" ? "bg-red-600 text-white hover:bg-red-500" :
-    "border border-app bg-surface-2 hover:bg-surface-3";
-  return <button {...rest} className={`${base} ${v} ${className}`} />;
 }
 
 function UserStatus({ user }: { user: UserRow }) {
@@ -1539,15 +1515,6 @@ function IssuedShareLinkDialog({ link, onClose }: { link: ShareLinkIssuedRow; on
 // =========================================================================
 // shared
 // =========================================================================
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block text-sm">
-      <span className="mb-1 block text-secondary">{label}</span>
-      {children}
-    </label>
-  );
-}
-
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
   const pointerStartedOnBackdrop = useRef(false);
 

@@ -4,6 +4,7 @@ import { Database, RefreshCw, Search, Trash2 } from "lucide-react";
 
 import { aiData } from "../../api/client";
 import type { AiDataKind, AiDataPurgeRequest, AiDataPurgeResult, AiDataSelector, AiDataSummaryItem } from "../../api/types";
+import { SectionCard, SelectField, SettingsMetricCard, TextField } from "../../components/SettingsPrimitives";
 import { useExtensions } from "../../extensions/ExtensionLoader";
 
 const KIND_OPTIONS: Array<{ value: AiDataKind; label: string }> = [
@@ -101,12 +102,10 @@ export function AiDataSettingsPanel() {
         onCancel={() => setConfirmOpen(false)}
       />
 
-      <section className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">AI Artifact Totals</h3>
-            <p className="mt-1 text-sm text-secondary">Current counts across embeddings, detections, timeline segments, tag provenance, and face-owned AI state.</p>
-          </div>
+      <SectionCard
+        title="AI Artifact Totals"
+        description="Current counts across embeddings, detections, timeline segments, tag provenance, and face-owned AI state."
+        actions={(
           <button
             type="button"
             onClick={() => {
@@ -117,14 +116,15 @@ export function AiDataSettingsPanel() {
             <RefreshCw className={`h-4 w-4 ${summaryQuery.isFetching ? "animate-spin" : ""}`} />
             Refresh
           </button>
-        </div>
+        )}
+      >
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {KIND_OPTIONS.map((option) => (
-            <SummaryCard key={option.value} label={option.label} value={overallSummary?.totals?.[option.value] ?? 0} />
+            <SettingsMetricCard key={option.value} label={option.label} value={(overallSummary?.totals?.[option.value] ?? 0).toLocaleString()} />
           ))}
         </div>
-      </section>
+      </SectionCard>
 
       {aiDataPanels.map((panel) => {
         const Component = resolveComponent(panel.componentName);
@@ -133,23 +133,18 @@ export function AiDataSettingsPanel() {
         }
 
         return (
-          <section key={panel.id} className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
-            <div className="mb-4">
-              <h3 className="text-base font-semibold text-foreground">{panel.label}</h3>
-              <p className="mt-1 text-sm text-secondary">Provided by the {panel.extensionId} extension.</p>
-            </div>
+          <SectionCard key={panel.id} title={panel.label} description={`Provided by the ${panel.extensionId} extension.`}>
             <Component />
-          </section>
+          </SectionCard>
         );
       })}
 
 
-      <section className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">Selector</h3>
-            <p className="mt-1 text-sm text-secondary">Preview a selector before running a destructive purge. Leaving fields empty broadens the match.</p>
-          </div>
+      <SectionCard
+        title="Selector"
+        description="Preview a selector before running a destructive purge. Leaving fields empty broadens the match."
+        headerClassName="flex-col lg:flex-row lg:items-start"
+        actions={(
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -185,15 +180,16 @@ export function AiDataSettingsPanel() {
               Purge
             </button>
           </div>
-        </div>
+        )}
+      >
 
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <LabeledInput label="Source key" value={filters.sourceKey} onChange={(value) => setFilters((current) => ({ ...current, sourceKey: value }))} placeholder="ext:your.extension" />
-          <LabeledInput label="Source run id" value={filters.sourceRunId} onChange={(value) => setFilters((current) => ({ ...current, sourceRunId: value }))} placeholder="run-1234" />
-          <LabeledInput label="Model" value={filters.model} onChange={(value) => setFilters((current) => ({ ...current, model: value }))} placeholder="tagger-v1" />
-          <LabeledSelect label="Modality" value={filters.modality} onChange={(value) => setFilters((current) => ({ ...current, modality: value }))} options={MODALITY_OPTIONS} />
-          <LabeledSelect label="Host type" value={filters.hostType} onChange={(value) => setFilters((current) => ({ ...current, hostType: value }))} options={HOST_TYPE_OPTIONS} />
-          <LabeledInput label="Host id" value={filters.hostId} onChange={(value) => setFilters((current) => ({ ...current, hostId: value }))} placeholder="42" />
+          <TextField label="Source key" value={filters.sourceKey} onChange={(value) => setFilters((current) => ({ ...current, sourceKey: value }))} placeholder="ext:your.extension" />
+          <TextField label="Source run id" value={filters.sourceRunId} onChange={(value) => setFilters((current) => ({ ...current, sourceRunId: value }))} placeholder="run-1234" />
+          <TextField label="Model" value={filters.model} onChange={(value) => setFilters((current) => ({ ...current, model: value }))} placeholder="tagger-v1" />
+          <SelectField label="Modality" value={filters.modality} onChange={(value) => setFilters((current) => ({ ...current, modality: value }))} options={buildAnyOptions(MODALITY_OPTIONS)} />
+          <SelectField label="Host type" value={filters.hostType} onChange={(value) => setFilters((current) => ({ ...current, hostType: value }))} options={buildAnyOptions(HOST_TYPE_OPTIONS)} />
+          <TextField label="Host id" value={filters.hostId} onChange={(value) => setFilters((current) => ({ ...current, hostId: value }))} placeholder="42" />
         </div>
 
         <div className="mt-4">
@@ -257,13 +253,9 @@ export function AiDataSettingsPanel() {
             )}
           </div>
         ) : null}
-      </section>
+      </SectionCard>
 
-      <section className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
-        <div>
-          <h3 className="text-base font-semibold text-foreground">{previewSummary && previewMatchesCurrent ? "Preview Results" : "Summary Table"}</h3>
-          <p className="mt-1 text-sm text-secondary">Grouped by artifact kind, detail, provenance source, model, and host type.</p>
-        </div>
+      <SectionCard title={previewSummary && previewMatchesCurrent ? "Preview Results" : "Summary Table"} description="Grouped by artifact kind, detail, provenance source, model, and host type.">
 
         {summaryQuery.isLoading || previewSummaryQuery.isFetching ? (
           <div className="mt-6 flex items-center justify-center py-10 text-secondary">
@@ -304,7 +296,7 @@ export function AiDataSettingsPanel() {
             No AI artifacts matched the current selector.
           </div>
         )}
-      </section>
+      </SectionCard>
     </div>
   );
 }
@@ -343,10 +335,7 @@ function PurgeKindCounts({ result }: { result: AiDataPurgeResult }) {
   return (
     <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
       {KIND_OPTIONS.map((option) => (
-        <div key={option.value} className="rounded-xl border border-border bg-surface p-4">
-          <div className="text-xs uppercase tracking-[0.16em] text-muted">{option.label}</div>
-          <div className="mt-2 text-xl font-semibold text-foreground">{(result.removedCounts[option.value] ?? 0).toLocaleString()}</div>
-        </div>
+        <SettingsMetricCard key={option.value} label={option.label} value={(result.removedCounts[option.value] ?? 0).toLocaleString()} valueClassName="text-xl" />
       ))}
     </div>
   );
@@ -436,45 +425,11 @@ function PurgeConfirmDialog({
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="text-xs uppercase tracking-[0.16em] text-muted">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-foreground">{value.toLocaleString()}</div>
-    </div>
-  );
-}
-
-function LabeledInput({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
-  return (
-    <label className="flex flex-col gap-2 text-sm text-secondary">
-      <span>{label}</span>
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-      />
-    </label>
-  );
-}
-
-function LabeledSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
-  return (
-    <label className="flex flex-col gap-2 text-sm text-secondary">
-      <span>{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-      >
-        <option value="">Any</option>
-        {options.map((option) => (
-          <option key={option} value={option}>{formatKind(option)}</option>
-        ))}
-      </select>
-    </label>
-  );
+function buildAnyOptions(options: readonly string[]) {
+  return [
+    { value: "", label: "Any" },
+    ...options.map((option) => ({ value: option, label: formatKind(option) })),
+  ];
 }
 
 function formatKind(value: string) {

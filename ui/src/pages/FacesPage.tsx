@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BoolCriterion, CriterionModifier, CustomFieldCriterion, FaceBatchOperationResult, FindFilter, FaceTopSuggestion, IntCriterion, MultiIdCriterion, StringCriterion } from "../api/types";
-import { aiFaces, faces } from "../api/client";
+import { faces } from "../api/client";
 import type { Face } from "../api/types";
 import { Fingerprint, Link2, Trash2 } from "lucide-react";
 import { ListPage, type DisplayMode } from "../components/ListPage";
@@ -448,9 +448,9 @@ export function FacesPage({ onNavigate }: Props) {
     queryClient.invalidateQueries({ queryKey: ["face", faceId, "suggestions"] });
   }, [queryClient]);
 
-  const linkMutation = useMutation({
-    mutationFn: (data: { faceId: number; performerId: number; setPerformerImage?: boolean }) =>
-      faces.link(data.faceId, { performerId: data.performerId, setPerformerImage: data.setPerformerImage }),
+  const suggestionDecisionMutation = useMutation({
+    mutationFn: (data: { faceId: number; performerId: number; decision: "accept" | "reject"; setPerformerImage?: boolean }) =>
+      faces.recordSuggestionDecision(data.faceId, { performerId: data.performerId, decision: data.decision, setPerformerImage: data.setPerformerImage }),
     onSuccess: (_, variables) => {
       invalidateFace(variables.faceId);
     },
@@ -474,25 +474,6 @@ export function FacesPage({ onNavigate }: Props) {
     },
   });
 
-  const rejectSuggestionMutation = useMutation({
-    mutationFn: (data: { faceId: number; performerId: number }) =>
-      faces.recordSuggestionDecision(data.faceId, { performerId: data.performerId, decision: "reject" }),
-    onSuccess: (_, variables) => {
-      invalidateFace(variables.faceId);
-    },
-  });
-
-  const referenceSuggestionMutation = useMutation({
-    mutationFn: (data: { faceId: number; referenceSuggestionId: number; action: "import" | "reject" }) =>
-      data.action === "import"
-        ? aiFaces.importReferencePerformer(data.faceId, { referenceSuggestionId: data.referenceSuggestionId })
-        : aiFaces.rejectReferenceSuggestion(data.faceId, { referenceSuggestionId: data.referenceSuggestionId }),
-    onSuccess: (_, variables) => {
-      invalidateFace(variables.faceId);
-      queryClient.invalidateQueries({ queryKey: ["ai-faces", "reference", "status"] });
-    },
-  });
-
   const handleFilterChange = useCallback((next: FindFilter) => {
     setFilter({ ...next, sort: readFaceSort(next.sort) });
   }, [setFilter]);
@@ -501,31 +482,17 @@ export function FacesPage({ onNavigate }: Props) {
     setObjectFilter(sanitizeFaceFilters(next));
   }, [setObjectFilter]);
 
-  const compareBusy = linkMutation.isPending || rejectSuggestionMutation.isPending || referenceSuggestionMutation.isPending;
+  const compareBusy = suggestionDecisionMutation.isPending;
 
   const handleConfirmSuggestion = useCallback((face: Face, suggestion: FaceTopSuggestion, options?: { setPerformerImage?: boolean }) => {
-    const localPerformerId = suggestion.localPerformerId ?? (suggestion.performerId > 0 ? suggestion.performerId : undefined);
-    if (localPerformerId != null) {
-      linkMutation.mutate({ faceId: face.id, performerId: localPerformerId, setPerformerImage: options?.setPerformerImage });
-      setComparison(null);
-      return;
-    }
-
-    referenceSuggestionMutation.mutate({ faceId: face.id, referenceSuggestionId: suggestion.performerId, action: "import" });
+    suggestionDecisionMutation.mutate({ faceId: face.id, performerId: suggestion.performerId, decision: "accept", setPerformerImage: options?.setPerformerImage });
     setComparison(null);
-  }, [linkMutation, referenceSuggestionMutation]);
+  }, [suggestionDecisionMutation]);
 
   const handleRejectSuggestion = useCallback((face: Face, suggestion: FaceTopSuggestion) => {
-    const localPerformerId = suggestion.localPerformerId ?? (suggestion.performerId > 0 ? suggestion.performerId : undefined);
-    if (localPerformerId != null) {
-      rejectSuggestionMutation.mutate({ faceId: face.id, performerId: localPerformerId });
-      setComparison(null);
-      return;
-    }
-
-    referenceSuggestionMutation.mutate({ faceId: face.id, referenceSuggestionId: suggestion.performerId, action: "reject" });
+    suggestionDecisionMutation.mutate({ faceId: face.id, performerId: suggestion.performerId, decision: "reject" });
     setComparison(null);
-  }, [referenceSuggestionMutation, rejectSuggestionMutation]);
+  }, [suggestionDecisionMutation]);
 
   return (
     <>

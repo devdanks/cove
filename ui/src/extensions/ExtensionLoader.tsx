@@ -1,7 +1,7 @@
 /**
  * Extension Runtime - Fetches the extension manifest and integrates all extension
  * contributions into the frontend: routes, slots, tabs, themes, page overrides,
- * dialog overrides, and settings panels.
+ * and settings panels.
  *
  * The architecture:
  * - Backend extensions declare UI contributions via UIManifest (JSON)
@@ -24,7 +24,6 @@ import type {
   ExtensionThemeDef,
   ExtensionTabContribution,
   ExtensionPageOverride,
-  ExtensionDialogOverride,
   ExtensionSettingsTab,
   ExtensionSettingsPanel,
   ExtensionComponentStyleDef,
@@ -96,8 +95,6 @@ interface ExtensionState {
   getTabsForPage: (pageType: string) => ExtensionTabContribution[];
   /** Page override for a specific built-in page (highest priority wins) */
   getPageOverride: (targetPage: string) => ExtensionPageOverride | undefined;
-  /** Dialog override for a specific dialog ID (highest priority wins) */
-  getDialogOverride: (dialogId: string) => ExtensionDialogOverride | undefined;
   /** Feature capabilities contributed by extensions */
   features: ExtensionFeatureDef[];
   /** Resolve a feature capability by stable key */
@@ -140,7 +137,6 @@ const ExtensionContext = createContext<ExtensionState>({
   setCustomThemeColors: () => {},
   getTabsForPage: () => [],
   getPageOverride: () => undefined,
-  getDialogOverride: () => undefined,
   features: [],
   getFeature: () => undefined,
   settingsTabs: [],
@@ -673,14 +669,6 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
     [manifest]
   );
 
-  const getDialogOverride = useCallback(
-    (dialogId: string) => {
-      const overrides = manifest?.dialogOverrides.filter((o) => o.dialogId === dialogId) ?? [];
-      return overrides.sort((a, b) => b.priority - a.priority)[0];
-    },
-    [manifest]
-  );
-
   const availableComponentStyles = manifest?.componentStyles ?? [];
   const availableLayoutStyles = manifest?.layoutStyles ?? [];
   const features = manifest?.features ?? [];
@@ -767,7 +755,6 @@ export function ExtensionLoaderProvider({ children }: { children: ReactNode }) {
         setCustomThemeColors,
         getTabsForPage,
         getPageOverride,
-        getDialogOverride,
         features,
         getFeature,
         settingsTabs,

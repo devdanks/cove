@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { metadata, type GenerateOptions } from "../api/client";
-import { X, Loader2, Clapperboard, Check } from "lucide-react";
+import { Loader2, Check } from "lucide-react";
+import { EditModal } from "./EditModal";
 
 interface Props {
   open: boolean;
@@ -55,24 +56,9 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
   const isSceneScoped = (sceneIds?.length ?? 0) > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
-      <div
-        className="bg-surface border border-border rounded-xl shadow-2xl w-full max-w-md"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Clapperboard className="w-5 h-5 text-accent" />
-            <h2 className="text-lg font-semibold text-foreground">{title ?? label}</h2>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-card-hover text-muted hover:text-foreground">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+    <EditModal open={open} onClose={onClose} title={title ?? label}>
         {/* Options */}
-        <div className="p-5 space-y-3">
+        <div className="space-y-3">
           <p className="text-sm text-secondary mb-4">Select what to generate:</p>
 
           <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Scene Content</h4>
@@ -132,7 +118,7 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
+        <div className="mt-5 flex items-center justify-end gap-2 border-t border-border pt-4">
           {submitted ? (
             <>
               <div className="flex items-center gap-2 text-sm text-green-400 mr-auto">
@@ -173,7 +159,6 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
             </>
           )}
         </div>
-      </div>
-    </div>
+    </EditModal>
   );
 }

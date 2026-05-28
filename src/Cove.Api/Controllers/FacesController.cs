@@ -25,7 +25,8 @@ public class FacesController(
     ILogger<FacesController> logger,
     IEnumerable<IFaceSuggester>? faceSuggesters = null,
     ICurrentPrincipalAccessor? principalAccessor = null,
-    IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
+    IFieldProvenanceService? fieldProvenanceService = null,
+    IEnumerable<IFaceSuggestionDecisionHandler>? faceSuggestionDecisionHandlers = null) : ControllerBase
 {
     private const int TopSuggestionCandidateCount = 3;
 
@@ -808,7 +809,18 @@ public class FacesController(
             .Include(item => item.RemoteIds)
             .FirstOrDefaultAsync(item => item.Id == dto.PerformerId, cancellationToken);
         if (performer is null)
+        {
+            var providerOutcome = await TryHandleProviderSuggestionDecisionAsync(id, dto, normalizedDecision, cancellationToken);
+            if (providerOutcome is not null)
+            {
+                if (providerOutcome.Succeeded)
+                    return NoContent();
+
+                return StatusCode(providerOutcome.StatusCode ?? StatusCodes.Status400BadRequest, new { error = providerOutcome.Error ?? "Suggestion decision was not accepted by the provider." });
+            }
+
             return ValidationProblem($"Performer {dto.PerformerId} was not found.");
+        }
 
         var decision = await db.FaceSuggestionDecisions
             .FirstOrDefaultAsync(item => item.FaceId == id && item.PerformerId == dto.PerformerId && item.UserId == userId, cancellationToken);
@@ -837,6 +849,23 @@ public class FacesController(
 
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
+    }
+
+    private async Task<FaceSuggestionDecisionOutcome?> TryHandleProviderSuggestionDecisionAsync(int faceId, FaceSuggestionDecisionDto dto, string normalizedDecision, CancellationToken cancellationToken)
+    {
+        var handlers = (faceSuggestionDecisionHandlers ?? []).ToArray();
+        if (handlers.Length == 0)
+            return null;
+
+        var request = new FaceSuggestionDecisionRequest(faceId, dto.PerformerId, normalizedDecision, dto.SetPerformerImage == true);
+        foreach (var handler in handlers)
+        {
+            var outcome = await handler.TryHandleAsync(request, cancellationToken);
+            if (outcome.Handled)
+                return outcome;
+        }
+
+        return null;
     }
 
     [HttpPost("{id:int}/merge-into")]

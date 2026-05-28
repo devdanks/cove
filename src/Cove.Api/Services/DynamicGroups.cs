@@ -1208,8 +1208,8 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         query = FilterHelpers.ApplyInt(query, filter.FileCountCriterion, audio => audio.FileCount);
         query = FilterHelpers.ApplyInt(query, filter.TrackCountCriterion, audio => audio.Tracks.Count);
         query = FilterHelpers.ApplyString(query, filter.TrackTitleCriterion, audio => audio.Tracks.Select(track => track.Title).FirstOrDefault());
-        query = FilterHelpers.ApplyInt(query, filter.SampleRateCriterion, audio => audio.Files.Select(file => file.SampleRate ?? 0).DefaultIfEmpty(0).Max());
-        query = FilterHelpers.ApplyInt(query, filter.ChannelsCriterion, audio => audio.Files.Select(file => file.Channels ?? 0).DefaultIfEmpty(0).Max());
+        query = FilterHelpers.ApplyInt(query, filter.SampleRateCriterion, audio => audio.Files.Max(file => file.SampleRate) ?? 0);
+        query = FilterHelpers.ApplyInt(query, filter.ChannelsCriterion, audio => audio.Files.Max(file => file.Channels) ?? 0);
         query = ApplyAudioEffectiveTagCountCriterion(query, filter.TagCountCriterion);
         query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, audio => audio.AudioPerformers.Count);
         query = ApplyAudioTagCriterion(query, filter.TagsCriterion);

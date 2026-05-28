@@ -543,7 +543,7 @@ export interface Image {
 }
 
 
-export interface AiVisualSimilarScene {
+export interface VisualSimilarScene {
   scene: Scene;
   distance: number;
   sectionIndex: number;
@@ -551,7 +551,7 @@ export interface AiVisualSimilarScene {
   endSec?: number;
 }
 
-export interface AiAudioSimilarScene {
+export interface AudioSimilarScene {
   scene: Scene;
   distance: number;
   sectionIndex: number;
@@ -559,7 +559,7 @@ export interface AiAudioSimilarScene {
   endSec?: number;
 }
 
-export interface AiVisualSimilarImage {
+export interface VisualSimilarImage {
   image: Image;
   distance: number;
 }
@@ -3012,16 +3012,6 @@ export interface RunPluginTaskRequest {
 
 export interface PluginSettings {
   enabledMap: Record<string, boolean>;
-}
-
-export interface Package {
-  name: string;
-  description: string;
-  version: string;
-  sourceUrl: string;
-  type: string;
-  installed: boolean;
-  installedVersion?: string;
 }
 
 // ===== Extension System Types =====

@@ -2362,10 +2362,6 @@ public record PluginTaskDto(string Name, string Description);
 public record RunPluginTaskDto(string PluginId, string TaskName, Dictionary<string, string>? Args);
 public record PluginSettingsDto(Dictionary<string, bool> EnabledMap);
 
-public record PackageDto(string Name, string Description, string Version, string SourceUrl, string Type, bool Installed, string? InstalledVersion);
-public record InstallPackagesDto(List<InstallPackageEntryDto> Packages);
-public record InstallPackageEntryDto(string Id, string SourceUrl);
-
 // ===== DIRECTORY LISTING =====
 public record DirectoryEntryDto(string Path, bool IsDirectory);
 

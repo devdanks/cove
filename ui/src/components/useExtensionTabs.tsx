@@ -20,14 +20,22 @@ interface Tab {
 export function useExtensionTabs(pageType: string, builtInTabs: Tab[], entityId?: number) {
   const { getTabsForPage, resolveComponent } = useExtensions();
 
-  const extTabs = getTabsForPage(pageType);
+  const extTabs = useMemo(() => getTabsForPage(pageType), [getTabsForPage, pageType]);
 
   // Fetch counts for extension tabs with countEndpoint
   const [extCounts, setExtCounts] = useState<Record<string, number>>({});
   useEffect(() => {
-    if (entityId == null) return;
+    if (entityId == null) {
+      setExtCounts((current) => Object.keys(current).length === 0 ? current : {});
+      return;
+    }
+
     const toFetch = extTabs.filter((t) => t.countEndpoint);
-    if (toFetch.length === 0) return;
+    if (toFetch.length === 0) {
+      setExtCounts((current) => Object.keys(current).length === 0 ? current : {});
+      return;
+    }
+
     let cancelled = false;
     Promise.all(
       toFetch.map(async (t) => {
@@ -38,7 +46,10 @@ export function useExtensionTabs(pageType: string, builtInTabs: Tab[], entityId?
             const data = await res.json();
             return { key: t.key, count: data.count ?? 0 } as { key: string; count: number };
           }
-        } catch {}
+          console.warn(`[Extensions] Count endpoint failed for tab ${t.key}: ${res.status} ${res.statusText}`);
+        } catch (error) {
+          console.warn(`[Extensions] Count endpoint failed for tab ${t.key}`, error);
+        }
         return null;
       })
     ).then((results) => {
@@ -47,7 +58,14 @@ export function useExtensionTabs(pageType: string, builtInTabs: Tab[], entityId?
       for (const r of results) {
         if (r) counts[r.key] = r.count;
       }
-      setExtCounts(counts);
+      setExtCounts((current) => {
+        const currentKeys = Object.keys(current);
+        const nextKeys = Object.keys(counts);
+        if (currentKeys.length === nextKeys.length && nextKeys.every((key) => current[key] === counts[key])) {
+          return current;
+        }
+        return counts;
+      });
     });
     return () => { cancelled = true; };
   }, [entityId, extTabs]);

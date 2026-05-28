@@ -21,6 +21,7 @@ import { createRouteLinkProps } from "../components/cardNavigation";
 import { StringListEditor } from "../components/StringListEditor";
 import { StudioSelector } from "../components/StudioSelector";
 import { ExtensionEntityActions } from "../components/ExtensionEntityActions";
+import { ExtensionErrorBoundary } from "../components/ExtensionErrorBoundary";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { RemoteIdsEditor, normalizeRemoteIds, type RemoteIdValue } from "../components/RemoteIdsEditor";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -247,17 +248,9 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     return () => document.removeEventListener("mousedown", handler);
   }, [showOpsMenu]);
 
-  // Apply CSS filters to video element when videoFilters change
-  useEffect(() => {
-    const video = document.querySelector('video');
-    if (video) {
-      const { brightness, contrast, saturation, hue } = videoFilters;
-      video.style.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) hue-rotate(${hue}deg)`;
-    }
-    return () => {
-      const video = document.querySelector('video');
-      if (video) video.style.filter = '';
-    };
+  const videoStyle = useMemo(() => {
+    const { brightness, contrast, saturation, hue } = videoFilters;
+    return { filter: `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) hue-rotate(${hue}deg)` };
   }, [videoFilters]);
 
   const deleteMut = useMutation({
@@ -372,6 +365,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const activeProfileName = displayProfiles.find((profile) => profile.id === activeProfileId)?.name ?? "Resolved";
   const hasVisualSimilarity = useSceneVisualSimilarityAvailable(id);
   const hasAudioSimilarity = useSceneAudioSimilarityAvailable(id);
+  const sceneExtTabs = useMemo(() => getTabsForPage("scene"), [getTabsForPage]);
 
   const tabs = filterItemsByPermission([
     { key: "details", label: "Details" },
@@ -381,7 +375,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     { key: "filters", label: "Filters" },
     { key: "file-info", label: `File Info${scene?.files.length && scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },
     { key: "history", label: "History" },
-    ...getTabsForPage("scene").map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label, manualContexts: t.manualContexts })),
+    ...sceneExtTabs.map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label, manualContexts: t.manualContexts })),
     { key: "edit", label: "Edit" },
   ], {
     segments: "segments.read",
@@ -615,11 +609,15 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     <SceneEditPanel scene={scene} onSaved={() => setActiveTab("details")} />
   ) : activeTab.startsWith("ext:") ? (() => {
     const extTabKey = activeTab.replace("ext:", "");
-    const extTab = getTabsForPage("scene").find((tab) => tab.key === extTabKey);
+    const extTab = sceneExtTabs.find((tab) => tab.key === extTabKey);
     if (!extTab) return null;
     const Component = resolveExtComponent(extTab.componentName);
     if (!Component) return <div className="p-4 text-muted">Extension component not found: {extTab.componentName}</div>;
-    return <Component entityId={id} />;
+    return (
+      <ExtensionErrorBoundary extensionId={extTab.extensionId}>
+        <Component entityId={id} />
+      </ExtensionErrorBoundary>
+    );
   })() : null;
 
   const sceneMedia = (
@@ -637,6 +635,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             segments={segments}
             faces={sceneFaces.map(({ face }) => face)}
             captions={file.captions}
+            videoStyle={videoStyle}
             onSeekRegister={(fn) => { seekRef.current = fn; }}
             onTimeUpdate={setVideoTime}
             autostart={config?.ui.autostartVideo}

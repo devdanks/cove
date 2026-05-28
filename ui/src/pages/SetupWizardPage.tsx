@@ -96,40 +96,6 @@ function ThemeMiniPreview({
 }) {
   const textStyle = (opacity: number) => ({ background: foreground, opacity });
 
-  return (
-    <div className="overflow-hidden rounded-xl border border-black/10" style={{ background }}>
-      <div className="flex items-center justify-between gap-2 border-b border-black/10 px-3 py-2" style={{ background: card }}>
-        <div className="flex items-center gap-1.5">
-          {[background, card, accent, foreground].map((color, index) => (
-            <span key={`${color}-${index}`} className="h-4 w-4 rounded-full border border-black/15" style={{ background: color }} />
-          ))}
-        </div>
-        <div className="h-2.5 w-16 rounded-full" style={textStyle(0.55)} />
-      </div>
-      <div className="grid grid-cols-[4rem_minmax(0,1fr)] gap-3 p-3">
-        <div className="space-y-2 rounded-xl p-2" style={{ background: card }}>
-          {[0.78, 0.56, 0.38].map((opacity, index) => (
-            <div key={index} className="h-2 rounded-full" style={textStyle(opacity)} />
-          ))}
-        </div>
-        <div className="space-y-2">
-          <div className="overflow-hidden rounded-xl" style={{ background: card }}>
-            <div className="aspect-[16/7]" style={{ background: accent, opacity: 0.86 }} />
-            <div className="space-y-1.5 p-2">
-              <div className="h-2.5 w-3/4 rounded-full" style={textStyle(0.78)} />
-              <div className="h-2 w-1/2 rounded-full" style={textStyle(0.42)} />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-1.5">
-            {[0.9, 0.68, 0.46].map((opacity, index) => (
-              <div key={index} className="h-8 rounded-lg" style={{ background: index === 0 ? accent : card, opacity }} />
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   if (variant === "library") {
     return (
       <div className="rounded-xl border border-black/10 p-3" style={{ background }}>

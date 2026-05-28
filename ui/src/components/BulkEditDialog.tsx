@@ -9,7 +9,7 @@ import { EntityReferenceMultiSelector, type EntityReferenceType } from "./Entity
 
 // ===== Generic Bulk Edit Dialog =====
 
-interface BulkEditField {
+export interface BulkEditField {
   key: string;
   label: string;
   type: "rating" | "number" | "bool" | "string" | "date" | "select" | "multiId";

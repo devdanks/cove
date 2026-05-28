@@ -189,22 +189,18 @@ public class ScanService(
                     {
                         continue;
                     }
-                    if (scanTarget.ExcludeVideo && videoExts.Contains(ext))
-                    {
+                    if (IsMediaTypeExcludedByScanTarget(
+                        ext,
+                        scanTarget.ExcludeVideo,
+                        scanTarget.ExcludeImage,
+                        scanTarget.ExcludeAudio,
+                        scanTarget.ExcludeText,
+                        videoExts,
+                        imageExts,
+                        galleryExts,
+                        audioExts,
+                        textExts))
                         continue;
-                    }
-                    if (scanTarget.ExcludeImage && imageExts.Contains(ext))
-                    {
-                        continue;
-                    }
-                    if (scanTarget.ExcludeAudio && audioExts.Contains(ext))
-                    {
-                        continue;
-                    }
-                    if (scanTarget.ExcludeText && textExts.Contains(ext))
-                    {
-                        continue;
-                    }
                     if (IsExcludedByConfiguredPatterns(scanTarget.Path, ext, imageExts, galleryExts, cfg)
                         || IsExcludedByFolderIgnore(scanTarget.Path, Path.GetDirectoryName(scanTarget.Path) ?? scanTarget.Path, ignoreRuleCache))
                     {
@@ -226,10 +222,17 @@ public class ScanService(
                     {
                         var ext = Path.GetExtension(f);
                         if (!allExts.Contains(ext)) return false;
-                        if (scanTarget.ExcludeVideo && videoExts.Contains(ext)) return false;
-                        if (scanTarget.ExcludeImage && imageExts.Contains(ext)) return false;
-                        if (scanTarget.ExcludeAudio && audioExts.Contains(ext)) return false;
-                        if (scanTarget.ExcludeText && textExts.Contains(ext)) return false;
+                        if (IsMediaTypeExcludedByScanTarget(
+                            ext,
+                            scanTarget.ExcludeVideo,
+                            scanTarget.ExcludeImage,
+                            scanTarget.ExcludeAudio,
+                            scanTarget.ExcludeText,
+                            videoExts,
+                            imageExts,
+                            galleryExts,
+                            audioExts,
+                            textExts)) return false;
                         return !IsExcludedByConfiguredPatterns(f, ext, imageExts, galleryExts, cfg)
                             && !IsExcludedByFolderIgnore(f, scanTarget.Path, ignoreRuleCache);
                     })
@@ -1739,6 +1742,24 @@ public class ScanService(
     internal static bool NeedsVideoMetadataProbe(VideoFile videoFile)
     {
         return videoFile.Width <= 0 || videoFile.Height <= 0 || videoFile.Duration <= 0;
+    }
+
+    internal static bool IsMediaTypeExcludedByScanTarget(
+        string extension,
+        bool excludeVideo,
+        bool excludeImage,
+        bool excludeAudio,
+        bool excludeText,
+        IReadOnlySet<string> videoExts,
+        IReadOnlySet<string> imageExts,
+        IReadOnlySet<string> galleryExts,
+        IReadOnlySet<string> audioExts,
+        IReadOnlySet<string> textExts)
+    {
+        return (excludeVideo && videoExts.Contains(extension))
+            || (excludeImage && (imageExts.Contains(extension) || galleryExts.Contains(extension)))
+            || (excludeAudio && audioExts.Contains(extension))
+            || (excludeText && textExts.Contains(extension));
     }
 
     private async Task ProbeVideoAsync(VideoFile videoFile, string path, CancellationToken ct)

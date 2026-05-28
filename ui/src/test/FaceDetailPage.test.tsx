@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FaceDetailPage } from "../pages/FaceDetailPage";
 
-const { mockFaces, mockPerformers, mockAiFaces, mockEntityEngagement, mockGoBack } = vi.hoisted(() => ({
+const { mockFaces, mockPerformers, mockEntityEngagement, mockGoBack } = vi.hoisted(() => ({
   mockFaces: {
     get: vi.fn(),
     similar: vi.fn(),
@@ -12,6 +12,7 @@ const { mockFaces, mockPerformers, mockAiFaces, mockEntityEngagement, mockGoBack
     deleteImpact: vi.fn(),
     update: vi.fn(),
     link: vi.fn(),
+    recordSuggestionDecision: vi.fn(),
     setIgnored: vi.fn(),
     mergeInto: vi.fn(),
     delete: vi.fn(),
@@ -19,10 +20,6 @@ const { mockFaces, mockPerformers, mockAiFaces, mockEntityEngagement, mockGoBack
   },
   mockPerformers: {
     find: vi.fn(),
-  },
-  mockAiFaces: {
-    importReferencePerformer: vi.fn(),
-    rejectReferenceSuggestion: vi.fn(),
   },
   mockEntityEngagement: {
     get: vi.fn(),
@@ -34,7 +31,6 @@ const { mockFaces, mockPerformers, mockAiFaces, mockEntityEngagement, mockGoBack
 
 vi.mock("../api/client", () => ({
   faces: mockFaces,
-  aiFaces: mockAiFaces,
   performers: mockPerformers,
   entityEngagement: mockEntityEngagement,
 }));

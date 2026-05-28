@@ -15,6 +15,10 @@ using System.Text;
 
 namespace Cove.Api.Services;
 
+public sealed record AutoScrapeAttemptResult(string ScraperId, string ScraperName, bool ReturnedResults, string? Error);
+
+public sealed record AutoScrapeResult(string? ScraperId, Dictionary<string, object>? Result, IReadOnlyList<AutoScrapeAttemptResult> Attempts);
+
 public class ScraperService
 {
     private static readonly string[] SupportedExtensions = [".yml", ".yaml"];
@@ -106,25 +110,48 @@ public class ScraperService
     /// </summary>
     public async Task<(string ScraperId, Dictionary<string, object> Result)?> ScrapeUrlAutoAsync(string url, string entityType, CancellationToken ct = default)
     {
+        var result = await ScrapeUrlAutoDetailedAsync(url, entityType, ct);
+        return result.Result is { Count: > 0 } && result.ScraperId is not null
+            ? (result.ScraperId, result.Result)
+            : null;
+    }
+
+    public async Task<AutoScrapeResult> ScrapeUrlAutoDetailedAsync(string url, string entityType, CancellationToken ct = default)
+    {
         if (string.IsNullOrWhiteSpace(url))
-            return null;
+            return new AutoScrapeResult(null, null, []);
 
         var candidates = FindScrapersForUrl(url, entityType);
+        var attempts = new List<AutoScrapeAttemptResult>(candidates.Count);
         foreach (var candidate in candidates)
         {
             try
             {
                 var result = await ScrapeUrlAsync(candidate.Id, entityType, url, ct);
                 if (result is { Count: > 0 })
-                    return (candidate.Id, result);
+                {
+                    attempts.Add(new AutoScrapeAttemptResult(candidate.Id, candidate.Name, true, null));
+                    return new AutoScrapeResult(candidate.Id, result, attempts);
+                }
+
+                attempts.Add(new AutoScrapeAttemptResult(candidate.Id, candidate.Name, false, null));
             }
             catch (Exception ex)
             {
+                attempts.Add(new AutoScrapeAttemptResult(candidate.Id, candidate.Name, false, ex.Message));
                 _logger.LogDebug(ex, "Auto scraper {ScraperId} failed for URL {Url}", candidate.Id, url);
             }
         }
 
-        return null;
+        if (attempts.Count > 0)
+        {
+            var summary = string.Join("; ", attempts.Select(attempt => attempt.Error is null
+                ? $"{attempt.ScraperId}: no results"
+                : $"{attempt.ScraperId}: {attempt.Error}"));
+            _logger.LogWarning("Auto scrape matched {CandidateCount} scraper(s) for {EntityType} URL {Url}, but none returned results. Attempts: {Attempts}", attempts.Count, entityType, url, summary);
+        }
+
+        return new AutoScrapeResult(null, null, attempts);
     }
 
     private static bool UrlMatchesPattern(string loweredUrl, string pattern)

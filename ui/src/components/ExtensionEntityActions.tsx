@@ -81,11 +81,6 @@ function shouldSuppressQueuedAlert(action: ExtensionAction, result: unknown): bo
     return true;
   }
 
-  if (result && typeof result === "object") {
-    const queued = result as QueuedActionResponse;
-    return typeof queued.description === "string" && /^run ai\b/i.test(queued.description);
-  }
-
   return false;
 }
 

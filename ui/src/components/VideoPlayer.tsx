@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   Eye,
   EyeOff,
@@ -120,6 +120,7 @@ export function VideoPlayer({
   playbackTracking,
   onEnded: onEndedProp,
   clip,
+  videoStyle,
   onPrev,
   onNext,
 }: {
@@ -143,6 +144,7 @@ export function VideoPlayer({
   playbackTracking?: PlaybackTrackingTarget;
   onEnded?: () => void;
   clip?: { start: number; end?: number | null; loop?: boolean };
+  videoStyle?: CSSProperties;
   onPrev?: () => void;
   onNext?: () => void;
 }) {
@@ -943,6 +945,7 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         className="w-full h-full object-contain cursor-pointer"
+        style={videoStyle}
         preload="metadata"
         poster={posterUrl}
         {...({ "x-webkit-airplay": "allow" } as Record<string, string>)}

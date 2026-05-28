@@ -4,9 +4,23 @@ import { Download, Edit, Image as ImageIcon, Loader2, Trash2, Search, Play, Unli
 import { scenes as scenesApi, images, galleries, performers, groups, studios, tags, audios, texts, entityImages } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
-import type { Audio, DeleteEntityOptions, Scene } from "../api/types";
+import type {
+  Audio,
+  BulkAudioUpdate,
+  BulkGalleryUpdate,
+  BulkGroupUpdate,
+  BulkImageUpdate,
+  BulkPerformerUpdate,
+  BulkSceneUpdate,
+  BulkStudioUpdate,
+  BulkTagUpdate,
+  BulkTextUpdate,
+  DeleteEntityOptions,
+  Scene,
+} from "../api/types";
 import type { TextDocument } from "../api/types";
-import { BulkEditDialog, SCENE_BULK_FIELDS, IMAGE_BULK_FIELDS, GALLERY_BULK_FIELDS, PERFORMER_BULK_FIELDS, GROUP_BULK_FIELDS, STUDIO_BULK_FIELDS, TAG_BULK_FIELDS, AUDIO_BULK_FIELDS, TEXT_BULK_FIELDS } from "./BulkEditDialog";
+import type { Route } from "../router/location";
+import { BulkEditDialog, SCENE_BULK_FIELDS, IMAGE_BULK_FIELDS, GALLERY_BULK_FIELDS, PERFORMER_BULK_FIELDS, GROUP_BULK_FIELDS, STUDIO_BULK_FIELDS, TAG_BULK_FIELDS, AUDIO_BULK_FIELDS, TEXT_BULK_FIELDS, type BulkEditField } from "./BulkEditDialog";
 import { BatchDownloadOptionsDialog } from "./BatchDownloadOptionsDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IdentifyDialog } from "./IdentifyDialog";
@@ -36,7 +50,7 @@ const FIELDS_MAP = {
   tags: TAG_BULK_FIELDS,
   audios: AUDIO_BULK_FIELDS,
   texts: TEXT_BULK_FIELDS,
-} as const;
+} satisfies Record<string, BulkEditField[]>;
 
 const API_MAP = { scenes: scenesApi, images, galleries, performers, groups, studios, tags, audios, texts } as const;
 
@@ -53,6 +67,33 @@ const ENTITY_RESOURCE_MAP = {
 } as const;
 
 type BulkSelectionEntityType = keyof typeof FIELDS_MAP;
+type BulkUpdatePayloadByEntity = {
+  scenes: BulkSceneUpdate;
+  images: BulkImageUpdate;
+  galleries: BulkGalleryUpdate;
+  performers: BulkPerformerUpdate;
+  groups: BulkGroupUpdate;
+  studios: BulkStudioUpdate;
+  tags: BulkTagUpdate;
+  audios: BulkAudioUpdate;
+  texts: BulkTextUpdate;
+};
+type BulkUpdatePayload = BulkUpdatePayloadByEntity[BulkSelectionEntityType];
+
+function runBulkUpdate(entityType: BulkSelectionEntityType, payload: BulkUpdatePayload) {
+  switch (entityType) {
+    case "scenes": return scenesApi.bulkUpdate(payload as BulkSceneUpdate);
+    case "images": return images.bulkUpdate(payload as BulkImageUpdate);
+    case "galleries": return galleries.bulkUpdate(payload as BulkGalleryUpdate);
+    case "performers": return performers.bulkUpdate(payload as BulkPerformerUpdate);
+    case "groups": return groups.bulkUpdate(payload as BulkGroupUpdate);
+    case "studios": return studios.bulkUpdate(payload as BulkStudioUpdate);
+    case "tags": return tags.bulkUpdate(payload as BulkTagUpdate);
+    case "audios": return audios.bulkUpdate(payload as BulkAudioUpdate);
+    case "texts": return texts.bulkUpdate(payload as BulkTextUpdate);
+  }
+}
+
 export type NestedListParent = {
   type: "tag" | "performer" | "studio" | "group" | "gallery";
   id: number;
@@ -196,7 +237,7 @@ interface Props {
   textItems?: TextDocument[];
   downloadItems?: DownloadSelectionItem[];
   /** Navigate callback for the scene queue player */
-  onNavigate?: (route: any) => void;
+  onNavigate?: (route: Route) => void;
   removeFromParent?: NestedListParent;
 }
 
@@ -242,7 +283,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
 
   const bulkEditMut = useMutation<void, Error, Record<string, unknown>>({
     mutationFn: async (values) => {
-      await api.bulkUpdate({ ids: [...selectedIds], ...values } as any);
+      await runBulkUpdate(entityType, { ids: [...selectedIds], ...values } as BulkUpdatePayload);
     },
     onSuccess: () => { queryClient.invalidateQueries(); setShowBulkEdit(false); onDone(); },
   });
@@ -440,7 +481,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           onClose={() => setShowBulkEdit(false)}
           title={`Bulk Edit ${selectedIds.size} ${entityType}`}
           selectedCount={selectedIds.size}
-          fields={fields as any}
+          fields={fields}
           onApply={(values) => bulkEditMut.mutate(values)}
           isPending={bulkEditMut.isPending}
         />

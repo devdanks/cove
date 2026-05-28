@@ -24,6 +24,10 @@ function normalizeRoute(route: Route): Route {
     return route.id != null ? { page: "segment", id: route.id } : { page: "segments" };
   }
 
+  if (route.page === "logs") {
+    return { page: "settings" };
+  }
+
   return route;
 }
 
@@ -53,7 +57,6 @@ const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
   image: "images.read",
   faces: "faces.read",
   sceneparser: "scenes.read",
-  logs: "system.read",
   duplicates: "scenes.read",
   stats: "system.read",
 };
@@ -85,7 +88,6 @@ const CompilationPlayerPage = lazy(() => import("./pages/CompilationPlayerPage")
 const ImageDetailPage = lazy(() => import("./pages/ImageDetailPage").then(m => ({ default: m.ImageDetailPage })));
 const FacesPage = lazy(() => import("./pages/FacesPage").then(m => ({ default: m.FacesPage })));
 const FaceDetailPage = lazy(() => import("./pages/FaceDetailPage").then(m => ({ default: m.FaceDetailPage })));
-const LogsPage = lazy(() => import("./pages/LogsPage").then(m => ({ default: m.LogsPage })));
 const DuplicateFinderPage = lazy(() => import("./pages/DuplicateFinderPage").then(m => ({ default: m.DuplicateFinderPage })));
 
 const SceneFilenameParserPage = lazy(() => import("./pages/SceneFilenameParserPage").then(m => ({ default: m.SceneFilenameParserPage })));
@@ -98,6 +100,14 @@ export default function App() {
   });
 
   useEffect(() => {
+    if (window.location.pathname === "/logs") {
+      const settingsLogsRoute: Route = { page: "settings" };
+      navigateToUrl("/settings/system-info/logs", { replace: true, state: settingsLogsRoute });
+      setRoute(settingsLogsRoute);
+      syncRouteHistory("push");
+      return;
+    }
+
     const legacyRoute = parseLegacyHashRoute(window.location.hash);
     if (legacyRoute) {
       const normalizedLegacyRoute = normalizeRoute(legacyRoute);
@@ -523,7 +533,6 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
       {route.page === "image" && route.id !== undefined && <ImageDetailPage id={route.id} onNavigate={navigate} />}
       {route.page === "settings" && <SettingsPage />}
       {route.page === "stats" && <StatsPage onNavigate={navigate} />}
-      {route.page === "logs" && <LogsPage />}
       {route.page === "duplicates" && <DuplicateFinderPage onNavigate={navigate} />}
       {route.page === "sceneparser" && <SceneFilenameParserPage onNavigate={navigate} />}
     </>

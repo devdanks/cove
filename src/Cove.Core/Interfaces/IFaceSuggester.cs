@@ -3,6 +3,20 @@ using Cove.Core.DTOs;
 namespace Cove.Core.Interfaces;
 
 public sealed record FaceSuggestionOptions(bool IncludeReferenceMatches = true);
+public sealed record FaceSuggestionDecisionRequest(int FaceId, int PerformerId, string Decision, bool SetPerformerImage);
+public sealed record FaceSuggestionDecisionOutcome(bool Handled, bool Succeeded, string? Error = null, int? StatusCode = null)
+{
+    public static readonly FaceSuggestionDecisionOutcome NotHandled = new(false, false);
+    public static readonly FaceSuggestionDecisionOutcome Success = new(true, true);
+
+    public static FaceSuggestionDecisionOutcome Failure(string error, int? statusCode = null)
+        => new(true, false, error, statusCode);
+}
+
+public interface IFaceSuggestionDecisionHandler
+{
+    Task<FaceSuggestionDecisionOutcome> TryHandleAsync(FaceSuggestionDecisionRequest request, CancellationToken cancellationToken = default);
+}
 
 public interface IFaceSuggester
 {

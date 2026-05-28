@@ -20,9 +20,9 @@ import type {
   AiDataPurgeResult,
   AiDataSelector,
   AiDataSummary,
-  AiAudioSimilarScene,
-  AiVisualSimilarImage,
-  AiVisualSimilarScene,
+  AudioSimilarScene,
+  VisualSimilarImage,
+  VisualSimilarScene,
   AffinityHostType,
   Segment, SegmentCreate, SegmentRecord, SegmentUpdate,
   ResolvedSpanDetail, ResolvedSpanList, SceneResolvedSpans, SegmentDisplayProfile,
@@ -93,7 +93,6 @@ import type {
   PluginTask,
   RunPluginTaskRequest,
   PluginSettings,
-  Package,
   ExtensionManifest,
   ExtensionInfo,
   DependencyProblem,
@@ -704,13 +703,13 @@ export function createVisualSimilarityClient(apiBasePath: string) {
     searchImages: (req: FilteredQueryRequest<ImageFilterCriteria>) =>
       request<PaginatedResponse<Image>>(`${normalizedBasePath}/images/search`, { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
     similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>
-      request<{ items: AiVisualSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
+      request<{ items: VisualSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
     similarScenesForImage: (imageId: number, params?: { perPage?: number }) =>
-      request<{ items: AiVisualSimilarScene[] }>(`${normalizedBasePath}/images/${imageId}/similar-scenes${buildQuery(params)}`),
+      request<{ items: VisualSimilarScene[] }>(`${normalizedBasePath}/images/${imageId}/similar-scenes${buildQuery(params)}`),
     similarImagesForImage: (imageId: number, params?: { perPage?: number }) =>
-      request<{ items: AiVisualSimilarImage[] }>(`${normalizedBasePath}/images/${imageId}/similar-images${buildQuery(params)}`),
+      request<{ items: VisualSimilarImage[] }>(`${normalizedBasePath}/images/${imageId}/similar-images${buildQuery(params)}`),
     similarScenesForSceneSegment: (sceneId: number, data: { intervals: Array<{ startSec: number; endSec?: number }>; perPage?: number }) =>
-      request<{ items: AiVisualSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes/segment`, { method: "POST", body: JSON.stringify(data) }),
+      request<{ items: VisualSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes/segment`, { method: "POST", body: JSON.stringify(data) }),
   };
 }
 
@@ -719,7 +718,7 @@ export function createAudioSimilarityClient(apiBasePath: string) {
 
   return {
     similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>
-      request<{ items: AiAudioSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
+      request<{ items: AudioSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
   };
 }
 
@@ -1088,13 +1087,6 @@ export const jobs = {
     request<void>(`/jobs/${id}/reorder`, { method: "PUT", body: JSON.stringify({ beforeJobId: beforeJobId ?? null }) }),
 };
 
-export const aiFaces = {
-  rejectReferenceSuggestion: (faceId: number, data: { referenceSuggestionId: number }) =>
-    request<void>(`/ext/ai-faces/reference/faces/${faceId}/reject`, { method: "POST", body: JSON.stringify(data) }),
-  importReferencePerformer: (faceId: number, data: { referenceSuggestionId: number }) =>
-    request<void>(`/ext/ai-faces/reference/faces/${faceId}/import-performer`, { method: "POST", body: JSON.stringify(data) }),
-};
-
 // ===== Metadata Tasks =====
 export interface ScanOptions {
   paths?: string[];
@@ -1316,20 +1308,6 @@ export const plugins = {
   getConfig: (pluginId: string) => request<Record<string, unknown>>(`/plugins/${encodeURIComponent(pluginId)}/config`),
   setConfig: (pluginId: string, values: Record<string, unknown>) =>
     request<void>(`/plugins/${encodeURIComponent(pluginId)}/config`, { method: "POST", body: JSON.stringify(values) }),
-  installedPackages: (type?: string) => request<Package[]>(`/plugins/packages/installed${type ? `?type=${type}` : ""}`),
-  availablePackages: (type?: string, source?: string) => {
-    const params = new URLSearchParams();
-    if (type) params.set("type", type);
-    if (source) params.set("source", source);
-    const qs = params.toString();
-    return request<Package[]>(`/plugins/packages/available${qs ? `?${qs}` : ""}`);
-  },
-  installPackages: (packages: { id: string; sourceUrl: string }[]) =>
-    request<{ jobId: string }>("/plugins/packages/install", { method: "POST", body: JSON.stringify({ packages }) }),
-  updatePackages: (packages?: { id: string; sourceUrl: string }[]) =>
-    request<{ jobId: string }>("/plugins/packages/update", { method: "POST", body: JSON.stringify(packages ? { packages } : {}) }),
-  uninstallPackages: (ids: string[]) =>
-    request<{ uninstalled: string[] }>("/plugins/packages/uninstall", { method: "POST", body: JSON.stringify(ids) }),
 };
 
 // ===== Extensions =====

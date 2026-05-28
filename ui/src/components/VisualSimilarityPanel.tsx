@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Film, Image as ImageIcon, Sparkles } from "lucide-react";
 import { useVisualSimilarityApi } from "../hooks/useVisualSimilarityApi";
-import type { AiVisualSimilarImage, AiVisualSimilarScene } from "../api/types";
+import type { VisualSimilarImage, VisualSimilarScene } from "../api/types";
 import { formatDuration } from "./shared";
 import { EntityCardGrid } from "./EntityCardGrid";
 import { ImageTile, SceneCard } from "./EntityCards";
@@ -47,7 +47,7 @@ export function useImageVisualSimilarityAvailable(imageId?: number) {
 }
 
 export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {
-  useManualContext(["panel:visual-similarity", "feature:cove.ai.visual.similarity"]);
+  useManualContext(["panel:visual-similarity", "feature:visual-similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
   const similarScenes = useQuery({
     queryKey: ["visual-similarity", "scene", sceneId, "similar-scenes"],
@@ -57,11 +57,11 @@ export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps &
   });
 
   if (!visualSimilarity) {
-    return <UnavailablePanel />;
+    return <UnavailablePanel message="No visual embedding provider is available." />;
   }
 
   if (similarScenes.isError) {
-    return <UnavailablePanel />;
+    return <UnavailablePanel message="Visual similarity could not be loaded." />;
   }
 
   return (
@@ -73,7 +73,7 @@ export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps &
 }
 
 export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps & { imageId: number }) {
-  useManualContext(["panel:visual-similarity", "feature:cove.ai.visual.similarity"]);
+  useManualContext(["panel:visual-similarity", "feature:visual-similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
   const similarScenes = useQuery({
     queryKey: ["visual-similarity", "image", imageId, "similar-scenes"],
@@ -89,11 +89,11 @@ export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps &
   });
 
   if (!visualSimilarity) {
-    return <UnavailablePanel />;
+    return <UnavailablePanel message="No visual embedding provider is available." />;
   }
 
   if (similarScenes.isError && similarImages.isError) {
-    return <UnavailablePanel />;
+    return <UnavailablePanel message="Visual similarity could not be loaded." />;
   }
 
   return (
@@ -122,7 +122,7 @@ export function useSegmentVisualSimilarityAvailable({ sceneId, startSec, endSec,
 }
 
 export function SegmentVisualSimilarityPanel({ sceneId, startSec, endSec, intervals, onNavigate }: PanelProps & { sceneId: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
-  useManualContext(["panel:visual-similarity", "feature:cove.ai.visual.similarity"]);
+  useManualContext(["panel:visual-similarity", "feature:visual-similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
   const queryIntervals = normalizeIntervals(intervals, startSec, endSec);
   const intervalKey = queryIntervals.map((interval) => `${interval.startSec}:${interval.endSec ?? ""}`).join("|");
@@ -134,11 +134,11 @@ export function SegmentVisualSimilarityPanel({ sceneId, startSec, endSec, interv
   });
 
   if (!visualSimilarity) {
-    return <UnavailablePanel />;
+    return <UnavailablePanel message="No visual embedding provider is available." />;
   }
 
   if (similarScenes.isError) {
-    return <UnavailablePanel />;
+    return <UnavailablePanel message="Visual similarity could not be loaded." />;
   }
 
   return (
@@ -158,7 +158,7 @@ function SimilarityHeader() {
   );
 }
 
-function SimilarSceneSection({ title, items, loading, error, onNavigate }: { title: string; items: AiVisualSimilarScene[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
+function SimilarSceneSection({ title, items, loading, error, onNavigate }: { title: string; items: VisualSimilarScene[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
   if (error) {
     return null;
   }
@@ -181,7 +181,7 @@ function SimilarSceneSection({ title, items, loading, error, onNavigate }: { tit
   );
 }
 
-function SimilarImageSection({ title, items, loading, error, onNavigate }: { title: string; items: AiVisualSimilarImage[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
+function SimilarImageSection({ title, items, loading, error, onNavigate }: { title: string; items: VisualSimilarImage[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
   if (error) {
     return null;
   }
@@ -213,7 +213,7 @@ function SectionTitle({ title, count }: { title: string; count: number }) {
   );
 }
 
-function SimilarSceneCard({ item, onNavigate }: { item: AiVisualSimilarScene; onNavigate: (route: any) => void }) {
+function SimilarSceneCard({ item, onNavigate }: { item: VisualSimilarScene; onNavigate: (route: any) => void }) {
   const scene = item.scene;
   const matchStart = item.sectionIndex > 0 ? item.startSec : undefined;
 
@@ -225,7 +225,7 @@ function SimilarSceneCard({ item, onNavigate }: { item: AiVisualSimilarScene; on
   );
 }
 
-function SimilarImageCard({ item, onNavigate }: { item: AiVisualSimilarImage; onNavigate: (route: any) => void }) {
+function SimilarImageCard({ item, onNavigate }: { item: VisualSimilarImage; onNavigate: (route: any) => void }) {
   const image = item.image;
 
   return (
@@ -259,11 +259,11 @@ function EmptyPanel({ icon, message }: { icon: ReactNode; message: string }) {
   );
 }
 
-function UnavailablePanel() {
-  return <EmptyPanel icon={<Sparkles className="h-10 w-10" />} message="Visual similarity is unavailable." />;
+function UnavailablePanel({ message }: { message: string }) {
+  return <EmptyPanel icon={<Sparkles className="h-10 w-10" />} message={message} />;
 }
 
-function getSceneMeta(item: AiVisualSimilarScene) {
+function getSceneMeta(item: VisualSimilarScene) {
   if (item.sectionIndex > 0 && item.startSec != null) {
     return item.endSec != null ? `${formatDuration(item.startSec)} - ${formatDuration(item.endSec)}` : formatDuration(item.startSec);
   }

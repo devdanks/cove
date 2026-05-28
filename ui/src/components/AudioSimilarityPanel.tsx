@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Film, Volume2 } from "lucide-react";
 import { useAudioSimilarityApi } from "../hooks/useAudioSimilarityApi";
-import type { AiAudioSimilarScene } from "../api/types";
+import type { AudioSimilarScene } from "../api/types";
 import { formatDuration } from "./shared";
 import { EntityCardGrid } from "./EntityCardGrid";
 import { SceneCard } from "./EntityCards";
@@ -28,7 +28,7 @@ export function useSceneAudioSimilarityAvailable(sceneId?: number) {
 }
 
 export function SceneAudioSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {
-  useManualContext(["panel:audio-similarity", "feature:cove.ai.audio.similarity"]);
+  useManualContext(["panel:audio-similarity", "feature:audio-similarity"]);
   const audioSimilarity = useAudioSimilarityApi();
   const similarScenes = useQuery({
     queryKey: ["audio-similarity", "scene", sceneId, "similar-scenes"],
@@ -38,11 +38,11 @@ export function SceneAudioSimilarityPanel({ sceneId, onNavigate }: PanelProps & 
   });
 
   if (!audioSimilarity) {
-    return <UnavailablePanel />;
+    return <UnavailablePanel message="No audio embedding provider is available." />;
   }
 
   if (similarScenes.isError) {
-    return <UnavailablePanel />;
+    return <UnavailablePanel message="Audio similarity could not be loaded." />;
   }
 
   return (
@@ -62,7 +62,7 @@ function SimilarityHeader() {
   );
 }
 
-function SimilarSceneSection({ title, items, loading, error, onNavigate }: { title: string; items: AiAudioSimilarScene[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
+function SimilarSceneSection({ title, items, loading, error, onNavigate }: { title: string; items: AudioSimilarScene[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
   if (error) {
     return null;
   }
@@ -94,7 +94,7 @@ function SectionTitle({ title, count }: { title: string; count: number }) {
   );
 }
 
-function SimilarSceneCard({ item, onNavigate }: { item: AiAudioSimilarScene; onNavigate: (route: any) => void }) {
+function SimilarSceneCard({ item, onNavigate }: { item: AudioSimilarScene; onNavigate: (route: any) => void }) {
   const scene = item.scene;
   const matchStart = item.sectionIndex > 0 ? item.startSec : undefined;
 
@@ -129,11 +129,11 @@ function EmptyPanel({ icon, message }: { icon: ReactNode; message: string }) {
   );
 }
 
-function UnavailablePanel() {
-  return <EmptyPanel icon={<Volume2 className="h-10 w-10" />} message="Audio similarity is unavailable." />;
+function UnavailablePanel({ message }: { message: string }) {
+  return <EmptyPanel icon={<Volume2 className="h-10 w-10" />} message={message} />;
 }
 
-function getSceneMeta(item: AiAudioSimilarScene) {
+function getSceneMeta(item: AudioSimilarScene) {
   if (item.sectionIndex > 0 && item.startSec != null) {
     return item.endSec != null ? `${formatDuration(item.startSec)} - ${formatDuration(item.endSec)}` : formatDuration(item.startSec);
   }

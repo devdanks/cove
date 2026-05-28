@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { scenes } from "../api/client";
 import type { Scene, FindFilter } from "../api/types";
@@ -239,7 +239,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
   });
 
   // Reparse whenever data or config changes
-  useMemo(() => {
+  useEffect(() => {
     if (!data?.items || !appliedConfig) return;
 
     const compiled = compilePattern(appliedConfig.pattern, appliedConfig.whitespaceReplacement);

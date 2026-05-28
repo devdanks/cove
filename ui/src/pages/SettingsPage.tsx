@@ -69,6 +69,7 @@ import { DisplayProfilesSettingsPanel } from "./settings/DisplayProfilesSettings
 import { AiDataSettingsPanel } from "./settings/AiDataSettingsPanel";
 import { SortableList } from "../components/SortableList";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { CheckboxLabel, CollapsibleSection, InfoPair, NumberField, SectionCard, SelectField, TaskCard, TextAreaField, TextField } from "../components/SettingsPrimitives";
 import {
   DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS,
   formatBatchDownloadSummary,
@@ -446,82 +447,6 @@ const TASK_GENERATE_OPTIONS_KEY = "cove-settings-generate-options";
 const TASK_DOWNLOAD_IMPORT_OPTIONS_KEY = "cove-settings-download-import-options";
 const TASK_DOWNLOAD_IMPORT_CACHE_KEY = "cove-settings-download-import-cache";
 const KEYBINDING_CAPTURE_COMMIT_MS = 850;
-
-const fieldDescriptionFallbacks: Record<string, string> = {
-  "Max parallel tasks (-1 = all CPU threads)": "Caps concurrent background work. Use -1 to let Cove scale to available CPU threads.",
-  "Exclude videos": "Skip video files under this library path during scans.",
-  "Exclude images": "Skip image files under this library path during scans.",
-  "Exclude audio": "Skip audio files under this library path during scans.",
-  "Generated path": "Directory where Cove writes generated covers, thumbnails, previews, sprites, and similar assets.",
-  "Cache path": "Directory for transient cache files that can be regenerated.",
-  "Preview preset": "FFmpeg preset used when Cove creates generated video previews.",
-  "Max concurrent downloads": "Limits how many downloader jobs can actively fetch media at the same time.",
-  "Site override (optional)": "Restricts this downloader path override to a specific normalized site key.",
-  "Save path": "Destination folder used by matching downloader jobs.",
-  "Video extensions": "File extensions treated as videos during library scans.",
-  "Image extensions": "File extensions treated as images during library scans.",
-  "Gallery extensions": "Archive or gallery file extensions discovered during scans.",
-  "Calculate MD5 checksums during scan": "Computes MD5 hashes while scanning so exact duplicate checks have stable file fingerprints.",
-  "Exclude patterns": "Path fragments or glob-like patterns ignored during library scans.",
-  "Excluded image patterns": "Image-specific path patterns ignored during scans.",
-  "Excluded gallery patterns": "Gallery-specific path patterns ignored during scans.",
-  "Create galleries from folders": "Treat image folders as gallery entities when scans discover grouped image sets.",
-  "Write image thumbnails": "Generate thumbnail files for images while scanning or generating assets.",
-  "Create image clips from videos": "Allow scans to create still-image clip records derived from video files.",
-  "Delete file default": "Default state for delete dialogs that can also remove source media files.",
-  "Delete generated default": "Default state for delete dialogs that can also remove generated Cove assets.",
-  "Gallery cover regex": "Regular expression used to pick a preferred gallery cover image from gallery file names.",
-  "Rating system": "Controls whether ratings are shown as stars or decimal values.",
-  "Star precision": "Controls how finely star ratings can be adjusted.",
-  "Default player start (%)": "Starts scene playback at this percentage for long enough videos.",
-  "Use default start only for videos longer than (seconds)": "Keeps short videos starting from the beginning even when a start percentage is set.",
-  "Wall show title": "Shows item titles on wall cards.",
-  "Wall playback": "Controls how wall cards start or preview video playback.",
-  "Playback source": "Chooses whether feed-style cards use generated previews or original video playback.",
-  "Play sound by default in Feed and Vertical Viewer": "Controls whether feed and vertical-viewer videos start muted or with audio.",
-  "Full video start (%)": "Starts full-video feed playback at this percentage for long enough videos.",
-  "Use start % only for videos longer than (seconds)": "Keeps shorter feed videos starting at the beginning.",
-  "Slideshow delay (ms)": "Delay between images while slideshow mode advances automatically.",
-  "Enable CSS customization": "Allows custom CSS from settings to be injected into the app shell.",
-  "Custom CSS": "CSS injected into the app when CSS customization is enabled.",
-  "Enable JavaScript customization": "Allows custom JavaScript from settings to run in the app shell.",
-  "Custom JavaScript": "JavaScript injected into the app when JavaScript customization is enabled.",
-  "Authentication required": "Requires users to sign in before accessing protected Cove APIs and pages.",
-  "Allow anonymous share links": "Allows generated share links to grant anonymous read-only access when valid.",
-  "Name": "Friendly display name for this entry.",
-  "Endpoint": "Base URL used when Cove connects to this service.",
-  "Max req/min": "Per-minute request cap used to avoid overwhelming this metadata server.",
-  "Existing linked entities": "Controls whether batch metadata operations keep or overwrite existing linked entities.",
-  "Max auto-apply duration difference (seconds)": "Maximum duration mismatch allowed when Identify auto-applies a match.",
-  "Max auto-apply pHash distance": "Maximum perceptual-hash distance allowed when Identify auto-applies a match.",
-  "Allow Identify to create new performers": "Lets Identify create performer records when applying metadata.",
-  "Allow Identify to create new studios": "Lets Identify create studio records when applying metadata.",
-  "Allow Identify to create new tags": "Lets Identify create tag records when applying metadata.",
-  "Host": "Network interface the Cove API binds to after restart.",
-  "Port": "HTTP port the Cove API listens on after restart.",
-  "Enable hardware acceleration (FFmpeg in-process)": "Allows Cove's in-process FFmpeg work to use configured hardware acceleration when available.",
-  "FFmpeg path": "Optional absolute path to the FFmpeg executable.",
-  "FFprobe path": "Optional absolute path to the FFprobe executable.",
-  "Max transcode size": "Maximum output size used for generated transcodes.",
-  "Max streaming transcode size": "Maximum output size used for live streaming transcodes.",
-  "Hardware acceleration": "Hardware acceleration backend passed to FFmpeg transcode jobs.",
-  "Transcode input args": "Additional FFmpeg input arguments for generated transcodes.",
-  "Transcode output args": "Additional FFmpeg output arguments for generated transcodes.",
-  "Live transcode input args": "Additional FFmpeg input arguments for live streaming transcodes.",
-  "Live transcode output args": "Additional FFmpeg output arguments for live streaming transcodes.",
-  "Enable engagement history": "Records viewing and engagement events for history, activity, and derived recommendations.",
-  "Minimum scene view seconds": "Minimum scene watch time before Cove records a view.",
-  "Scene completion ratio": "Fraction of a scene that must be watched before Cove records completion.",
-  "Minimum image view seconds": "Minimum image detail-view time before Cove records a view.",
-  "Minimum session length for derived likes": "Minimum viewing-session duration before Cove derives engagement from it.",
-  "Session idle timeout seconds": "Idle time after which Cove starts a new engagement session.",
-  "Segment thumbnails": "Generate still thumbnails for resolved segments.",
-  "Animated segment previews": "Generate animated previews for resolved segments.",
-};
-
-function getSettingHelpText(label: string, description?: string) {
-  return description ?? fieldDescriptionFallbacks[label] ?? `Changes the ${label.toLowerCase()} setting.`;
-}
 
 const DEFAULT_SCAN_OPTIONS: ScanOptions = {
   scanGenerateCovers: true,
@@ -1968,6 +1893,18 @@ export function SettingsPage() {
                               ...current,
                               covePaths: current.covePaths.map((item, itemIndex) =>
                                 itemIndex === index ? { ...item, excludeAudio: checked } : item,
+                              ),
+                            }))
+                          }
+                        />
+                        <CheckboxLabel
+                          label="Exclude texts"
+                          checked={path.excludeText}
+                          onChange={(checked) =>
+                            updateDraft((current) => ({
+                              ...current,
+                              covePaths: current.covePaths.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, excludeText: checked } : item,
                               ),
                             }))
                           }
@@ -5323,66 +5260,6 @@ function WipeConfirmInput({ onConfirm, onCancel, isPending, error }: { onConfirm
   );
 }
 
-// ---- Task Card (reusable) ----
-function TaskCard({
-  label,
-  description,
-  onRun,
-  isPending,
-  expandable,
-  expanded,
-  onToggleExpand,
-  runLabel = "Run",
-  statusMessage,
-  children,
-}: {
-  label: string;
-  description: string;
-  onRun: () => void;
-  isPending: boolean;
-  expandable?: boolean;
-  expanded?: boolean;
-  onToggleExpand?: () => void;
-  runLabel?: string;
-  statusMessage?: { type: "success" | "error"; text: string } | null;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          {expandable && onToggleExpand && (
-            <button onClick={onToggleExpand} className="text-muted hover:text-foreground flex-shrink-0">
-              {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </button>
-          )}
-          <div>
-            <h4 className="text-sm font-medium text-foreground">{label}</h4>
-            <p className="text-xs text-secondary mt-0.5">{description}</p>
-          </div>
-        </div>
-        <button
-          onClick={onRun}
-          disabled={isPending}
-          className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60 flex-shrink-0 ml-3"
-        >
-          {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-          {runLabel}
-        </button>
-      </div>
-      {statusMessage && (
-        <p className={`text-xs mt-2 ${statusMessage.type === "success" ? "text-green-400" : "text-red-400"}`}>
-          {statusMessage.text}
-        </p>
-      )}
-      {/* Always show children (e.g. Clean dry-run checkbox), or show only when expanded */}
-      {children && (!expandable || expanded) && (
-        <div className="mt-3">{children}</div>
-      )}
-    </div>
-  );
-}
-
 // ===== Color + Alpha helpers for custom theme colors =====
 /** Parse a CSS color value into hex + alpha. Handles hex, rgba, and named colors. */
 function parseColorAlpha(raw: string): { hex: string; alpha: number } {
@@ -5894,164 +5771,6 @@ function ThemeSelector() {
   );
 }
 
-function CollapsibleSection({ title, subtitle, expanded, onToggle, children }: { title: string; subtitle?: string; expanded: boolean; onToggle: () => void; children: React.ReactNode }) {
-  return (
-    <div className="border border-border rounded-xl overflow-hidden">
-      <button onClick={onToggle} className="w-full flex items-center justify-between px-4 py-3 bg-card hover:bg-card-hover transition-colors text-left">
-        <div className="min-w-0">
-          <span className="text-sm font-medium text-foreground">{title}</span>
-          {subtitle && <span className="text-xs text-muted ml-2">({subtitle})</span>}
-        </div>
-        {expanded ? <ChevronUp className="w-4 h-4 text-muted shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted shrink-0" />}
-      </button>
-      {expanded && <div className="px-4 py-3 border-t border-border">{children}</div>}
-    </div>
-  );
-}
-
-function SectionCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-border bg-surface p-5 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.7)]">
-      <div className="mb-4">
-        <h3 className="text-base font-semibold text-foreground">{title}</h3>
-        <p className="mt-1 text-sm text-secondary">{description}</p>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function TextField({
-  label,
-  value,
-  onChange,
-  onBlur,
-  placeholder,
-  type = "text",
-  description,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  onBlur?: () => void;
-  placeholder?: string;
-  type?: string;
-  description?: string;
-}) {
-  return (
-    <label className="block text-sm" title={getSettingHelpText(label, description)}>
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onBlur}
-        placeholder={placeholder}
-        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-      />
-    </label>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  description,
-}: {
-  label: string;
-  value?: number;
-  onChange: (value: number | undefined) => void;
-  min?: number;
-  max?: number;
-  description?: string;
-}) {
-  return (
-    <label className="block text-sm" title={getSettingHelpText(label, description)}>
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
-      <input
-        type="number"
-        value={value ?? ""}
-        min={min}
-        max={max}
-        onChange={(event) => onChange(event.target.value ? Number(event.target.value) : undefined)}
-        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-      />
-    </label>
-  );
-}
-
-function TextAreaField({
-  label,
-  value,
-  onChange,
-  onBlur,
-  rows,
-  placeholder,
-  description,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  onBlur?: () => void;
-  rows: number;
-  placeholder?: string;
-  description?: string;
-}) {
-  return (
-    <label className="block text-sm" title={getSettingHelpText(label, description)}>
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onBlur}
-        rows={rows}
-        placeholder={placeholder}
-        className="w-full rounded-xl border border-border bg-card px-3 py-2 font-mono text-sm text-foreground focus:border-accent focus:outline-none"
-      />
-    </label>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  onChange,
-  onBlur,
-  options,
-  disabled = false,
-  description,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  onBlur?: () => void;
-  options: { value: string; label: string }[];
-  disabled?: boolean;
-  description?: string;
-}) {
-  return (
-    <label className="block text-sm" title={getSettingHelpText(label, description)}>
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onBlur}
-        disabled={disabled}
-        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 function NavReorderList({
   allItems,
   enabledItems,
@@ -6106,29 +5825,6 @@ function NavReorderList({
         );
       }}
     />
-  );
-}
-
-function CheckboxLabel({ label, checked, onChange, description }: { label: string; checked: boolean; onChange: (checked: boolean) => void; description?: string }) {
-  return (
-    <label className="flex items-center gap-2 text-sm text-secondary" title={getSettingHelpText(label, description)}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
-      />
-      <span>{label}</span>
-    </label>
-  );
-}
-
-function InfoPair({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-3">
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted">{label}</dt>
-      <dd className="mt-1 break-all text-sm text-foreground">{value}</dd>
-    </div>
   );
 }
 
@@ -6335,9 +6031,7 @@ function ExtensionsPanel({ mode }: { mode: "installed" | "registry" }) {
 
   const uninstallMut = useMutation<unknown, Error, PendingExtensionUninstall>({
     mutationFn: (ext) =>
-      ext.source === "legacy"
-        ? pluginsApi.uninstallPackages([ext.id])
-        : import("../api/client").then(m => m.extensions.registryUninstall(ext.id, ext.confirmedDependents || ext.dependents.length > 0)),
+      import("../api/client").then(m => m.extensions.registryUninstall(ext.id, ext.confirmedDependents || ext.dependents.length > 0)),
     onSuccess: (data, variables) => {
       const result = data as { requiresDependents?: boolean; dependents?: ExtensionDependencyImpact[] } | undefined;
       if (variables.source === "native" && result?.requiresDependents && Array.isArray(result.dependents)) {
@@ -6644,25 +6338,27 @@ function ExtensionsPanel({ mode }: { mode: "installed" | "registry" }) {
                         {ext.enabled ? "Enabled" : "Disabled"}
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        uninstallMut.reset();
-                        setExtensionToUninstall({
-                          id: ext.id,
-                          name: ext.name,
-                          source: ext.source,
-                          dependents: ext.source === "native" ? getNativeDependents(ext.id) : [],
-                        });
-                      }}
-                      disabled={uninstallMut.isPending}
-                      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:opacity-50"
-                      title="Uninstall extension"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Uninstall
-                    </button>
+                    {ext.source === "native" && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          uninstallMut.reset();
+                          setExtensionToUninstall({
+                            id: ext.id,
+                            name: ext.name,
+                            source: ext.source,
+                            dependents: getNativeDependents(ext.id),
+                          });
+                        }}
+                        disabled={uninstallMut.isPending}
+                        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:opacity-50"
+                        title="Uninstall extension"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Uninstall
+                      </button>
+                    )}
                     <span className="text-secondary text-xs">{isExpanded ? "▲" : "▼"}</span>
                   </div>
                 </div>

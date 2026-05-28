@@ -13,7 +13,7 @@ namespace Cove.Tests;
 
 public class ScraperServiceTests
 {
-    private const string YamlScraperPackId = "cove.official.scrapers.yaml-sites";
+    private const string YamlScraperPackId = "cove.official.scrapers.yaml-video";
 
     [Fact]
     public void FindScrapersForUrl_ReturnsGenericTextFallbackForHttpUrls()

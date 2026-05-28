@@ -398,9 +398,19 @@ public class SystemController(
     [RequiresPermission(Permissions.SystemRead)]
     public async Task<ActionResult<object?>> ScrapeUrlAuto([FromBody] ScraperMatchUrlRequest req, CancellationToken ct)
     {
-        var hit = await scraperService.ScrapeUrlAutoAsync(req.Url, req.EntityType ?? "scene", ct);
-        if (hit == null) return NotFound(new { error = "No scraper matched this URL or all matches returned no results" });
-        return Ok(new { scraperId = hit.Value.ScraperId, result = hit.Value.Result });
+        var hit = await scraperService.ScrapeUrlAutoDetailedAsync(req.Url, req.EntityType ?? "scene", ct);
+        if (hit.Result is { Count: > 0 } && hit.ScraperId is not null)
+            return Ok(new { scraperId = hit.ScraperId, result = hit.Result });
+
+        if (hit.Attempts.Count == 0)
+            return NotFound(new { error = "No scraper matched this URL" });
+
+        var anyFailure = hit.Attempts.Any(attempt => !string.IsNullOrWhiteSpace(attempt.Error));
+        return NotFound(new
+        {
+            error = anyFailure ? "Matching scrapers failed or returned no results" : "Matching scrapers returned no results",
+            attempts = hit.Attempts,
+        });
     }
 
     [HttpGet("downloaders")]

@@ -1,13 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { aiFaces, faces, jobs } from "../api/client";
+import { jobs } from "../api/client";
 import { HubConnectionBuilder, LogLevel } from "@microsoft/signalr";
-import type { Face, FaceTopSuggestion, JobInfo } from "../api/types";
+import type { JobInfo } from "../api/types";
 import { X, Loader2, CheckCircle, XCircle, Ban, Clock, Trash2 } from "lucide-react";
-import { FaceCompareDialog } from "./FaceCompareDialog";
-import { useAuth } from "../auth/AuthContext";
-import { canReadEntity, canWriteEntity } from "../auth/visibility";
 
 interface Props {
   open: boolean;
@@ -25,55 +22,10 @@ const statusIcon = (status: JobInfo["status"]) => {
   }
 };
 
-export function JobDrawer({ open, onClose, onNavigate }: Props) {
+export function JobDrawer({ open, onClose }: Props) {
   const queryClient = useQueryClient();
-  const { hasPermission } = useAuth();
-  const canReadPerformers = canReadEntity("performer", hasPermission);
-  const canWriteFaces = canWriteEntity("face", hasPermission);
   const [realtimeJobs, setRealtimeJobs] = useState<Map<string, JobInfo>>(new Map());
-  const [faceReview, setFaceReview] = useState<{ job: JobInfo; faces: Face[]; index: number } | null>(null);
   const connectionRef = useRef<ReturnType<typeof HubConnectionBuilder.prototype.build> | null>(null);
-  const notifiedAiJobIds = useRef<Set<string>>(new Set());
-
-  const advanceFaceReview = useCallback(() => {
-    setFaceReview((current) => {
-      if (!current) return null;
-      const nextIndex = current.index + 1;
-      return nextIndex < current.faces.length ? { ...current, index: nextIndex } : null;
-    });
-  }, []);
-
-  const linkSuggestionMutation = useMutation({
-    mutationFn: (data: { faceId: number; performerId: number }) => faces.link(data.faceId, { performerId: data.performerId }),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["faces"] });
-      queryClient.invalidateQueries({ queryKey: ["face", variables.faceId] });
-      advanceFaceReview();
-    },
-  });
-
-  const rejectSuggestionMutation = useMutation({
-    mutationFn: (data: { faceId: number; performerId: number }) =>
-      faces.recordSuggestionDecision(data.faceId, { performerId: data.performerId, decision: "reject" }),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["faces"] });
-      queryClient.invalidateQueries({ queryKey: ["face", variables.faceId] });
-      advanceFaceReview();
-    },
-  });
-
-  const referenceSuggestionMutation = useMutation({
-    mutationFn: (data: { faceId: number; referenceSuggestionId: number; action: "import" | "reject" }) =>
-      data.action === "import"
-        ? aiFaces.importReferencePerformer(data.faceId, { referenceSuggestionId: data.referenceSuggestionId })
-        : aiFaces.rejectReferenceSuggestion(data.faceId, { referenceSuggestionId: data.referenceSuggestionId }),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["faces"] });
-      queryClient.invalidateQueries({ queryKey: ["face", variables.faceId] });
-      queryClient.invalidateQueries({ queryKey: ["ai-faces", "reference", "status"] });
-      advanceFaceReview();
-    },
-  });
 
   const { data: activeJobs } = useQuery({
     queryKey: ["jobs-active"],
@@ -111,10 +63,6 @@ export function JobDrawer({ open, onClose, onNavigate }: Props) {
         queryClient.invalidateQueries({ queryKey: ["galleries"] });
         queryClient.invalidateQueries({ queryKey: ["performers"] });
         queryClient.invalidateQueries({ queryKey: ["stats"] });
-      }
-      if (shouldShowAiCompletionDialog(job, notifiedAiJobIds.current)) {
-        // Keep AI run completion feedback in the Jobs drawer instead of opening
-        // alert/review dialogs automatically from realtime job updates.
       }
     });
 
@@ -163,31 +111,9 @@ export function JobDrawer({ open, onClose, onNavigate }: Props) {
 
   const runningCount = mergedActive.filter((j) => j.status === "running" || j.status === "pending").length;
 
-  const handleConfirmReviewSuggestion = useCallback((face: Face | undefined, suggestion: FaceTopSuggestion) => {
-    if (!face || !suggestion) return;
-    const localPerformerId = suggestion.localPerformerId ?? (suggestion.performerId > 0 ? suggestion.performerId : undefined);
-    if (localPerformerId != null) {
-      linkSuggestionMutation.mutate({ faceId: face.id, performerId: localPerformerId });
-      return;
-    }
-
-    referenceSuggestionMutation.mutate({ faceId: face.id, referenceSuggestionId: suggestion.performerId, action: "import" });
-  }, [linkSuggestionMutation, referenceSuggestionMutation]);
-
-  const handleRejectReviewSuggestion = useCallback((face: Face | undefined, suggestion: FaceTopSuggestion) => {
-    if (!face || !suggestion) return;
-    const localPerformerId = suggestion.localPerformerId ?? (suggestion.performerId > 0 ? suggestion.performerId : undefined);
-    if (localPerformerId != null) {
-      rejectSuggestionMutation.mutate({ faceId: face.id, performerId: localPerformerId });
-      return;
-    }
-
-    referenceSuggestionMutation.mutate({ faceId: face.id, referenceSuggestionId: suggestion.performerId, action: "reject" });
-  }, [referenceSuggestionMutation, rejectSuggestionMutation]);
-
   if (typeof document === "undefined") return null;
 
-  if (!open && faceReview == null) return null;
+  if (!open) return null;
 
   return createPortal(
     <>
@@ -241,40 +167,9 @@ export function JobDrawer({ open, onClose, onNavigate }: Props) {
           </div>
         </>
       ) : null}
-
-      {faceReview ? (
-        <FaceCompareDialog
-          open={faceReview != null}
-          face={faceReview.faces[faceReview.index] ?? null}
-          suggestion={faceReview.faces[faceReview.index]?.topSuggestion ?? null}
-          disabled={!canWriteFaces || linkSuggestionMutation.isPending || rejectSuggestionMutation.isPending || referenceSuggestionMutation.isPending}
-          canReadPerformers={canReadPerformers}
-          onClose={() => setFaceReview(null)}
-          onConfirm={(suggestion) => handleConfirmReviewSuggestion(faceReview.faces[faceReview.index], suggestion as FaceTopSuggestion)}
-          onReject={(suggestion) => handleRejectReviewSuggestion(faceReview.faces[faceReview.index], suggestion as FaceTopSuggestion)}
-          onNavigate={(route) => {
-            setFaceReview(null);
-            onClose();
-            onNavigate?.(route);
-          }}
-        />
-      ) : null}
     </>,
     document.body,
   );
-}
-
-function shouldShowAiCompletionDialog(job: JobInfo, notifiedIds: Set<string>) {
-  if (job.type !== "ai.run" || !["completed", "failed", "cancelled"].includes(job.status)) {
-    return false;
-  }
-
-  if (notifiedIds.has(job.id)) {
-    return false;
-  }
-
-  notifiedIds.add(job.id);
-  return true;
 }
 
 function formatDuration(ms: number): string {
