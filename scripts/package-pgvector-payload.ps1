@@ -101,6 +101,26 @@ function Copy-Payload {
     }
 }
 
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    return ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+}
+
 $resolvedSourceRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceRoot)
 $resolvedOutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
 $archiveName = "pgvector-$PgvectorVersion-pg$PgMajor-$Rid.tar.gz"
@@ -128,7 +148,7 @@ try {
         throw "tar failed to create $archivePath with exit code $LASTEXITCODE"
     }
 
-    $sha256 = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sha256 = Get-Sha256Hex -Path $archivePath
     Set-Content -Path "$archivePath.sha256" -Value "$sha256  $archiveName" -Encoding ASCII
     Write-Info "Created $archivePath"
 }

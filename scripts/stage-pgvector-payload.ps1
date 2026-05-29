@@ -124,13 +124,33 @@ function Get-ManifestAsset {
     return $asset
 }
 
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    return ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+}
+
 function Assert-FileHash {
     param(
         [string]$Path,
         [string]$ExpectedSha256
     )
 
-    $actual = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = Get-Sha256Hex -Path $Path
     $expected = $ExpectedSha256.Trim().ToLowerInvariant()
     if ($actual -ne $expected) {
         throw "SHA-256 mismatch for $Path. Expected $expected, got $actual."
