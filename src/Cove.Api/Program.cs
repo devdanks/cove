@@ -70,6 +70,13 @@ static LogEventLevel ParseSerilogLogLevel(string? level)
         _ => LogEventLevel.Information,
     };
 
+static string GetApplicationLogFilePath()
+{
+    var logDir = Path.Combine(CoveDefaultPaths.GetDataRoot(), "logs");
+    Directory.CreateDirectory(logDir);
+    return Path.Combine(logDir, "cove-.log");
+}
+
 static async Task<bool> HasPostgresApplicationTablesAsync(CoveContext db)
 {
     var conn = db.Database.GetDbConnection();
@@ -117,6 +124,7 @@ try
     {
         Log.Logger = new LoggerConfiguration()
             .WriteTo.Console()
+            .WriteTo.File(GetApplicationLogFilePath(), rollingInterval: RollingInterval.Day, retainedFileCountLimit: 30, shared: true)
             .CreateBootstrapLogger();
 
         // Serilog
@@ -128,6 +136,7 @@ try
             .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
             .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
             .WriteTo.Console()
+                .WriteTo.File(GetApplicationLogFilePath(), rollingInterval: RollingInterval.Day, retainedFileCountLimit: 30, shared: true)
             .WriteTo.Sink(new SignalRLogSink()));
     }
 

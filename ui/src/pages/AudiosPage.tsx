@@ -26,6 +26,7 @@ import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { SourceDownloadDialog } from "../components/SourceDownloadDialog";
 import { AUDIO_CRITERIA } from "../components/FilterDialog";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
+import { RelatedEntityListView } from "../components/RelatedEntityListView";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 const SORT_OPTIONS = [
@@ -153,7 +154,7 @@ export function AudiosPage({ onNavigate }: Props) {
             queryKey="audios"
           />
         ) : displayMode === "list" ? (
-          <AudioListTable audios={items} engagementById={engagementById} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} />
+          <RelatedEntityListView entityType="audios" items={items} displayMode="list" selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={listData.infinitePageSize} hasNextPage={listData.infiniteQuery.hasNextPage} isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage} loadMore={listData.loadMore} />
         ) : (
         <VirtualizedEntityGrid
           items={items}

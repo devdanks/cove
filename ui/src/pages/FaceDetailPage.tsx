@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Film, Fingerprint, Images, Link2, Merge, MoreVertical, Pencil, Save, Search, Sparkles, Trash2, UserPlus } from "lucide-react";
 import { faces, performers } from "../api/client";
-import type { Detection, Face, FaceAppearance, FaceDeleteImpact, FaceSimilar, FaceSuggestion, FindFilter, PaginatedResponse, Performer } from "../api/types";
+import type { Face, FaceAppearance, FaceDeleteImpact, FaceSimilar, FaceSuggestion, FindFilter, PaginatedResponse, Performer } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -11,6 +11,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { FaceSuggestionsPanel } from "../components/FaceSuggestionsPanel";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
+import { buildFaceCarouselSampleImageUrls, buildFaceHeroImageUrls } from "../components/faceComparisonImages";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { EditModal } from "../components/EditModal";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
@@ -21,6 +22,7 @@ import { FieldProvenanceHover, formatDate } from "../components/shared";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
+import type { DetailListDisplayMode } from "../components/DetailListToolbar";
 
 interface Props {
   id: number;
@@ -61,54 +63,6 @@ function canPromptForPerformerImage(face: Face, suggestion: FaceSuggestion) {
     && suggestion.localPerformerIsLocalOnly === true;
 }
 
-function isPlausibleFaceDetection(detection: Detection) {
-  if (detection.w <= 0 || detection.h <= 0 || detection.score < 0.5) {
-    return false;
-  }
-
-  const aspectRatio = detection.w / detection.h;
-  if (!Number.isFinite(aspectRatio) || aspectRatio < 0.45 || aspectRatio > 1.8) {
-    return false;
-  }
-
-  const frameWidth = (detection as any).frameWidth;
-  const frameHeight = (detection as any).frameHeight;
-  if (typeof frameWidth === "number" && typeof frameHeight === "number" && frameWidth > 0 && frameHeight > 0) {
-    const area = (detection.w * detection.h) / (frameWidth * frameHeight);
-    if (Number.isFinite(area) && area < 0.005) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function extractDetectionRole(detection: Detection): string | undefined {
-  const extra = (detection as { extra?: unknown }).extra;
-  if (extra && typeof extra === "object") {
-    const role = (extra as Record<string, unknown>).role;
-    return typeof role === "string" ? role : undefined;
-  }
-  return undefined;
-}
-
-function extractCoverQualityScore(detection: Detection): number {
-  const extra = (detection as { extra?: unknown }).extra;
-  if (extra && typeof extra === "object") {
-    const value = (extra as Record<string, unknown>).coverQualityScore;
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === "string") {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-  }
-  return 0;
-}
-
 export function FaceDetailPage({ id, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { hasPermission, user } = useAuth();
@@ -121,6 +75,8 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
   const [similarFilter, setSimilarFilter] = useState<FindFilter>({ page: 1, perPage: 18, sort: "distance", direction: "asc" });
   const [appearanceZoomLevel, setAppearanceZoomLevel] = useState(0);
   const [similarZoomLevel, setSimilarZoomLevel] = useState(0);
+  const [appearanceDisplayMode, setAppearanceDisplayMode] = useState<"grid" | "list">("grid");
+  const [similarDisplayMode, setSimilarDisplayMode] = useState<"grid" | "list">("grid");
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -347,31 +303,13 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
 
   const mergeCandidates = (mergeMatchesQuery.data?.items ?? []).filter((candidate) => candidate.id !== id);
   const performerMatches = performerMatchesQuery.data?.items ?? [];
-  const sampleDetections = useMemo(
-    () => [...faceDetections]
-      .filter(isPlausibleFaceDetection)
-      .sort((left, right) => {
-        const roleLeft = extractDetectionRole(left) === "best" ? 1 : 0;
-        const roleRight = extractDetectionRole(right) === "best" ? 1 : 0;
-        if (roleLeft !== roleRight) return roleRight - roleLeft;
-        const qualityDelta = extractCoverQualityScore(right) - extractCoverQualityScore(left);
-        if (qualityDelta !== 0) return qualityDelta;
-        return (right.score ?? 0) - (left.score ?? 0);
-      })
-      .filter((detection, index, ordered) => ordered.findIndex((candidate) => candidate.hostType === detection.hostType && candidate.hostId === detection.hostId && candidate.observedAtSec === detection.observedAtSec) === index)
-      .slice(0, 3),
-    [faceDetections],
-  );
   const carouselSampleImageUrls = useMemo(
-    () => (face?.coverImageUrl
-      ? sampleDetections.slice(1)
-      : sampleDetections)
-      .map((detection) => faces.detectionCropUrl(detection.id, 2048)),
-    [face?.coverImageUrl, sampleDetections],
+    () => buildFaceCarouselSampleImageUrls(face, faceDetections, faces.detectionCropUrl),
+    [face, faceDetections],
   );
   const heroImageUrls = useMemo(
-    () => Array.from(new Set([face?.coverImageUrl, ...carouselSampleImageUrls].filter((url): url is string => typeof url === "string" && url.trim().length > 0))).slice(0, 3),
-    [carouselSampleImageUrls, face?.coverImageUrl],
+    () => buildFaceHeroImageUrls(face, carouselSampleImageUrls),
+    [carouselSampleImageUrls, face],
   );
   const [heroImageIndex, setHeroImageIndex] = useState(0);
   const title = face?.label?.trim() || face?.performerName || `Face #${id}`;
@@ -567,8 +505,11 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
             cardSizeEntityType="faces"
             showSearch
             allowInfinitePageSize
+            displayMode={appearanceDisplayMode}
+            onDisplayModeChange={(mode: DetailListDisplayMode) => { if (mode === "grid" || mode === "list") setAppearanceDisplayMode(mode); }}
+            availableDisplayModes={["grid", "list"]}
           />
-          <FaceAppearancesGrid appearances={faceAppearancesPage.items} onNavigate={onNavigate} zoomLevel={appearanceZoomLevel} infinitePageSize={appearancesInfinitePageSize} hasNextPage={appearancesInfiniteQuery.hasNextPage} isFetchingNextPage={appearancesInfiniteQuery.isFetchingNextPage} loadMore={loadMoreAppearances} />
+          <FaceAppearancesGrid appearances={faceAppearancesPage.items} displayMode={appearanceDisplayMode} onNavigate={onNavigate} zoomLevel={appearanceZoomLevel} infinitePageSize={appearancesInfinitePageSize} hasNextPage={appearancesInfiniteQuery.hasNextPage} isFetchingNextPage={appearancesInfiniteQuery.isFetchingNextPage} loadMore={loadMoreAppearances} />
           {!appearancesInfinitePageSize ? <FaceTabPager filter={appearanceFilter} setFilter={setAppearanceFilter} totalCount={faceAppearancesPage.totalCount} /> : null}
         </>
       )}
@@ -603,10 +544,11 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
             cardSizeEntityType="faces"
             showSearch
             allowInfinitePageSize
+            displayMode={similarDisplayMode}
+            onDisplayModeChange={(mode: DetailListDisplayMode) => { if (mode === "grid" || mode === "list") setSimilarDisplayMode(mode); }}
+            availableDisplayModes={["grid", "list"]}
           />
-          <VirtualizedEntityGrid items={similarFacesPage.items} getItemKey={(candidate) => candidate.id} minCardWidth={`${getEntityCardMinWidthPx("faces", similarZoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("faces", similarZoomLevel)} estimateRowHeight={360} gap={16} gapClassName="gap-4" infinitePageSize={similarInfinitePageSize} hasNextPage={similarInfiniteQuery.hasNextPage} isFetchingNextPage={similarInfiniteQuery.isFetchingNextPage} loadMore={loadMoreSimilar} renderItem={(candidate) => (
-            <SimilarFaceTile face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
-          )} />
+          <SimilarFacesView faces={similarFacesPage.items} displayMode={similarDisplayMode} onNavigate={onNavigate} canReadPerformers={canReadPerformers} zoomLevel={similarZoomLevel} infinitePageSize={similarInfinitePageSize} hasNextPage={similarInfiniteQuery.hasNextPage} isFetchingNextPage={similarInfiniteQuery.isFetchingNextPage} loadMore={loadMoreSimilar} />
           {!similarInfinitePageSize ? <FaceTabPager filter={similarFilter} setFilter={setSimilarFilter} totalCount={similarFacesPage.totalCount} /> : null}
         </>
       )}
@@ -920,10 +862,62 @@ function FaceCandidateRow({ face, onSelect, disabled }: { face: Face; onSelect: 
   );
 }
 
-function FaceAppearancesGrid({ appearances, onNavigate, zoomLevel, infinitePageSize, hasNextPage, isFetchingNextPage, loadMore }: { appearances: FaceAppearanceListItem[]; onNavigate: (r: any) => void; zoomLevel: number; infinitePageSize: boolean; hasNextPage?: boolean; isFetchingNextPage?: boolean; loadMore: () => void }) {
+function FaceAppearancesGrid({ appearances, displayMode, onNavigate, zoomLevel, infinitePageSize, hasNextPage, isFetchingNextPage, loadMore }: { appearances: FaceAppearanceListItem[]; displayMode: "grid" | "list"; onNavigate: (r: any) => void; zoomLevel: number; infinitePageSize: boolean; hasNextPage?: boolean; isFetchingNextPage?: boolean; loadMore: () => void }) {
+  if (displayMode === "list") {
+    return (
+      <div className="overflow-hidden rounded-lg border border-border bg-card/60">
+        <div className="divide-y divide-border/70">
+          {appearances.map((appearance) => (
+            <button key={appearance.appearanceId} type="button" onClick={() => onNavigate({ page: appearance.hostType, id: appearance.hostId })} className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-card-hover">
+              <div className="h-12 w-16 shrink-0 overflow-hidden rounded bg-surface">
+                {appearance.thumbnailUrl ? <img src={appearance.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" /> : null}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-accent">{appearance.title || `${appearance.hostType} #${appearance.hostId}`}</div>
+                <div className="mt-0.5 truncate text-xs text-muted">{appearance.hostType} · {appearance.frameSampleCount} samples · {appearance.topConfidence != null ? `${Math.round(appearance.topConfidence * 100)}%` : "No confidence"}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <VirtualizedEntityGrid items={appearances} getItemKey={(appearance) => appearance.appearanceId} minCardWidth={`${getEntityCardMinWidthPx("faces", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("faces", zoomLevel)} estimateRowHeight={280} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} renderItem={(appearance) => (
       <FaceAppearanceTile appearance={appearance} onClick={() => onNavigate({ page: appearance.hostType, id: appearance.hostId })} />
+    )} />
+  );
+}
+
+function SimilarFacesView({ faces: faceItems, displayMode, onNavigate, canReadPerformers, zoomLevel, infinitePageSize, hasNextPage, isFetchingNextPage, loadMore }: { faces: FaceSimilar[]; displayMode: "grid" | "list"; onNavigate: (r: any) => void; canReadPerformers: boolean; zoomLevel: number; infinitePageSize: boolean; hasNextPage?: boolean; isFetchingNextPage?: boolean; loadMore: () => void }) {
+  if (displayMode === "list") {
+    return (
+      <div className="overflow-hidden rounded-lg border border-border bg-card/60">
+        <div className="divide-y divide-border/70">
+          {faceItems.map((face) => {
+            const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
+            return (
+              <button key={face.id} type="button" onClick={() => onNavigate({ page: "face", id: face.id })} className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-card-hover">
+                <div className="h-12 w-12 shrink-0 overflow-hidden rounded bg-surface">
+                  {face.coverImageUrl ? <img src={face.coverImageUrl} alt="" className="h-full w-full object-cover" loading="lazy" /> : <div className="flex h-full w-full items-center justify-center text-muted"><Fingerprint className="h-4 w-4" /></div>}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium text-accent">{title}</div>
+                  <div className="mt-0.5 truncate text-xs text-muted">Distance {face.distance.toFixed(3)} · {face.appearanceCount} appearances</div>
+                </div>
+                {face.performerId ? <span className={`shrink-0 text-xs ${canReadPerformers ? "text-accent" : "text-muted"}`}>{face.performerName || `Performer #${face.performerId}`}</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <VirtualizedEntityGrid items={faceItems} getItemKey={(candidate) => candidate.id} minCardWidth={`${getEntityCardMinWidthPx("faces", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("faces", zoomLevel)} estimateRowHeight={360} gap={16} gapClassName="gap-4" infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} renderItem={(candidate) => (
+      <SimilarFaceTile face={candidate} onNavigate={onNavigate} canReadPerformers={canReadPerformers} />
     )} />
   );
 }

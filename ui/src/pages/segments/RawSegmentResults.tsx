@@ -13,6 +13,7 @@ import {
   Pill,
   SegmentScenePreview,
 } from "./segmentDisplayUtils";
+import { useSegmentListDensity, type SegmentListDensity } from "./segmentListDensity";
 import type { RawSegmentItem } from "./types";
 
 interface Props {
@@ -42,6 +43,8 @@ export function RawSegmentResults({
   isFetchingNextPage,
   loadMore,
 }: Props) {
+  const listDensity = useSegmentListDensity();
+
   if (displayMode === "grid") {
     return (
       <VirtualizedEntityGrid
@@ -106,6 +109,7 @@ export function RawSegmentResults({
             selected={selectedIds.has(item.id)}
             onToggle={() => onToggle(item.id)}
             selecting={selecting}
+            density={listDensity}
           />
         ))}
       </div>
@@ -120,6 +124,7 @@ function RawSegmentListRow({
   selected,
   onToggle,
   selecting,
+  density,
 }: {
   item: RawSegmentItem;
   canReadScenes: boolean;
@@ -127,19 +132,20 @@ function RawSegmentListRow({
   selected: boolean;
   onToggle: () => void;
   selecting: boolean;
+  density: SegmentListDensity;
 }) {
   const title = buildRawSegmentTitle(item);
 
   return (
-    <div onClick={selecting ? onToggle : undefined} className={`scene-card group relative cursor-pointer px-4 py-3 transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
+    <div onClick={selecting ? onToggle : undefined} className={`scene-card group relative cursor-pointer px-4 ${density.rowPaddingClassName} transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
       <RouteCardLinkOverlay route={{ page: "segment", id: item.id }} onClick={() => onNavigate({ page: "segment", id: item.id })} label={`Open raw segment ${title}`} disabled={selecting} selectionSafeZone />
       <div className="flex items-start gap-3 lg:grid lg:grid-cols-[minmax(0,1.3fr)_140px_minmax(0,1fr)_120px_120px] lg:items-center">
         <div className="relative min-w-0 pl-8">
           <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onToggle} />
           <div className="flex items-start gap-3">
-            <div className="hidden h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-surface sm:block">
+            {density.showPreview ? <div className="hidden shrink-0 overflow-hidden rounded-lg bg-surface sm:block" style={{ height: density.previewHeight, width: density.previewWidth }}>
               <SegmentScenePreview hostId={item.hostId} segmentId={item.id} updatedAt={item.updatedAt} startSec={item.startSec} endSec={item.endSec} title={title} imgClassName="h-full w-full object-cover" />
-            </div>
+            </div> : null}
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">

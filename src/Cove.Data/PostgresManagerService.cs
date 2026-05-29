@@ -714,8 +714,8 @@ public class PostgresManagerService : IHostedService
             ["shared_buffers"] = "128MB",
             ["log_destination"] = "'stderr'",
             ["logging_collector"] = "off",
-            ["dynamic_library_path"] = QuotePostgresSettingValue(string.Join(Path.PathSeparator, new[] { PgLibDir, "$libdir" })),
-            ["extension_control_path"] = QuotePostgresSettingValue(string.Join(Path.PathSeparator, new[] { PgShareDir, "$system" })),
+            ["dynamic_library_path"] = QuotePostgresSettingValue(ToPostgresConfigPath(PgLibDir)),
+            ["extension_control_path"] = QuotePostgresSettingValue(string.Join(Path.PathSeparator, new[] { ToPostgresConfigPath(PgShareDir), "$system" })),
         };
 
         var lines = (await File.ReadAllLinesAsync(configPath, ct)).ToList();
@@ -773,6 +773,9 @@ public class PostgresManagerService : IHostedService
 
     private static string QuotePostgresSettingValue(string value)
         => "'" + value.Replace("'", "''") + "'";
+
+    private static string ToPostgresConfigPath(string path)
+        => Path.GetFullPath(path).Replace('\\', '/');
 
     private async Task PgCtlAsync(string args, CancellationToken ct)
     {

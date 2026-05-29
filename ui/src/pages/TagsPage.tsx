@@ -23,6 +23,7 @@ import { TagTagger } from "../components/TagTagger";
 import { CustomFieldsEditor } from "../components/shared";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { RelatedEntityListView } from "../components/RelatedEntityListView";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 
@@ -224,7 +225,7 @@ export function TagsPage({ onNavigate }: Props) {
           )}
         />
       ) : (
-        <TagListTable tags={items} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <RelatedEntityListView entityType="tags" items={items} displayMode="list" selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={listData.infinitePageSize} hasNextPage={listData.infiniteQuery.hasNextPage} isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage} loadMore={listData.loadMore} />
       )}
       {displayMode !== "graph" && items.length === 0 && (
         <div className="text-center text-secondary py-16">

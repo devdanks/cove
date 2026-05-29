@@ -1273,7 +1273,7 @@ export function ListPage({
           </select>
 
           {/* Zoom slider (standard card size slider) */}
-          {displayMode === "grid" && (
+          {(displayMode === "grid" || displayMode === "list") && (
             <div className="hidden items-center gap-1 pl-1 md:flex">
               <ZoomOut className="w-3 h-3 text-muted" />
               <input

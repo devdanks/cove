@@ -12,7 +12,7 @@ import { Lightbox, type LightboxImage } from "../components/Lightbox";
 import { InteractiveRating } from "../components/Rating";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { IMAGE_CRITERIA, SCENE_CRITERIA } from "../components/FilterDialog";
-import { SceneCard, ImageTile, PerformerTile } from "../components/EntityCards";
+import { PerformerTile } from "../components/EntityCards";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
@@ -29,8 +29,7 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { useDetailListSelection } from "../hooks/useDetailListSelection";
 import { withRequiredMultiId } from "../utils/detailRelationFilters";
-import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
-import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
+import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
 import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 
 interface Props {
@@ -429,6 +428,7 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("scenes");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
@@ -471,6 +471,9 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       allowInfinitePageSize
+      displayMode={displayMode}
+      onDisplayModeChange={setDisplayMode}
+      availableDisplayModes={availableDisplayModes}
     />
   );
 
@@ -480,22 +483,7 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid
-        items={items}
-        getItemKey={(scene) => scene.id}
-        minCardWidth={`${getEntityCardMinWidthPx("scenes", zoomLevel)}px`}
-        virtualMinColumnWidth={getEntityCardMinWidthPx("scenes", zoomLevel)}
-        estimateRowHeight={320}
-        gap={16}
-        gapClassName="gap-4"
-        infinitePageSize={infinitePageSize}
-        hasNextPage={infiniteQuery.hasNextPage}
-        isFetchingNextPage={infiniteQuery.isFetchingNextPage}
-        loadMore={loadMore}
-        renderItem={(scene) => (
-          <SceneCard scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
-        )}
-      />
+      <RelatedEntityListView entityType="scenes" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onSceneQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -529,6 +517,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
   canWriteGallery: boolean;
 }) {
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("images");
   const items = galleryImages?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
@@ -552,6 +541,9 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       allowInfinitePageSize
+      displayMode={displayMode}
+      onDisplayModeChange={setDisplayMode}
+      availableDisplayModes={availableDisplayModes}
       selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} removeFromParent={{ type: "gallery", id: galleryId }} />}
     />
   );
@@ -576,48 +568,7 @@ function GalleryImagesPanel({ galleryId, filter, setFilter, objectFilter, setObj
           <Plus className="w-3 h-3" /> Add Images
         </button>
       </div> : null}
-      <VirtualizedEntityGrid
-        items={items}
-        getItemKey={(image) => image.id}
-        minCardWidth={`${getEntityCardMinWidthPx("images", imageZoom)}px`}
-        virtualMinColumnWidth={getEntityCardMinWidthPx("images", imageZoom)}
-        estimateRowHeight={260}
-        infinitePageSize={infinitePageSize}
-        hasNextPage={infiniteQuery.hasNextPage}
-        isFetchingNextPage={infiniteQuery.isFetchingNextPage}
-        loadMore={loadMore}
-        renderItem={(image, idx) => (
-          <ImageTile
-            image={image}
-            onClick={() => {
-              if (selecting) {
-                toggle(image.id);
-                return;
-              }
-              onNavigate({ page: "image", id: image.id });
-            }}
-            onPreview={() => {
-              if (selecting) {
-                toggle(image.id);
-                return;
-              }
-              onLightbox(idx);
-            }}
-            onDetails={() => {
-              if (selecting) {
-                toggle(image.id);
-                return;
-              }
-              onNavigate({ page: "image", id: image.id });
-            }}
-            onNavigate={onNavigate}
-            onQuickView={() => setQuickViewId(image.id)}
-            selected={selectedIds.has(image.id)}
-            onSelect={() => toggle(image.id)}
-            selecting={selecting}
-          />
-        )}
-      />
+      <RelatedEntityListView entityType="images" items={items} displayMode={displayMode} zoomLevel={imageZoom} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onImageQuickView={setQuickViewId} onImagePreview={(_image, index) => onLightbox(index)} onImageDetails={(image) => onNavigate({ page: "image", id: image.id })} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}

@@ -5,7 +5,7 @@ import type { ApplySceneScrapeAttemptRequest, Scene, MetadataServerSceneMatch, M
 import { useAppConfig } from "../state/AppConfigContext";
 import { formatDuration, getResolutionLabel } from "./shared";
 import { createNestedRouteLinkProps } from "./cardNavigation";
-import { type CollectionMode } from "./sceneScrapeUtils";
+import { buildFragmentDraft, findDefaultKind, getSceneNameSearchInput, supportsScrapeKind, type CollectionMode, type InputKind } from "./sceneScrapeUtils";
 import { buildRelationSelectionPayload, relationKey, ScrapeRelationChoices, type ScrapeRelationActionMap } from "./ScrapeRelationChoices";
 import {
   CompactCollectionDecision,
@@ -38,6 +38,7 @@ interface SceneTaggerProps {
   selectedIds?: Set<number>;
   selecting?: boolean;
   onSelect?: (sceneId: number) => void;
+  mode?: "bulk" | "detail";
 }
 
 interface TaggerConfig {
@@ -334,7 +335,7 @@ async function runWithConcurrency<T>(
   await Promise.all(workers);
 }
 
-export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, selecting = false, onSelect }: SceneTaggerProps) {
+export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, selecting = false, onSelect, mode = "bulk" }: SceneTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: scraperList = [] } = useQuery({ queryKey: ["scrapers"], queryFn: system.listScrapers });
@@ -404,6 +405,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
   const [showConfig, setShowConfig] = useState(false);
   const [searchStates, setSearchStates] = useState<Record<number, SceneSearchState>>({});
   const [queryOverrides, setQueryOverrides] = useState<Record<number, string>>({});
+  const [scraperInputKinds, setScraperInputKinds] = useState<Record<number, InputKind>>({});
   const selectedSource = resolveSource(taggerConfig.selectedEndpoint, taggerSources);
 
   const updateSearchState = useCallback(
@@ -457,15 +459,52 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
     [queryOverrides, taggerConfig.queryMode, taggerConfig.blacklist]
   );
 
+  const getScraperInputKind = useCallback((scene: Scene, source: TaggerSource | undefined): InputKind => {
+    if (source?.kind !== "scraper") {
+      return "name";
+    }
+
+    const preferred = scene.urls?.some((url) => url.trim()) ? "url" : "name";
+    return scraperInputKinds[scene.id] ?? findDefaultKind(source.scraper, preferred);
+  }, [scraperInputKinds]);
+
   const getSourceQuery = useCallback(
     (scene: Scene, source: TaggerSource | undefined): string => {
-      if (source?.kind === "scraper" && source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url")) {
-        return queryOverrides[scene.id] ?? scene.urls?.find(Boolean) ?? getSearchQuery(scene);
+      if (source?.kind === "scraper") {
+        const inputKind = getScraperInputKind(scene, source);
+        if (queryOverrides[scene.id] !== undefined) {
+          return queryOverrides[scene.id];
+        }
+
+        if (inputKind === "url") {
+          return scene.urls?.find((url) => url.trim()) ?? "";
+        }
+
+        if (inputKind === "fragment") {
+          return buildFragmentDraft(scene);
+        }
+
+        return getSceneNameSearchInput(scene) || getSearchQuery(scene);
       }
       return getSearchQuery(scene);
     },
-    [getSearchQuery, queryOverrides]
+    [getScraperInputKind, getSearchQuery, queryOverrides]
   );
+
+  const handleScraperInputKindChange = useCallback((scene: Scene, source: TaggerSource | undefined, inputKind: InputKind) => {
+    setScraperInputKinds((prev) => ({ ...prev, [scene.id]: inputKind }));
+    setQueryOverrides((prev) => {
+      const nextQuery = inputKind === "url"
+        ? scene.urls?.find((url) => url.trim()) ?? ""
+        : inputKind === "fragment"
+          ? buildFragmentDraft(scene)
+          : getSceneNameSearchInput(scene) || getSearchQuery(scene);
+      return { ...prev, [scene.id]: nextQuery };
+    });
+    if (source?.kind === "scraper" && !supportsScrapeKind(source.scraper, inputKind)) {
+      updateSearchState(scene.id, { error: `The selected scraper does not support ${inputKind} input.` });
+    }
+  }, [getSearchQuery, updateSearchState]);
 
   const searchScene = useCallback(
     async (scene: Scene) => {
@@ -475,11 +514,18 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
       try {
         let results: UnifiedSceneMatch[] = [];
         if (source?.kind === "scraper") {
-          const supportsUrl = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url");
-          const supportsName = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "name");
-          const looksLikeUrl = /^https?:\/\//i.test(query.trim());
-          const inputKind = supportsUrl && looksLikeUrl ? "url" : supportsName ? "name" : supportsUrl ? "url" : undefined;
-          if (!inputKind) throw new Error("This scraper cannot search this scene from the available row data.");
+          const inputKind = getScraperInputKind(scene, source);
+          if (!supportsScrapeKind(source.scraper, inputKind)) throw new Error(`This scraper does not support ${inputKind} input.`);
+          if (inputKind === "url" && !query.trim()) throw new Error("Enter a URL to scrape.");
+          if (inputKind === "name" && !query.trim()) throw new Error("Enter a title or name to scrape.");
+          let fragment: Record<string, unknown> | undefined;
+          if (inputKind === "fragment") {
+            const parsed = JSON.parse(query);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+              throw new Error("Fragment input must be a JSON object.");
+            }
+            fragment = parsed as Record<string, unknown>;
+          }
           const attempt = await scrapeAttempts.create({
             scraperId: source.scraper.id,
             entityType: "scene",
@@ -487,6 +533,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
             inputKind,
             url: inputKind === "url" ? query : undefined,
             name: inputKind === "name" ? query : undefined,
+            fragment,
           });
           if (attempt.status.toLowerCase() === "failure") throw new Error(attempt.error || "Scrape returned no results.");
           results = parseAttemptResults(attempt).map((result, index) => toScraperSceneMatch(attempt, result, index, source.scraper));
@@ -515,7 +562,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
         });
       }
     },
-    [getSourceQuery, selectedSource, taggerConfig.preferFingerprints, updateSearchState]
+    [getScraperInputKind, getSourceQuery, selectedSource, taggerConfig.preferFingerprints, updateSearchState]
   );
 
   // Fingerprint-only search
@@ -582,16 +629,21 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
       <TaggerToolbar
         sources={taggerSources.map((source) => ({ value: source.value, label: source.label }))}
         selectedSource={selectedSource?.value ?? taggerConfig.selectedEndpoint}
-        onSourceChange={(value) => setTaggerConfig((c) => ({ ...c, selectedEndpoint: value }))}
-        showToggle={{
+        onSourceChange={(value) => {
+          setTaggerConfig((c) => ({ ...c, selectedEndpoint: value }));
+          setQueryOverrides({});
+          setScraperInputKinds({});
+        }}
+        showToggle={mode === "bulk" ? {
           value: taggerConfig.showUnmatched,
           onChange: (value) => setTaggerConfig((c) => ({ ...c, showUnmatched: value })),
           enabledLabel: "Hide Unmatched",
           disabledLabel: "Show Unmatched",
-        }}
+        } : undefined}
         batchSearching={batchSearching}
         onCancelBatch={cancelBatchSearch}
         onRunAll={searchAll}
+        showRunAll={mode === "bulk"}
         countLabel={`${visibleScenes.length} scene${visibleScenes.length !== 1 ? "s" : ""}`}
         settingsOpen={showConfig}
         onToggleSettings={() => setShowConfig((current) => !current)}
@@ -714,6 +766,8 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
             state={searchStates[scene.id]}
             query={getSourceQuery(scene, selectedSource)}
             onQueryChange={(q) => setQueryOverrides((prev) => ({ ...prev, [scene.id]: q }))}
+            scraperInputKind={getScraperInputKind(scene, selectedSource)}
+            onScraperInputKindChange={(inputKind) => handleScraperInputKindChange(scene, selectedSource, inputKind)}
             onSearch={() => searchScene(scene)}
             onSearchFingerprints={() => searchSceneFingerprints(scene)}
             onUpdateState={(update) => updateSearchState(scene.id, update)}
@@ -723,6 +777,7 @@ export function SceneTagger({ scenes: sceneList, onNavigate, selectedIds, select
             selected={selectedIds?.has(scene.id) ?? false}
             selecting={selecting}
             onSelect={onSelect}
+            detailMode={mode === "detail"}
           />
         ))}
       </div>
@@ -737,6 +792,8 @@ interface TaggerSceneRowProps {
   state?: SceneSearchState;
   query: string;
   onQueryChange: (q: string) => void;
+  scraperInputKind: InputKind;
+  onScraperInputKindChange: (inputKind: InputKind) => void;
   onSearch: () => void;
   onSearchFingerprints: () => void;
   onUpdateState: (update: Partial<SceneSearchState>) => void;
@@ -746,6 +803,7 @@ interface TaggerSceneRowProps {
   selected?: boolean;
   selecting?: boolean;
   onSelect?: (sceneId: number) => void;
+  detailMode?: boolean;
 }
 
 function TaggerSceneRow({
@@ -753,6 +811,8 @@ function TaggerSceneRow({
   state,
   query,
   onQueryChange,
+  scraperInputKind,
+  onScraperInputKindChange,
   onSearch,
   onSearchFingerprints,
   onUpdateState,
@@ -762,12 +822,23 @@ function TaggerSceneRow({
   selected = false,
   selecting = false,
   onSelect,
+  detailMode = false,
 }: TaggerSceneRowProps) {
   const file = scene.files[0];
   const screenshotUrl = scenes.screenshotUrl(scene.id, scene.updatedAt);
   const selectedResult = state?.results?.[state.selectedIndex ?? 0];
   const queryClient = useQueryClient();
   const sceneLinkProps = createNestedRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: scene.id }, () => onNavigate?.(scene.id));
+  const isScraperSource = source?.kind === "scraper";
+  const sceneUrls = (scene.urls ?? []).filter((url) => url.trim());
+  const selectedUrlOption = sceneUrls.includes(query) ? query : "__custom";
+  const searchPlaceholder = isScraperSource
+    ? scraperInputKind === "url"
+      ? "Scene URL..."
+      : scraperInputKind === "fragment"
+        ? "Fragment JSON..."
+        : "Title or name..."
+    : "Search query...";
 
   const importMut = useMutation<Scene | ScrapeAttempt, Error>({
     mutationFn: () => {
@@ -871,20 +942,59 @@ function TaggerSceneRow({
 
         {/* Search + Results */}
         <div className="flex-1 min-w-0">
+          {detailMode && isScraperSource && (
+            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+              <select
+                value={scraperInputKind}
+                onChange={(event) => onScraperInputKindChange(event.target.value as InputKind)}
+                className="bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
+              >
+                <option value="url" disabled={!supportsScrapeKind(source.scraper, "url")}>URL</option>
+                <option value="name" disabled={!supportsScrapeKind(source.scraper, "name")}>Title</option>
+                <option value="fragment" disabled={!supportsScrapeKind(source.scraper, "fragment")}>Fragment</option>
+              </select>
+              {scraperInputKind === "url" && sceneUrls.length > 0 ? (
+                <select
+                  value={selectedUrlOption}
+                  onChange={(event) => {
+                    if (event.target.value !== "__custom") {
+                      onQueryChange(event.target.value);
+                    }
+                  }}
+                  className="min-w-0 max-w-full flex-1 bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
+                >
+                  <option value="__custom">Custom URL</option>
+                  {sceneUrls.map((url) => (
+                    <option key={url} value={url}>{url}</option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+          )}
           {/* Search input — inline and compact */}
           <div className="flex gap-1.5 mb-1.5">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => onQueryChange(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && onSearch()}
-              placeholder="Search query..."
-              className="flex-1 min-w-0 bg-input border border-border rounded pl-2 pr-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
-            />
+            {isScraperSource && scraperInputKind === "fragment" ? (
+              <textarea
+                value={query}
+                onChange={(e) => onQueryChange(e.target.value)}
+                rows={detailMode ? 8 : 3}
+                placeholder={searchPlaceholder}
+                className="flex-1 min-w-0 bg-input border border-border rounded pl-2 pr-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
+              />
+            ) : (
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => onQueryChange(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && onSearch()}
+                placeholder={searchPlaceholder}
+                className="flex-1 min-w-0 bg-input border border-border rounded pl-2 pr-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent placeholder:text-muted"
+              />
+            )}
             <button
               onClick={onSearch}
               disabled={state?.loading}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-accent text-white hover:bg-accent-hover disabled:opacity-60"
+              className="flex h-fit items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-accent text-white hover:bg-accent-hover disabled:opacity-60"
             >
               {state?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
             </button>

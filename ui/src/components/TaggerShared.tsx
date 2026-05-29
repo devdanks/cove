@@ -73,6 +73,7 @@ export function TaggerToolbar({
   onCancelBatch,
   onRunAll,
   runAllLabel = "Scrape All",
+  showRunAll = true,
   countLabel,
   settingsOpen,
   onToggleSettings,
@@ -90,6 +91,7 @@ export function TaggerToolbar({
   onCancelBatch: () => void;
   onRunAll: () => void;
   runAllLabel?: string;
+  showRunAll?: boolean;
   countLabel: string;
   settingsOpen?: boolean;
   onToggleSettings?: () => void;
@@ -120,16 +122,18 @@ export function TaggerToolbar({
         </button>
       )}
 
-      {batchSearching ? (
-        <button type="button" onClick={onCancelBatch} className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-red-600 text-white hover:bg-red-500">
-          <X className="w-3.5 h-3.5" />
-          Cancel
-        </button>
-      ) : (
-        <button type="button" onClick={onRunAll} className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-accent text-white hover:bg-accent-hover">
-          <CloudDownload className="w-3.5 h-3.5" />
-          {runAllLabel}
-        </button>
+      {showRunAll && (
+        batchSearching ? (
+          <button type="button" onClick={onCancelBatch} className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-red-600 text-white hover:bg-red-500">
+            <X className="w-3.5 h-3.5" />
+            Cancel
+          </button>
+        ) : (
+          <button type="button" onClick={onRunAll} className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium bg-accent text-white hover:bg-accent-hover">
+            <CloudDownload className="w-3.5 h-3.5" />
+            {runAllLabel}
+          </button>
+        )
       )}
 
       <span className="ml-auto text-xs text-muted">{countLabel}</span>

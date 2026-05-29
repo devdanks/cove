@@ -9,8 +9,10 @@ import type { CriterionDefinition, FilterDialogCustomSection } from "../componen
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { createNestedRouteLinkProps } from "../components/cardNavigation";
 import { FaceCompareDialog } from "../components/FaceCompareDialog";
+import { buildFaceCarouselSampleImageUrls } from "../components/faceComparisonImages";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FaceTile } from "../components/EntityCards";
+import { useListPageCardSizeContext } from "../components/ListPageCardSizeContext";
 import { formatDate } from "../components/shared";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
@@ -374,6 +376,7 @@ export function FacesPage({ onNavigate }: Props) {
   const [batchResult, setBatchResult] = useState<FaceBatchOperationResult | null>(null);
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
+  const comparisonFaceId = comparison?.face.id ?? null;
 
   const query = useMemo(() => ({
     q: filter.q?.trim() || undefined,
@@ -433,6 +436,15 @@ export function FacesPage({ onNavigate }: Props) {
   const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: listData.infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
   const selectedFaceIds = useMemo(() => Array.from(selectedIds).map((value) => Number(value)), [selectedIds]);
+  const { data: comparisonFaceDetections = [] } = useQuery({
+    queryKey: ["face", comparisonFaceId, "detections"],
+    queryFn: () => faces.detections(comparisonFaceId!),
+    enabled: comparisonFaceId != null,
+  });
+  const comparisonFaceImageUrls = useMemo(
+    () => buildFaceCarouselSampleImageUrls(comparison?.face, comparisonFaceDetections, faces.detectionCropUrl),
+    [comparison?.face, comparisonFaceDetections],
+  );
   const handleSelectAllMatching = async () => {
     setSelectAllMatchingPending(true);
     try {
@@ -582,6 +594,8 @@ export function FacesPage({ onNavigate }: Props) {
                     canReadPerformers={canReadPerformers}
                     canWriteFaces={canWriteFaces}
                     onOpenCompare={(suggestion) => setComparison({ face, suggestion })}
+                    onLinkSuggestion={(suggestion) => handleConfirmSuggestion(face, suggestion)}
+                    actionDisabled={compareBusy}
                   />
                 )}
               </FaceTile>
@@ -594,6 +608,8 @@ export function FacesPage({ onNavigate }: Props) {
             canReadPerformers={canReadPerformers}
             canWriteFaces={canWriteFaces}
             onOpenCompare={(face, suggestion) => setComparison({ face, suggestion })}
+            onLinkSuggestion={(face, suggestion) => handleConfirmSuggestion(face, suggestion)}
+            actionDisabled={compareBusy}
             selectedIds={selectedIds}
             onToggle={toggle}
             selecting={selecting}
@@ -630,6 +646,7 @@ export function FacesPage({ onNavigate }: Props) {
         open={comparison != null}
         face={comparison?.face ?? null}
         suggestion={comparison?.suggestion ?? null}
+        faceImageUrls={comparisonFaceImageUrls}
         disabled={compareBusy}
         canReadPerformers={canReadPerformers}
         onClose={() => setComparison(null)}
@@ -666,6 +683,8 @@ function FaceListTable({
   canReadPerformers,
   canWriteFaces,
   onOpenCompare,
+  onLinkSuggestion,
+  actionDisabled,
   selectedIds,
   onToggle,
   selecting,
@@ -675,10 +694,14 @@ function FaceListTable({
   canReadPerformers: boolean;
   canWriteFaces: boolean;
   onOpenCompare: (face: Face, suggestion: FaceTopSuggestion) => void;
+  onLinkSuggestion: (face: Face, suggestion: FaceTopSuggestion) => void;
+  actionDisabled?: boolean;
   selectedIds: Set<number>;
   onToggle: (id: number) => void;
   selecting: boolean;
 }) {
+  const density = useFaceListDensity();
+
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="hidden grid-cols-[minmax(0,1.1fr)_110px_130px_minmax(0,1fr)_120px] gap-3 border-b border-border bg-surface/70 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted lg:grid">
@@ -697,14 +720,44 @@ function FaceListTable({
             canReadPerformers={canReadPerformers}
             canWriteFaces={canWriteFaces}
             onOpenCompare={(suggestion) => onOpenCompare(face, suggestion)}
+            onLinkSuggestion={(suggestion) => onLinkSuggestion(face, suggestion)}
+            actionDisabled={actionDisabled}
             selected={selectedIds.has(face.id)}
             onToggle={() => onToggle(face.id)}
             selecting={selecting}
+            density={density}
           />
         ))}
       </div>
     </div>
   );
+}
+
+interface FaceListDensity {
+  rowPaddingClassName: string;
+  previewSize: number;
+  showPreview: boolean;
+  showMeta: boolean;
+}
+
+function useFaceListDensity(): FaceListDensity {
+  const cardSize = useListPageCardSizeContext();
+  const level = Math.max(0, Math.min(8, cardSize?.zoomLevel ?? 1));
+
+  if (level <= 0.25) {
+    return { rowPaddingClassName: "py-1.5", previewSize: 0, showPreview: false, showMeta: false };
+  }
+
+  if (level <= 0.75) {
+    return { rowPaddingClassName: "py-2", previewSize: 0, showPreview: false, showMeta: true };
+  }
+
+  return {
+    rowPaddingClassName: level >= 3 ? "py-4" : "py-3",
+    previewSize: Math.round(Math.min(104, 48 + level * 8)),
+    showPreview: true,
+    showMeta: true,
+  };
 }
 
 function FaceListRow({
@@ -713,25 +766,31 @@ function FaceListRow({
   canReadPerformers,
   canWriteFaces,
   onOpenCompare,
+  onLinkSuggestion,
+  actionDisabled,
   selected,
   onToggle,
   selecting,
+  density,
 }: {
   face: Face;
   onNavigate: (r: any) => void;
   canReadPerformers: boolean;
   canWriteFaces: boolean;
   onOpenCompare: (suggestion: FaceTopSuggestion) => void;
+  onLinkSuggestion: (suggestion: FaceTopSuggestion) => void;
+  actionDisabled?: boolean;
   selected: boolean;
   onToggle: () => void;
   selecting: boolean;
+  density: FaceListDensity;
 }) {
   const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
 
   return (
     <div
       onClick={selecting ? onToggle : undefined}
-      className={`group relative cursor-pointer px-4 py-3 transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}
+      className={`group relative cursor-pointer px-4 ${density.rowPaddingClassName} transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}
     >
       <RouteCardLinkOverlay
         route={{ page: "face", id: face.id }}
@@ -744,7 +803,7 @@ function FaceListRow({
         <div className="relative min-w-0 pl-8">
           <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onToggle} />
           <div className="flex items-start gap-3">
-            <div className="hidden h-16 w-16 shrink-0 overflow-hidden rounded-full bg-surface sm:block">
+            {density.showPreview ? <div className="hidden shrink-0 overflow-hidden rounded-full bg-surface sm:block" style={{ height: density.previewSize, width: density.previewSize }}>
               {face.coverImageUrl ? (
                       <img src={face.coverImageUrl} alt={title} className="h-full w-full bg-surface/85 object-contain p-1" loading="lazy" />
               ) : (
@@ -752,12 +811,12 @@ function FaceListRow({
                   <Fingerprint className="h-6 w-6" />
                 </div>
               )}
-            </div>
+            </div> : null}
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
+              {density.showMeta ? <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
                 {face.performerId ? <Badge icon={<Link2 className="h-3 w-3" />} label={face.performerName || `Performer #${face.performerId}`} /> : null}
-              </div>
+              </div> : null}
             </div>
           </div>
         </div>
@@ -774,6 +833,8 @@ function FaceListRow({
               canReadPerformers={canReadPerformers}
               canWriteFaces={canWriteFaces}
               onOpenCompare={onOpenCompare}
+              onLinkSuggestion={onLinkSuggestion}
+              actionDisabled={actionDisabled}
               compact
             />
           )}
@@ -797,6 +858,8 @@ function TopSuggestionFooter({
   canReadPerformers,
   canWriteFaces,
   onOpenCompare,
+  onLinkSuggestion,
+  actionDisabled,
   compact = false,
 }: {
   face: Face;
@@ -805,6 +868,8 @@ function TopSuggestionFooter({
   canReadPerformers: boolean;
   canWriteFaces: boolean;
   onOpenCompare: (suggestion: FaceTopSuggestion) => void;
+  onLinkSuggestion: (suggestion: FaceTopSuggestion) => void;
+  actionDisabled?: boolean;
   compact?: boolean;
 }) {
   if (!suggestion) {
@@ -843,17 +908,34 @@ function TopSuggestionFooter({
         <div className="text-xs text-secondary">{formatPercent(suggestion.confidence)}% confidence</div>
       </div>
       {canWriteFaces ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onOpenCompare(suggestion);
-          }}
-          className="relative z-20 shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-accent hover:text-accent"
-        >
-          Link
-        </button>
+        <div className="relative z-20 flex shrink-0 flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onLinkSuggestion(suggestion);
+            }}
+            disabled={actionDisabled}
+            className={`inline-flex items-center gap-1 rounded-lg border border-accent bg-accent/10 text-xs font-medium text-accent transition-colors hover:bg-accent/15 disabled:cursor-not-allowed disabled:opacity-60 ${compact ? "px-2 py-1" : "px-3 py-1.5"}`}
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            Link
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenCompare(suggestion);
+            }}
+            disabled={actionDisabled}
+            className={`inline-flex items-center gap-1 rounded-lg border border-border text-xs font-medium text-foreground transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60 ${compact ? "px-2 py-1" : "px-3 py-1.5"}`}
+          >
+            <Fingerprint className="h-3.5 w-3.5" />
+            Compare
+          </button>
+        </div>
       ) : null}
     </div>
   );

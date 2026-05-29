@@ -31,6 +31,7 @@ interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   videoClassName?: string;
   chromeless?: boolean;
   videoControls?: (state: WallMediaVideoControlsState) => ReactNode;
+  onVideoPlayEligibilityChange?: (eligible: boolean) => void;
   playbackTracking?: PlaybackTrackingTarget;
   trackingEnabled?: boolean;
 }
@@ -56,6 +57,7 @@ export function WallMediaCard({
   videoClassName,
   chromeless = false,
   videoControls,
+  onVideoPlayEligibilityChange,
   playbackTracking,
   trackingEnabled = true,
   className,
@@ -77,6 +79,20 @@ export function WallMediaCard({
   const intervalStart = useRef<number | null>(null);
   const lastSeenTime = useRef(0);
   const lastKeepaliveSentAt = useRef(0);
+  const onVideoPlayEligibilityChangeRef = useRef(onVideoPlayEligibilityChange);
+  const lastReportedVideoPlayEligibilityRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    onVideoPlayEligibilityChangeRef.current = onVideoPlayEligibilityChange;
+  }, [onVideoPlayEligibilityChange]);
+
+  const setVideoPlayEligibility = useCallback((eligible: boolean) => {
+    setShouldPlayVideo(eligible);
+    if (lastReportedVideoPlayEligibilityRef.current !== eligible) {
+      lastReportedVideoPlayEligibilityRef.current = eligible;
+      onVideoPlayEligibilityChangeRef.current?.(eligible);
+    }
+  }, []);
 
   const playbackTrackingTarget = useMemo<PlaybackTrackingTarget | null>(() => {
     if (!trackingEnabled) {
@@ -124,7 +140,7 @@ export function WallMediaCard({
   useEffect(() => {
     if (!useVideo || !videoSrc) {
       setShouldLoadVideo(false);
-      setShouldPlayVideo(false);
+      setVideoPlayEligibility(false);
       return;
     }
 
@@ -133,7 +149,7 @@ export function WallMediaCard({
 
     if (typeof IntersectionObserver === "undefined") {
       setShouldLoadVideo(true);
-      setShouldPlayVideo(true);
+      setVideoPlayEligibility(true);
       return;
     }
 
@@ -144,7 +160,7 @@ export function WallMediaCard({
       const intersectionRatio = typeof entry.intersectionRatio === "number"
         ? entry.intersectionRatio
         : (entry.isIntersecting ? 1 : 0);
-      setShouldPlayVideo(entry.isIntersecting && intersectionRatio >= videoPlayThreshold);
+      setVideoPlayEligibility(entry.isIntersecting && intersectionRatio >= videoPlayThreshold);
     }, { threshold: [0, Math.min(1, Math.max(0.01, videoPlayThreshold)), 1] });
 
     loadObserver.observe(element);
@@ -152,8 +168,9 @@ export function WallMediaCard({
     return () => {
       loadObserver.disconnect();
       playObserver.disconnect();
+      setVideoPlayEligibility(false);
     };
-  }, [useVideo, videoLoadRootMargin, videoPlayThreshold, videoSrc]);
+  }, [setVideoPlayEligibility, useVideo, videoLoadRootMargin, videoPlayThreshold, videoSrc]);
 
   useEffect(() => {
     if (!useVideo || !videoSrc || !shouldLoadVideo) {

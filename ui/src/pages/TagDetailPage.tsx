@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { audios, galleries, groups, images, metadata, performers, scenes, segmentLibrary, studios, tags, texts, entityImages } from "../api/client";
 import type { Audio, FindFilter, Gallery, Group, Image, Performer, Scene, SceneFilterCriteria, SegmentRecord, Studio, TagDetail as TagDetailModel, TextDocument } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
-import { Building2, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MoreVertical, Music, Pencil, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
+import { Building2, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MoreVertical, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TagEditModal } from "./TagEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -17,7 +17,8 @@ import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
-import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
+import { TagMetadataTaggerDialog } from "../components/MetadataTaggerDialog";
+import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
 import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
 import { SCENE_CRITERIA } from "../components/FilterDialog";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -92,6 +93,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [metadataTaggerOpen, setMetadataTaggerOpen] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("scenes");
@@ -290,6 +292,11 @@ export function TagDetailPage({ id, onNavigate }: Props) {
                       </button>
                     ) : null}
                     {canWriteTag ? (
+                      <button type="button" onClick={() => { setShowOpsMenu(false); setMetadataTaggerOpen(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary hover:bg-card hover:text-foreground">
+                        <Search className="h-3.5 w-3.5" /> Metadata...
+                      </button>
+                    ) : null}
+                    {canWriteTag ? (
                       <button type="button" onClick={() => { setShowOpsMenu(false); setMergeOpen(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary hover:bg-card hover:text-foreground">
                         <GitMerge className="h-3.5 w-3.5" /> Merge...
                       </button>
@@ -380,6 +387,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         onMerge={(targetId, sourceIds) => tags.merge(targetId, sourceIds)}
         invalidateQueryKeys={[["tag", id], ["tags"]]}
       />
+      <TagMetadataTaggerDialog open={metadataTaggerOpen} onClose={() => setMetadataTaggerOpen(false)} tag={tag} />
 
     </>
   );
@@ -433,6 +441,7 @@ function TagScenesPanel({ tagId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("scenes");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
@@ -449,7 +458,7 @@ function TagScenesPanel({ tagId, filter, setFilter, onNavigate }: {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "tag", id: tagId }} />} criteriaDefinitions={SCENE_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "tag", id: tagId }} />} criteriaDefinitions={SCENE_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes with this tag" /></>;
@@ -457,20 +466,7 @@ function TagScenesPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid
-        items={items}
-        getItemKey={(scene) => scene.id}
-        minCardWidth={`${getEntityCardMinWidthPx("scenes", zoomLevel)}px`}
-        virtualMinColumnWidth={getEntityCardMinWidthPx("scenes", zoomLevel)}
-        estimateRowHeight={320}
-        infinitePageSize={infinitePageSize}
-        hasNextPage={infiniteQuery.hasNextPage}
-        isFetchingNextPage={infiniteQuery.isFetchingNextPage}
-        loadMore={loadMore}
-        renderItem={(scene) => (
-          <SceneCard scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
-        )}
-      />
+      <RelatedEntityListView entityType="scenes" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onSceneQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -485,6 +481,7 @@ function TagPerformersPanel({ tagId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("performers");
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Performer>({
     queryKey: ["tag-performers", tagId, filter],
     filter,
@@ -493,7 +490,7 @@ function TagPerformersPanel({ tagId, filter, setFilter, onNavigate }: {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={PERFORMER_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={PERFORMER_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<UserRound className="h-10 w-10" />} message="Loading performers..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<UserRound className="h-12 w-12" />} message="No performers with this tag" /></>;
@@ -501,9 +498,7 @@ function TagPerformersPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(performer) => performer.id} minCardWidth={`${getEntityCardMinWidthPx("performers", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("performers", zoomLevel)} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(performer) => (
-        <PerformerTile performer={performer} onClick={() => selecting ? toggle(performer.id) : onNavigate({ page: "performer", id: performer.id })} selected={selectedIds.has(performer.id)} onSelect={() => toggle(performer.id)} selecting={selecting} />
-      )} />
+      <RelatedEntityListView entityType="performers" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
     </>
   );
 }
@@ -515,6 +510,7 @@ function TagImagesPanel({ tagId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("images");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Image>({
     queryKey: ["tag-images", tagId, filter],
@@ -524,7 +520,7 @@ function TagImagesPanel({ tagId, filter, setFilter, onNavigate }: {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={IMAGE_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="images" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<ImageIcon className="h-10 w-10" />} message="Loading images..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<ImageIcon className="h-12 w-12" />} message="No images with this tag" /></>;
@@ -532,9 +528,7 @@ function TagImagesPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(image) => image.id} minCardWidth={`${getEntityCardMinWidthPx("images", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("images", zoomLevel)} estimateRowHeight={260} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(image) => (
-        <ImageTile image={image} onClick={() => selecting ? toggle(image.id) : onNavigate({ page: "image", id: image.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(image.id)} selected={selectedIds.has(image.id)} onSelect={() => toggle(image.id)} selecting={selecting} />
-      )} />
+      <RelatedEntityListView entityType="images" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onImageQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
         <QuickViewDialog type="image" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
@@ -549,6 +543,7 @@ function TagGalleriesPanel({ tagId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("galleries");
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Gallery>({
     queryKey: ["tag-galleries", tagId, filter],
     filter,
@@ -557,7 +552,7 @@ function TagGalleriesPanel({ tagId, filter, setFilter, onNavigate }: {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={GALLERY_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="galleries" selectedIds={selectedIds} onDone={selectNone} downloadItems={items} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<FolderOpen className="h-10 w-10" />} message="Loading galleries..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<FolderOpen className="h-12 w-12" />} message="No galleries with this tag" /></>;
@@ -565,9 +560,7 @@ function TagGalleriesPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(gallery) => gallery.id} minCardWidth={`${getEntityCardMinWidthPx("galleries", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("galleries", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(gallery) => (
-        <GalleryTile gallery={gallery} onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })} selected={selectedIds.has(gallery.id)} onSelect={() => toggle(gallery.id)} selecting={selecting} />
-      )} />
+      <RelatedEntityListView entityType="galleries" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
     </>
   );
 }
@@ -579,6 +572,7 @@ function TagAudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("audios");
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Audio>({
     queryKey: ["tag-audios", tagId, filter],
     filter,
@@ -592,7 +586,7 @@ function TagAudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={AUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="audios" selectedIds={selectedIds} onDone={selectNone} audioItems={items} downloadItems={items} onNavigate={onNavigate} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={AUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="audios" selectedIds={selectedIds} onDone={selectNone} audioItems={items} downloadItems={items} onNavigate={onNavigate} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<Headphones className="h-10 w-10" />} message="Loading audios..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Headphones className="h-12 w-12" />} message="No audios with this tag" /></>;
@@ -600,9 +594,7 @@ function TagAudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(audio) => audio.id} minCardWidth={`${getEntityCardMinWidthPx("audios", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("audios", zoomLevel)} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(audio) => (
-        <AudioTile audio={audio} onClick={() => selecting ? toggle(audio.id) : onNavigate({ page: "audio", id: audio.id })} onNavigate={onNavigate} selected={selectedIds.has(audio.id)} onSelect={() => toggle(audio.id)} selecting={selecting} />
-      )} />
+      <RelatedEntityListView entityType="audios" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
     </>
   );
 }
@@ -614,6 +606,7 @@ function TagTextsPanel({ tagId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("texts");
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<TextDocument>({
     queryKey: ["tag-texts", tagId, filter],
     filter,
@@ -627,7 +620,7 @@ function TagTextsPanel({ tagId, filter, setFilter, onNavigate }: {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={TEXT_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="texts" selectedIds={selectedIds} onDone={selectNone} textItems={items} downloadItems={items} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={TEXT_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="texts" selectedIds={selectedIds} onDone={selectNone} textItems={items} downloadItems={items} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<FileText className="h-10 w-10" />} message="Loading texts..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<FileText className="h-12 w-12" />} message="No texts with this tag" /></>;
@@ -635,9 +628,7 @@ function TagTextsPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(text) => text.id} minCardWidth={`${getEntityCardMinWidthPx("texts", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("texts", zoomLevel)} estimateRowHeight={220} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(text) => (
-        <TextTile text={text} onClick={() => selecting ? toggle(text.id) : onNavigate({ page: "text", id: text.id })} onNavigate={onNavigate} selected={selectedIds.has(text.id)} onSelect={() => toggle(text.id)} selecting={selecting} />
-      )} />
+      <RelatedEntityListView entityType="texts" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
     </>
   );
 }
@@ -646,6 +637,7 @@ function TagSegmentsPanel({ tagId, filter, setFilter, onNavigate }: { tagId: num
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canEditSegments = hasPermission("segments.write");
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("segments");
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<SegmentRecord>({
     queryKey: ["tag-segments", tagId, filter],
     filter,
@@ -675,7 +667,7 @@ function TagSegmentsPanel({ tagId, filter, setFilter, onNavigate }: { tagId: num
       {removeTagMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
       Remove from Tag
     </button>
-  ) : undefined} allowInfinitePageSize />;
+  ) : undefined} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading segments..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Layers className="h-12 w-12" />} message="No segments with this tag" /></>;
@@ -683,9 +675,7 @@ function TagSegmentsPanel({ tagId, filter, setFilter, onNavigate }: { tagId: num
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(segment) => segment.id} minCardWidth={`${getEntityCardMinWidthPx("segments", 1)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("segments", 1)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(segment) => (
-        <SegmentTile segment={segment} onClick={() => selecting ? toggle(segment.id) : onNavigate({ page: "segment", id: segment.id })} selected={selectedIds.has(segment.id)} onSelect={() => toggle(segment.id)} selecting={selecting} />
-      )} />
+      <RelatedEntityListView entityType="segments" items={items} displayMode={displayMode} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
     </>
   );
 }
@@ -697,6 +687,7 @@ function TagStudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("studios");
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Studio>({
     queryKey: ["tag-studios", tagId, filter],
     filter,
@@ -705,7 +696,7 @@ function TagStudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={STUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="studios" selectedIds={selectedIds} onDone={selectNone} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={STUDIO_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="studios" selectedIds={selectedIds} onDone={selectNone} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<Building2 className="h-10 w-10" />} message="Loading studios..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Building2 className="h-12 w-12" />} message="No studios with this tag" /></>;
@@ -713,9 +704,7 @@ function TagStudiosPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(studio) => studio.id} minCardWidth={`${getEntityCardMinWidthPx("studios", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("studios", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(studio) => (
-        <StudioTile studio={studio} onClick={() => selecting ? toggle(studio.id) : onNavigate({ page: "studio", id: studio.id })} selected={selectedIds.has(studio.id)} onSelect={() => toggle(studio.id)} selecting={selecting} />
-      )} />
+      <RelatedEntityListView entityType="studios" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
     </>
   );
 }
@@ -727,6 +716,7 @@ function TagGroupsPanel({ tagId, filter, setFilter, onNavigate }: {
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("groups");
   const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Group>({
     queryKey: ["tag-groups", tagId, filter],
     filter,
@@ -735,7 +725,7 @@ function TagGroupsPanel({ tagId, filter, setFilter, onNavigate }: {
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={GROUP_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={GROUP_SORT} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="groups" selectedIds={selectedIds} onDone={selectNone} removeFromParent={{ type: "tag", id: tagId }} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<Layers className="h-10 w-10" />} message="Loading groups..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Layers className="h-12 w-12" />} message="No groups with this tag" /></>;
@@ -743,9 +733,7 @@ function TagGroupsPanel({ tagId, filter, setFilter, onNavigate }: {
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid items={items} getItemKey={(group) => group.id} minCardWidth={`${getEntityCardMinWidthPx("groups", zoomLevel)}px`} virtualMinColumnWidth={getEntityCardMinWidthPx("groups", zoomLevel)} estimateRowHeight={280} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} renderItem={(group) => (
-        <GroupTile group={group} onClick={() => selecting ? toggle(group.id) : onNavigate({ page: "group", id: group.id })} selected={selectedIds.has(group.id)} onSelect={() => toggle(group.id)} selecting={selecting} />
-      )} />
+      <RelatedEntityListView entityType="groups" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
     </>
   );
 }

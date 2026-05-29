@@ -682,8 +682,7 @@ query Me {
             Id: tag.Id,
             Name: tag.Name,
             Description: tag.Description,
-            Aliases: tag.Aliases
-                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            Aliases: CleanStrings(tag.Aliases)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList()
         );
@@ -1685,7 +1684,7 @@ query Me {
         if (!string.IsNullOrWhiteSpace(remote.Description))
             fields["description"] = remote.Description.Trim();
 
-        var aliases = remote.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Select(alias => alias.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var aliases = CleanStrings(remote.Aliases).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (aliases.Count > 0)
             fields["aliases"] = aliases;
 
@@ -2114,15 +2113,20 @@ query Me {
         }
     }
 
-    private static void MergeAliases(Tag tag, IEnumerable<string> aliases)
+    private static void MergeAliases(Tag tag, IEnumerable<string>? aliases)
     {
         var existing = tag.Aliases.Select(alias => alias.Alias).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var alias in aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Select(alias => alias.Trim()).Where(alias => !string.Equals(alias, tag.Name, StringComparison.OrdinalIgnoreCase)))
+        foreach (var alias in CleanStrings(aliases).Where(alias => !string.Equals(alias, tag.Name, StringComparison.OrdinalIgnoreCase)))
         {
             if (existing.Add(alias))
                 tag.Aliases.Add(new TagAlias { Alias = alias, TagId = tag.Id });
         }
     }
+
+    private static IEnumerable<string> CleanStrings(IEnumerable<string>? values)
+        => values == null
+            ? []
+            : values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim());
 
     private static void UpsertRemoteId<TRemoteId>(ICollection<TRemoteId> collection, string endpoint, string remoteId, Func<TRemoteId, string> getEndpoint, Func<TRemoteId, string> getRemoteId, Action<TRemoteId, string> setRemoteId, Func<string, TRemoteId> create)
     {

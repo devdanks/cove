@@ -36,6 +36,7 @@ import { createFromUrlWithOptionalDownload, mergeUrlLists, NoDownloaderFoundErro
 import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
 import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
 import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
+import { RelatedEntityListRow } from "../components/RelatedEntityListView";
 import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 import {
   formatBatchDownloadSummary,
@@ -137,6 +138,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const [verticalAutoScrollSeconds, setVerticalAutoScrollSeconds] = useState(8);
   const [verticalAutoScrollAwake, setVerticalAutoScrollAwake] = useState(true);
   const [feedAudioSceneId, setFeedAudioSceneId] = useState<number | null>(null);
+  const lastPagedFilterRef = useRef<Pick<FindFilter, "page" | "perPage">>({ page: defaultState.filter.page ?? 1, perPage: defaultState.filter.perPage });
   const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
   const queryClient = useQueryClient();
   const { setQueue } = useSceneQueue();
@@ -295,6 +297,12 @@ export function ScenesPage({ onNavigate }: Props) {
   );
 
   useEffect(() => {
+    if (!infiniteOnlyDisplayMode && filter.perPage !== 0) {
+      lastPagedFilterRef.current = { page: filter.page ?? 1, perPage: filter.perPage };
+    }
+  }, [filter.page, filter.perPage, infiniteOnlyDisplayMode]);
+
+  useEffect(() => {
     if (infiniteOnlyDisplayMode && filter.perPage !== 0) {
       setFilter({ ...filter, page: 1, perPage: 0 });
     }
@@ -340,17 +348,28 @@ export function ScenesPage({ onNavigate }: Props) {
   }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode, visualSimilarityAvailable]);
 
   const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
+    const requiresInfinite = mode === "feed" || mode === "vertical";
+
+    if (requiresInfinite && filter.perPage !== 0) {
+      lastPagedFilterRef.current = { page: filter.page ?? 1, perPage: filter.perPage };
+    }
+
     setDisplayMode(mode);
 
     if (mode === "vertical" && !objectFilter[VERTICAL_PORTRAIT_FILTER_KEY] && Object.keys(objectFilter).length === 0) {
       setObjectFilter({ [VERTICAL_PORTRAIT_FILTER_KEY]: { value: "portrait" } });
     }
 
-    const requiresInfinite = mode === "feed" || mode === "vertical";
-    if (filter.page !== 1 || (requiresInfinite && filter.perPage !== 0)) {
-      setFilter({ ...filter, page: 1, perPage: requiresInfinite ? 0 : filter.perPage });
+    if (requiresInfinite && filter.perPage !== 0) {
+      setFilter({ ...filter, page: 1, perPage: 0 });
+      return;
     }
-  }, [filter, objectFilter, setDisplayMode, setFilter, setObjectFilter]);
+
+    if (!requiresInfinite && filter.perPage === 0) {
+      const lastPagedFilter = lastPagedFilterRef.current;
+      setFilter({ ...filter, page: lastPagedFilter.page ?? 1, perPage: lastPagedFilter.perPage ?? defaultState.filter.perPage });
+    }
+  }, [defaultState.filter.perPage, filter, objectFilter, setDisplayMode, setFilter, setObjectFilter]);
 
   const includeCompilationGroups = isIncludeCompilationGroupsEnabled(normalizedObjectFilter[INCLUDE_COMPILATIONS_FILTER_KEY]);
   const canShowCompilationGroups = !infinitePageSize && includeCompilationGroups && searchMode === "text" && !hasCompilationBlockingObjectFilter && (displayMode === "grid" || displayMode === "list");
@@ -885,7 +904,6 @@ export function ScenesPage({ onNavigate }: Props) {
             hasNextPage={Boolean(infiniteScenesQuery.hasNextPage)}
             isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
             loadMore={loadMoreScenes}
-            onActiveIndexChange={defaultFeedVideoSound ? (idx) => setFeedAudioSceneId(idx == null ? null : items[idx]?.id ?? null) : undefined}
             className={isMobileViewer ? "[overflow-anchor:none]" : undefined}
             itemClassName="pb-5 [touch-action:pan-y]"
             renderItem={({ item: scene }) => (
@@ -898,6 +916,7 @@ export function ScenesPage({ onNavigate }: Props) {
                 feedVideoStartMinDuration={feedVideoStartMinDuration}
                 soundEnabled={feedAudioSceneId === scene.id}
                 onToggleSound={() => setFeedAudioSceneId((current) => current === scene.id ? null : scene.id)}
+                onPlaybackEligibilityChange={defaultFeedVideoSound ? (eligible) => setFeedAudioSceneId((current) => eligible ? scene.id : current === scene.id ? null : current) : undefined}
                 onNavigate={onNavigate}
                 canEngage={canEngageScene}
                 selected={selectedIds.has(scene.id)}
@@ -1328,87 +1347,41 @@ function getSceneFeedVideoStartTime(scene: Scene, feedVideoSource: string, start
 
 /* ── Scene List Table ── */
 
-function SceneListTable({ entries, engagementById, onNavigate, selectedIds, onToggle, selecting }: { entries: SceneListEntry[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
+function SceneListTable({ entries, onNavigate, selectedIds, onToggle, selecting }: { entries: SceneListEntry[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
   return (
-    <div className="overflow-x-auto px-2">
-      <table className="w-full text-xs text-foreground">
-        <thead>
-          <tr className="border-b border-border text-muted">
-            {selectedIds && <th className="w-8 py-2 px-2"></th>}
-            <th className="text-left py-2 px-2 font-medium">Title</th>
-            <th className="text-left py-2 px-2 font-medium">Date</th>
-            <th className="text-left py-2 px-2 font-medium">Rating</th>
-            <th className="text-left py-2 px-2 font-medium">Duration</th>
-            <th className="text-left py-2 px-2 font-medium">Size</th>
-            <th className="text-left py-2 px-2 font-medium">Resolution</th>
-            <th className="text-right py-2 px-2 font-medium">Plays</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((entry) => {
-            if (entry.kind === "compilation" && entry.group) {
-              const group = entry.group;
-              return (
-                <tr
-                  key={`compilation-${group.id}`}
-                  onClick={() => onNavigate({ page: "compilation", id: group.id })}
-                  className="border-b border-border hover:bg-card cursor-pointer"
-                >
-                  {selectedIds && <td className="py-1.5 px-2 text-muted"><Layers className="h-3.5 w-3.5" /></td>}
-                  <td className="py-1.5 px-2">
-                    <span className="text-foreground hover:text-accent">{group.name}</span>
-                    {group.studioName && <span className="text-muted ml-2">— {group.studioName}</span>}
-                  </td>
-                  <td className="py-1.5 px-2 text-muted">{group.date || ""}</td>
-                  <td className="py-1.5 px-2 text-muted">Compilation</td>
-                  <td className="py-1.5 px-2 text-muted"></td>
-                  <td className="py-1.5 px-2 text-muted"></td>
-                  <td className="py-1.5 px-2 text-muted">{group.sceneCount} scenes</td>
-                  <td className="py-1.5 px-2 text-right text-muted"></td>
-                </tr>
-              );
-            }
-            if (!entry.scene) return null;
-            const scene = entry.scene;
-            const file = scene.files[0];
-            const duration = getSceneDisplayDuration(scene);
-            return (
-              <tr
-                key={`scene-${scene.id}`}
-                onClick={() => selecting ? onToggle?.(scene.id) : onNavigate({ page: "scene", id: scene.id })}
-                className={`border-b border-border hover:bg-card cursor-pointer ${selectedIds?.has(scene.id) ? "bg-accent/10" : ""}`}
-              >
-                {selectedIds && (
-                  <td className="py-1.5 px-2">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(scene.id)}
-                      onChange={() => onToggle?.(scene.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-3.5 h-3.5 rounded border-border cursor-pointer accent-accent"
-                    />
-                  </td>
-                )}
-                <td className="py-1.5 px-2">
-                  <span className="text-foreground hover:text-accent">
-                    {scene.title || file?.basename || "Untitled"}
-                  </span>
-                  {scene.studioName && (
-                    <span className="text-muted ml-2">— {scene.studioName}</span>
-                  )}
-                </td>
-                <td className="py-1.5 px-2 text-muted">{scene.date || ""}</td>
-                <td className="py-1.5 px-2"><RatingBadge rating={engagementById.get(scene.id)?.rating} /></td>
-                <td className="py-1.5 px-2 text-muted">{duration > 0 ? formatDuration(duration) : ""}</td>
-                <td className="py-1.5 px-2 text-muted">{file ? formatFileSize(file.size) : ""}</td>
-                <td className="py-1.5 px-2 text-muted">{file ? getResolutionLabel(file.width, file.height) : ""}</td>
-                <td className="py-1.5 px-2 text-right text-muted">{engagementById.get(scene.id)?.playCount || ""}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-2">
+      {entries.map((entry) => {
+        if (entry.kind === "compilation" && entry.group) {
+          const group = entry.group;
+          return <CompilationListRow key={`compilation-${group.id}`} group={group} onNavigate={onNavigate} />;
+        }
+        if (!entry.scene) return null;
+        return <RelatedEntityListRow key={`scene-${entry.scene.id}`} entityType="scenes" item={entry.scene} selected={selectedIds?.has(entry.scene.id) ?? false} selecting={selecting} onToggle={onToggle} onNavigate={onNavigate} />;
+      })}
     </div>
+  );
+}
+
+function CompilationListRow({ group, onNavigate }: { group: Group; onNavigate: (r: any) => void }) {
+  return (
+    <article
+      className="group flex min-h-[5.75rem] w-full cursor-pointer items-stretch gap-3 rounded-lg border border-border/70 bg-card/70 p-2 text-left shadow-sm shadow-black/10 transition-colors hover:border-accent/45 hover:bg-card"
+      onClick={() => onNavigate({ page: "compilation", id: group.id })}
+    >
+      <div className="relative flex h-20 w-28 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-surface/80 text-muted">
+        <Layers className="h-7 w-7" />
+      </div>
+      <button type="button" onClick={(event) => { event.stopPropagation(); onNavigate({ page: "compilation", id: group.id }); }} className="flex min-w-0 flex-1 flex-col justify-center text-left">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <h3 className="min-w-0 truncate text-sm font-semibold text-foreground transition-colors group-hover:text-accent sm:text-[15px]">{group.name}</h3>
+          <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-accent">Compilation</span>
+        </div>
+        <p className="mt-1 truncate text-xs text-secondary">{[group.studioName, group.date].filter(Boolean).join(" · ") || "Compilation"}</p>
+        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted">
+          <span className="rounded-full border border-border/70 bg-background/55 px-2 py-0.5">{group.sceneCount} scenes</span>
+        </div>
+      </button>
+    </article>
   );
 }
 
@@ -1456,7 +1429,7 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
   );
 }
 
-function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, canEngage, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; canEngage: boolean; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnabled, onToggleSound, onPlaybackEligibilityChange, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, canEngage, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; onPlaybackEligibilityChange?: (eligible: boolean) => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; canEngage: boolean; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
   const file = scene.files[0];
   const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
   const title = scene.title || file?.basename || `Scene ${scene.id}`;
@@ -1543,7 +1516,8 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
                 useVideo={useVideo}
                 muted={!soundEnabled}
                 videoStartTimeSec={videoStartTimeSec}
-                videoPlayThreshold={0.65}
+                videoPlayThreshold={0.5}
+                onVideoPlayEligibilityChange={onPlaybackEligibilityChange}
                 playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "feed", scopeKey: `scene-feed:${scene.id}` }}
                 fillMedia
                 chromeless
@@ -1565,7 +1539,8 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
             useVideo={useVideo}
             muted={!soundEnabled}
             videoStartTimeSec={videoStartTimeSec}
-            videoPlayThreshold={0.65}
+            videoPlayThreshold={0.5}
+            onVideoPlayEligibilityChange={onPlaybackEligibilityChange}
             playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "feed", scopeKey: `scene-feed:${scene.id}` }}
             aspectRatio={aspectRatio}
             imageClassName="object-cover"
@@ -1701,10 +1676,10 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnable
   const title = scene.title || file?.basename || `Scene ${scene.id}`;
   const duration = getSceneDisplayDuration(scene);
   const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
-  const availableViewerHeight = viewerHeight != null ? Math.max(120, viewerHeight - 16) : null;
+  const availableViewerHeight = viewerHeight != null ? Math.max(120, viewerHeight) : null;
 
   return (
-    <article data-vertical-scene-id={scene.id} className={`flex min-h-full snap-start snap-always items-center justify-center ${fullscreen ? "px-0 py-0" : "px-2 py-1 sm:px-4"}`}>
+    <article data-vertical-scene-id={scene.id} className={`flex h-full min-h-0 snap-start snap-always items-center justify-center ${fullscreen ? "px-0 py-0" : "px-2 py-0 sm:px-4"}`}>
       <WallMediaCard
         title={title}
         imageSrc={coverUrl}

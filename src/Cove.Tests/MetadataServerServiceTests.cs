@@ -133,6 +133,40 @@ public sealed class MetadataServerServiceTests
     }
 
     [Fact]
+    public async Task MergeSceneAsync_AllowsRemoteTagsWithNullAliases()
+    {
+        await using var context = CreateContext();
+        var scene = new Scene { Title = "Original Scene" };
+        context.Scenes.Add(scene);
+        await context.SaveChangesAsync();
+
+        var remoteSceneJson = RemoteSceneJson.Replace("\"aliases\": [\"Activity\"]", "\"aliases\": null", StringComparison.Ordinal);
+        using var httpClient = new HttpClient(new FixtureMetadataServerHandler(request =>
+        {
+            Assert.Contains("query FindSceneByID", request.Query);
+            return GraphQlData($$"""
+                "findScene": {{remoteSceneJson}}
+                """);
+        }));
+
+        var service = CreateService(context, httpClient);
+
+        var imported = await service.MergeSceneAsync(
+            scene,
+            Endpoint,
+            "remote-scene-1",
+            new MetadataServerSceneImportRequestDto { SetCoverImage = false },
+            CancellationToken.None);
+        await context.SaveChangesAsync();
+
+        Assert.True(imported);
+        var savedTag = await context.Tags.Include(tag => tag.Aliases).SingleAsync(tag => tag.Name == "Action");
+        Assert.Empty(savedTag.Aliases);
+        var savedScene = await context.Scenes.Include(item => item.SceneTags).ThenInclude(link => link.Tag).SingleAsync();
+        Assert.Contains(savedScene.SceneTags, link => link.Tag != null && link.Tag.Name == "Action");
+    }
+
+    [Fact]
     public async Task BatchTagPerformersAsync_UsesGraphQlImportAndRestoresExcludedFields()
     {
         await using var context = CreateContext();

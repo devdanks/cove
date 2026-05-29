@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Grid3X3, List, Search, Shuffle, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Columns3, FolderTree, Grid3X3, LayoutGrid, List, MonitorPlay, Rows3, Search, Share2, Shuffle, ZoomIn, ZoomOut } from "lucide-react";
 import type { FindFilter } from "../api/types";
 import { isValidElement, useEffect, useMemo, useState } from "react";
 import { clampEntityCardSizeLevel, getEntityCardMaxLevel, getEntityCardMinWidthPx, useEntityCardSize } from "../hooks/useEntityCardSize";
@@ -7,6 +7,19 @@ import { LIST_PER_PAGE_OPTIONS, toolbarIconButtonClass, toolbarSegmentClass, too
 import { FilterButton, FilterDialog, type CriterionDefinition } from "./FilterDialog";
 
 const PER_PAGE_OPTIONS = LIST_PER_PAGE_OPTIONS;
+
+export type DetailListDisplayMode = "grid" | "list" | "wall" | "tagger" | "graph" | "byGroup" | "feed" | "vertical";
+
+const DISPLAY_MODE_BUTTONS: Array<{ mode: DetailListDisplayMode; title: string; icon: React.ReactNode }> = [
+  { mode: "grid", title: "Grid", icon: <LayoutGrid className="h-3.5 w-3.5" /> },
+  { mode: "list", title: "List", icon: <List className="h-3.5 w-3.5" /> },
+  { mode: "wall", title: "Wall", icon: <Grid3X3 className="h-3.5 w-3.5" /> },
+  { mode: "tagger", title: "Tagger", icon: <Columns3 className="h-3.5 w-3.5" /> },
+  { mode: "graph", title: "Graph/Tree", icon: <Share2 className="h-3.5 w-3.5" /> },
+  { mode: "byGroup", title: "By Group", icon: <FolderTree className="h-3.5 w-3.5" /> },
+  { mode: "feed", title: "Feed", icon: <Rows3 className="h-3.5 w-3.5" /> },
+  { mode: "vertical", title: "Vertical Viewer", icon: <MonitorPlay className="h-3.5 w-3.5" /> },
+];
 
 interface DetailListToolbarProps {
   filter: FindFilter;
@@ -27,8 +40,9 @@ interface DetailListToolbarProps {
   selectAllMatchingLabel?: string;
   selectAllMatchingPending?: boolean;
   selectionActions?: React.ReactNode;
-  displayMode?: "grid" | "list";
-  onDisplayModeChange?: (mode: "grid" | "list") => void;
+  displayMode?: DetailListDisplayMode;
+  onDisplayModeChange?: (mode: DetailListDisplayMode) => void;
+  availableDisplayModes?: DetailListDisplayMode[];
   criteriaDefinitions?: CriterionDefinition[];
   objectFilter?: Record<string, unknown>;
   onObjectFilterChange?: (filter: Record<string, unknown>) => void;
@@ -37,7 +51,7 @@ interface DetailListToolbarProps {
   showPagingControls?: boolean;
 }
 
-export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOptions, zoomLevel, onZoomChange, cardSizeEntityType, showSearch, showSort = true, selectedCount, onSelectAll, onSelectAllMatching, onSelectNone, selectAllLabel = "Select all", selectAllPending = false, selectAllMatchingLabel = "Select all matching", selectAllMatchingPending, selectionActions, displayMode, onDisplayModeChange, criteriaDefinitions, objectFilter, onObjectFilterChange, allowInfinitePageSize = false, infinitePageSizeOnly = false, showPagingControls = true }: DetailListToolbarProps) {
+export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOptions, zoomLevel, onZoomChange, cardSizeEntityType, showSearch, showSort = true, selectedCount, onSelectAll, onSelectAllMatching, onSelectNone, selectAllLabel = "Select all", selectAllPending = false, selectAllMatchingLabel = "Select all matching", selectAllMatchingPending, selectionActions, displayMode, onDisplayModeChange, availableDisplayModes, criteriaDefinitions, objectFilter, onObjectFilterChange, allowInfinitePageSize = false, infinitePageSizeOnly = false, showPagingControls = true }: DetailListToolbarProps) {
   const page = filter.page ?? 1;
   const perPage = filter.perPage ?? 24;
   const infinitePageSize = allowInfinitePageSize && (perPage === 0 || infinitePageSizeOnly);
@@ -64,6 +78,7 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
   const maxZoomLevel = getEntityCardMaxLevel(inferredCardSizeEntityType);
   const [storedZoomLevel, setStoredZoomLevel] = useEntityCardSize(inferredCardSizeEntityType);
   const effectiveZoomLevel = inferredCardSizeEntityType ? storedZoomLevel : zoomLevel;
+  const displayModes = availableDisplayModes ?? (displayMode && onDisplayModeChange ? ["grid", "list"] as DetailListDisplayMode[] : []);
 
   useEffect(() => {
     if (!inferredCardSizeEntityType || zoomLevel == null || !onZoomChange) return;
@@ -74,6 +89,13 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
     const nextLevel = clampEntityCardSizeLevel(inferredCardSizeEntityType, level);
     if (inferredCardSizeEntityType) setStoredZoomLevel(nextLevel);
     onZoomChange?.(nextLevel);
+  };
+
+  const handleDisplayModeChange = (mode: DetailListDisplayMode) => {
+    onDisplayModeChange?.(mode);
+    if (allowInfinitePageSize && (mode === "feed" || mode === "vertical") && !infinitePageSize) {
+      onFilterChange({ ...filter, perPage: 0, page: 1 });
+    }
   };
 
   const goTo = (nextPage: number) => onFilterChange({ ...filter, page: Math.max(1, Math.min(totalPages, nextPage)) });
@@ -142,13 +164,19 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
         ) : null}
 
         {displayMode && onDisplayModeChange ? (
-          <div className={toolbarSegmentClass}>
-            <button type="button" onClick={() => onDisplayModeChange("grid")} className={`${toolbarIconButtonClass} ${displayMode === "grid" ? "bg-background/60 text-accent shadow-sm" : ""}`} title="Grid view">
-              <Grid3X3 className="h-3.5 w-3.5" />
-            </button>
-            <button type="button" onClick={() => onDisplayModeChange("list")} className={`${toolbarIconButtonClass} ${displayMode === "list" ? "bg-background/60 text-accent shadow-sm" : ""}`} title="List view">
-              <List className="h-3.5 w-3.5" />
-            </button>
+          <div className={`${toolbarSegmentClass} gap-0.5`}>
+            {DISPLAY_MODE_BUTTONS.filter((button) => displayModes.includes(button.mode)).map((button) => (
+              <button
+                key={button.mode}
+                type="button"
+                onClick={() => handleDisplayModeChange(button.mode)}
+                className={`${toolbarIconButtonClass} ${displayMode === button.mode ? "bg-background/60 text-accent shadow-sm" : ""}`}
+                title={button.title}
+                aria-label={button.title}
+              >
+                {button.icon}
+              </button>
+            ))}
           </div>
         ) : null}
 

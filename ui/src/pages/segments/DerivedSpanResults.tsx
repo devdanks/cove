@@ -14,10 +14,10 @@ import {
   formatSegmentCardEyebrow,
   formatSegmentDuration,
   formatSegmentRange,
-  formatSpanItemKindLabel,
   Pill,
   SegmentScenePreview,
 } from "./segmentDisplayUtils";
+import { useSegmentListDensity, type SegmentListDensity } from "./segmentListDensity";
 import type { DerivedSpanItem } from "./types";
 
 interface Props {
@@ -97,6 +97,7 @@ export function DerivedSpanResults({
     });
     return { tagNamesById, performerNamesById, faceLabelsById };
   }, [faceIds, faceQueries, performerIds, performerQueries, tagIds, tagQueries]);
+  const listDensity = useSegmentListDensity();
 
   if (displayMode === "grid") {
     return (
@@ -189,6 +190,7 @@ export function DerivedSpanResults({
             onToggle={() => onToggle(item.id)}
             selecting={selecting}
             nameMaps={nameMaps}
+            density={listDensity}
           />
         ))}
       </div>
@@ -205,6 +207,7 @@ function DerivedSpanListRow({
   onToggle,
   selecting,
   nameMaps,
+  density,
 }: {
   item: DerivedSpanItem;
   canReadScenes: boolean;
@@ -214,31 +217,31 @@ function DerivedSpanListRow({
   onToggle: () => void;
   selecting: boolean;
   nameMaps?: DerivedOperandNameMaps;
+  density: SegmentListDensity;
 }) {
   const title = buildSpanTitle(item.span, item.sceneTitle);
   const primaryRawSegmentId = item.span.segmentIds[0];
   const operandSummary = formatDerivedOperandSummary(item, nameMaps);
 
   return (
-    <div onClick={selecting ? onToggle : undefined} className={`scene-card group relative cursor-pointer px-4 py-3 transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
+    <div onClick={selecting ? onToggle : undefined} className={`scene-card group relative cursor-pointer px-4 ${density.rowPaddingClassName} transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
       <RouteCardLinkOverlay route={{ page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor }} onClick={() => onNavigate({ page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor })} label={`Open span ${title}`} disabled={selecting} selectionSafeZone />
       <div className="flex items-start gap-3 lg:grid lg:grid-cols-[minmax(0,1.4fr)_140px_minmax(0,1.1fr)_120px_120px] lg:items-center">
         <div className="relative min-w-0 pl-8">
           <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onToggle} />
           <div className="flex items-start gap-3">
-            <div className="hidden h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-surface sm:block">
+            {density.showPreview ? <div className="hidden shrink-0 overflow-hidden rounded-lg bg-surface sm:block" style={{ height: density.previewHeight, width: density.previewWidth }}>
               <SegmentScenePreview hostId={item.sceneId} segmentId={primaryRawSegmentId} updatedAt={item.sceneUpdatedAt} startSec={item.span.startSec} endSec={item.span.endSec} title={title} imgClassName="h-full w-full object-cover" />
-            </div>
+            </div> : null}
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
-                <Pill>{formatSpanItemKindLabel(item)}</Pill>
                 {item.span.tagName ? <Pill>{item.span.tagName}</Pill> : null}
                 {item.span.kind ? <Pill>{item.span.kind}</Pill> : null}
                 <Pill>{formatSegmentDuration(item.span.startSec, item.span.endSec)}</Pill>
                 <span>{item.span.segmentIds.length} raw segment{item.span.segmentIds.length === 1 ? "" : "s"}</span>
               </div>
-              {operandSummary ? <div className="mt-1 line-clamp-2 text-xs text-secondary">{operandSummary}</div> : null}
+              {density.showSecondaryDetails && operandSummary ? <div className="mt-1 line-clamp-2 text-xs text-secondary">{operandSummary}</div> : null}
             </div>
           </div>
         </div>

@@ -11,6 +11,7 @@ interface TagTaggerProps {
   selectedIds?: Set<number>;
   selecting?: boolean;
   onSelect?: (tagId: number) => void;
+  mode?: "bulk" | "detail";
 }
 
 interface TaggerConfig {
@@ -41,7 +42,7 @@ async function runWithConcurrency<T>(items: T[], fn: (item: T) => Promise<void>,
   await Promise.all(workers);
 }
 
-export function TagTagger({ tags: tagList, selectedIds, selecting = false, onSelect }: TagTaggerProps) {
+export function TagTagger({ tags: tagList, selectedIds, selecting = false, onSelect, mode = "bulk" }: TagTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const [taggerConfig, setTaggerConfig] = useState<TaggerConfig>({
@@ -105,17 +106,21 @@ export function TagTagger({ tags: tagList, selectedIds, selecting = false, onSel
       <TaggerToolbar
         sources={metadataServers.map((server) => ({ value: server.endpoint, label: server.name || server.endpoint }))}
         selectedSource={taggerConfig.selectedEndpoint}
-        onSourceChange={(value) => setTaggerConfig((current) => ({ ...current, selectedEndpoint: value }))}
-        showToggle={{
+        onSourceChange={(value) => {
+          setTaggerConfig((current) => ({ ...current, selectedEndpoint: value }));
+          setQueryOverrides({});
+        }}
+        showToggle={mode === "bulk" ? {
           value: taggerConfig.showTagged,
           onChange: (value) => setTaggerConfig((current) => ({ ...current, showTagged: value })),
           enabledLabel: "Hide Saved",
           disabledLabel: "Show Saved",
-        }}
+        } : undefined}
         batchSearching={batchSearching}
         onCancelBatch={cancelBatchSearch}
         onRunAll={searchAll}
         runAllLabel="Search All"
+        showRunAll={mode === "bulk"}
         countLabel={`${visibleTags.length} tag${visibleTags.length !== 1 ? "s" : ""}`}
         settingsOpen={showSettings}
         onToggleSettings={() => setShowSettings((current) => !current)}

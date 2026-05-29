@@ -110,6 +110,10 @@ describe("getResolutionLabel", () => {
     expect(getResolutionLabel(1280, 720)).toBe("720p");
   });
 
+  it("uses the short edge for non-standard 720p widths", () => {
+    expect(getResolutionLabel(1080, 720)).toBe("720p");
+  });
+
   it("returns 1080p", () => {
     expect(getResolutionLabel(1920, 1080)).toBe("1080p");
   });

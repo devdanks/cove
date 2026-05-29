@@ -27,6 +27,7 @@ import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
 import { BookmarkButton } from "../components/BookmarkButton";
+import { RelatedEntityListView } from "../components/RelatedEntityListView";
 import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 import {
   formatBatchDownloadSummary,
@@ -226,7 +227,7 @@ export function GalleriesPage({ onNavigate }: Props) {
           )}
         />
       ) : displayMode === "list" ? (
-        <GalleryListTable galleries={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <RelatedEntityListView entityType="galleries" items={items} displayMode="list" selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={listData.infinitePageSize} hasNextPage={listData.infiniteQuery.hasNextPage} isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage} loadMore={listData.loadMore} />
       ) : (
         <VirtualizedWallColumns
           columns={wallColumns}

@@ -1,4 +1,4 @@
-import { ReactNode, RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer, useWindowVirtualizer, Virtualizer } from "@tanstack/react-virtual";
 
 /**
@@ -36,7 +36,7 @@ export interface VirtualizedInfiniteListBaseProps<TItem> {
   endContent?: ReactNode;
   /** Number of items ahead of the last rendered one at which to call loadMore. Default = overscan + 1. */
   loadMoreThreshold?: number;
-  /** Called when the centered item (or row for grid) changes. */
+  /** Called when the most visible item (or row for grid) changes. */
   onActiveIndexChange?: (index: number | null) => void;
   /** Disable virtualizer scroll offset corrections when dynamic item measurements change. */
   adjustScrollOnItemSizeChange?: boolean;
@@ -191,6 +191,8 @@ function SingleColumnFrame<TItem>({ parentRef, virtualizer, offset, items, rende
     onActiveIndexChange,
     getScrollOffset: () => (windowScroll ? window.scrollY - offset : (scrollElement?.scrollTop ?? 0)),
     getViewportSize: () => (windowScroll ? window.innerHeight : (scrollElement?.clientHeight ?? window.innerHeight)),
+    windowScroll,
+    scrollElement,
   });
 
   return (
@@ -390,6 +392,8 @@ function GridFrame<TItem>({ parentRef, virtualizer, offset, items, columns, gap,
     onActiveIndexChange: onActiveIndexChange ? (rowIndex) => onActiveIndexChange(rowIndex == null ? null : rowIndex * columns) : undefined,
     getScrollOffset: () => (windowScroll ? window.scrollY - offset : (scrollElement?.scrollTop ?? 0)),
     getViewportSize: () => (windowScroll ? window.innerHeight : (scrollElement?.clientHeight ?? window.innerHeight)),
+    windowScroll,
+    scrollElement,
   });
 
   return (
@@ -449,40 +453,96 @@ function useActiveIndexNotifier({
   onActiveIndexChange,
   getScrollOffset,
   getViewportSize,
+  windowScroll,
+  scrollElement,
 }: {
   virtualItems: { index: number; start: number; size: number }[];
   onActiveIndexChange?: (index: number | null) => void;
   getScrollOffset: () => number;
   getViewportSize: () => number;
+  windowScroll?: boolean;
+  scrollElement?: HTMLElement | null;
 }) {
   const cb = onActiveIndexChange;
   const lastReportedRef = useRef<number | null>(null);
+  const virtualItemsRef = useRef(virtualItems);
+  const getScrollOffsetRef = useRef(getScrollOffset);
+  const getViewportSizeRef = useRef(getViewportSize);
 
-  useEffect(() => {
+  virtualItemsRef.current = virtualItems;
+  getScrollOffsetRef.current = getScrollOffset;
+  getViewportSizeRef.current = getViewportSize;
+
+  const reportActiveIndex = useCallback(() => {
     if (!cb) return;
-    if (virtualItems.length === 0) {
+    const currentVirtualItems = virtualItemsRef.current;
+    if (currentVirtualItems.length === 0) {
       if (lastReportedRef.current !== null) {
         lastReportedRef.current = null;
         cb(null);
       }
       return;
     }
-    const midpoint = getScrollOffset() + getViewportSize() / 2;
-    let bestIndex = virtualItems[0].index;
+
+    const viewportStart = getScrollOffsetRef.current();
+    const viewportEnd = viewportStart + getViewportSizeRef.current();
+    const viewportMidpoint = viewportStart + (viewportEnd - viewportStart) / 2;
+    let bestIndex: number | null = null;
+    let bestVisible = 0;
     let bestDistance = Infinity;
-    for (const v of virtualItems) {
-      const itemMid = v.start + v.size / 2;
-      const d = Math.abs(itemMid - midpoint);
-      if (d < bestDistance) {
-        bestDistance = d;
+    for (const v of currentVirtualItems) {
+      const itemStart = v.start;
+      const itemEnd = v.start + v.size;
+      const visible = Math.max(0, Math.min(itemEnd, viewportEnd) - Math.max(itemStart, viewportStart));
+      if (visible <= 0) continue;
+      const itemMidpoint = itemStart + v.size / 2;
+      const distance = Math.abs(itemMidpoint - viewportMidpoint);
+      if (visible > bestVisible || (visible === bestVisible && distance < bestDistance)) {
+        bestVisible = visible;
+        bestDistance = distance;
         bestIndex = v.index;
       }
+    }
+    if (bestIndex == null && currentVirtualItems.length > 0) {
+      bestIndex = currentVirtualItems[0].index;
     }
     if (lastReportedRef.current !== bestIndex) {
       lastReportedRef.current = bestIndex;
       cb(bestIndex);
     }
+  }, [cb]);
+
+  useEffect(() => {
+    reportActiveIndex();
   });
+
+  useEffect(() => {
+    if (!cb) return;
+    const target = windowScroll ? window : scrollElement;
+    if (!target) {
+      reportActiveIndex();
+      return;
+    }
+
+    let frameId = 0;
+    const scheduleReport = () => {
+      if (frameId !== 0) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0;
+        reportActiveIndex();
+      });
+    };
+
+    target.addEventListener("scroll", scheduleReport, { passive: true });
+    window.addEventListener("resize", scheduleReport);
+    reportActiveIndex();
+
+    return () => {
+      if (frameId !== 0) window.cancelAnimationFrame(frameId);
+      target.removeEventListener("scroll", scheduleReport);
+      window.removeEventListener("resize", scheduleReport);
+    };
+  }, [cb, reportActiveIndex, scrollElement, windowScroll]);
 }
 
 // ---------- Infinite load triggers ----------

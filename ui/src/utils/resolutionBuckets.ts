@@ -22,6 +22,24 @@ const RESOLUTION_BUCKETS: ResolutionBucket[] = [
   { label: "HUGE", value: 9999, minDimension: 9840, maxDimensionExclusive: Number.POSITIVE_INFINITY },
 ];
 
+const STANDARD_RESOLUTION_LABELS = [
+  { label: "144p", value: 144 },
+  { label: "240p", value: 240 },
+  { label: "360p", value: 360 },
+  { label: "480p", value: 480 },
+  { label: "540p", value: 540 },
+  { label: "720p", value: 720 },
+  { label: "1080p", value: 1080 },
+  { label: "1440p", value: 1440 },
+  { label: "4K", value: 2160 },
+  { label: "5K", value: 2880 },
+  { label: "6K", value: 3384 },
+  { label: "7K", value: 4032 },
+  { label: "8K", value: 4320 },
+] as const;
+
+const RESOLUTION_LABEL_MARGIN = 0.95;
+
 export const RESOLUTION_FILTER_OPTIONS = [
   { label: "Any", value: 0 },
   { label: "144p", value: 144 },
@@ -48,5 +66,23 @@ export function getResolutionBucket(maxDimension: number): ResolutionBucket | nu
 }
 
 export function getResolutionBucketLabel(width: number, height: number): string | null {
-  return getResolutionBucket(Math.max(width, height))?.label ?? null;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+
+  const maxDimensionBucket = getResolutionBucket(Math.max(width, height));
+  const shortEdge = Math.min(width, height);
+  const shortEdgeMatch = [...STANDARD_RESOLUTION_LABELS]
+    .reverse()
+    .find((resolution) => shortEdge >= resolution.value * RESOLUTION_LABEL_MARGIN);
+
+  if (!shortEdgeMatch) {
+    return maxDimensionBucket?.label ?? null;
+  }
+
+  if (!maxDimensionBucket || shortEdgeMatch.value > maxDimensionBucket.value) {
+    return shortEdgeMatch.label;
+  }
+
+  return maxDimensionBucket.label;
 }

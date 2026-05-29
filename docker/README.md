@@ -1,10 +1,10 @@
 # Docker Setup
 
-Cove provides two Docker images to suit different deployment needs. Both include **FFmpeg with hardware acceleration support** (NVENC, VAAPI, QSV, Vulkan) via [BtbN static builds](https://github.com/BtbN/FFmpeg-Builds).
+Cove provides two Docker images to suit different deployment needs. Both use PostgreSQL with pgvector for embedding storage and similarity search, and both include **FFmpeg with hardware acceleration support** (NVENC, VAAPI, QSV, Vulkan) via [BtbN static builds](https://github.com/BtbN/FFmpeg-Builds).
 
 ## Option 1: All-in-one (recommended for simple setups)
 
-A single container with PostgreSQL, FFmpeg, and Cove. Best for UnRAID, Synology, and users who want minimal configuration.
+A single container with PostgreSQL, pgvector, FFmpeg, and Cove. Best for UnRAID, Synology, and users who want minimal configuration.
 
 ```bash
 docker compose -f docker-compose.allinone.yml up -d
@@ -25,7 +25,7 @@ Then open http://localhost:9999.
 
 ## Option 2: App + PostgreSQL (recommended for docker-compose users)
 
-Separate containers for the app and database. Easier to manage, upgrade, and back up independently.
+Separate containers for the app and database. Easier to manage, upgrade, and back up independently. The provided compose file uses the official `pgvector/pgvector` PostgreSQL 18 image.
 
 ```bash
 docker compose up -d
@@ -99,7 +99,7 @@ All Cove configuration can be overridden via environment variables using the `CO
 |----------|---------|-------------|
 | `COVE__Port` | `9999` | HTTP port |
 | `COVE__Postgres__Managed` | `false` | Use embedded PostgreSQL manager (disabled in Docker) |
-| `COVE__Postgres__ConnectionString` | — | PostgreSQL connection string |
+| `COVE__Postgres__ConnectionString` | — | PostgreSQL connection string; the target database must have pgvector available |
 | `COVE__GeneratedPath` | `/generated` | Path for thumbnails/previews |
 | `COVE__CachePath` | `/cache` | Temporary cache path |
 | `COVE__FfmpegPath` | auto-detected | Custom FFmpeg binary path |
@@ -115,6 +115,8 @@ Cove uses EF Core migrations to manage database schema changes. On startup:
 3. **Before any migration**: An automatic pg_dump backup is created in `/backups`
 
 If the frontend shows a "Database Update Required" screen, simply restart the container — migrations apply on startup.
+
+The all-in-one container enables `CREATE EXTENSION vector` before Cove starts and exits if pgvector is missing from the image.
 
 ## Building locally
 

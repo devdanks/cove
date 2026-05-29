@@ -3464,33 +3464,6 @@ export function SettingsPage() {
         )}
         {resolvedActiveTab === "extensions-registry" && <ExtensionsPanel mode="registry" />}
 
-        {resolvedActiveTab === "logs" && canWriteSystemSettings && (
-          <SectionCard title="Log Output" description="Persisted log destination settings. File and stdout changes apply after restart.">
-            <div className="space-y-4">
-              <TextField
-                label="Log file"
-                description="Optional path for writing server logs to a file. Leave blank to disable file logging."
-                value={draft.logFile ?? ""}
-                onChange={(value) => updateDraft((d) => ({ ...d, logFile: value || undefined }))}
-                placeholder="Leave blank for no file logging"
-              />
-              <div className="grid gap-3 md:grid-cols-2">
-                <CheckboxLabel
-                  label="Write logs to stdout"
-                  description="Send application logs to the process output stream."
-                  checked={draft.logOut}
-                  onChange={(checked) => updateDraft((d) => ({ ...d, logOut: checked }))}
-                />
-                <CheckboxLabel
-                  label="Log access requests"
-                  description="Record HTTP request access entries in the server log."
-                  checked={draft.logAccess}
-                  onChange={(checked) => updateDraft((d) => ({ ...d, logAccess: checked }))}
-                />
-              </div>
-            </div>
-          </SectionCard>
-        )}
         {resolvedActiveTab === "logs" && <LogsPanel />}
         {resolvedActiveTab === "system-info-about" && (
           <>

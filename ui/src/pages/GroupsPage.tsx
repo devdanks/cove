@@ -21,6 +21,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { DynamicGroupFilterEditor, FILTER_DYNAMIC_SOURCE_KEY, defaultDynamicGroupFilterQueryJson } from "../components/DynamicGroupFilterEditor";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
+import { RelatedEntityListView } from "../components/RelatedEntityListView";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
 
@@ -239,7 +240,7 @@ export function GroupsPage({ onNavigate }: Props) {
           />
         )
       ) : (
-        <GroupListTable groups={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <RelatedEntityListView entityType="groups" items={items} displayMode="list" selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={listData.infinitePageSize} hasNextPage={listData.infiniteQuery.hasNextPage} isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage} loadMore={listData.loadMore} />
       )}
       {items.length === 0 && (
         <div className="text-center text-secondary py-16">

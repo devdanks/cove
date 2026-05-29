@@ -22,6 +22,7 @@ interface StudioTaggerProps {
   selectedIds?: Set<number>;
   selecting?: boolean;
   onSelect?: (studioId: number) => void;
+  mode?: "bulk" | "detail";
 }
 
 interface TaggerConfig {
@@ -126,7 +127,7 @@ function buildStudioFieldStrategies(studio: Studio, result: MetadataServerStudio
   };
 }
 
-export function StudioTagger({ studios: studioList, selectedIds, selecting = false, onSelect }: StudioTaggerProps) {
+export function StudioTagger({ studios: studioList, selectedIds, selecting = false, onSelect, mode = "bulk" }: StudioTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
 
@@ -207,16 +208,20 @@ export function StudioTagger({ studios: studioList, selectedIds, selecting = fal
       <TaggerToolbar
         sources={metadataServers.map((server) => ({ value: server.endpoint, label: server.name || server.endpoint }))}
         selectedSource={taggerConfig.selectedEndpoint}
-        onSourceChange={(value) => setTaggerConfig((current) => ({ ...current, selectedEndpoint: value }))}
-        showToggle={{
+        onSourceChange={(value) => {
+          setTaggerConfig((current) => ({ ...current, selectedEndpoint: value }));
+          setQueryOverrides({});
+        }}
+        showToggle={mode === "bulk" ? {
           value: taggerConfig.showTagged,
           onChange: (value) => setTaggerConfig((current) => ({ ...current, showTagged: value })),
           enabledLabel: "Hide Already Tagged",
           disabledLabel: "Show All Studios",
-        }}
+        } : undefined}
         batchSearching={batchSearching}
         onCancelBatch={cancelBatchSearch}
         onRunAll={searchAll}
+        showRunAll={mode === "bulk"}
         countLabel={`${visibleStudios.length} studio${visibleStudios.length !== 1 ? "s" : ""}`}
         settingsOpen={showSettings}
         onToggleSettings={() => setShowSettings((current) => !current)}

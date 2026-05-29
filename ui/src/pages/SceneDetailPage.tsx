@@ -43,7 +43,7 @@ const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((m
 const DetailMergeDialog = lazy(() => import("../components/DetailMergeDialog").then((module) => ({ default: module.DetailMergeDialog })));
 const IdentifyDialog = lazy(() => import("../components/IdentifyDialog").then((module) => ({ default: module.IdentifyDialog })));
 const SceneDownloadDialog = lazy(() => import("../components/SceneDownloadDialog").then((module) => ({ default: module.SceneDownloadDialog })));
-const SceneScrapeDialog = lazy(() => import("../components/SceneScrapeDialog").then((module) => ({ default: module.SceneScrapeDialog })));
+const SceneMetadataTaggerDialog = lazy(() => import("../components/MetadataTaggerDialog").then((module) => ({ default: module.SceneMetadataTaggerDialog })));
 
 interface Props {
   id: number;
@@ -551,7 +551,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             {file && canLibraryScan ? (
               <button onClick={() => { rescanMut.mutate(); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button>
             ) : null}
-            {canScrapeScene ? <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><ExternalLink className="h-3.5 w-3.5" /> Scrape…</button> : null}
+            {canScrapeScene ? <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Scrape / Metadata…</button> : null}
             {canIdentifyScene ? <button onClick={() => { setShowIdentify(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Identify…</button> : null}
             {canGenerateScene || canWriteScene ? <div className="my-1 border-t border-border" /> : null}
             <ExtensionEntityActions entityType="scene" entityId={scene.id} renderMode="menu" onInvoked={() => setShowOpsMenu(false)} />
@@ -721,10 +721,11 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           />
         ) : null}
         {showScrapeDialog ? (
-          <SceneScrapeDialog
+          <SceneMetadataTaggerDialog
             open={showScrapeDialog}
             scene={scene}
             onClose={() => setShowScrapeDialog(false)}
+            onNavigate={onNavigate}
           />
         ) : null}
         {showMerge ? (

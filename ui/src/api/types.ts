@@ -1958,9 +1958,6 @@ export interface CoveConfig {
   previewPreset: string;
   previewAudio: string;
   logLevel: string;
-  logFile?: string;
-  logOut: boolean;
-  logAccess: boolean;
   ffmpegPath?: string;
   ffprobePath?: string;
   interface: InterfaceConfig;

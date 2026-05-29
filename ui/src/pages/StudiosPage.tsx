@@ -20,6 +20,7 @@ import { useAuth } from "../auth/AuthContext";
 import { canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
+import { RelatedEntityListView } from "../components/RelatedEntityListView";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 
 const SORT_OPTIONS = [
@@ -163,7 +164,7 @@ export function StudiosPage({ onNavigate }: Props) {
           )}
         />
       ) : (
-        <StudioListTable studios={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <RelatedEntityListView entityType="studios" items={items} displayMode="list" selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={listData.infinitePageSize} hasNextPage={listData.infiniteQuery.hasNextPage} isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage} loadMore={listData.loadMore} />
       )}
       {items.length === 0 && (
         <div className="text-center text-secondary py-16">

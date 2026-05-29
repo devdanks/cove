@@ -35,6 +35,8 @@ services:
       - cove-backups:/backups
       # Mount your media library (adjust path):
       # - /path/to/your/media:/media:ro
+      # Example network share mount using the commented volume below:
+      # - yourcontent:/media:ro
 
     # ── GPU acceleration (uncomment ONE section) ──────────────────
     # NVIDIA GPU (requires nvidia-container-toolkit):
@@ -51,7 +53,7 @@ services:
     #   - /dev/dri:/dev/dri
 
   db:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg18
     restart: unless-stopped
     environment:
       POSTGRES_DB: cove
@@ -71,4 +73,12 @@ volumes:
   cove-generated:
   cove-cache:
   cove-backups:
+  # Example SMB/CIFS network share for media mounted at /media above.
+  # The device is the share root; use prefixpath for a folder inside it.
+  # yourcontent:
+  #   driver: local
+  #   driver_opts:
+  #     type: cifs
+  #     device: "//192.168.1.101/share"
+  #     o: "username=youruser,password=yourpassword,vers=3.0"
   pg-data:

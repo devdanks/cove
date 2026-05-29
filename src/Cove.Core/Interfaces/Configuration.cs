@@ -42,9 +42,6 @@ public class CoveConfiguration
     public string PreviewAudio { get; set; } = "false"; // true, false
     // Logging
     public string LogLevel { get; set; } = "Info"; // Trace, Debug, Info, Warning, Error
-    public string? LogFile { get; set; }
-    public bool LogOut { get; set; } = true;
-    public bool LogAccess { get; set; } = true;
     public InterfaceConfig Interface { get; set; } = new();
     public UiConfig Ui { get; set; } = new();
     public ScrapingConfig Scraping { get; set; } = new();

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { entityEngagement, images } from "../api/client";
 import type { DeleteEntityOptions, EntityEngagement, FindFilter, Image, ImageFilterCriteria } from "../api/types";
@@ -26,6 +26,7 @@ import { WallMediaCard } from "../components/WallMediaCard";
 import { FeedActionPill, FeedCardFrame, FeedChipButton, FeedChipOverflowMenu, FeedIdentityBadge, FeedInlineRating, FeedMetadataPill, FeedPortraitMediaFrame, getFeedMediaStyle } from "../components/FeedCardFrame";
 import { BookmarkButton } from "../components/BookmarkButton";
 import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
+import { RelatedEntityListView } from "../components/RelatedEntityListView";
 import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
 import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 import { useAppConfig } from "../state/AppConfigContext";
@@ -77,7 +78,7 @@ export function ImagesPage({ onNavigate }: Props) {
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
-    allowedDisplayModes: ["grid", "wall", "tagger", "feed"] as const,
+    allowedDisplayModes: ["grid", "list", "wall", "tagger", "feed"] as const,
     defaultSearchMode: "text",
     allowedSearchModes: visualSimilarityAvailable ? ["text", "visual"] : ["text"],
     allowInfinitePageSize: true,
@@ -91,6 +92,7 @@ export function ImagesPage({ onNavigate }: Props) {
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [showBatchScrape, setShowBatchScrape] = useState(false);
   const [wallColumnCount, setWallColumnCount] = useState(6);
+  const lastPagedFilterRef = useRef<Pick<FindFilter, "page" | "perPage">>({ page: defaultState.filter.page ?? 1, perPage: defaultState.filter.perPage });
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const queryClient = useQueryClient();
   const { config } = useAppConfig();
@@ -144,13 +146,31 @@ export function ImagesPage({ onNavigate }: Props) {
     setFilter({ ...filter, page: 1 });
   }, [defaultState.filter.direction, defaultState.filter.sort, filter, setFilter, setSearchMode, visualSimilarityAvailable]);
 
-  const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
-    setDisplayMode(mode);
-    const requiresInfinite = mode === "feed";
-    if (filter.page !== 1 || (requiresInfinite && filter.perPage !== 0)) {
-      setFilter({ ...filter, page: 1, perPage: requiresInfinite ? 0 : filter.perPage });
+  useEffect(() => {
+    if (displayMode !== "feed" && filter.perPage !== 0) {
+      lastPagedFilterRef.current = { page: filter.page ?? 1, perPage: filter.perPage };
     }
-  }, [filter, setDisplayMode, setFilter]);
+  }, [displayMode, filter.page, filter.perPage]);
+
+  const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
+    const requiresInfinite = mode === "feed";
+
+    if (requiresInfinite && filter.perPage !== 0) {
+      lastPagedFilterRef.current = { page: filter.page ?? 1, perPage: filter.perPage };
+    }
+
+    setDisplayMode(mode);
+
+    if (requiresInfinite && filter.perPage !== 0) {
+      setFilter({ ...filter, page: 1, perPage: 0 });
+      return;
+    }
+
+    if (!requiresInfinite && filter.perPage === 0) {
+      const lastPagedFilter = lastPagedFilterRef.current;
+      setFilter({ ...filter, page: lastPagedFilter.page ?? 1, perPage: lastPagedFilter.perPage ?? defaultState.filter.perPage });
+    }
+  }, [defaultState.filter.perPage, filter, setDisplayMode, setFilter]);
 
   const listData = useInfiniteListData<Image>({
     queryKey: ["images", objectFilter, searchMode],
@@ -268,7 +288,7 @@ export function ImagesPage({ onNavigate }: Props) {
       sortOptions={sortOptions}
       displayMode={displayMode}
       onDisplayModeChange={handleDisplayModeChange}
-      availableDisplayModes={["grid", "wall", "tagger", "feed"]}
+      availableDisplayModes={["grid", "list", "wall", "tagger", "feed"]}
       allowInfinitePageSize
       onNew={canWriteImage ? () => setShowCreate(true) : undefined}
       criteriaDefinitions={IMAGE_CRITERIA}
@@ -377,6 +397,20 @@ export function ImagesPage({ onNavigate }: Props) {
           getImageUrl={(image) => images.thumbnailUrl(image.id, 320)}
           getRoute={(image) => ({ page: "image", id: image.id })}
           queryKey="images"
+        />
+      ) : displayMode === "list" ? (
+        <RelatedEntityListView
+          entityType="images"
+          items={items}
+          displayMode="list"
+          selectedIds={selectedIds}
+          selecting={selecting}
+          onToggle={toggle}
+          onNavigate={onNavigate}
+          infinitePageSize={infinitePageSize}
+          hasNextPage={listData.infiniteQuery.hasNextPage}
+          isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage}
+          loadMore={listData.loadMore}
         />
       ) : displayMode === "grid" ? (
         <VirtualizedEntityGrid

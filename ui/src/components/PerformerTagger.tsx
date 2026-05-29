@@ -26,6 +26,7 @@ interface PerformerTaggerProps {
   selecting?: boolean;
   onSelect?: (performerId: number) => void;
   onNavigate?: (performerId: number) => void;
+  mode?: "bulk" | "detail";
 }
 
 interface TaggerConfig {
@@ -47,6 +48,7 @@ interface PerformerSearchState {
 }
 
 type PerformerFieldStrategy = "ignore" | "merge" | "overwrite";
+type PerformerInputKind = "url" | "name";
 
 type PerformerSource =
   | { kind: "metadata-server"; value: string; label: string; endpoint: string }
@@ -279,7 +281,7 @@ async function runWithConcurrency<T>(items: T[], fn: (item: T) => Promise<void>,
   await Promise.all(workers);
 }
 
-export function PerformerTagger({ performers: performerList, selectedIds, selecting = false, onSelect, onNavigate }: PerformerTaggerProps) {
+export function PerformerTagger({ performers: performerList, selectedIds, selecting = false, onSelect, onNavigate, mode = "bulk" }: PerformerTaggerProps) {
   const { config } = useAppConfig();
   const metadataServers = config?.scraping?.metadataServers ?? [];
   const { data: scraperList = [] } = useQuery({ queryKey: ["scrapers"], queryFn: system.listScrapers });
@@ -316,21 +318,35 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
 
   const [searchStates, setSearchStates] = useState<Record<number, PerformerSearchState>>({});
   const [queryOverrides, setQueryOverrides] = useState<Record<number, string>>({});
+  const [scraperInputKinds, setScraperInputKinds] = useState<Record<number, PerformerInputKind>>({});
   const [showSettings, setShowSettings] = useState(false);
   const selectedSource = resolveSource(taggerConfig.selectedEndpoint, sources);
   const existingTagNames = (tagPage?.items ?? []).map((tag) => tag.name);
+
+  const getScraperInputKind = useCallback((performer: Performer, source: PerformerSource | undefined): PerformerInputKind => {
+    if (source?.kind !== "scraper") {
+      return "name";
+    }
+
+    if (scraperInputKinds[performer.id]) {
+      return scraperInputKinds[performer.id];
+    }
+
+    const supportsUrl = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url");
+    return supportsUrl && performer.urls.some((url) => url.trim()) ? "url" : "name";
+  }, [scraperInputKinds]);
 
   const getQuery = useCallback((performer: Performer) => {
     if (queryOverrides[performer.id] !== undefined) {
       return queryOverrides[performer.id];
     }
 
-    if (selectedSource?.kind === "scraper" && selectedSource.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url")) {
-      return pickBestSourceUrl(performer.urls, selectedSource.scraper) ?? cleanTaggerQueryString(performer.name, taggerConfig.blacklist);
+    if (selectedSource?.kind === "scraper" && getScraperInputKind(performer, selectedSource) === "url") {
+      return pickBestSourceUrl(performer.urls, selectedSource.scraper) ?? "";
     }
 
     return cleanTaggerQueryString(performer.name, taggerConfig.blacklist);
-  }, [queryOverrides, selectedSource, taggerConfig.blacklist]);
+  }, [getScraperInputKind, queryOverrides, selectedSource, taggerConfig.blacklist]);
 
   const updateSearchState = useCallback(
     (performerId: number, update: Partial<PerformerSearchState>) => {
@@ -338,6 +354,16 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
     },
     []
   );
+
+  const handleScraperInputKindChange = useCallback((performer: Performer, source: PerformerSource | undefined, inputKind: PerformerInputKind) => {
+    setScraperInputKinds((prev) => ({ ...prev, [performer.id]: inputKind }));
+    setQueryOverrides((prev) => ({
+      ...prev,
+      [performer.id]: inputKind === "url"
+        ? (source?.kind === "scraper" ? pickBestSourceUrl(performer.urls, source.scraper) : performer.urls.find((url) => url.trim())) ?? ""
+        : cleanTaggerQueryString(performer.name, taggerConfig.blacklist),
+    }));
+  }, [taggerConfig.blacklist]);
 
   const searchPerformer = useCallback(
     async (performer: Performer) => {
@@ -347,11 +373,12 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
       try {
         let results: UnifiedPerformerMatch[];
         if (source?.kind === "scraper") {
+          const inputKind = getScraperInputKind(performer, source);
           const supportsUrl = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url");
           const supportsName = source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "name");
-          const looksLikeUrl = /^https?:\/\//i.test(query.trim());
-          const inputKind = supportsUrl && looksLikeUrl ? "url" : supportsName ? "name" : supportsUrl ? "url" : undefined;
-          if (!inputKind) throw new Error("This scraper cannot search this performer from the available row data.");
+          if (inputKind === "url" && !supportsUrl) throw new Error("This scraper does not support URL input.");
+          if (inputKind === "name" && !supportsName) throw new Error("This scraper does not support name input.");
+          if (!query.trim()) throw new Error(inputKind === "url" ? "Enter a performer URL to scrape." : "Enter a performer name to scrape.");
           const preview = await performers.previewScrape(performer.id, {
             scraperId: source.scraper.id,
             inputKind,
@@ -375,7 +402,7 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
         });
       }
     },
-    [getQuery, selectedSource, updateSearchState]
+    [getQuery, getScraperInputKind, selectedSource, updateSearchState]
   );
 
   const [batchSearching, setBatchSearching] = useState(false);
@@ -416,16 +443,21 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
       <TaggerToolbar
         sources={sources.map((source) => ({ value: source.value, label: source.label }))}
         selectedSource={selectedSource?.value ?? taggerConfig.selectedEndpoint}
-        onSourceChange={(value) => setTaggerConfig((current) => ({ ...current, selectedEndpoint: value }))}
-        showToggle={{
+        onSourceChange={(value) => {
+          setTaggerConfig((current) => ({ ...current, selectedEndpoint: value }));
+          setQueryOverrides({});
+          setScraperInputKinds({});
+        }}
+        showToggle={mode === "bulk" ? {
           value: taggerConfig.showTagged,
           onChange: (value) => setTaggerConfig((current) => ({ ...current, showTagged: value })),
           enabledLabel: "Hide Already Tagged",
           disabledLabel: "Show Already Tagged",
-        }}
+        } : undefined}
         batchSearching={batchSearching}
         onCancelBatch={cancelBatchSearch}
         onRunAll={searchAll}
+        showRunAll={mode === "bulk"}
         countLabel={`${visiblePerformers.length} performer${visiblePerformers.length !== 1 ? "s" : ""}`}
         settingsOpen={showSettings}
         onToggleSettings={() => setShowSettings((current) => !current)}
@@ -451,6 +483,8 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
             state={searchStates[performer.id]}
             query={getQuery(performer)}
             onQueryChange={(q) => setQueryOverrides((prev) => ({ ...prev, [performer.id]: q }))}
+            scraperInputKind={getScraperInputKind(performer, selectedSource)}
+            onScraperInputKindChange={(inputKind) => handleScraperInputKindChange(performer, selectedSource, inputKind)}
             onSearch={() => searchPerformer(performer)}
             onUpdateState={(update) => updateSearchState(performer.id, update)}
             source={selectedSource}
@@ -460,6 +494,7 @@ export function PerformerTagger({ performers: performerList, selectedIds, select
             onNavigate={onNavigate}
             taggerConfig={taggerConfig}
             existingTagNames={existingTagNames}
+            detailMode={mode === "detail"}
           />
         ))}
       </div>
@@ -472,6 +507,8 @@ function PerformerTaggerRow({
   state,
   query,
   onQueryChange,
+  scraperInputKind,
+  onScraperInputKindChange,
   onSearch,
   onUpdateState,
   source,
@@ -481,11 +518,14 @@ function PerformerTaggerRow({
   onNavigate,
   taggerConfig,
   existingTagNames,
+  detailMode = false,
 }: {
   performer: Performer;
   state?: PerformerSearchState;
   query: string;
   onQueryChange: (q: string) => void;
+  scraperInputKind: PerformerInputKind;
+  onScraperInputKindChange: (inputKind: PerformerInputKind) => void;
   onSearch: () => void;
   onUpdateState: (update: Partial<PerformerSearchState>) => void;
   source?: PerformerSource;
@@ -495,10 +535,17 @@ function PerformerTaggerRow({
   onNavigate?: (performerId: number) => void;
   taggerConfig: TaggerConfig;
   existingTagNames: string[];
+  detailMode?: boolean;
 }) {
   const imageUrl = performer.imagePath;
   const queryClient = useQueryClient();
   const performerLinkProps = createNestedRouteLinkProps<HTMLAnchorElement>({ page: "performer", id: performer.id }, () => onNavigate?.(performer.id));
+  const isScraperSource = source?.kind === "scraper";
+  const performerUrls = (performer.urls ?? []).filter((url) => url.trim());
+  const selectedUrlOption = performerUrls.includes(query) ? query : "__custom";
+  const searchPlaceholder = isScraperSource
+    ? scraperInputKind === "url" ? "Performer URL..." : "Performer name..."
+    : "Search query...";
 
   const importMut = useMutation({
     mutationFn: () => {
@@ -576,13 +623,41 @@ function PerformerTaggerRow({
 
         {/* Search + Results */}
         <div className="flex-1 min-w-0">
+          {detailMode && isScraperSource && (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <select
+                value={scraperInputKind}
+                onChange={(event) => onScraperInputKindChange(event.target.value as PerformerInputKind)}
+                className="bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
+              >
+                <option value="url" disabled={!source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "url")}>URL</option>
+                <option value="name" disabled={!source.scraper.supportedScrapes.some((kind) => kind.toLowerCase() === "name")}>Name</option>
+              </select>
+              {scraperInputKind === "url" && performerUrls.length > 0 ? (
+                <select
+                  value={selectedUrlOption}
+                  onChange={(event) => {
+                    if (event.target.value !== "__custom") {
+                      onQueryChange(event.target.value);
+                    }
+                  }}
+                  className="min-w-0 max-w-full flex-1 bg-input border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-accent"
+                >
+                  <option value="__custom">Custom URL</option>
+                  {performerUrls.map((url) => (
+                    <option key={url} value={url}>{url}</option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+          )}
           <div className="flex gap-2 mb-2">
             <input
               type="text"
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && onSearch()}
-              placeholder="Search query..."
+              placeholder={searchPlaceholder}
               className="flex-1 bg-input border border-border rounded px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-accent"
             />
             <button

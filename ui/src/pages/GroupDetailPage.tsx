@@ -11,7 +11,7 @@ import { AudioTile, EntityTileFrame, GroupTile, ImageTile, SceneCard, SegmentTil
 import { CompilationPlayer } from "../components/CompilationPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { QuickViewDialog } from "../components/QuickViewDialog";
-import { DetailListToolbar } from "../components/DetailListToolbar";
+import { DetailListToolbar, type DetailListDisplayMode } from "../components/DetailListToolbar";
 import { SCENE_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
 import { EntityHeroLayout } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
@@ -32,6 +32,7 @@ import { withRequiredMultiId } from "../utils/detailRelationFilters";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
 import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
+import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
 
 interface Props {
   id: number;
@@ -466,6 +467,9 @@ function GroupItemsPanel({ group, filter, setFilter, onNavigate, groupItems, gro
 }) {
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+    const setGroupViewMode = useCallback((mode: DetailListDisplayMode) => {
+      if (mode === "grid" || mode === "list") setViewMode(mode);
+    }, []);
   const [mixedFilter, setMixedFilter] = useState<FindFilter>(() => ({ page: 1, perPage: 40, sort: "order", direction: "asc" }));
   const [zoomLevel, setZoomLevel] = useState(0);
   const [itemObjectFilter, setItemObjectFilter] = useState<Record<string, unknown>>({});
@@ -723,7 +727,8 @@ function GroupItemsPanel({ group, filter, setFilter, onNavigate, groupItems, gro
       selectAllMatchingLabel="Select shown"
       onSelectNone={selectNone}
       displayMode={viewMode}
-      onDisplayModeChange={setViewMode}
+      onDisplayModeChange={setGroupViewMode}
+      availableDisplayModes={["grid", "list"]}
       criteriaDefinitions={GROUP_ITEM_CRITERIA}
       objectFilter={itemObjectFilter}
       onObjectFilterChange={setItemObjectFilter}
@@ -1952,6 +1957,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
 }) {
   const queryClient = useQueryClient();
   const [zoomLevel, setZoomLevel] = useState(0);
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("scenes");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
@@ -2026,6 +2032,9 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       allowInfinitePageSize
+      displayMode={displayMode}
+      onDisplayModeChange={setDisplayMode}
+      availableDisplayModes={availableDisplayModes}
     />
   );
 
@@ -2125,22 +2134,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
   return (
     <>
       {toolbar}
-      <VirtualizedEntityGrid
-        items={items}
-        getItemKey={(scene) => scene.id}
-        minCardWidth={`${getEntityCardMinWidthPx("scenes", zoomLevel)}px`}
-        virtualMinColumnWidth={getEntityCardMinWidthPx("scenes", zoomLevel)}
-        estimateRowHeight={320}
-        gap={16}
-        gapClassName="gap-4"
-        infinitePageSize={infinitePageSize}
-        hasNextPage={infiniteQuery.hasNextPage}
-        isFetchingNextPage={infiniteQuery.isFetchingNextPage}
-        loadMore={loadMore}
-        renderItem={(scene) => (
-          <SceneCard scene={scene} onClick={() => selecting ? toggle(scene.id) : onNavigate({ page: "scene", id: scene.id })} onNavigate={onNavigate} onQuickView={() => setQuickViewId(scene.id)} selected={selectedIds.has(scene.id)} onSelect={() => toggle(scene.id)} selecting={selecting} />
-        )}
-      />
+      <RelatedEntityListView entityType="scenes" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onSceneQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
         <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}

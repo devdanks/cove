@@ -23,6 +23,7 @@ import { CustomFieldsEditor } from "../components/shared";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { WallMediaCard } from "../components/WallMediaCard";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
+import { RelatedEntityListView } from "../components/RelatedEntityListView";
 import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 
 /** Convert 2-letter ISO country code to flag emoji */
@@ -185,7 +186,7 @@ export function PerformersPage({ onNavigate }: Props) {
           )}
         />
       ) : (
-        <PerformerListTable performers={items} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <RelatedEntityListView entityType="performers" items={items} displayMode="list" selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} infinitePageSize={listData.infinitePageSize} hasNextPage={listData.infiniteQuery.hasNextPage} isFetchingNextPage={listData.infiniteQuery.isFetchingNextPage} loadMore={listData.loadMore} />
       )}
       {items.length === 0 && (
         <div className="text-center text-secondary py-16">
