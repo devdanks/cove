@@ -379,23 +379,60 @@ stashBoxes:
             "NormalizeStashPathMappings",
             (object)new StashPathMapping[]
             {
-                new(@"E:\test", "/wrong"),
-                new(@"E:\test\Content", "/media"),
+                new(@"C:", "/wrong"),
+                new(@"C:\Content", "/media"),
             }));
 
         var mappedPath = Assert.IsType<string>(InvokePrivateStatic(
             typeof(StashMigrationService),
             "ApplyStashPathMappings",
-            @"E:\test\Content\Nested\clip.mp4",
+            @"C:\Content\Nested\clip.mp4",
             mappings));
         var siblingPath = Assert.IsType<string>(InvokePrivateStatic(
             typeof(StashMigrationService),
             "ApplyStashPathMappings",
-            @"E:\test\Content2\clip.mp4",
+            @"C:\Content2\clip.mp4",
             mappings));
 
         Assert.Equal("/media/Nested/clip.mp4", mappedPath);
         Assert.Equal("/wrong/Content2/clip.mp4", siblingPath);
+    }
+
+    [Fact]
+    public void ApplyStashConfigPathMappings_MapsWindowsGeneratedPathOnDockerHost()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"stash-config-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var configPath = Path.Combine(tempDir, "config.yml");
+
+        try
+        {
+            File.WriteAllText(configPath, """
+generated: E:/test/Content/Stash-PornServer
+stash:
+  - path: E:/test/Content
+""");
+
+            var stashConfig = InvokePrivateStatic(typeof(StashMigrationService), "ParseStashConfig", configPath);
+            Assert.NotNull(stashConfig);
+
+            var mappings = Assert.IsAssignableFrom<IReadOnlyList<StashPathMapping>>(InvokePrivateStatic(
+                typeof(StashMigrationService),
+                "NormalizeStashPathMappings",
+                (object)new StashPathMapping[]
+                {
+                    new(@"C:\Coding\Testing\Stash-PornServer", "/stash"),
+                    new("E:/test/Content", "/media"),
+                }));
+
+            var mappedConfig = InvokePrivateStatic(typeof(StashMigrationService), "ApplyStashConfigPathMappings", stashConfig!, mappings);
+            Assert.NotNull(mappedConfig);
+            Assert.Equal("/media/Stash-PornServer", GetPrivateProperty<string>(mappedConfig!, "GeneratedPath"));
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
+        }
     }
 
     [Fact]

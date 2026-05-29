@@ -24,9 +24,11 @@ public class PerformerRepository : IPerformerRepository
         if (string.IsNullOrWhiteSpace(normalized)) return textQuery;
         var normalizedLower = normalized.ToLowerInvariant();
 
-        return textQuery
-            .Concat(query.Where(p => p.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower))))
-            .Distinct();
+        var withAliases = textQuery
+            .Concat(query.Where(p => p.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower))));
+
+        return FullTextSearchHelpers.ApplyRelationalMatches(withAliases, query, search,
+            tagSelectors: [p => p.PerformerTags.Where(pt => pt.Tag != null).Select(pt => pt.Tag!)]);
     }
 
     private static IQueryable<Performer> ApplyCareerLengthCriterion(IQueryable<Performer> query, IntCriterion? criterion)
@@ -1199,9 +1201,11 @@ public class StudioRepository : IStudioRepository
         if (string.IsNullOrWhiteSpace(normalized)) return textQuery;
         var normalizedLower = normalized.ToLowerInvariant();
 
-        return textQuery
-            .Concat(query.Where(s => s.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower))))
-            .Distinct();
+        var withAliases = textQuery
+            .Concat(query.Where(s => s.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower))));
+
+        return FullTextSearchHelpers.ApplyRelationalMatches(withAliases, query, search,
+            tagSelectors: [s => s.StudioTags.Where(st => st.Tag != null).Select(st => st.Tag!)]);
     }
 
     private IQueryable<Studio> ApplyStudioRatingSort(IQueryable<Studio> query, bool desc)
@@ -1537,12 +1541,16 @@ public class GalleryRepository : IGalleryRepository
 
             query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Gallery, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
-        query = FullTextSearchHelpers.Apply(_db, query, findFilter?.Q,
+        var galleryBase = query;
+        var galleryText = FullTextSearchHelpers.Apply(_db, galleryBase, findFilter?.Q,
             g => g.Title,
             g => g.Code,
             g => g.Details,
             g => g.Photographer,
             g => g.SearchText);
+        query = FullTextSearchHelpers.ApplyRelationalMatches(galleryText, galleryBase, findFilter?.Q,
+            tagSelectors: [g => g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => gt.Tag!)],
+            performerSelectors: [g => g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => gp.Performer!)]);
 
         var totalCount = await query.CountAsync(ct);
         var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);
@@ -1879,13 +1887,17 @@ public class ImageRepository : IImageRepository
         // Build filter query once (lightweight, no includes)
         var filterQuery = (readScopePlan ?? new ReadScopeRootPlan<Image>(false, null)).Apply(_db.Images.AsQueryable());
         filterQuery = ApplyImageFilters(filterQuery, filter, expandedTags?.ValueGroups);
-        filterQuery = FullTextSearchHelpers.Apply(_db, filterQuery, findFilter?.Q,
+        var imageBase = filterQuery;
+        var imageText = FullTextSearchHelpers.Apply(_db, imageBase, findFilter?.Q,
             i => i.Title,
             i => i.Details,
             i => i.Code,
             i => i.Photographer,
             i => i.FileSearchText,
             i => i.SearchText);
+        filterQuery = FullTextSearchHelpers.ApplyRelationalMatches(imageText, imageBase, findFilter?.Q,
+            tagSelectors: [i => i.ImageTags.Where(it => it.Tag != null).Select(it => it.Tag!)],
+            performerSelectors: [i => i.ImagePerformers.Where(ip => ip.Performer != null).Select(ip => ip.Performer!)]);
 
         var perPage = findFilter?.PerPage ?? 25;
 
@@ -2517,12 +2529,15 @@ public class GroupRepository : IGroupRepository
 
             query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Group, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
         }
-        query = FullTextSearchHelpers.Apply(_db, query, findFilter?.Q,
+        var groupBase = query;
+        var groupText = FullTextSearchHelpers.Apply(_db, groupBase, findFilter?.Q,
             g => g.Name,
             g => g.Aliases,
             g => g.Director,
             g => g.Synopsis,
             g => g.SearchText);
+        query = FullTextSearchHelpers.ApplyRelationalMatches(groupText, groupBase, findFilter?.Q,
+            tagSelectors: [g => g.GroupTags.Where(gt => gt.Tag != null).Select(gt => gt.Tag!)]);
 
         var totalCount = await query.CountAsync(ct);
         var hasExplicitSort = !string.IsNullOrWhiteSpace(findFilter?.Sort);

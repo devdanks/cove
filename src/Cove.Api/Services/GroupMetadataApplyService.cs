@@ -407,6 +407,17 @@ public sealed class GroupMetadataApplyService(
             && data[4] == 0x4A && data[5] == 0x58 && data[6] == 0x4C && data[7] == 0x20)
             return "image/jxl";
 
+        if (LooksLikeSvg(data))
+            return "image/svg+xml";
+
         return null;
+    }
+
+    private static bool LooksLikeSvg(byte[] data)
+    {
+        var head = System.Text.Encoding.UTF8.GetString(data, 0, Math.Min(data.Length, 256));
+        var trimmed = head.TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
+        return trimmed.StartsWith("<svg", StringComparison.OrdinalIgnoreCase)
+            || (trimmed.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) && trimmed.Contains("<svg", StringComparison.OrdinalIgnoreCase));
     }
 }

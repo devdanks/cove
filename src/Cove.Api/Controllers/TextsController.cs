@@ -37,12 +37,16 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
 
         var query = db.TextDocuments.AsNoTracking().AsQueryable();
 
-        query = FullTextSearchHelpers.Apply(db, query, q,
+        var textBase = query;
+        var textQuery = FullTextSearchHelpers.Apply(db, textBase, q,
             text => text.Title,
             text => text.Code,
             text => text.Details,
             text => text.FileSearchText,
             text => text.SearchText);
+        query = FullTextSearchHelpers.ApplyRelationalMatches(textQuery, textBase, q,
+            tagSelectors: [text => text.TextTags.Where(tt => tt.Tag != null).Select(tt => tt.Tag!)],
+            performerSelectors: [text => text.TextPerformers.Where(tp => tp.Performer != null).Select(tp => tp.Performer!)]);
 
         query = ApplySort(query, sort, descending);
         if (FullTextSearchHelpers.ShouldOrderByRelevance(db, q, sort))
@@ -71,12 +75,16 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
 
         var query = db.TextDocuments.AsNoTracking().AsQueryable();
 
-        query = FullTextSearchHelpers.Apply(db, query, findFilter.Q,
+        var textBase = query;
+        var textQuery = FullTextSearchHelpers.Apply(db, textBase, findFilter.Q,
             text => text.Title,
             text => text.Code,
             text => text.Details,
             text => text.FileSearchText,
             text => text.SearchText);
+        query = FullTextSearchHelpers.ApplyRelationalMatches(textQuery, textBase, findFilter.Q,
+            tagSelectors: [text => text.TextTags.Where(tt => tt.Tag != null).Select(tt => tt.Tag!)],
+            performerSelectors: [text => text.TextPerformers.Where(tp => tp.Performer != null).Select(tp => tp.Performer!)]);
 
         query = ApplyFilter(query, req.ObjectFilter);
         query = ApplySort(query, findFilter.Sort, descending);

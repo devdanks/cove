@@ -219,7 +219,8 @@ public class ThumbnailService(
         if (source == null) return null;
 
         var effectiveContentType = await GetEffectiveImageContentTypeAsync(source.Value.stream, source.Value.contentType, ct);
-        var thumbnailOutput = GetImageThumbnailOutput(effectiveContentType ?? source.Value.contentType);
+        var sourceContentType = effectiveContentType ?? source.Value.contentType;
+        var thumbnailOutput = GetImageThumbnailOutput(sourceContentType);
         var thumbnailPath = GetImageThumbnailPath(thumbnailBasePath, thumbnailOutput);
 
         if (config.WriteImageThumbnails && !string.Equals(declaredThumbnailPath, thumbnailPath, StringComparison.OrdinalIgnoreCase) && IsImageThumbnailCurrent(thumbnailPath, imageFile.ModTime))
@@ -229,8 +230,8 @@ public class ThumbnailService(
             return (cachedStream, thumbnailOutput.ContentType, true);
         }
 
-        if (!CanGenerateImageThumbnail(effectiveContentType ?? source.Value.contentType))
-            return source;
+        if (!CanGenerateImageThumbnail(sourceContentType))
+            return (source.Value.stream, sourceContentType, source.Value.supportsRangeRequests);
 
         var sourceFilePath = TryGetDirectImageSourcePath(imageFile);
 
@@ -238,7 +239,7 @@ public class ThumbnailService(
         {
             if (config.WriteImageThumbnails)
             {
-                if (await TryGenerateImageThumbnailFileAsync(source.Value.stream, sourceFilePath, effectiveContentType ?? source.Value.contentType, thumbnailPath, imageFile.ModTime, maxDimension, thumbnailOutput, ct))
+                if (await TryGenerateImageThumbnailFileAsync(source.Value.stream, sourceFilePath, sourceContentType, thumbnailPath, imageFile.ModTime, maxDimension, thumbnailOutput, ct))
                 {
                     await source.Value.stream.DisposeAsync();
                     DeleteAlternateImageThumbnailVariants(thumbnailBasePath, thumbnailPath);
@@ -250,10 +251,10 @@ public class ThumbnailService(
                 if (source.Value.stream.CanSeek)
                     source.Value.stream.Position = 0;
                 logger.LogInformation("Skipping thumbnail generation for unsupported image format {ImageId}", imageId);
-                return source;
+                return (source.Value.stream, sourceContentType, source.Value.supportsRangeRequests);
             }
 
-            var thumbnailStream = await TryCreateImageThumbnailStreamAsync(source.Value.stream, sourceFilePath, effectiveContentType ?? source.Value.contentType, maxDimension, thumbnailOutput, ct);
+            var thumbnailStream = await TryCreateImageThumbnailStreamAsync(source.Value.stream, sourceFilePath, sourceContentType, maxDimension, thumbnailOutput, ct);
             if (thumbnailStream != null)
             {
                 await source.Value.stream.DisposeAsync();
@@ -263,14 +264,14 @@ public class ThumbnailService(
             if (source.Value.stream.CanSeek)
                 source.Value.stream.Position = 0;
             logger.LogInformation("Skipping thumbnail generation for unsupported image format {ImageId}", imageId);
-            return source;
+            return (source.Value.stream, sourceContentType, source.Value.supportsRangeRequests);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Falling back to original image stream for thumbnail {ImageId}", imageId);
             if (source.Value.stream.CanSeek)
                 source.Value.stream.Position = 0;
-            return source;
+            return (source.Value.stream, sourceContentType, source.Value.supportsRangeRequests);
         }
     }
 
@@ -290,15 +291,16 @@ public class ThumbnailService(
         if (source == null) return null;
 
         var effectiveContentType = await GetEffectiveImageContentTypeAsync(source.Value.Stream, source.Value.ContentType, ct);
-        var thumbnailOutput = GetImageThumbnailOutput(effectiveContentType ?? source.Value.ContentType);
+        var sourceContentType = effectiveContentType ?? source.Value.ContentType;
+        var thumbnailOutput = GetImageThumbnailOutput(sourceContentType);
         var thumbnailPath = GetImageThumbnailPath(thumbnailBasePath, thumbnailOutput);
 
-        if (!CanGenerateImageThumbnail(effectiveContentType ?? source.Value.ContentType))
-            return (source.Value.Stream, source.Value.ContentType, source.Value.Stream.CanSeek);
+        if (!CanGenerateImageThumbnail(sourceContentType))
+            return (source.Value.Stream, sourceContentType, source.Value.Stream.CanSeek);
 
         try
         {
-            if (await TryGenerateImageThumbnailFileAsync(source.Value.Stream, null, effectiveContentType ?? source.Value.ContentType, thumbnailPath, DateTime.UtcNow, maxDimension, thumbnailOutput, ct))
+            if (await TryGenerateImageThumbnailFileAsync(source.Value.Stream, null, sourceContentType, thumbnailPath, DateTime.UtcNow, maxDimension, thumbnailOutput, ct))
             {
                 await source.Value.Stream.DisposeAsync();
                 DeleteAlternateImageThumbnailVariants(thumbnailBasePath, thumbnailPath);
@@ -310,14 +312,14 @@ public class ThumbnailService(
             if (source.Value.Stream.CanSeek)
                 source.Value.Stream.Position = 0;
             logger.LogInformation("Skipping cached blob thumbnail generation for unsupported image format {BlobId}", blobId);
-            return (source.Value.Stream, source.Value.ContentType, source.Value.Stream.CanSeek);
+            return (source.Value.Stream, sourceContentType, source.Value.Stream.CanSeek);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Falling back to original blob stream for entity image thumbnail {BlobId}", blobId);
             if (source.Value.Stream.CanSeek)
                 source.Value.Stream.Position = 0;
-            return (source.Value.Stream, source.Value.ContentType, source.Value.Stream.CanSeek);
+            return (source.Value.Stream, sourceContentType, source.Value.Stream.CanSeek);
         }
     }
 
@@ -646,14 +648,18 @@ public class ThumbnailService(
             if (brand.StartsWith("heif", StringComparison.OrdinalIgnoreCase)) return "image/heif";
         }
 
-        if (data[0] == 0x3C)
-        {
-            var head = System.Text.Encoding.UTF8.GetString(data[..Math.Min(data.Length, 256)]);
-            if (head.Contains("<svg", StringComparison.OrdinalIgnoreCase))
-                return "image/svg+xml";
-        }
+        if (LooksLikeSvg(data))
+            return "image/svg+xml";
 
         return null;
+    }
+
+    private static bool LooksLikeSvg(ReadOnlySpan<byte> data)
+    {
+        var head = Encoding.UTF8.GetString(data[..Math.Min(data.Length, 256)]);
+        var trimmed = head.TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
+        return trimmed.StartsWith("<svg", StringComparison.OrdinalIgnoreCase)
+            || (trimmed.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) && trimmed.Contains("<svg", StringComparison.OrdinalIgnoreCase));
     }
 
     private static async Task WriteImageThumbnailAsync(Stream sourceStream, Stream outputStream, int maxDimension, ImageThumbnailOutput thumbnailOutput, CancellationToken ct)

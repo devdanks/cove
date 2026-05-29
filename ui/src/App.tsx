@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Database, Loader2 } from "lucide-react";
 import { Navbar } from "./components/Navbar";
-import { TutorialStoryboardDialog, TUTORIAL_STORYBOARD_EVENT, hasCompletedTutorialStoryboard, type TutorialOpenRequest } from "./components/TutorialStoryboardDialog";
+import { TutorialStoryboardDialog, TUTORIAL_STORYBOARD_EVENT, type TutorialOpenRequest } from "./components/TutorialStoryboardDialog";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteRegistryProvider, useRouteRegistry } from "./router/RouteRegistry";
 import { AppConfigProvider, useAppConfig } from "./state/AppConfigContext";
@@ -424,7 +424,7 @@ function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => v
           setSetupFlowActive(false);
           setSetupDismissed(true);
           sessionStorage.setItem("cove-setup-dismissed", "true");
-          if (options?.showTutorial && !hasCompletedTutorialStoryboard()) {
+          if (options?.showTutorial) {
             setTutorialRequest({ topicId: "getting-started" });
             setTutorialOpen(true);
           }

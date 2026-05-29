@@ -1,4 +1,6 @@
 using System.Linq.Expressions;
+using System.Reflection;
+using System.Text;
 using Cove.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 using NpgsqlTypes;
@@ -9,6 +11,82 @@ public static class FullTextSearchHelpers
 {
     private const string SearchVectorProperty = "SearchVector";
     private const string SearchConfig = "simple";
+
+    private static readonly MethodInfo EnumerableAnyMethod = typeof(Enumerable)
+        .GetMethods(BindingFlags.Public | BindingFlags.Static)
+        .First(m => m.Name == nameof(Enumerable.Any)
+            && m.GetParameters().Length == 2);
+
+    /// <summary>
+    /// Augments a free-text search result with relational matches against applied tags and
+    /// performers, returning the union (distinct) of the two. Tag matching is whole-word
+    /// (including aliases) so that searching "1F" does not match a tag named "1F1M". Performer
+    /// matching is substring (including aliases) to mirror scene search behavior. Descriptions
+    /// are intentionally not handled here because every entity already indexes its description
+    /// field in its full-text <c>SearchVector</c>.
+    /// </summary>
+    /// <param name="textQuery">The full-text search result to extend.</param>
+    /// <param name="baseQuery">The pre-text-search (already scoped/filtered) query to match against.</param>
+    /// <param name="search">The raw search term.</param>
+    /// <param name="tagSelectors">Selectors projecting an entity to its applied tags.</param>
+    /// <param name="performerSelectors">Selectors projecting an entity to its applied performers.</param>
+    public static IQueryable<T> ApplyRelationalMatches<T>(
+        IQueryable<T> textQuery,
+        IQueryable<T> baseQuery,
+        string? search,
+        Expression<Func<T, IEnumerable<Tag>>>[]? tagSelectors = null,
+        Expression<Func<T, IEnumerable<Performer>>>[]? performerSelectors = null)
+    {
+        var normalized = Normalize(search);
+        if (normalized is null)
+            return textQuery;
+
+        var lower = normalized.ToLowerInvariant();
+        var wordTerm = $" {lower} ";
+
+        Expression<Func<Tag, bool>> tagMatches = tag =>
+            (" " + tag.Name.ToLower() + " ").Contains(wordTerm)
+            || tag.Aliases.Any(alias => (" " + alias.Alias.ToLower() + " ").Contains(wordTerm));
+
+        Expression<Func<Performer, bool>> performerMatches = performer =>
+            performer.Name.ToLower().Contains(lower)
+            || performer.Aliases.Any(alias => alias.Alias.ToLower().Contains(lower));
+
+        var entityParam = Expression.Parameter(typeof(T), "entity");
+        Expression? body = null;
+
+        foreach (var selector in tagSelectors ?? [])
+            body = OrElse(body, BuildAnyMatch(selector, entityParam, tagMatches));
+
+        foreach (var selector in performerSelectors ?? [])
+            body = OrElse(body, BuildAnyMatch(selector, entityParam, performerMatches));
+
+        if (body is null)
+            return textQuery;
+
+        var predicate = Expression.Lambda<Func<T, bool>>(body, entityParam);
+        return textQuery.Concat(baseQuery.Where(predicate)).Distinct();
+    }
+
+    private static Expression OrElse(Expression? left, Expression right)
+        => left is null ? right : Expression.OrElse(left, right);
+
+    private static Expression BuildAnyMatch<T, TElement>(
+        Expression<Func<T, IEnumerable<TElement>>> collectionSelector,
+        ParameterExpression entityParam,
+        Expression<Func<TElement, bool>> elementPredicate)
+    {
+        var collectionBody = new ParameterReplacer(collectionSelector.Parameters[0], entityParam)
+            .Visit(collectionSelector.Body)!;
+        var anyMethod = EnumerableAnyMethod.MakeGenericMethod(typeof(TElement));
+        return Expression.Call(anyMethod, collectionBody, elementPredicate);
+    }
+
+    private sealed class ParameterReplacer(ParameterExpression from, ParameterExpression to) : ExpressionVisitor
+    {
+        protected override Expression VisitParameter(ParameterExpression node)
+            => node == from ? to : base.VisitParameter(node);
+    }
 
     public static bool IsActive(CoveContext db, string? search)
         => SupportsPostgresFullText(db) && !string.IsNullOrWhiteSpace(search);
@@ -27,8 +105,12 @@ public static class FullTextSearchHelpers
         if (!SupportsPostgresFullText(db))
             return FilterHelpers.ApplyBooleanKeywordSearch(query, normalized, fallbackSelectors);
 
+        var prefixQuery = BuildPrefixQuery(normalized);
+        if (prefixQuery is null)
+            return query;
+
         return query.Where(entity => EF.Property<NpgsqlTsVector>(entity, SearchVectorProperty)
-            .Matches(EF.Functions.WebSearchToTsQuery(SearchConfig, normalized)));
+            .Matches(EF.Functions.ToTsQuery(SearchConfig, prefixQuery)));
     }
 
     public static bool ShouldOrderByRelevance(CoveContext db, string? search, string? explicitSort)
@@ -41,9 +123,13 @@ public static class FullTextSearchHelpers
         if (normalized is null || !SupportsPostgresFullText(db))
             return query;
 
+        var prefixQuery = BuildPrefixQuery(normalized);
+        if (prefixQuery is null)
+            return query;
+
         return query
             .OrderByDescending(entity => EF.Property<NpgsqlTsVector>(entity, SearchVectorProperty)
-                .Rank(EF.Functions.WebSearchToTsQuery(SearchConfig, normalized)))
+                .Rank(EF.Functions.ToTsQuery(SearchConfig, prefixQuery)))
             .ThenByDescending(entity => entity.UpdatedAt)
             .ThenBy(entity => entity.Id);
     }
@@ -55,5 +141,42 @@ public static class FullTextSearchHelpers
     {
         var normalized = search?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    /// <summary>
+    /// Builds a prefix-matching <c>to_tsquery</c> expression from free-text input so that
+    /// partial words match (e.g. "sa" matches "sapphix", "small ho" matches "small hole").
+    /// Each whitespace-delimited token is sanitized to its alphanumeric lexeme, suffixed with
+    /// the prefix operator (<c>:*</c>), and combined with AND so every token must match.
+    /// Returns <c>null</c> when no usable tokens remain.
+    /// </summary>
+    private static string? BuildPrefixQuery(string search)
+    {
+        var builder = new StringBuilder();
+        var token = new StringBuilder();
+
+        void FlushToken()
+        {
+            if (token.Length == 0)
+                return;
+
+            if (builder.Length > 0)
+                builder.Append(" & ");
+
+            builder.Append(token).Append(":*");
+            token.Clear();
+        }
+
+        foreach (var ch in search)
+        {
+            if (char.IsLetterOrDigit(ch))
+                token.Append(char.ToLowerInvariant(ch));
+            else
+                FlushToken();
+        }
+
+        FlushToken();
+
+        return builder.Length == 0 ? null : builder.ToString();
     }
 }

@@ -355,6 +355,11 @@ public class SceneRepository : ISceneRepository
         var normalized = search?.Trim();
         if (string.IsNullOrWhiteSpace(normalized)) return textQuery;
         var normalizedLower = normalized.ToLowerInvariant();
+        // Tags (and tag aliases) match on whole words rather than substrings so a search like
+        // "1F" does not also pull in scenes tagged "1F1M". Space-padding both sides makes the
+        // term match only when it appears as a complete space-delimited word, and works on both
+        // PostgreSQL and the SQLite test provider.
+        var tagWordTerm = $" {normalizedLower} ";
 
         var relationalQuery = query.Where(s =>
             (s.Studio != null && s.Studio.Name.ToLower().Contains(normalizedLower)) ||
@@ -362,8 +367,8 @@ public class SceneRepository : ISceneRepository
                 sp.Performer.Name.ToLower().Contains(normalizedLower) ||
                 sp.Performer.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower)))) ||
             s.SceneTags.Any(st => st.Tag != null && (
-                st.Tag.Name.ToLower().Contains(normalizedLower) ||
-                st.Tag.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower)))) ||
+                (" " + st.Tag.Name.ToLower() + " ").Contains(tagWordTerm) ||
+                st.Tag.Aliases.Any(alias => (" " + alias.Alias.ToLower() + " ").Contains(tagWordTerm)))) ||
             s.SceneGalleries.Any(sg => sg.Gallery != null && sg.Gallery.Title != null && sg.Gallery.Title.ToLower().Contains(normalizedLower)) ||
             s.GroupItems.Any(item => item.Group != null && item.Group.Name.ToLower().Contains(normalizedLower)));
 

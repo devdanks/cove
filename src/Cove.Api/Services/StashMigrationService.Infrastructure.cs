@@ -985,9 +985,16 @@ WHERE files.zip_file_id IS NOT NULL";
         var trimmed = configuredPath.Trim();
         if (Path.IsPathRooted(trimmed))
             return Path.GetFullPath(trimmed);
+        if (IsWindowsAbsolutePath(trimmed))
+            return NormalizeImportedPath(trimmed);
 
         return Path.GetFullPath(Path.Combine(configDirectory, trimmed));
     }
+
+    private static bool IsWindowsAbsolutePath(string path)
+        => Regex.IsMatch(path, @"^[A-Za-z]:[\\/]")
+            || path.StartsWith(@"\\", StringComparison.Ordinal)
+            || path.StartsWith("//", StringComparison.Ordinal);
 
     private static bool TryResolveStashBlobFilePath(string blobFilesPath, string checksum, out string sourcePath)
     {

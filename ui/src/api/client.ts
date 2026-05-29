@@ -372,6 +372,10 @@ export const scenes = {
     request<MetadataServerSceneMatch[]>(`/scenes/${id}/metadata-server/search${buildQuery(undefined, { term, endpoint })}`),
   importFromMetadataServer: (id: number, data: MetadataServerSceneImportRequest) =>
     request<Scene>(`/scenes/${id}/metadata-server/import`, { method: "POST", body: JSON.stringify(data) }),
+  submitMetadataServerDraft: (id: number, endpoint: string) =>
+    request<{ draftId: string | null }>(`/scenes/${id}/metadata-server/submit-draft`, { method: "POST", body: JSON.stringify({ endpoint }) }),
+  submitFingerprints: (id: number, endpoint: string) =>
+    request<void>(`/scenes/${id}/metadata-server/submit-fingerprints`, { method: "POST", body: JSON.stringify({ endpoint }) }),
   generateScreenshot: (id: number, atSeconds?: number) =>
     request<{ success: boolean }>(`/scenes/${id}/generate-screenshot`, { method: "POST", body: JSON.stringify({ atSeconds }) }),
   setCoverFromFrame: (id: number, atSeconds?: number) =>

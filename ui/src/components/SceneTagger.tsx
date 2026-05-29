@@ -30,6 +30,8 @@ import {
   Settings2,
   EyeOff,
   Eye,
+  Upload,
+  CloudUpload,
 } from "lucide-react";
 
 interface SceneTaggerProps {
@@ -92,6 +94,10 @@ interface UnifiedSceneMatch extends MetadataServerSceneMatch {
 }
 
 const sourceValue = (kind: "metadata-server" | "scraper", id: string) => `${kind}:${id}`;
+
+function normalizeEndpoint(endpoint?: string | null): string {
+  return (endpoint ?? "").trim().replace(/\/+$/, "").toLowerCase();
+}
 
 function resolveSource(value: string, sources: TaggerSource[]): TaggerSource | undefined {
   return sources.find((source) => source.value === value)
@@ -896,6 +902,26 @@ function TaggerSceneRow({
     },
   });
 
+  const submitEndpoint = source?.kind === "metadata-server" ? source.endpoint : undefined;
+  const normalizedSubmitEndpoint = normalizeEndpoint(submitEndpoint);
+  const hasRemoteIdForEndpoint =
+    Boolean(normalizedSubmitEndpoint) &&
+    scene.remoteIds.some((remote) => normalizeEndpoint(remote.endpoint) === normalizedSubmitEndpoint);
+
+  const submitDraftMut = useMutation<{ draftId: string | null }, Error>({
+    mutationFn: () => {
+      if (!submitEndpoint) throw new Error("Select a metadata-server source first.");
+      return scenes.submitMetadataServerDraft(scene.id, submitEndpoint);
+    },
+  });
+
+  const submitFingerprintsMut = useMutation<void, Error>({
+    mutationFn: () => {
+      if (!submitEndpoint) throw new Error("Select a metadata-server source first.");
+      return scenes.submitFingerprints(scene.id, submitEndpoint);
+    },
+  });
+
   return (
     <div className={`px-3 py-2 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
       <div className="flex gap-3">
@@ -1008,7 +1034,40 @@ function TaggerSceneRow({
                 <Fingerprint className="w-3 h-3" />
               </button>
             )}
+            {source?.kind === "metadata-server" && (
+              <button
+                onClick={() => submitFingerprintsMut.mutate()}
+                disabled={submitFingerprintsMut.isPending || !hasRemoteIdForEndpoint}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface border border-border text-muted hover:text-foreground disabled:opacity-60"
+                title={hasRemoteIdForEndpoint ? "Submit your fingerprints for this scene to the metadata server" : "Link this scene to a metadata-server entry before submitting fingerprints"}
+              >
+                {submitFingerprintsMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              </button>
+            )}
+            {source?.kind === "metadata-server" && (
+              <button
+                onClick={() => submitDraftMut.mutate()}
+                disabled={submitDraftMut.isPending}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface border border-border text-muted hover:text-foreground disabled:opacity-60"
+                title="Submit this scene as a draft entry to the metadata server"
+              >
+                {submitDraftMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CloudUpload className="w-3 h-3" />}
+              </button>
+            )}
           </div>
+
+          {submitFingerprintsMut.isError && (
+            <p className="text-xs text-red-400 mb-2"><AlertCircle className="w-3 h-3 inline mr-1" />{submitFingerprintsMut.error.message}</p>
+          )}
+          {submitFingerprintsMut.isSuccess && (
+            <p className="text-xs text-green-400 mb-2"><Check className="w-3 h-3 inline mr-1" />Fingerprints submitted to the metadata server.</p>
+          )}
+          {submitDraftMut.isError && (
+            <p className="text-xs text-red-400 mb-2"><AlertCircle className="w-3 h-3 inline mr-1" />{submitDraftMut.error.message}</p>
+          )}
+          {submitDraftMut.isSuccess && (
+            <p className="text-xs text-green-400 mb-2"><Check className="w-3 h-3 inline mr-1" />Scene draft submitted{submitDraftMut.data.draftId ? ` (${submitDraftMut.data.draftId})` : ""}.</p>
+          )}
 
           {/* Error */}
           {state?.error && (

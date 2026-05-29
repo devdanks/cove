@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -263,6 +264,51 @@ public class ThumbnailServiceTests
         }
     }
 
+    [Fact]
+    public async Task GetBlobImageThumbnailStreamAsync_ServesDetectedSvgWithSvgContentType()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"cove-thumbnail-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var svgBytes = Encoding.UTF8.GetBytes("\uFEFF  <?xml version=\"1.0\" encoding=\"UTF-8\"?><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect width=\"20\" height=\"20\" fill=\"red\" /></svg>");
+            var generatedPath = Path.Combine(tempRoot, "generated");
+            var services = new ServiceCollection();
+
+            await using var provider = services.BuildServiceProvider();
+
+            var service = new ThumbnailService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                new StubJobService(),
+                new CoveConfiguration
+                {
+                    GeneratedPath = generatedPath,
+                    WriteImageThumbnails = true,
+                },
+                new ZipFileReader(),
+                new BlobServiceWithContent(svgBytes, "image/png"),
+                NullLogger<ThumbnailService>.Instance);
+
+            var result = await service.GetBlobImageThumbnailStreamAsync("studio-svg", 640, CancellationToken.None);
+
+            Assert.NotNull(result);
+            Assert.Equal("image/svg+xml", result.Value.contentType);
+            Assert.True(result.Value.supportsRangeRequests);
+
+            await using var stream = result.Value.stream;
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            Assert.Equal(svgBytes, buffer.ToArray());
+            if (Directory.Exists(generatedPath))
+                Assert.Empty(Directory.GetFiles(generatedPath, "*", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
     private sealed class StubJobService : IJobService
     {
         public string Enqueue(string type, string description, Func<IJobProgress, CancellationToken, Task> work, bool exclusive = true)
@@ -286,6 +332,18 @@ public class ThumbnailServiceTests
 
         public Task<(Stream Stream, string ContentType)?> GetBlobAsync(string blobId, CancellationToken ct = default)
             => Task.FromResult<(Stream, string)?>(null);
+
+        public Task DeleteBlobAsync(string blobId, CancellationToken ct = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class BlobServiceWithContent(byte[] bytes, string contentType) : IBlobService
+    {
+        public Task<string> StoreBlobAsync(Stream data, string contentType, CancellationToken ct = default)
+            => Task.FromResult("blob-id");
+
+        public Task<(Stream Stream, string ContentType)?> GetBlobAsync(string blobId, CancellationToken ct = default)
+            => Task.FromResult<(Stream, string)?>((new MemoryStream(bytes), contentType));
 
         public Task DeleteBlobAsync(string blobId, CancellationToken ct = default)
             => Task.CompletedTask;

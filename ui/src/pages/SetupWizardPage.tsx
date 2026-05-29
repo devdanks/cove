@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { database, jobs, system, stashMigration } from "../api/client";
+import { database, jobs, metadata, system, stashMigration } from "../api/client";
 import type { StashPreviewResult, StashImportOptions, StashImportResult, StashPathMapping } from "../api/client";
 import type { CoveConfig, CovePathConfig, JobInfo } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
@@ -34,16 +34,12 @@ interface BackupRestoreResultSummary {
   configBackupPath: string | null;
 }
 
-const THEME_PREVIEW_VARIANTS = ["dashboard", "library", "metadata", "tasks"] as const;
-
-type ThemePreviewVariant = typeof THEME_PREVIEW_VARIANTS[number];
-
 const TUTORIAL_STEPS = [
   {
     eyebrow: "Step 1",
     title: "Scan and generate your library",
-    description: "After setup, head to Tasks first. Run Scan to index files, then Generate when you want previews, thumbnails, hashes, sprites, or markers.",
-    actionLabel: "Open Settings > Tasks",
+    description: "After setup, run Scan to index files, then use Scan & Generate when you want previews, thumbnails, hashes, sprites, or markers.",
+    actionLabel: "Open Scan & Generate",
     highlight: "This is the fastest way to move from an empty library to something you can actually browse.",
     checklist: ["Scan the folders you just added", "Run Generate for previews and images", "Come back later if you add more media"],
     icon: FolderOpen,
@@ -81,146 +77,41 @@ const TUTORIAL_STEPS = [
   },
 ] as const;
 
-function ThemeMiniPreview({
-  background,
-  card,
-  accent,
-  foreground,
-  variant,
-}: {
-  background: string;
-  card: string;
-  accent: string;
-  foreground: string;
-  variant: ThemePreviewVariant;
-}) {
-  const textStyle = (opacity: number) => ({ background: foreground, opacity });
+function getThemePreviewColor(cssVariables: Record<string, string> | undefined, key: string, fallback: string) {
+  return cssVariables?.[`--${key}`] ?? cssVariables?.[`--color-${key}`] ?? fallback;
+}
 
-  if (variant === "library") {
-    return (
-      <div className="rounded-xl border border-black/10 p-3" style={{ background }}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="h-2.5 w-20 rounded-full" style={textStyle(0.78)} />
-          <div className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: accent }}>
-            Scenes
-          </div>
-        </div>
-        <div className="mt-3 grid grid-cols-[1.35fr_0.95fr] gap-2">
-          <div className="overflow-hidden rounded-xl" style={{ background: card }}>
-            <div className="aspect-[16/10]" style={{ background: accent, opacity: 0.88 }} />
-            <div className="space-y-2 p-2.5">
-              <div className="h-2.5 w-4/5 rounded-full" style={textStyle(0.78)} />
-              <div className="h-2 w-2/3 rounded-full" style={textStyle(0.42)} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            {[0.84, 0.72, 0.62].map((opacity, index) => (
-              <div key={index} className="rounded-xl p-2" style={{ background: card, opacity }}>
-                <div className="h-10 rounded-lg" style={{ background: accent, opacity: 0.48 }} />
-                <div className="mt-2 h-2 w-3/4 rounded-full" style={textStyle(0.7)} />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (variant === "metadata") {
-    return (
-      <div className="rounded-xl border border-black/10 p-3" style={{ background }}>
-        <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-xl" style={{ background: accent }} />
-          <div className="h-2.5 flex-1 rounded-full" style={textStyle(0.75)} />
-        </div>
-        <div className="mt-3 rounded-2xl p-3" style={{ background: card }}>
-          <div className="flex flex-wrap gap-1.5">
-            {["Scrape", "Identify", "Apply"].map((label, index) => (
-              <div
-                key={label}
-                className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                style={index === 0 ? { background: accent, color: "#fff" } : { background: foreground, color: background, opacity: 0.75 }}
-              >
-                {label}
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-[1.2fr_0.8fr]">
-            <div className="space-y-2">
-              <div className="h-2.5 w-5/6 rounded-full" style={textStyle(0.8)} />
-              <div className="h-2.5 w-3/5 rounded-full" style={textStyle(0.55)} />
-              <div className="grid grid-cols-3 gap-1.5 pt-1">
-                {[0.76, 0.62, 0.48].map((opacity, index) => (
-                  <div key={index} className="h-8 rounded-xl" style={{ background: accent, opacity }} />
-                ))}
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/10 p-2" style={{ background, opacity: 0.88 }}>
-              <div className="h-2 w-2/3 rounded-full" style={textStyle(0.72)} />
-              <div className="mt-2 h-10 rounded-lg" style={{ background: accent, opacity: 0.42 }} />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (variant === "tasks") {
-    return (
-      <div className="rounded-xl border border-black/10 p-3" style={{ background }}>
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <div className="h-2.5 w-24 rounded-full" style={textStyle(0.82)} />
-            <div className="mt-1.5 h-2 w-16 rounded-full" style={textStyle(0.45)} />
-          </div>
-          <div className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: accent }}>
-            Running
-          </div>
-        </div>
-        <div className="mt-3 space-y-2">
-          {[0.92, 0.76].map((opacity, index) => (
-            <div key={index} className="rounded-2xl p-2.5" style={{ background: card }}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="h-2.5 w-24 rounded-full" style={textStyle(0.74)} />
-                <div className="h-2 w-10 rounded-full" style={textStyle(0.36)} />
-              </div>
-              <div className="mt-2 h-2 rounded-full" style={{ background: foreground, opacity: 0.14 }}>
-                <div className="h-full rounded-full" style={{ width: index === 0 ? "74%" : "38%", background: accent, opacity }} />
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 flex gap-2">
-          <div className="h-9 flex-1 rounded-xl" style={{ background: accent }} />
-          <div className="h-9 w-24 rounded-xl" style={{ background: card }} />
-        </div>
-      </div>
-    );
-  }
+function ThemeMiniPreview({ cssVariables }: { cssVariables?: Record<string, string> }) {
+  const background = getThemePreviewColor(cssVariables, "background", "#0b1220");
+  const card = getThemePreviewColor(cssVariables, "card", "#152033");
+  const surface = getThemePreviewColor(cssVariables, "surface", card);
+  const accent = getThemePreviewColor(cssVariables, "accent", "#2f80ed");
+  const foreground = getThemePreviewColor(cssVariables, "foreground", "#f8fafc");
+  const secondary = getThemePreviewColor(cssVariables, "secondary", foreground);
 
   return (
-    <div className="rounded-xl border border-black/10 p-3" style={{ background }}>
-      <div className="flex items-center gap-2">
-        <div className="h-8 w-8 rounded-xl" style={{ background: accent }} />
-        <div className="h-2.5 flex-1 rounded-full" style={textStyle(0.8)} />
-        <div className="h-6 w-14 rounded-full" style={{ background: card }} />
-      </div>
-      <div className="mt-3 grid grid-cols-[0.9fr_1.4fr] gap-2">
-        <div className="space-y-2 rounded-2xl p-2.5" style={{ background: card }}>
-          {[0.78, 0.6, 0.45].map((opacity, index) => (
-            <div key={index} className="h-2.5 rounded-full" style={textStyle(opacity)} />
+    <div className="overflow-hidden rounded-xl border border-black/10" style={{ background }}>
+      <div className="flex items-center justify-between gap-2 border-b border-black/10 px-3 py-2" style={{ background: surface }}>
+        <div className="flex items-center gap-1.5">
+          {[background, surface, card, accent, foreground].map((color, index) => (
+            <span key={`${color}-${index}`} className="h-4 w-4 rounded-full border border-black/15" style={{ background: color }} />
           ))}
         </div>
-        <div className="grid gap-2">
-          <div className="grid grid-cols-2 gap-2">
-            {[0.92, 0.76].map((opacity, index) => (
-              <div key={index} className="rounded-2xl p-2.5" style={{ background: card, opacity }}>
-                <div className="h-8 rounded-lg" style={{ background: accent, opacity: 0.55 }} />
-                <div className="mt-2 h-2 w-3/4 rounded-full" style={textStyle(0.7)} />
-              </div>
+        <div className="h-2 w-14 rounded-full" style={{ background: secondary, opacity: 0.55 }} />
+      </div>
+      <div className="grid grid-cols-[3.75rem_minmax(0,1fr)] gap-2 p-3">
+        <div className="space-y-1.5 rounded-lg p-2" style={{ background: card }}>
+          {[0.85, 0.6, 0.38].map((opacity, index) => (
+            <div key={index} className="h-1.5 rounded-full" style={{ background: foreground, opacity }} />
+          ))}
+        </div>
+        <div className="space-y-2">
+          <div className="h-9 rounded-lg" style={{ background: accent }} />
+          <div className="grid grid-cols-3 gap-1.5">
+            {[surface, card, accent].map((color, index) => (
+              <div key={`${color}-${index}`} className="h-6 rounded-md" style={{ background: color, opacity: index === 2 ? 0.75 : 1 }} />
             ))}
           </div>
-          <div className="h-16 rounded-2xl" style={{ background: card, opacity: 0.88 }} />
         </div>
       </div>
     </div>
@@ -362,6 +253,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
   const [restoreConfigBackupPath, setRestoreConfigBackupPath] = useState("");
   const [restoreConfirmed, setRestoreConfirmed] = useState(false);
   const [backupRestoreResult, setBackupRestoreResult] = useState<BackupRestoreResultSummary | null>(null);
+  const [scanJobId, setScanJobId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { availableThemes, activeThemeId, setActiveTheme } = useExtensions();
   const importPathMappings = pathMappings
@@ -498,6 +390,16 @@ export function SetupWizardPage({ config, onComplete }: Props) {
     onError: (err: Error) => setError(err.message),
   });
 
+  const scanMut = useMutation({
+    mutationFn: () => metadata.scan(),
+    onSuccess: async ({ jobId }) => {
+      setError(null);
+      setScanJobId(jobId);
+      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
   const addPath = () => {
     setPaths([...paths, { path: "", excludeVideo: false, excludeImage: false, excludeAudio: false, excludeText: false }]);
   };
@@ -520,14 +422,9 @@ export function SetupWizardPage({ config, onComplete }: Props) {
     saveMut.mutate(updatedConfig);
   };
 
-  const handleFinish = (target: "dashboard" | "tasks" | "settings" = "dashboard") => {
-    if (target === "tasks") {
-      navigateToUrl("/settings/tasks");
-    } else if (target === "settings") {
-      navigateToUrl("/settings");
-    } else {
-      navigateToUrl("/");
-    }
+  const handleFinish = (target: "scenes" | "settings" = "scenes") => {
+    const path = target === "settings" ? "/settings" : "/scenes";
+    navigateToUrl(backupRestoreResult ? `${path}?tutorial=getting-started` : path);
 
     onComplete({ showTutorial: true });
 
@@ -811,7 +708,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                               type="text"
                               value={mapping.source}
                               onChange={(e) => updatePathMapping(index, "source", e.target.value)}
-                              placeholder="E:\\test\\Content"
+                              placeholder="C:\\Content"
                               aria-label="Stash source path"
                               disabled={isStashImportActive}
                               className="min-w-0 bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none disabled:opacity-60"
@@ -1049,14 +946,9 @@ export function SetupWizardPage({ config, onComplete }: Props) {
               </p>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                {themeOptions.map((theme, index) => {
+                {themeOptions.map((theme) => {
                   const isSelected = (activeThemeId ?? "default") === theme.id;
                   const cssVariables = (theme.cssVariables ?? {}) as Record<string, string>;
-                  const background = cssVariables["--background"] ?? cssVariables["--color-background"] ?? "#0b1220";
-                  const card = cssVariables["--card"] ?? cssVariables["--color-card"] ?? "#152033";
-                  const accent = cssVariables["--accent"] ?? cssVariables["--color-accent"] ?? "#2f80ed";
-                  const foreground = cssVariables["--foreground"] ?? cssVariables["--color-foreground"] ?? "#f8fafc";
-                  const previewVariant = THEME_PREVIEW_VARIANTS[index % THEME_PREVIEW_VARIANTS.length];
 
                   return (
                     <button
@@ -1064,13 +956,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                       onClick={() => setActiveTheme(theme.id === "default" ? "default" : theme.id)}
                       className={`rounded-2xl border p-4 text-left transition-colors ${isSelected ? "border-accent bg-accent/5 shadow-lg shadow-accent/10" : "border-border bg-card hover:border-accent/50"}`}
                     >
-                      <ThemeMiniPreview
-                        background={background}
-                        card={card}
-                        accent={accent}
-                        foreground={foreground}
-                        variant={previewVariant}
-                      />
+                      <ThemeMiniPreview cssVariables={cssVariables} />
                       <div className="mt-4 flex items-start justify-between gap-3">
                         <div>
                           <div className="font-semibold text-foreground">{theme.name}</div>
@@ -1154,7 +1040,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                 </div>
               ) : (
                 <p className="text-secondary mb-6 max-w-md mx-auto">
-                  Your library paths have been configured. Open Tasks when you're ready to scan and generate library data.
+                  Your library paths have been configured. Run Scan to start indexing files, or jump straight into your scenes.
                 </p>
               )}
               <p className="text-xs text-muted mb-6">
@@ -1162,16 +1048,18 @@ export function SetupWizardPage({ config, onComplete }: Props) {
               </p>
               <div className="flex flex-wrap justify-center gap-3">
                 <button
-                  onClick={() => handleFinish("dashboard")}
+                  onClick={() => handleFinish("scenes")}
                   className="inline-flex items-center gap-2 px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors"
                 >
-                  Go to Dashboard <ChevronRight className="w-4 h-4" />
+                  Go to Scenes <ChevronRight className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => handleFinish("tasks")}
+                  onClick={() => { setError(null); scanMut.mutate(); }}
+                  disabled={scanMut.isPending}
                   className="inline-flex items-center gap-2 px-6 py-3 bg-card border border-border text-secondary hover:text-foreground rounded-lg font-medium transition-colors"
                 >
-                  <Play className="w-4 h-4" /> Open Tasks
+                  {scanMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Scan
                 </button>
                 <button
                   onClick={() => handleFinish("settings")}
@@ -1180,6 +1068,8 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                   <Settings className="w-4 h-4" /> Open Settings
                 </button>
               </div>
+              {scanJobId ? <p className="mt-4 text-xs text-green-300">Scan started. You can stay here or open Scenes while it runs.</p> : null}
+              {error ? <div className="mx-auto mt-4 max-w-md rounded-lg border border-red-700/50 bg-red-900/20 p-3 text-sm text-red-300">{error}</div> : null}
             </div>
           )}
         </div>

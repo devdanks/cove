@@ -1314,7 +1314,7 @@ query Me {
         var box = ResolveBox(endpoint);
 
         var sceneRemoteId = scene.RemoteIds.FirstOrDefault(id =>
-            string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+            EndpointsMatch(id.Endpoint, endpoint));
         if (sceneRemoteId == null)
             throw new InvalidOperationException("Scene does not have a remote ID for this endpoint");
 
@@ -1352,7 +1352,7 @@ query Me {
         var box = ResolveBox(endpoint);
 
         var sceneRemoteId = scene.RemoteIds.FirstOrDefault(id =>
-            string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+            EndpointsMatch(id.Endpoint, endpoint));
 
         var fingerprints = scene.Files
             .SelectMany(f => f.Fingerprints.Select(fp => new { fp, file = f }))
@@ -1370,7 +1370,7 @@ query Me {
             .Select(sp =>
             {
                 var perfRemoteId = sp.Performer!.RemoteIds
-                    .FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+                    .FirstOrDefault(id => EndpointsMatch(id.Endpoint, endpoint));
                 return new { name = sp.Performer.Name, id = perfRemoteId?.RemoteId };
             })
             .ToList();
@@ -1380,7 +1380,7 @@ query Me {
             .Select(st =>
             {
                 var tagRemoteId = st.Tag!.RemoteIds
-                    .FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+                    .FirstOrDefault(id => EndpointsMatch(id.Endpoint, endpoint));
                 return new { name = st.Tag.Name, id = tagRemoteId?.RemoteId };
             })
             .ToList();
@@ -1389,7 +1389,7 @@ query Me {
         if (scene.Studio != null)
         {
             var studioRemoteId = scene.Studio.RemoteIds
-                .FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(id => EndpointsMatch(id.Endpoint, endpoint));
             studio = new { name = scene.Studio.Name, id = studioRemoteId?.RemoteId };
         }
 
@@ -1902,13 +1902,8 @@ query Me {
             if (brand.StartsWith("heic", StringComparison.OrdinalIgnoreCase)) return "image/heic";
         }
 
-        // SVG: starts with < (XML)
-        if (data[0] == 0x3C)
-        {
-            var head = System.Text.Encoding.UTF8.GetString(data, 0, Math.Min(data.Length, 256));
-            if (head.Contains("<svg", StringComparison.OrdinalIgnoreCase))
-                return "image/svg+xml";
-        }
+        if (LooksLikeSvg(data))
+            return "image/svg+xml";
 
         // JPEG XL: FF 0A or 00 00 00 0C 4A 58 4C 20
         if (data[0] == 0xFF && data[1] == 0x0A)
@@ -1918,6 +1913,14 @@ query Me {
             return "image/jxl";
 
         return null;
+    }
+
+    private static bool LooksLikeSvg(byte[] data)
+    {
+        var head = System.Text.Encoding.UTF8.GetString(data, 0, Math.Min(data.Length, 256));
+        var trimmed = head.TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
+        return trimmed.StartsWith("<svg", StringComparison.OrdinalIgnoreCase)
+            || (trimmed.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) && trimmed.Contains("<svg", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void MergeAliases(Performer performer, IEnumerable<string> aliases)
@@ -2151,9 +2154,15 @@ query Me {
 
     private MetadataServerInstance ResolveBox(string endpoint)
     {
-        return _config.Scraping.MetadataServers.FirstOrDefault(box => string.Equals(box.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase))
+        return _config.Scraping.MetadataServers.FirstOrDefault(box => EndpointsMatch(box.Endpoint, endpoint))
             ?? throw new InvalidOperationException($"Configured metadata-server endpoint not found: {endpoint}");
     }
+
+    private static string NormalizeEndpoint(string? endpoint)
+        => endpoint?.Trim().TrimEnd('/') ?? string.Empty;
+
+    private static bool EndpointsMatch(string? a, string? b)
+        => string.Equals(NormalizeEndpoint(a), NormalizeEndpoint(b), StringComparison.OrdinalIgnoreCase);
 
     private async Task<T> SendQueryAsync<T>(MetadataServerInstance box, string query, object? variables, CancellationToken ct)
     {

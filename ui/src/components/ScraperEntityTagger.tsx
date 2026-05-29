@@ -110,6 +110,7 @@ interface ScraperReviewData {
   creator?: string;
   date?: string;
   studio?: string;
+  imageUrl?: string;
   urls: string[];
   tags: string[];
   performers: string[];
@@ -280,6 +281,7 @@ function buildCurrentReviewData(item: ScraperEntityItem): ScraperReviewData {
     director: item.director,
     date: normalizeSceneDate(item.date),
     studio: item.studioName,
+    imageUrl: item.frontImagePath ?? item.imagePath ?? undefined,
     urls: item.urls ?? [],
     tags: normalizeTagList((item.tags ?? []).map((tag) => tag.name)),
     performers: (item.performers ?? []).map((performer) => performer.name).filter(Boolean),
@@ -303,6 +305,7 @@ function buildScrapedReviewData(result?: ScraperResultMatch): ScraperReviewData 
     creator: result.creator,
     date: result.date,
     studio: result.studioName,
+    imageUrl: result.imageUrl,
     urls: result.urls,
     tags: result.tagNames,
     performers: result.performerNames,
@@ -333,6 +336,7 @@ function buildDefaultApplyPlan(
   if (entityType === "group" && scrapedData.director && scrapedData.director !== currentData.director) replaceFields.push("director");
   if (entityType === "group" && scrapedData.duration && scrapedData.duration !== currentData.duration) replaceFields.push("duration");
   if (entityType === "group" && scrapedData.rating && scrapedData.rating !== currentData.rating) replaceFields.push("rating");
+  if (entityType === "group" && scrapedData.imageUrl && scrapedData.imageUrl !== currentData.imageUrl) replaceFields.push("image");
   if ((entityType === "image" || entityType === "gallery") && scrapedData.creator && scrapedData.creator !== currentData.creator) replaceFields.push("photographer");
   if (scrapedData.date && scrapedData.date !== currentData.date) replaceFields.push("date");
 
@@ -734,6 +738,7 @@ function ScraperResultRow({
       { key: "director", label: "Director", current: currentData.director, scraped: result.director },
       { key: "duration", label: "Duration", current: currentData.duration, scraped: result.duration },
       { key: "rating", label: "Rating", current: currentData.rating, scraped: result.rating },
+      { key: "image", label: "Front image", current: currentData.imageUrl ? "Current front image" : undefined, scraped: result.imageUrl ? "Scraped front image" : undefined },
     ] : []),
     ...(entityType === "image" || entityType === "gallery" ? [{ key: "photographer", label: "Photographer", current: currentData.creator, scraped: result.creator }] : []),
     { key: "date", label: "Date", current: currentData.date, scraped: result.date },

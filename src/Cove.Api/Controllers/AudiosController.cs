@@ -39,12 +39,16 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
 
         var query = db.Audios.AsNoTracking().AsQueryable();
 
-        query = FullTextSearchHelpers.Apply(db, query, q,
+        var audioBase = query;
+        var audioText = FullTextSearchHelpers.Apply(db, audioBase, q,
             audio => audio.Title,
             audio => audio.Code,
             audio => audio.Details,
             audio => audio.FileSearchText,
             audio => audio.SearchText);
+        query = FullTextSearchHelpers.ApplyRelationalMatches(audioText, audioBase, q,
+            tagSelectors: [audio => audio.AudioTags.Where(at => at.Tag != null).Select(at => at.Tag!)],
+            performerSelectors: [audio => audio.AudioPerformers.Where(ap => ap.Performer != null).Select(ap => ap.Performer!)]);
 
         query = ApplySort(query, sort, descending);
         if (FullTextSearchHelpers.ShouldOrderByRelevance(db, q, sort))
@@ -74,12 +78,16 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
 
         var query = db.Audios.AsNoTracking().AsQueryable();
 
-        query = FullTextSearchHelpers.Apply(db, query, findFilter.Q,
+        var audioBase = query;
+        var audioText = FullTextSearchHelpers.Apply(db, audioBase, findFilter.Q,
             audio => audio.Title,
             audio => audio.Code,
             audio => audio.Details,
             audio => audio.FileSearchText,
             audio => audio.SearchText);
+        query = FullTextSearchHelpers.ApplyRelationalMatches(audioText, audioBase, findFilter.Q,
+            tagSelectors: [audio => audio.AudioTags.Where(at => at.Tag != null).Select(at => at.Tag!)],
+            performerSelectors: [audio => audio.AudioPerformers.Where(ap => ap.Performer != null).Select(ap => ap.Performer!)]);
 
         query = ApplyFilter(query, req.ObjectFilter);
         query = ApplySort(query, findFilter.Sort, descending);

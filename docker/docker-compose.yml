@@ -15,7 +15,7 @@
 
 services:
   cove:
-    image: ghcr.io/yourcove/yourcove:latest
+    image: ghcr.io/yourcove/cove-app:latest
     restart: unless-stopped
     ports:
       - "9999:9999"

@@ -15,7 +15,7 @@ public class FileOpsControllerTests
 
         if (OperatingSystem.IsWindows())
         {
-            Assert.Equal(Path.GetFullPath(@"E:\test\Content\video.mp4"), normalized);
+            Assert.Equal(Path.GetFullPath(@"C:\Content\video.mp4"), normalized);
         }
         else
         {
