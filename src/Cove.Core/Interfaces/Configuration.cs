@@ -10,7 +10,7 @@ public class CoveConfiguration
     public string? FfprobePath { get; set; }
     public string Host { get; set; } = "0.0.0.0";
     public int Port { get; set; } = 9999;
-    public int MaxParallelTasks { get; set; } = 1;
+    public int MaxParallelTasks { get; set; } = 5;
     public int MaxConcurrentDownloads { get; set; } = 3;
     public List<DownloaderPathOverride> DownloaderPathOverrides { get; set; } = [];
     public bool CalculateMd5 { get; set; }
@@ -126,7 +126,7 @@ public class InterfaceConfig
         "groups"
     ];
 
-    public static readonly string[] DefaultMenuItems =
+    public static readonly string[] FacesDefaultMenuItems =
     [
         "scenes",
         "segments",
@@ -137,6 +137,20 @@ public class InterfaceConfig
         "studios",
         "tags",
         "groups"
+    ];
+
+    public static readonly string[] DefaultMenuItems =
+    [
+        "scenes",
+        "images",
+        "audios",
+        "texts",
+        "galleries",
+        "segments",
+        "performers",
+        "tags",
+        "groups",
+        "studios"
     ];
 
     public string? Language { get; set; } = "en-US";

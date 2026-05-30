@@ -8,14 +8,31 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onOpenJobDrawer?: () => void;
-  /** If provided, generate only for these IDs. Otherwise generates for all. */
+  /** If provided, generate only for these scene IDs. */
   sceneIds?: number[];
+  /** If provided, generate only for these image IDs. */
+  imageIds?: number[];
+  /** If provided, generate only for these audio IDs. */
+  audioIds?: number[];
+  /** If provided, generate only for these text IDs. */
+  textIds?: number[];
   title?: string;
 }
 
-export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title }: Props) {
+export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, imageIds, audioIds, textIds, title }: Props) {
+  const isSceneScoped = (sceneIds?.length ?? 0) > 0;
+  const isImageScoped = (imageIds?.length ?? 0) > 0;
+  const isAudioScoped = (audioIds?.length ?? 0) > 0;
+  const isTextScoped = (textIds?.length ?? 0) > 0;
+  const isScoped = isSceneScoped || isImageScoped || isAudioScoped || isTextScoped;
+
+  const showScene = isSceneScoped || !isScoped;
+  const showImage = isImageScoped;
+  const showAudio = isAudioScoped || !isScoped;
+  const showText = isTextScoped || !isScoped;
+
   const [opts, setOpts] = useState<GenerateOptions>({
-    thumbnails: true,
+    thumbnails: showScene,
     previews: false,
     sprites: false,
     markers: false,
@@ -23,14 +40,16 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
     segmentPreviews: false,
     phashes: false,
     md5: false,
-    audioPhashes: false,
-    textPhashes: false,
+    imageThumbnails: isImageScoped,
+    imagePhashes: false,
+    audioPhashes: isAudioScoped,
+    textPhashes: isTextScoped,
     overwrite: false,
   });
   const [submitted, setSubmitted] = useState(false);
 
   const generateMut = useMutation({
-    mutationFn: () => metadata.generate({ ...opts, sceneIds }),
+    mutationFn: () => metadata.generate({ ...opts, sceneIds, imageIds, audioIds, textIds }),
     onSuccess: () => {
       setSubmitted(true);
     },
@@ -50,10 +69,29 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
       return { ...o, [key]: nextValue };
     });
 
-  const label = sceneIds?.length
-    ? `Generate for ${sceneIds.length} scene${sceneIds.length !== 1 ? "s" : ""}`
+  const scopedCount = sceneIds?.length ?? imageIds?.length ?? audioIds?.length ?? textIds?.length ?? 0;
+  const scopedNoun = isSceneScoped ? "scene" : isImageScoped ? "image" : isAudioScoped ? "audio" : isTextScoped ? "text" : "item";
+  const label = isScoped
+    ? `Generate for ${scopedCount} ${scopedNoun}${scopedCount !== 1 ? "s" : ""}`
     : "Generate All";
-  const isSceneScoped = (sceneIds?.length ?? 0) > 0;
+
+  const renderGroup = (heading: string, rows: ReadonlyArray<readonly [keyof GenerateOptions, string]>, withDivider = true) => (
+    <>
+      {withDivider && <div className="border-t border-border my-3" />}
+      <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">{heading}</h4>
+      {rows.map(([key, labelText]) => (
+        <label key={key} className="flex items-center gap-3 cursor-pointer group">
+          <input
+            type="checkbox"
+            checked={!!opts[key]}
+            onChange={() => toggle(key)}
+            className="w-4 h-4 rounded border-border accent-accent"
+          />
+          <span className="text-sm text-foreground group-hover:text-accent">{labelText}</span>
+        </label>
+      ))}
+    </>
+  );
 
   return (
     <EditModal open={open} onClose={onClose} title={title ?? label}>
@@ -61,8 +99,7 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
         <div className="space-y-3">
           <p className="text-sm text-secondary mb-4">Select what to generate:</p>
 
-          <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Scene Content</h4>
-          {([
+          {showScene && renderGroup("Scene Content", [
             ["thumbnails", "Thumbnails / Screenshots"],
             ["previews", "Video Previews"],
             ["sprites", "Sprite Sheets"],
@@ -70,39 +107,20 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, title
             ["segmentPreviews", "Animated Segment Previews"],
             ["phashes", "Scene perceptual hashes"],
             ["md5", "MD5 Checksums"],
-          ] as const).map(([key, labelText]) => (
-            <label key={key} className="flex items-center gap-3 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={!!opts[key]}
-                onChange={() => toggle(key)}
-                className="w-4 h-4 rounded border-border accent-accent"
-              />
-              <span className="text-sm text-foreground group-hover:text-accent">{labelText}</span>
-            </label>
-          ))}
+          ], false)}
 
-          {!isSceneScoped && (
-            <>
-              <div className="border-t border-border my-3" />
+          {showImage && renderGroup("Image Content", [
+            ["imageThumbnails", "Image Thumbnails"],
+            ["imagePhashes", "Image perceptual hashes"],
+          ], showScene)}
 
-              <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Audio and Text</h4>
-              {([
-                ["audioPhashes", "Audio perceptual hashes"],
-                ["textPhashes", "Text perceptual hashes"],
-              ] as const).map(([key, labelText]) => (
-                <label key={key} className="flex items-center gap-3 cursor-pointer group">
-                  <input
-                    type="checkbox"
-                    checked={!!opts[key]}
-                    onChange={() => toggle(key)}
-                    className="w-4 h-4 rounded border-border accent-accent"
-                  />
-                  <span className="text-sm text-foreground group-hover:text-accent">{labelText}</span>
-                </label>
-              ))}
-            </>
-          )}
+          {showAudio && renderGroup("Audio", [
+            ["audioPhashes", "Audio perceptual hashes"],
+          ], showScene || showImage)}
+
+          {showText && renderGroup("Text", [
+            ["textPhashes", "Text perceptual hashes"],
+          ], showScene || showImage || showAudio)}
 
           <div className="border-t border-border my-3" />
 

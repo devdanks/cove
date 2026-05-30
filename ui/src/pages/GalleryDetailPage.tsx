@@ -12,12 +12,11 @@ import { Lightbox, type LightboxImage } from "../components/Lightbox";
 import { InteractiveRating } from "../components/Rating";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { IMAGE_CRITERIA, SCENE_CRITERIA } from "../components/FilterDialog";
-import { PerformerTile } from "../components/EntityCards";
-import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { PerformerBadgeRow } from "../components/EntityCards";
+import { EntityHeroLayout, HERO_PRIMARY_ACTION_BUTTON_CLASS, HERO_ACTION_BUTTON_CLASS } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
-import { EntityCardGrid } from "../components/EntityCardGrid";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
@@ -65,7 +64,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("images");
   const { allTabs: galleryTabs, renderExtensionTab } = useExtensionTabs("gallery", [
     { key: "images", label: "Images", count: effectiveImageCount },
-    { key: "scenes", label: "Scenes" },
+    { key: "scenes", label: "Scenes", count: gallery?.sceneCount ?? 0 },
     { key: "fileinfo", label: "File Info" },
   ]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -85,6 +84,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   const canReadPerformers = canReadEntity("performer", hasPermission);
   const canReadStudios = canReadEntity("studio", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
+  const canLibraryScan = hasPermission("library.scan");
   const {
     favorite: galleryFavorite,
     rating: galleryRating,
@@ -174,6 +174,8 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
       goBack();
     },
   });
+
+  const rescanMut = useMutation({ mutationFn: () => galleries.rescan(id) });
 
   const galleryUpdateMut = useMutation({
     mutationFn: (data: { organized?: boolean }) => galleries.update(id, data),
@@ -269,6 +271,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
           queryClient.invalidateQueries({ queryKey: ["galleries"] });
         }}
         aspectRatio="2/3"
+        objectFit="contain"
       />
       <ConfirmDialog
         open={confirmDelete}
@@ -283,7 +286,9 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         onGoBack={goBack}
         imageUrl={gallery.coverPath}
         imageAlt={gallery.title || "Gallery cover"}
-        imageContainerClassName="relative flex h-96 w-72 max-w-full flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/35 md:h-[34rem] md:w-[25rem]"
+        imageContainerClassName="relative flex flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/35"
+        imageClassName="h-auto w-auto max-h-96 max-w-[22rem] object-contain md:max-h-[34rem] md:max-w-[28rem]"
+        imageFallbackClassName="h-96 w-72 items-center justify-center bg-card text-muted md:h-[34rem] md:w-[25rem]"
         onImageClick={canWriteGallery ? () => setCoverOpen(true) : undefined}
         imageFallback={<ImageIcon className="h-14 w-14" />}
         title={<FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="title">{gallery.title || "Untitled Gallery"}</FieldProvenanceHover>}
@@ -321,11 +326,40 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
           </>
         }
         heroContent={(
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <div className="shrink-0">
-              <InteractiveRating value={galleryRating} onChange={(value) => setGalleryRating(value)} readOnly={!canEngageGallery} />
+          <>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <div className="shrink-0">
+                <InteractiveRating value={galleryRating} onChange={(value) => setGalleryRating(value)} readOnly={!canEngageGallery} />
+              </div>
             </div>
-          </div>
+
+            {canReadPerformers && gallery.performers.length > 0 ? (
+              <PerformerBadgeRow performers={gallery.performers} onNavigate={onNavigate} className="mt-4" />
+            ) : null}
+
+            {gallery.urls.length > 0 ? (
+              <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="urls" block className="mt-4">
+                <div className="flex flex-wrap gap-2">
+                  {gallery.urls.map((url, index) => (
+                    <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-accent hover:border-accent/60 hover:text-accent-hover">
+                      <LinkIcon className="h-3 w-3" />
+                      {(() => { try { return new URL(url).hostname.replace("www.", ""); } catch { return url; } })()}
+                    </a>
+                  ))}
+                </div>
+              </FieldProvenanceHover>
+            ) : null}
+
+            {canReadTags && gallery.tags.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {gallery.tags.map((tag) => (
+                  <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={resolveTagProvenance(tag, gallery.fieldProvenance)} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
+                ))}
+              </div>
+            ) : null}
+
+            <CustomFieldsDisplay customFields={gallery.customFields} entityType="gallery" />
+          </>
         )}
         actions={
           <>
@@ -334,7 +368,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
               <button
                 type="button"
                 onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
+                className={HERO_PRIMARY_ACTION_BUTTON_CLASS}
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
               </button>
@@ -344,13 +378,13 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
                 type="button"
                 onClick={() => setShowOpsMenu(!showOpsMenu)}
                 aria-label="Open gallery operations"
-                className="flex items-center gap-1.5 rounded border border-border bg-card px-3 py-1.5 text-sm text-secondary hover:text-foreground"
+                className={HERO_ACTION_BUTTON_CLASS}
                 title="Operations"
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
               <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[180px] py-1">
-                  <button onClick={() => { setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button>
+                  {canLibraryScan ? <button onClick={() => { rescanMut.mutate(); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button> : null}
                   {canDeleteGallery ? <div className="my-1 border-t border-border" /> : null}
                   {canDeleteGallery ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
               </FloatingActionMenu>
@@ -358,41 +392,6 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
           </>
         }
       >
-        {(canReadTags && gallery.tags.length > 0) || gallery.urls.length > 0 || gallery.customFields ? (
-          <div className="mb-6 space-y-3 text-sm text-secondary">
-            {canReadTags && gallery.tags.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {gallery.tags.map((tag) => (
-                  <TagBadge key={tag.id} name={tag.name} tag={tag} provenance={resolveTagProvenance(tag, gallery.fieldProvenance)} onClick={() => onNavigate({ page: "tag", id: tag.id })} />
-                ))}
-              </div>
-            ) : null}
-            {gallery.urls.length > 0 ? (
-              <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="urls" block>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {gallery.urls.map((url, index) => (
-                    <a key={index} href={url} target="_blank" rel="noopener noreferrer" className="flex max-w-xs items-center gap-1 truncate text-accent hover:underline">
-                      <LinkIcon className="h-3.5 w-3.5 flex-shrink-0" />{new URL(url).hostname}
-                    </a>
-                  ))}
-                </div>
-              </FieldProvenanceHover>
-            ) : null}
-            <CustomFieldsDisplay customFields={gallery.customFields} entityType="gallery" />
-          </div>
-        ) : null}
-
-        {canReadPerformers && gallery.performers.length > 0 ? (
-          <section className="mb-6 rounded-2xl border border-border bg-card/70 p-5">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Performers</h2>
-            <EntityCardGrid minCardWidth="160px" gapClassName="gap-3">
-              {gallery.performers.map((performer) => (
-                <PerformerTile key={performer.id} performer={performer} onClick={() => onNavigate({ page: "performer", id: performer.id })} onNavigate={onNavigate} />
-              ))}
-            </EntityCardGrid>
-          </section>
-        ) : null}
-
         <EntityDetailTabs tabs={visibleGalleryTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto mb-4 max-w-7xl" />
 
         {activeContent}

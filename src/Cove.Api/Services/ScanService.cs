@@ -1596,7 +1596,19 @@ public class ScanService(
                     }
                     else if (codecType == "video")
                     {
-                        audioFile.HasVideoTrack = true;
+                        // Audio container album art is a "video" stream flagged attached_pic; don't treat it as a real video track.
+                        var isAttachedPic = stream.TryGetProperty("disposition", out var disposition)
+                            && disposition.TryGetProperty("attached_pic", out var attachedPic)
+                            && attachedPic.TryGetInt32(out var attachedPicFlag)
+                            && attachedPicFlag == 1;
+                        // Some encoders embed cover art as an image-codec video stream without the attached_pic
+                        // disposition. Treat single-image codecs (mjpeg/png/etc.) as album art, not a real video track.
+                        var streamCodec = stream.TryGetProperty("codec_name", out var videoCodecName)
+                            ? videoCodecName.GetString()
+                            : null;
+                        var isImageCodec = streamCodec is "mjpeg" or "png" or "bmp" or "gif" or "webp" or "tiff" or "jpeg";
+                        if (!isAttachedPic && !isImageCodec)
+                            audioFile.HasVideoTrack = true;
                     }
                 }
             }

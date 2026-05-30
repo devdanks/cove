@@ -69,6 +69,7 @@ import { DisplayProfilesSettingsPanel } from "./settings/DisplayProfilesSettings
 import { AiDataSettingsPanel } from "./settings/AiDataSettingsPanel";
 import { SortableList } from "../components/SortableList";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PaginationControls } from "../components/ListPage";
 import { CheckboxLabel, CollapsibleSection, InfoPair, NumberField, SectionCard, SelectField, TaskCard, TextAreaField, TextField } from "../components/SettingsPrimitives";
 import {
   DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS,
@@ -456,6 +457,8 @@ const DEFAULT_SCAN_OPTIONS: ScanOptions = {
   scanGenerateMd5: false,
   scanGenerateThumbnails: false,
   scanGenerateImagePhashes: false,
+  scanGenerateAudioPhashes: false,
+  scanGenerateTextPhashes: false,
   rescan: false,
 };
 
@@ -899,6 +902,8 @@ function normalizeConfig(config: CoveConfig): CoveConfig {
     videoExtensions: config.videoExtensions.map((value) => value.trim()).filter(Boolean),
     imageExtensions: config.imageExtensions.map((value) => value.trim()).filter(Boolean),
     galleryExtensions: config.galleryExtensions.map((value) => value.trim()).filter(Boolean),
+    audioExtensions: (config.audioExtensions ?? []).map((value) => value.trim()).filter(Boolean),
+    textExtensions: (config.textExtensions ?? []).map((value) => value.trim()).filter(Boolean),
     excludePatterns: config.excludePatterns.map((value) => value.trim()).filter(Boolean),
     excludeImagePatterns: config.excludeImagePatterns.map((value) => value.trim()).filter(Boolean),
     excludeGalleryPatterns: config.excludeGalleryPatterns.map((value) => value.trim()).filter(Boolean),
@@ -2132,6 +2137,18 @@ export function SettingsPage() {
                   label="Gallery extensions"
                   value={listToLines(draft.galleryExtensions)}
                   onChange={(value) => updateDraft((current) => ({ ...current, galleryExtensions: linesToList(value) }))}
+                  rows={7}
+                />
+                <TextAreaField
+                  label="Audio extensions"
+                  value={listToLines(draft.audioExtensions)}
+                  onChange={(value) => updateDraft((current) => ({ ...current, audioExtensions: linesToList(value) }))}
+                  rows={7}
+                />
+                <TextAreaField
+                  label="Text extensions"
+                  value={listToLines(draft.textExtensions)}
+                  onChange={(value) => updateDraft((current) => ({ ...current, textExtensions: linesToList(value) }))}
                   rows={7}
                 />
               </div>
@@ -3520,23 +3537,6 @@ export function SettingsPage() {
 
         {resolvedActiveTab === "system-info-runtime-status" && (
           <>
-            <SectionCard title="Runtime Status" description="Effective values reported by the running backend instance.">
-              {statusLoading && !status ? (
-                <div className="flex items-center gap-2 text-sm text-secondary">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading status...
-                </div>
-              ) : status ? (
-                <dl className="grid gap-4 md:grid-cols-2">
-                  <InfoPair label="Version" value={status.version} />
-                  <InfoPair label="Database" value={status.databasePath} />
-                  {status.configFile ? <InfoPair label="Config file" value={status.configFile} /> : null}
-                  {status.appDir ? <InfoPair label="App directory" value={status.appDir} /> : null}
-                </dl>
-              ) : (
-                <div className="text-sm text-secondary">Runtime status is unavailable.</div>
-              )}
-            </SectionCard>
-
             {canShutdownSystem ? (
               <SectionCard title="Shutdown" description="Stop the current Cove server process after pending requests complete.">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -3560,6 +3560,23 @@ export function SettingsPage() {
                 </div>
               </SectionCard>
             ) : null}
+
+            <SectionCard title="Runtime Status" description="Effective values reported by the running backend instance.">
+              {statusLoading && !status ? (
+                <div className="flex items-center gap-2 text-sm text-secondary">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading status...
+                </div>
+              ) : status ? (
+                <dl className="grid gap-4 md:grid-cols-2">
+                  <InfoPair label="Version" value={status.version} />
+                  <InfoPair label="Database" value={status.databasePath} />
+                  {status.configFile ? <InfoPair label="Config file" value={status.configFile} /> : null}
+                  {status.appDir ? <InfoPair label="App directory" value={status.appDir} /> : null}
+                </dl>
+              ) : (
+                <div className="text-sm text-secondary">Runtime status is unavailable.</div>
+              )}
+            </SectionCard>
 
             <SectionCard title="System Information" description="Browser and environment details.">
               <dl className="grid gap-4 md:grid-cols-2">
@@ -4399,17 +4416,33 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
           expanded={showScanOpts}
           onToggleExpand={() => setShowScanOpts(!showScanOpts)}
         >
-          <div className="grid gap-2 sm:grid-cols-2 pt-3 border-t border-border/50">
-            <CheckboxLabel label="Generate covers" checked={!!scanOpts.scanGenerateCovers} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateCovers: c })} />
-            <CheckboxLabel label="Generate previews" checked={!!scanOpts.scanGeneratePreviews} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePreviews: c })} />
-            <CheckboxLabel label="Generate sprites" checked={!!scanOpts.scanGenerateSprites} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateSprites: c })} />
-            <CheckboxLabel label="Generate perceptual hashes" checked={!!scanOpts.scanGeneratePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePhashes: c })} />
-            <CheckboxLabel label="Generate MD5 checksums" checked={!!scanOpts.scanGenerateMd5} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateMd5: c })} />
-            <CheckboxLabel label="Generate image thumbnails" checked={!!scanOpts.scanGenerateThumbnails} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateThumbnails: c })} />
-            <CheckboxLabel label="Generate image phashes" checked={!!scanOpts.scanGenerateImagePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateImagePhashes: c })} />
-            <CheckboxLabel label="Force rescan (ignore mtime)" checked={!!scanOpts.rescan} onChange={(c) => setScanOpts({ ...scanOpts, rescan: c })} />
+          <div className="space-y-3 pt-3 border-t border-border/50">
+            <p className="text-xs text-muted font-medium uppercase tracking-wide">Scene options</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CheckboxLabel label="Thumbnails / screenshots" checked={!!scanOpts.scanGenerateCovers} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateCovers: c })} />
+              <CheckboxLabel label="Video previews" checked={!!scanOpts.scanGeneratePreviews} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePreviews: c })} />
+              <CheckboxLabel label="Sprite sheets" checked={!!scanOpts.scanGenerateSprites} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateSprites: c })} />
+              <CheckboxLabel label="Perceptual hashes (phash)" checked={!!scanOpts.scanGeneratePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePhashes: c })} />
+              <CheckboxLabel label="MD5 checksums" checked={!!scanOpts.scanGenerateMd5} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateMd5: c })} />
+            </div>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Image options</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CheckboxLabel label="Image thumbnails" checked={!!scanOpts.scanGenerateThumbnails} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateThumbnails: c })} />
+              <CheckboxLabel label="Image phashes" checked={!!scanOpts.scanGenerateImagePhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateImagePhashes: c })} />
+            </div>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Audio options</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CheckboxLabel label="Audio perceptual hashes" checked={!!scanOpts.scanGenerateAudioPhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateAudioPhashes: c })} />
+            </div>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Text options</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CheckboxLabel label="Text perceptual hashes" checked={!!scanOpts.scanGenerateTextPhashes} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateTextPhashes: c })} />
+            </div>
+            <div className="pt-2">
+              <CheckboxLabel label="Force rescan (ignore mtime)" checked={!!scanOpts.rescan} onChange={(c) => setScanOpts({ ...scanOpts, rescan: c })} />
+            </div>
             {selectablePaths.length > 0 && (
-              <div className="sm:col-span-2 space-y-2 rounded-xl border border-border/60 bg-surface/60 p-3">
+              <div className="space-y-2 rounded-xl border border-border/60 bg-surface/60 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-medium text-foreground">Selective scan</p>
@@ -4485,6 +4518,14 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
             <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Gallery options</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <CheckboxLabel label="Gallery cover thumbnails" checked={!!genOpts.galleryThumbnails} onChange={(c) => setGenOpts({ ...genOpts, galleryThumbnails: c })} />
+            </div>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Audio options</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CheckboxLabel label="Audio perceptual hashes" checked={!!genOpts.audioPhashes} onChange={(c) => setGenOpts({ ...genOpts, audioPhashes: c })} />
+            </div>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide pt-2">Text options</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CheckboxLabel label="Text perceptual hashes" checked={!!genOpts.textPhashes} onChange={(c) => setGenOpts({ ...genOpts, textPhashes: c })} />
             </div>
             <div className="pt-2">
               <CheckboxLabel label="Overwrite existing generated files" checked={!!genOpts.overwrite} onChange={(c) => setGenOpts({ ...genOpts, overwrite: c })} />
@@ -6374,6 +6415,8 @@ function FindAndInstallExtensions() {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<string>("");
+  const [registryType, setRegistryType] = useState<string>("");
+  const [page, setPage] = useState(1);
   const [selectedExtension, setSelectedExtension] = useState<import("../api/types").RegistryExtensionDetail | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string>("");
   const [pendingDeps, setPendingDeps] = useState<import("../api/types").DependencyInfo[] | null>(null);
@@ -6385,10 +6428,17 @@ function FindAndInstallExtensions() {
   const [confirmUrlInstall, setConfirmUrlInstall] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
 
+  const REGISTRY_PAGE_SIZE = 20;
+
+  // Reset to the first page whenever the search/filters change.
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, category, registryType]);
+
   const { data: searchResults, isLoading: searching, refetch: doSearch } = useQuery({
-    queryKey: ["registry-search", searchQuery, category],
+    queryKey: ["registry-search", searchQuery, category, registryType, page],
     queryFn: () => import("../api/client").then(m =>
-      m.extensions.registrySearch({ q: searchQuery || undefined, category: category || undefined, pageSize: 50 })
+      m.extensions.registrySearch({ q: searchQuery || undefined, category: category || undefined, type: registryType || undefined, page, pageSize: REGISTRY_PAGE_SIZE })
     ),
     enabled: true,
   });
@@ -6470,6 +6520,7 @@ function FindAndInstallExtensions() {
     getTransitiveExtensionDependents(installedList ?? [], extensionId).map(toExtensionDependencyImpact);
   const updateMap = new Map((updates ?? []).map(u => [u.extensionId, u]));
   const registryItems = searchResults?.items ?? [];
+  const totalPages = searchResults ? Math.max(1, Math.ceil(searchResults.totalCount / (searchResults.pageSize || REGISTRY_PAGE_SIZE))) : 1;
 
   const viewDetail = async (id: string) => {
     const detail = await import("../api/client").then(m => m.extensions.registryGetExtension(id));
@@ -6589,6 +6640,17 @@ function FindAndInstallExtensions() {
             className="min-h-10 w-full rounded border border-border bg-card py-2 pl-8 pr-3 text-sm focus:border-accent focus:outline-none sm:min-h-0 sm:py-1.5"
           />
         </div>
+        <select
+          value={registryType}
+          onChange={(e) => setRegistryType(e.target.value)}
+          className="min-h-10 rounded border border-border bg-card px-3 py-2 text-sm focus:border-accent focus:outline-none sm:min-h-0 sm:w-auto sm:py-1.5"
+          title="Filter by extension type"
+        >
+          <option value="">All Types</option>
+          <option value="extension">Extensions</option>
+          <option value="scraper">Scrapers</option>
+          <option value="downloader">Downloaders</option>
+        </select>
         {registryCategories && registryCategories.length > 0 && (
           <select
             value={category}
@@ -6925,6 +6987,12 @@ function FindAndInstallExtensions() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {!searching && searchResults && registryItems.length > 0 && totalPages > 1 && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-1">
+          <PaginationControls page={page} totalPages={totalPages} goTo={(p) => setPage(Math.min(Math.max(1, p), totalPages))} />
         </div>
       )}
     </SectionCard>

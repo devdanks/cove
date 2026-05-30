@@ -14,7 +14,7 @@ import { FaceCompareDialog } from "../components/FaceCompareDialog";
 import { buildFaceCarouselSampleImageUrls, buildFaceHeroImageUrls } from "../components/faceComparisonImages";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { EditModal } from "../components/EditModal";
-import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { EntityHeroLayout, HERO_PRIMARY_ACTION_BUTTON_CLASS } from "../components/EntityHeroLayout";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
 import { FaceAppearanceTile, FaceTile } from "../components/EntityCards";
@@ -567,7 +567,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         <button
           type="button"
           onClick={() => setIsEditModalOpen(true)}
-          className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
+          className={HERO_PRIMARY_ACTION_BUTTON_CLASS}
           title="Edit face"
         >
           <Pencil className="h-3.5 w-3.5" /> Edit

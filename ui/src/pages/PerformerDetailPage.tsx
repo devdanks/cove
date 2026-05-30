@@ -17,7 +17,7 @@ import { useMultiSelect } from "../hooks/useMultiSelect";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
-import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { EntityHeroLayout, HERO_ACTION_BUTTON_CLASS, HERO_PRIMARY_ACTION_BUTTON_CLASS } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
@@ -355,7 +355,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
               <button
                 type="button"
                 onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
+                className={HERO_PRIMARY_ACTION_BUTTON_CLASS}
                 title="Edit"
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
@@ -363,7 +363,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
             ) : null}
             {showPerformerOpsMenu ? (
               <div className="relative" ref={opsMenuRef}>
-                <button onClick={() => setShowOpsMenu(!showOpsMenu)} className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground" title="Actions">
+                <button onClick={() => setShowOpsMenu(!showOpsMenu)} className={`${HERO_ACTION_BUTTON_CLASS} text-secondary`} title="Actions">
                   <MoreVertical className="h-4 w-4" />
                 </button>
                 <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[160px] py-1">

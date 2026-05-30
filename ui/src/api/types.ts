@@ -1939,6 +1939,8 @@ export interface CoveConfig {
   videoExtensions: string[];
   imageExtensions: string[];
   galleryExtensions: string[];
+  audioExtensions: string[];
+  textExtensions: string[];
   excludePatterns: string[];
   excludeImagePatterns: string[];
   excludeGalleryPatterns: string[];

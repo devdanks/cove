@@ -227,6 +227,29 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
         return CreatedAtAction(nameof(GetById), new { id = textDocumentId }, await MapToDetailDtoAsync(text, ct));
     }
 
+    [HttpPost("{id:int}/rescan")]
+    [RequiresPermission(Permissions.LibraryScan)]
+    [RequiresEntityAccess(EntityKinds.Text, Permissions.LibraryScan)]
+    public async Task<IActionResult> Rescan(int id, CancellationToken ct)
+    {
+        var text = await db.TextDocuments.AsNoTracking()
+            .Include(item => item.Files)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (text == null) return NotFound();
+
+        var filePath = text.Files
+            .Select(file => file.Path)
+            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+        if (string.IsNullOrWhiteSpace(filePath)) return BadRequest("Text has no files");
+
+        var jobId = scanService.StartScan(new ScanOperationOptions
+        {
+            Paths = [filePath],
+            Rescan = true,
+        });
+        return Ok(new { jobId });
+    }
+
     [HttpPut("{id:int}")]
     [RequiresPermission(Permissions.TextsWrite)]
     [RequiresEntityAccess(EntityKinds.Text, Permissions.TextsWrite)]

@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpenText, Check, ChevronLeft, ChevronRight, Download, ExternalLink, Files, FolderOpen, Image, Link2, MoreVertical, Rows3, Trash2 } from "lucide-react";
+import { BookOpenText, Check, ChevronLeft, ChevronRight, Clapperboard, Download, ExternalLink, Files, FolderOpen, Image, Layers, Link2, MoreVertical, RefreshCw, Rows3, Trash2 } from "lucide-react";
 import { entityImages, fileOps, playback, texts } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
@@ -9,6 +9,7 @@ import { BookmarkButton } from "../components/BookmarkButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
+import { GenerateDialog } from "../components/GenerateDialog";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
@@ -16,7 +17,7 @@ import type { FieldProvenance } from "../api/types";
 import { InteractiveRating } from "../components/Rating";
 import { TextViewer } from "../components/TextViewer";
 import { CustomFieldsDisplay, FieldProvenanceHover, formatDate, formatDuration, formatFileSize, TagBadge, resolveTagProvenance } from "../components/shared";
-import { EntityReferencePopovers, PerformerTile } from "../components/EntityCards";
+import { EntityRefBadge, MediaStudioSubtitle, PerformerTile, StudioHeaderImage } from "../components/EntityCards";
 import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -138,6 +139,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
   const [coverOpen, setCoverOpen] = useState(false);
   const [showScrapeDialog, setShowScrapeDialog] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const canReadText = canReadEntity("text", hasPermission);
   const canWriteText = canWriteEntity("text", hasPermission);
@@ -174,8 +176,11 @@ export function TextDetailPage({ id, onNavigate }: Props) {
     },
   });
   const revealFileMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
+  const rescanTextMut = useMutation({ mutationFn: () => texts.rescan(id) });
   const canRevealFiles = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
   const canDownloadTextMedia = canWriteText && hasPermission("jobs.run") && (text?.files.length ?? 0) === 0 && (text?.urls.length ?? 0) > 0;
+  const canLibraryScan = hasPermission("library.scan");
+  const canGenerateText = hasPermission("jobs.run") && canWriteText;
 
   useEffect(() => {
     if (!text) {
@@ -228,19 +233,6 @@ export function TextDetailPage({ id, onNavigate }: Props) {
   }, [queryClient, text, trackTextActivity]);
 
   const displayTitle = text ? getTextDisplayTitle(text) : `Text ${id}`;
-  const subtitleText = useMemo(() => {
-    if (!text) {
-      return undefined;
-    }
-
-    return [text.performers.map((performer) => performer.name).filter(Boolean).join(", "), text.studioName, text.date ? formatDate(text.date) : null]
-      .filter(Boolean)
-      .join(" • ") || undefined;
-  }, [text]);
-  const detailSubtitle = subtitleText;
-  const headerImage = text?.imagePath ? (
-    <img src={text.imagePath} alt={`${displayTitle} cover`} className="h-24 w-20 rounded-2xl border border-border object-cover shadow-lg shadow-black/20" />
-  ) : undefined;
   const textCoverUrl = text?.imagePath ?? undefined;
   const tabs = useMemo(() => {
     const nextTabs: MediaDetailTab[] = [{ key: "details", label: "Details" }];
@@ -325,12 +317,13 @@ export function TextDetailPage({ id, onNavigate }: Props) {
         aspectRatio="2/3"
       />
     ) : null}
+    <GenerateDialog open={showGenerate} onClose={() => setShowGenerate(false)} textIds={[id]} />
     <MediaDetailLayout
       title={<FieldProvenanceHover fieldProvenance={text.fieldProvenance} fieldKey="title">{displayTitle}</FieldProvenanceHover>}
-      subtitle={detailSubtitle}
+      subtitle={<MediaStudioSubtitle date={text.date} studioId={text.studioId} studioName={text.studioName} fieldProvenance={text.fieldProvenance} onNavigate={onNavigate} canReadStudio={canReadStudio} />}
       backLabel={backLabel}
       onGoBack={goBack}
-      headerImage={headerImage}
+      headerImage={<StudioHeaderImage studioId={text.studioId} studioName={text.studioName} onNavigate={onNavigate} />}
       media={textMedia}
       mediaAspectRatio="auto"
       mediaFullBleed
@@ -410,6 +403,25 @@ export function TextDetailPage({ id, onNavigate }: Props) {
                       <Image className="h-3.5 w-3.5" /> Set Cover...
                     </button>
                   ) : null}
+                  {(text.files?.length ?? 0) > 0 && canLibraryScan ? (
+                    <button
+                      type="button"
+                      onClick={() => { rescanTextMut.mutate(); setShowOpsMenu(false); }}
+                      disabled={rescanTextMut.isPending}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface disabled:opacity-60"
+                    >
+                      <RefreshCw className={["h-3.5 w-3.5", rescanTextMut.isPending ? "animate-spin" : ""].join(" ")} /> Rescan
+                    </button>
+                  ) : null}
+                  {canGenerateText ? (
+                    <button
+                      type="button"
+                      onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                    >
+                      <Clapperboard className="h-3.5 w-3.5" /> Generate…
+                    </button>
+                  ) : null}
                   {canDeleteText ? (
                     <button
                       type="button"
@@ -445,8 +457,6 @@ export function TextDetailPage({ id, onNavigate }: Props) {
               <DetailGrid
                 fieldProvenance={text.fieldProvenance}
                 items={[
-                  { label: "Studio", value: text.studioName, fieldKey: "studio" },
-                  { label: "Date", value: text.date ? formatDate(text.date) : undefined, fieldKey: "date" },
                   { label: "Words", value: text.maxWordCount ? Intl.NumberFormat().format(text.maxWordCount) : undefined },
                   { label: "Pages", value: text.maxPageCount ? String(text.maxPageCount) : undefined },
                   { label: "Files", value: String(text.fileCount) },
@@ -512,28 +522,18 @@ export function TextDetailPage({ id, onNavigate }: Props) {
             {canReadGroups && text.groups.length > 0 ? (
               <div>
                 <h3 className="text-sm text-muted mb-2">Groups</h3>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="flex flex-wrap gap-2">
                   {text.groups.map((group) => (
-                    <button
+                    <EntityRefBadge
                       key={group.id}
-                      type="button"
-                      onClick={() => onNavigate({ page: "group", id: group.id })}
-                      className="rounded-xl border border-border bg-card p-4 text-left transition hover:border-accent/60"
-                    >
-                      <div className="text-sm font-medium text-foreground">{group.name}</div>
-                    </button>
+                      route={{ page: "group", id: group.id }}
+                      onNavigate={onNavigate}
+                      imageUrl={entityImages.groupFrontImageUrl(group.id)}
+                      icon={<Layers className="h-5 w-5" />}
+                      label={group.name}
+                    />
                   ))}
                 </div>
-              </div>
-            ) : null}
-            {canReadStudio && text.studioId && text.studioName ? (
-              <div>
-                <h3 className="text-sm text-muted mb-2">Studio</h3>
-                <FieldProvenanceHover fieldProvenance={text.fieldProvenance} fieldKey="studio">
-                  <button type="button" onClick={() => onNavigate({ page: "studio", id: text.studioId! })} className="text-accent hover:underline">
-                    {text.studioName}
-                  </button>
-                </FieldProvenanceHover>
               </div>
             ) : null}
             {text.customFields && Object.keys(text.customFields).length > 0 ? (

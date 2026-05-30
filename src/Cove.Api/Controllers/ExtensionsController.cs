@@ -497,6 +497,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
     public async Task<IActionResult> RegistrySearch(
         [FromQuery] string? q,
         [FromQuery] string? category,
+        [FromQuery] string? type,
         [FromQuery] string? sort,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
@@ -507,6 +508,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         {
             Query = q,
             Categories = !string.IsNullOrWhiteSpace(category) ? [category.Trim()] : null,
+            Type = type,
             SortBy = sort ?? "relevance",
             Page = page,
             PageSize = pageSize,

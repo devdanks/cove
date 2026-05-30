@@ -14,7 +14,7 @@ namespace Cove.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.GalleriesRead)]
-public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, ITagProvenanceService? tagProvenanceService = null, CustomFieldService? customFields = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
+public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, IScanService scanService, ITagProvenanceService? tagProvenanceService = null, CustomFieldService? customFields = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
     private sealed record GalleryRelationshipCounts(IReadOnlyDictionary<int, int> ImageCounts, IReadOnlyDictionary<int, int> SceneCounts);
@@ -200,6 +200,30 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         return NoContent();
     }
 
+    [HttpPost("{id:int}/rescan")]
+    [RequiresPermission(Permissions.LibraryScan)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.LibraryScan)]
+    public async Task<IActionResult> Rescan(int id, CancellationToken ct)
+    {
+        var gallery = await db.Galleries.AsNoTracking()
+            .Include(item => item.Folder)
+            .Include(item => item.Files)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (gallery == null) return NotFound();
+
+        var scanPath = gallery.Folder?.Path;
+        if (string.IsNullOrWhiteSpace(scanPath))
+            scanPath = gallery.Files?.Select(file => file.Path).FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+        if (string.IsNullOrWhiteSpace(scanPath)) return BadRequest("Gallery has no folder or files");
+
+        var jobId = scanService.StartScan(new ScanOperationOptions
+        {
+            Paths = [scanPath],
+            Rescan = true,
+        });
+        return Ok(new { jobId });
+    }
+
     private async Task<GalleryDto> MapToDtoWithProvenanceAsync(Gallery gallery, CancellationToken cancellationToken = default)
     {
         var tagIds = gallery.GalleryTags
@@ -241,6 +265,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
         ResolveCoverPath(g, imageCount, sceneCount),
         g.CoverImageId,
+        g.BackImageBlobId != null ? EntityImageUrls.GalleryBackCover(ControllerContext.HttpContext, g.Id, g.UpdatedAt) : null,
         fieldProvenance
     );
 

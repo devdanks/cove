@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ImgHTMLAttributes, type 
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { scenes, images, performers, galleries, studios, groups, audios, texts, entityImages, faces as facesApi } from "../api/client";
-import type { AffinityHostType, Audio, EntityEngagement, Face, FaceAppearance, Gallery, Group, GroupItem, GroupSummary, Image, PerformerSummary, Scene, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
-import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
+import type { AffinityHostType, Audio, EntityEngagement, Face, FaceAppearance, FieldProvenance, Gallery, Group, GroupItem, GroupSummary, Image, PerformerSummary, Scene, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
+import { formatDate, FieldProvenanceHover, formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
 import { BookOpenText, Building2, FileText, Fingerprint, FolderOpen, GripVertical, Headphones, Layers, Link2, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp, Mic2, MonitorPlay, PlayCircle, Merge } from "lucide-react";
 import { createRouteLinkProps, createNestedRouteLinkProps } from "./cardNavigation";
@@ -661,8 +661,110 @@ function PerformerBadge({
   );
 }
 
-// ===== SceneCard (redesigned - cleaner, performer badges, 2-line title) =====
+// ===== PerformerBadgeRow (reusable wrap of small performer badges for hero/detail headers) =====
 
+export function PerformerBadgeRow({
+  performers,
+  onNavigate,
+  max = 12,
+  className = "",
+}: {
+  performers: Array<{ id: number; name: string; imagePath?: string | null }>;
+  onNavigate?: (route: any) => void;
+  max?: number;
+  className?: string;
+}) {
+  if (!performers.length) return null;
+  const shown = performers.slice(0, max);
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
+      {shown.map((performer) => {
+        const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page: "performer", id: performer.id }, onNavigate);
+        return <PerformerBadge key={performer.id} performer={performer} navigationHandlers={navigationHandlers} />;
+      })}
+      {performers.length > max && <span className="text-[10px] text-muted">+{performers.length - max}</span>}
+    </div>
+  );
+}
+
+
+// ===== EntityRefBadge (face-list style reference badge with image thumbnail) =====
+
+export function EntityRefBadge({
+  imageUrl,
+  label,
+  sublabel,
+  icon,
+  route,
+  onNavigate,
+}: {
+  imageUrl?: string | null;
+  label: string;
+  sublabel?: ReactNode;
+  icon: ReactNode;
+  route: { page: string; id: number };
+  onNavigate?: (route: any) => void;
+}) {
+  const [failed, setFailed] = useState(false);
+  const showImage = Boolean(imageUrl) && !failed;
+  const navigationHandlers = createRouteLinkProps<HTMLAnchorElement>(route, () => onNavigate?.(route));
+  return (
+    <a
+      {...navigationHandlers}
+      className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-2 py-1.5 min-w-0 transition-colors hover:border-accent/60"
+    >
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface text-muted">
+        {showImage ? (
+          <CoverImage src={imageUrl ?? undefined} alt="" className="h-full w-full" loading="lazy" onError={() => setFailed(true)} />
+        ) : (
+          icon
+        )}
+      </div>
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium text-foreground">{label}</div>
+        {sublabel ? <div className="mt-0.5 truncate text-xs text-secondary">{sublabel}</div> : null}
+      </div>
+    </a>
+  );
+}
+
+// ===== StudioHeaderImage (shared studio logo shown above detail titles) =====
+export function StudioHeaderImage({ studioId, studioName, onNavigate }: { studioId?: number | null; studioName?: string | null; onNavigate?: (route: any) => void }) {
+  if (!studioId) return null;
+  return (
+    <button type="button" onClick={() => onNavigate?.({ page: "studio", id: studioId })} className="block" title={studioName || "Studio"}>
+      <img
+        src={entityImages.studioImageUrl(studioId)}
+        alt={studioName || "Studio"}
+        className="h-20 w-auto max-w-full object-contain"
+        onError={(event) => { (event.target as HTMLImageElement).style.display = "none"; }}
+      />
+    </button>
+  );
+}
+
+// ===== MediaStudioSubtitle (shared date + studio link subtitle for detail pages) =====
+export function MediaStudioSubtitle({ date, studioId, studioName, fieldProvenance, onNavigate, canReadStudio = true, extra }: { date?: string | null; studioId?: number | null; studioName?: string | null; fieldProvenance?: FieldProvenance[]; onNavigate?: (route: any) => void; canReadStudio?: boolean; extra?: ReactNode }) {
+  const hasStudio = Boolean(studioName && studioId);
+  if (!date && !hasStudio && !extra) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-sm text-secondary">
+      {date ? <FieldProvenanceHover fieldProvenance={fieldProvenance} fieldKey="date"><span>{formatDate(date)}</span></FieldProvenanceHover> : null}
+      {hasStudio ? (
+        canReadStudio ? (
+          <FieldProvenanceHover fieldProvenance={fieldProvenance} fieldKey="studio">
+            <button type="button" onClick={() => onNavigate?.({ page: "studio", id: studioId! })} className="font-medium text-accent hover:underline">{studioName}</button>
+          </FieldProvenanceHover>
+        ) : (
+          <FieldProvenanceHover fieldProvenance={fieldProvenance} fieldKey="studio"><span>{studioName}</span></FieldProvenanceHover>
+        )
+      ) : null}
+      {extra}
+    </div>
+  );
+}
+
+// ===== SceneCard (redesigned - cleaner, performer badges, 2-line title) =====
 export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNavigate, selecting, onQuickView, bookmarkInitiallySaved }: { scene: Scene; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onNavigate?: (r: any) => void; onQuickView?: () => void; bookmarkInitiallySaved?: boolean }) {
   const appConfig = useOptionalAppConfig();
   const file = scene.files[0];

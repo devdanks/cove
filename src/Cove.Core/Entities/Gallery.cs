@@ -11,6 +11,7 @@ public class Gallery : BaseEntity
     public int? StudioId { get; set; }
     public int? FolderId { get; set; }
     public string? ImageBlobId { get; set; }
+    public string? BackImageBlobId { get; set; }
     public int? CoverImageId { get; set; }
     public string? SearchText { get; set; }
 

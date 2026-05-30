@@ -302,6 +302,7 @@ public record GalleryDto(int Id, string? Title, string? Code, string? Date, stri
     int ImageCount, int SceneCount, List<int> SceneIds, string? FolderPath, List<GalleryFileInfoDto> Files,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     string? CoverPath = null, int? CoverImageId = null,
+    string? BackCoverPath = null,
     List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record GalleryFileInfoDto(int Id, string Path, long Size, string ModTime, List<FingerprintDto> Fingerprints);
@@ -1183,7 +1184,7 @@ public record CoveConfigDto
     public string? CachePath { get; init; }
     public string Host { get; init; } = "0.0.0.0";
     public int Port { get; init; } = 9999;
-    public int MaxParallelTasks { get; init; } = 1;
+    public int MaxParallelTasks { get; init; } = 5;
     public int MaxConcurrentDownloads { get; init; } = 3;
     public List<DownloaderPathOverrideDto> DownloaderPathOverrides { get; init; } = [];
     public bool CalculateMd5 { get; init; }
@@ -1201,6 +1202,7 @@ public record CoveConfigDto
     public bool CreateImageClipsFromVideos { get; init; }
     public string GalleryCoverRegex { get; init; } = "(poster|cover|folder|board)\\.[^\\.]+$";
     public bool DeleteGeneratedDefault { get; init; } = true;
+    public string LogLevel { get; init; } = "Info";
     public InterfaceConfigDto Interface { get; init; } = new();
     public UiConfigDto Ui { get; init; } = new();
     public SecurityConfigDto Security { get; init; } = new();
@@ -2055,6 +2057,9 @@ public record GenerateOptionsDto
     public bool TextPhashes { get; init; }
     public bool Overwrite { get; init; }
     public List<int>? SceneIds { get; init; }
+    public List<int>? ImageIds { get; init; }
+    public List<int>? AudioIds { get; init; }
+    public List<int>? TextIds { get; init; }
     public List<string>? Paths { get; init; }
 }
 

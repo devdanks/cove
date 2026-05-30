@@ -14,7 +14,7 @@ import { DetailListToolbar } from "../components/DetailListToolbar";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
 import { useExtensionTabs } from "../components/useExtensionTabs";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
-import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { EntityHeroLayout, HERO_ACTION_BUTTON_CLASS, HERO_PRIMARY_ACTION_BUTTON_CLASS } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { TagMetadataTaggerDialog } from "../components/MetadataTaggerDialog";
@@ -279,10 +279,10 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         actions={(
           <>
             <ExtensionSlot slot="tag-detail-actions" context={{ tag, onNavigate }} />
-            {canWriteTag ? <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
+            {canWriteTag ? <button onClick={() => setEditing(true)} className={HERO_PRIMARY_ACTION_BUTTON_CLASS}><Pencil className="h-3.5 w-3.5" /> Edit</button> : null}
             {showTagOpsMenu ? (
               <div className="relative" ref={opsMenuRef}>
-                <button onClick={() => setShowOpsMenu(!showOpsMenu)} className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground" title="Actions">
+                <button onClick={() => setShowOpsMenu(!showOpsMenu)} className={`${HERO_ACTION_BUTTON_CLASS} text-secondary`} title="Actions">
                   <MoreVertical className="h-4 w-4" />
                 </button>
                 <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="w-44 py-1">

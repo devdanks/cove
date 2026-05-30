@@ -716,6 +716,70 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         return Ok(new { blobId = entity.ImageBlobId });
     }
 
+    // ── Galleries (back cover) ──────────────────────────────────
+
+    [HttpPost("galleries/{id:int}/image/back")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
+    public async Task<IActionResult> UploadGalleryBackImage(int id, IFormFile file, CancellationToken ct)
+    {
+        if (!IsImage(file)) return BadRequest("File must be an image.");
+
+        var entity = await db.Galleries.FirstOrDefaultAsync(gallery => gallery.Id == id, ct);
+        if (entity == null) return NotFound();
+
+        if (entity.BackImageBlobId != null)
+            await blobService.DeleteBlobAsync(entity.BackImageBlobId, ct);
+
+        await using var stream = file.OpenReadStream();
+        entity.BackImageBlobId = await blobService.StoreBlobAsync(stream, file.ContentType, ct);
+        await db.SaveChangesAsync(ct);
+
+        return Ok(new { blobId = entity.BackImageBlobId });
+    }
+
+    [HttpGet("galleries/{id:int}/image/back")]
+    [RequiresPermission(Permissions.GalleriesRead)]
+    public async Task<IActionResult> GetGalleryBackImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
+    {
+        var entity = await db.Galleries.FirstOrDefaultAsync(gallery => gallery.Id == id, ct);
+        if (entity?.BackImageBlobId == null) return NotFound();
+
+        return await ServeBlobAsync(entity.BackImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
+    }
+
+    [HttpDelete("galleries/{id:int}/image/back")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
+    public async Task<IActionResult> DeleteGalleryBackImage(int id, CancellationToken ct)
+    {
+        var entity = await db.Galleries.FirstOrDefaultAsync(gallery => gallery.Id == id, ct);
+        if (entity?.BackImageBlobId == null) return NotFound();
+
+        await blobService.DeleteBlobAsync(entity.BackImageBlobId, ct);
+        entity.BackImageBlobId = null;
+        await db.SaveChangesAsync(ct);
+
+        return NoContent();
+    }
+
+    [HttpPut("galleries/{id:int}/image/back/source")]
+    [RequiresPermission(Permissions.GalleriesWrite)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesWrite)]
+    public async Task<IActionResult> SetGalleryBackImageFromSource(int id, [FromBody] EntityImageCoverSourceDto dto, CancellationToken ct)
+    {
+        var entity = await db.Galleries.FirstOrDefaultAsync(gallery => gallery.Id == id, ct);
+        if (entity == null) return NotFound();
+
+        var source = await StoreCoverSourceBlobAsync(dto, ct);
+        if (source.Error != null) return BadRequest(source.Error);
+
+        await ReplaceBlobAsync(entity.BackImageBlobId, source.BlobId!, blobId => entity.BackImageBlobId = blobId, ct);
+        await db.SaveChangesAsync(ct);
+
+        return Ok(new { blobId = entity.BackImageBlobId });
+    }
+
     // ── Gallery Cover (Set from gallery images) ─────────────────
 
     [HttpPut("galleries/{id:int}/cover")]

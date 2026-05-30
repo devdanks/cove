@@ -768,6 +768,7 @@ export const galleries = {
   update: (id: number, data: GalleryUpdate) => request<Gallery>(`/galleries/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   bulkUpdate: (data: BulkGalleryUpdate) => request<void>("/galleries/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/galleries/${id}`, { method: "DELETE" }),
+  rescan: (id: number) => request<{ jobId: string }>(`/galleries/${id}/rescan`, { method: "POST" }),
   bulkDelete: (ids: number[]) => request<void>("/galleries/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),
   chapters: (id: number) => request<GalleryChapter[]>(`/galleries/${id}/chapters`),
   createChapter: (id: number, data: GalleryChapterCreate) =>
@@ -841,6 +842,7 @@ export const audios = {
   create: (data: AudioCreate) => request<Audio>("/audios", { method: "POST", body: JSON.stringify(data) }),
   createFromFile: (data: FileBackedCreate) => request<Audio>("/audios/from-file", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: AudioUpdate) => request<Audio>(`/audios/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  rescan: (id: number) => request<{ jobId: string }>(`/audios/${id}/rescan`, { method: "POST" }),
   bulkUpdate: (data: BulkAudioUpdate) => request<void>("/audios/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number, options?: DeleteEntityOptions) =>
     request<void>(`/audios/${id}${buildQuery(undefined, { deleteFile: options?.deleteFile, deleteGenerated: options?.deleteGenerated })}`, { method: "DELETE" }),
@@ -862,6 +864,7 @@ export const texts = {
   create: (data: TextCreate) => request<TextDocument>("/texts", { method: "POST", body: JSON.stringify(data) }),
   createFromFile: (data: FileBackedCreate) => request<TextDocument>("/texts/from-file", { method: "POST", body: JSON.stringify(data) }),
   update: (id: number, data: TextUpdate) => request<TextDocument>(`/texts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  rescan: (id: number) => request<{ jobId: string }>(`/texts/${id}/rescan`, { method: "POST" }),
   bulkUpdate: (data: BulkTextUpdate) => request<void>("/texts/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number, options?: DeleteEntityOptions) =>
     request<void>(`/texts/${id}${buildQuery(undefined, { deleteFile: options?.deleteFile, deleteGenerated: options?.deleteGenerated })}`, { method: "DELETE" }),
@@ -1122,6 +1125,9 @@ export interface GenerateOptions {
   textPhashes?: boolean;
   overwrite?: boolean;
   sceneIds?: number[];
+  imageIds?: number[];
+  audioIds?: number[];
+  textIds?: number[];
   paths?: string[];
 }
 
@@ -1339,10 +1345,11 @@ export const extensions = {
   getMissingDependencies: (id: string) =>
     request<string[]>(`/extensions/${encodeURIComponent(id)}/dependencies/missing`),
   /** Registry: search for extensions. */
-  registrySearch: (params: { q?: string; category?: string; sort?: string; page?: number; pageSize?: number }) => {
+  registrySearch: (params: { q?: string; category?: string; type?: string; sort?: string; page?: number; pageSize?: number }) => {
     const qs = new URLSearchParams();
     if (params.q) qs.set("q", params.q);
     if (params.category) qs.set("category", params.category);
+    if (params.type) qs.set("type", params.type);
     if (params.sort) qs.set("sort", params.sort);
     if (params.page) qs.set("page", String(params.page));
     if (params.pageSize) qs.set("pageSize", String(params.pageSize));

@@ -100,6 +100,9 @@ internal static class EntityImageUrls
     public static string GalleryCover(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultGalleryCoverMaxDimension)
         => Build(context, $"/api/galleries/{id}/cover", updatedAt, maxDimension);
 
+    public static string GalleryBackCover(HttpContext? context, int id, DateTime updatedAt, int maxDimension = DefaultGalleryCoverMaxDimension)
+        => Build(context, $"/api/galleries/{id}/image/back", updatedAt, maxDimension);
+
     private static string Build(HttpContext? context, string path, DateTime updatedAt, int maxDimension)
     {
         var query = new List<KeyValuePair<string, string?>>

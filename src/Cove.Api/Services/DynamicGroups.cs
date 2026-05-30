@@ -1608,7 +1608,7 @@ public sealed class ContinueWatchingDynamicGroupSource(CoveContext db) : UserSco
                 && affinity.CompleteCount == 0)
             .OrderByDescending(affinity => affinity.LastConsumedAt);
         var rows = await query
-            .Select(affinity => new { affinity.HostType, affinity.HostId, affinity.LastConsumedAt, affinity.TotalConsumedSec })
+            .Select(affinity => new { affinity.HostType, affinity.HostId, affinity.LastConsumedAt, affinity.LastPositionSec })
             .ToListAsync(ct);
         var sceneIds = rows.Where(row => row.HostType == AffinityHostType.Scene).Select(row => row.HostId).Distinct().ToArray();
         var sceneDurations = await Db.Scenes.AsNoTracking()
@@ -1619,7 +1619,7 @@ public sealed class ContinueWatchingDynamicGroupSource(CoveContext db) : UserSco
             .Where(row => row.HostType != AffinityHostType.Scene
                 || !sceneDurations.TryGetValue(row.HostId, out var maxDuration)
                 || maxDuration <= 0
-                || row.TotalConsumedSec < maxDuration * 0.95)
+                || row.LastPositionSec < maxDuration * 0.95)
             .Select(row => (row.HostType, row.HostId, (double)row.LastConsumedAt!.Value.Ticks))
             .ToList();
         return await HydratePageAsync(filteredRows, context, ct);

@@ -172,6 +172,29 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
         return NoContent();
     }
 
+    [HttpPost("{id:int}/rescan")]
+    [RequiresPermission(Permissions.LibraryScan)]
+    [RequiresEntityAccess(EntityKinds.Audio, Permissions.LibraryScan)]
+    public async Task<IActionResult> Rescan(int id, CancellationToken ct)
+    {
+        var audio = await db.Audios.AsNoTracking()
+            .Include(item => item.Files)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (audio == null) return NotFound();
+
+        var filePath = audio.Files
+            .Select(file => file.Path)
+            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+        if (string.IsNullOrWhiteSpace(filePath)) return BadRequest("Audio has no files");
+
+        var jobId = scanService.StartScan(new ScanOperationOptions
+        {
+            Paths = [filePath],
+            Rescan = true,
+        });
+        return Ok(new { jobId });
+    }
+
     [HttpPost]
     [RequiresPermission(Permissions.AudiosWrite)]
     public async Task<ActionResult<AudioDto>> Create([FromBody] AudioCreateDto dto, CancellationToken ct)

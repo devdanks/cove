@@ -33,6 +33,17 @@ public class GitHubExtensionRegistry : IExtensionRegistry
     private DateTime _cacheExpiry = DateTime.MinValue;
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
+    // Cache the fully resolved summary list so search/filter/paging does not
+    // re-fetch every extension metadata file on each request.
+    private List<RegistryExtensionSummary>? _cachedSummaries;
+    private DateTime _summariesExpiry = DateTime.MinValue;
+    private readonly SemaphoreSlim _summariesLock = new(1, 1);
+
+    // The registry can list hundreds of extensions (e.g. YAML scraper packs).
+    // Resolve their metadata concurrently with a bounded fan-out instead of
+    // one sequential request at a time.
+    private const int MaxConcurrentMetadataFetches = 16;
+
     public GitHubExtensionRegistry(
         HttpClient http,
         string registryOwner = "yourcove",
@@ -110,6 +121,9 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             meta.Dependencies ??= source.Dependencies;
             meta.ExternalDependencies ??= source.ExternalDependencies;
             meta.Settings ??= source.Settings;
+            meta.ScraperFiles ??= source.ScraperFiles;
+            meta.SourceMinCoveVersion ??= source.MinCoveVersion;
+            meta.Version ??= source.Version;
         }
         catch
         {
@@ -118,6 +132,36 @@ public class GitHubExtensionRegistry : IExtensionRegistry
 
         return meta;
     }
+
+    /// <summary>
+    /// A source-tracked scraper pack is content-only (YAML) served directly from the
+    /// extension repository source tree. These are intentionally unversioned: there are
+    /// no release zips, checksums, or CI. Install always fetches the current source files.
+    /// </summary>
+    private static bool IsSourcePack(RegistryExtensionMetadata meta) =>
+        string.Equals(meta.Kind, "scraper-pack", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(meta.SourceManifestUrl)
+        && (meta.Versions == null || meta.Versions.Count == 0);
+
+    private static bool HasTypeTag(RegistryExtensionSummary summary, string tag) =>
+        summary.Categories?.Any(category => string.Equals(category.Trim(), tag, StringComparison.OrdinalIgnoreCase)) ?? false;
+
+    private bool IsSourcePackCompatible(RegistryExtensionMetadata meta)
+    {
+        if (string.IsNullOrWhiteSpace(meta.SourceMinCoveVersion) || string.IsNullOrWhiteSpace(_coveVersion))
+            return true;
+
+        return IsVersionAtLeast(_coveVersion, meta.SourceMinCoveVersion);
+    }
+
+    private static RegistryVersionInfo BuildSourcePackVersionInfo(RegistryExtensionMetadata meta) => new()
+    {
+        Version = string.IsNullOrWhiteSpace(meta.Version) ? "0.0.0" : meta.Version!,
+        ReleasedAt = null,
+        Changelog = meta.Changelog,
+        MinCoveVersion = meta.SourceMinCoveVersion,
+        Checksum = null,
+    };
 
     public async Task<RegistrySearchResult> SearchAsync(RegistrySearchRequest request, CancellationToken ct = default)
     {
@@ -139,6 +183,18 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             items = items.Where(e =>
                 request.Categories.All(requestedCategory =>
                     e.Categories?.Any(category => string.Equals(category.Trim(), requestedCategory.Trim(), StringComparison.OrdinalIgnoreCase)) ?? false));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Type))
+        {
+            var type = request.Type.Trim().ToLowerInvariant();
+            items = type switch
+            {
+                "scraper" => items.Where(e => HasTypeTag(e, "scraper")),
+                "downloader" => items.Where(e => HasTypeTag(e, "downloader")),
+                "extension" => items.Where(e => !HasTypeTag(e, "scraper") && !HasTypeTag(e, "downloader")),
+                _ => items,
+            };
         }
 
         var list = items.ToList();
@@ -175,7 +231,11 @@ public class GitHubExtensionRegistry : IExtensionRegistry
             .Where(v => IsInstallableVersion(v) && IsCompatibleWithCove(v))
             .ToList();
         if (validVersions.Count == 0)
+        {
+            if (IsSourcePack(meta) && IsSourcePackCompatible(meta))
+                return await BuildSourcePackDetailAsync(meta, extensionId, ct);
             return null;
+        }
 
         var latestVersion = validVersions
             .OrderByDescending(v => ParseSemverOrFallback(v.Version))
@@ -232,6 +292,10 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         var meta = await GetResolvedMetadataAsync(extensionId, ct);
         if (meta == null)
             throw new InvalidOperationException($"Extension '{extensionId}' not found in registry.");
+
+        // Source-tracked scraper packs have no release zip; fetch the YAML directly.
+        if (IsSourcePack(meta))
+            return await DownloadSourcePackAsync(meta, extensionId, targetDir, ct);
 
         // Find the download URL for this version
         var versionInfo = meta.Versions?.FirstOrDefault(v =>
@@ -312,6 +376,98 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         return extensionDir;
     }
 
+    private async Task<RegistryExtensionDetail> BuildSourcePackDetailAsync(
+        RegistryExtensionMetadata meta, string extensionId, CancellationToken ct)
+    {
+        string? readme = null;
+        if (!string.IsNullOrWhiteSpace(meta.ReadmeUrl))
+        {
+            try
+            {
+                var resp = await _http.GetAsync(meta.ReadmeUrl, ct);
+                if (resp.IsSuccessStatusCode)
+                    readme = await resp.Content.ReadAsStringAsync(ct);
+            }
+            catch { /* ignore */ }
+        }
+
+        var versionInfo = BuildSourcePackVersionInfo(meta);
+
+        return new RegistryExtensionDetail
+        {
+            Id = meta.Id ?? extensionId,
+            Name = meta.Name ?? extensionId,
+            Version = versionInfo.Version,
+            Description = meta.Description,
+            Author = meta.Author,
+            IconUrl = meta.IconUrl,
+            Kind = meta.Kind ?? "scraper-pack",
+            Url = meta.HomepageUrl ?? meta.Url ?? meta.RepositoryUrl,
+            Categories = meta.Categories ?? [],
+            UpdatedAt = null,
+            MinCoveVersion = meta.SourceMinCoveVersion,
+            Dependencies = meta.Dependencies ?? [],
+            ExternalDependencies = meta.ExternalDependencies ?? [],
+            Settings = meta.Settings ?? [],
+            Readme = readme,
+            Changelog = meta.Changelog,
+            Screenshots = meta.Screenshots ?? [],
+            Versions = [versionInfo],
+        };
+    }
+
+    private async Task<string> DownloadSourcePackAsync(
+        RegistryExtensionMetadata meta, string extensionId, string targetDir, CancellationToken ct)
+    {
+        var manifestUrl = meta.SourceManifestUrl!;
+        var lastSlash = manifestUrl.LastIndexOf('/');
+        if (lastSlash < 0)
+            throw new InvalidOperationException($"Source manifest URL for '{extensionId}' is not a valid file URL.");
+        var baseUrl = manifestUrl[..(lastSlash + 1)];
+
+        var scraperFiles = meta.ScraperFiles ?? [];
+        if (scraperFiles.Count == 0)
+            throw new InvalidOperationException(
+                $"Source scraper pack '{extensionId}' does not list any scraperFiles in its manifest.");
+
+        var extensionDir = Path.Combine(targetDir, extensionId);
+        if (Directory.Exists(extensionDir))
+            Directory.Delete(extensionDir, recursive: true);
+        Directory.CreateDirectory(extensionDir);
+        var extensionRoot = Path.GetFullPath(extensionDir);
+
+        // Persist the manifest verbatim so Cove discovers the pack like any other extension.
+        var manifestJson = await GetStringAsync(manifestUrl, ct);
+        await System.IO.File.WriteAllTextAsync(Path.Combine(extensionDir, "extension.json"), manifestJson, ct);
+
+        foreach (var relative in scraperFiles)
+        {
+            if (string.IsNullOrWhiteSpace(relative))
+                continue;
+
+            var normalized = relative.Replace('\\', '/').TrimStart('/');
+            var destPath = Path.GetFullPath(Path.Combine(extensionDir, normalized));
+
+            // Security: prevent path traversal outside the extension directory.
+            if (!destPath.StartsWith(extensionRoot, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var fileUrl = baseUrl + string.Join('/', normalized.Split('/').Select(Uri.EscapeDataString));
+            var content = await GetStringAsync(fileUrl, ct);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            await System.IO.File.WriteAllTextAsync(destPath, content, ct);
+        }
+
+        return extensionDir;
+    }
+
+    private async Task<string> GetStringAsync(string url, CancellationToken ct)
+    {
+        var response = await _http.GetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
     public async Task<List<RegistryUpdateInfo>> CheckForUpdatesAsync(
         IEnumerable<(string Id, string Version)> installed,
         CancellationToken ct = default)
@@ -352,43 +508,100 @@ public class GitHubExtensionRegistry : IExtensionRegistry
 
     private async Task<List<RegistryExtensionSummary>> ResolveSummariesAsync(CancellationToken ct)
     {
-        var index = await GetIndexAsync(ct);
-        var summaries = new List<RegistryExtensionSummary>();
+        if (_cachedSummaries != null && DateTime.UtcNow < _summariesExpiry)
+            return _cachedSummaries;
 
-        foreach (var entry in index.Extensions)
+        await _summariesLock.WaitAsync(ct);
+        try
         {
-            if (string.IsNullOrWhiteSpace(entry.Id))
-                continue;
+            // Double-check after acquiring the lock so a concurrent caller that
+            // just populated the cache wins instead of re-resolving everything.
+            if (_cachedSummaries != null && DateTime.UtcNow < _summariesExpiry)
+                return _cachedSummaries;
 
-            var meta = await GetResolvedMetadataAsync(entry.Id, ct);
-            if (meta?.Versions == null)
-                continue;
+            var index = await GetIndexAsync(ct);
 
-            var validVersions = meta.Versions.Where(v => IsInstallableVersion(v) && IsCompatibleWithCove(v)).ToList();
-            if (validVersions.Count == 0)
-                continue;
+            using var throttler = new SemaphoreSlim(MaxConcurrentMetadataFetches);
+            var tasks = index.Extensions
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Id))
+                .Select(async entry =>
+                {
+                    await throttler.WaitAsync(ct);
+                    try
+                    {
+                        // Summaries only need registry-level metadata. The registry
+                        // CI already syncs name/description/kind/categories into each
+                        // extension JSON, so we skip the extra per-pack source manifest
+                        // fetch here (it is still used for the detail/install views).
+                        var meta = await GetMetadataAsync(entry.Id!, ct);
+                        return meta == null ? null : BuildSummary(meta, entry.Id!);
+                    }
+                    finally
+                    {
+                        throttler.Release();
+                    }
+                })
+                .ToList();
 
-            var latest = validVersions
-                .OrderByDescending(v => ParseSemverOrFallback(v.Version))
-                .ThenByDescending(v => v.ReleasedAt ?? DateTime.MinValue)
-                .First();
+            var resolved = await Task.WhenAll(tasks);
+            var summaries = resolved.Where(s => s != null).Select(s => s!).ToList();
 
-            summaries.Add(new RegistryExtensionSummary
+            _cachedSummaries = summaries;
+            _summariesExpiry = DateTime.UtcNow + CacheDuration;
+            return summaries;
+        }
+        finally
+        {
+            _summariesLock.Release();
+        }
+    }
+
+    private RegistryExtensionSummary? BuildSummary(RegistryExtensionMetadata meta, string fallbackId)
+    {
+        var validVersions = (meta.Versions ?? [])
+            .Where(v => IsInstallableVersion(v) && IsCompatibleWithCove(v))
+            .ToList();
+
+        if (validVersions.Count == 0)
+        {
+            if (IsSourcePack(meta) && IsSourcePackCompatible(meta))
             {
-                Id = meta.Id ?? entry.Id,
-                Name = meta.Name ?? entry.Id,
-                Version = latest.Version ?? "0.0.0",
-                Description = meta.Description,
-                Author = meta.Author,
-                IconUrl = meta.IconUrl,
-                Kind = meta.Kind ?? "extension",
-                Categories = meta.Categories ?? [],
-                UpdatedAt = latest.ReleasedAt,
-                MinCoveVersion = latest.MinCoveVersion,
-            });
+                var sourceVersion = BuildSourcePackVersionInfo(meta);
+                return new RegistryExtensionSummary
+                {
+                    Id = meta.Id ?? fallbackId,
+                    Name = meta.Name ?? fallbackId,
+                    Version = sourceVersion.Version,
+                    Description = meta.Description,
+                    Author = meta.Author,
+                    IconUrl = meta.IconUrl,
+                    Kind = meta.Kind ?? "scraper-pack",
+                    Categories = meta.Categories ?? [],
+                    UpdatedAt = null,
+                    MinCoveVersion = meta.SourceMinCoveVersion,
+                };
+            }
+            return null;
         }
 
-        return summaries;
+        var latest = validVersions
+            .OrderByDescending(v => ParseSemverOrFallback(v.Version))
+            .ThenByDescending(v => v.ReleasedAt ?? DateTime.MinValue)
+            .First();
+
+        return new RegistryExtensionSummary
+        {
+            Id = meta.Id ?? fallbackId,
+            Name = meta.Name ?? fallbackId,
+            Version = latest.Version ?? "0.0.0",
+            Description = meta.Description,
+            Author = meta.Author,
+            IconUrl = meta.IconUrl,
+            Kind = meta.Kind ?? "extension",
+            Categories = meta.Categories ?? [],
+            UpdatedAt = latest.ReleasedAt,
+            MinCoveVersion = latest.MinCoveVersion,
+        };
     }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -539,6 +752,8 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         public string? Changelog { get; set; }
         public List<string>? Screenshots { get; set; }
         public List<RegistryVersionEntry>? Versions { get; set; }
+        public List<string>? ScraperFiles { get; set; }
+        public string? SourceMinCoveVersion { get; set; }
     }
 
     private class ExtensionSourceManifest
@@ -556,6 +771,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         public Dictionary<string, string>? Dependencies { get; set; }
         public List<ExtensionExternalDependency>? ExternalDependencies { get; set; }
         public List<ExtensionSettingManifest>? Settings { get; set; }
+        public List<string>? ScraperFiles { get; set; }
     }
 
     private class RegistryVersionEntry

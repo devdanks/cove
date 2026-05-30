@@ -33,6 +33,11 @@ public class RegistrySearchRequest
     public string? Query { get; set; }
     /// <summary>Filter by categories (AND logic — results must match all).</summary>
     public List<string>? Categories { get; set; }
+    /// <summary>
+    /// High-level type filter: "scraper" or "downloader" (items carrying that tag),
+    /// or "extension" (items without a scraper/downloader tag). Null/empty = all types.
+    /// </summary>
+    public string? Type { get; set; }
     /// <summary>Sort by: "relevance", "downloads", "updated", "name".</summary>
     public string SortBy { get; set; } = "relevance";
     public int Page { get; set; } = 1;

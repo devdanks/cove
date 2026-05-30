@@ -13,7 +13,7 @@ import { DetailSkeleton } from "../components/DetailSkeleton";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { DetailListToolbar, type DetailListDisplayMode } from "../components/DetailListToolbar";
 import { SCENE_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
-import { EntityHeroLayout } from "../components/EntityHeroLayout";
+import { EntityHeroLayout, HERO_ACTION_BUTTON_CLASS, HERO_PRIMARY_ACTION_BUTTON_CLASS } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { EntityDetailTabs } from "../components/EntityDetailTabs";
@@ -114,6 +114,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
+  const [coverFace, setCoverFace] = useState<"front" | "back">("front");
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [addSubGroupRequestId, setAddSubGroupRequestId] = useState(0);
   const opsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -255,16 +256,34 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
       <GroupEditModal group={group} open={editing} onClose={() => setEditing(false)} />
       <CoverImageDialog
         open={coverOpen}
-        title="Set Group Cover"
-        currentImageUrl={group.frontImagePath}
-        onUpload={(file) => entityImages.uploadGroupFrontImage(group.id, file)}
-        onDelete={() => entityImages.deleteGroupFrontImage(group.id)}
+        title={coverFace === "front" ? "Set Group Cover (Front)" : "Set Group Cover (Back)"}
+        currentImageUrl={coverFace === "front" ? group.frontImagePath : group.backImagePath}
+        onUpload={(file) => coverFace === "front" ? entityImages.uploadGroupFrontImage(group.id, file) : entityImages.uploadGroupBackImage(group.id, file)}
+        onDelete={() => coverFace === "front" ? entityImages.deleteGroupFrontImage(group.id) : entityImages.deleteGroupBackImage(group.id)}
         onClose={() => setCoverOpen(false)}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["group", group.id] });
           queryClient.invalidateQueries({ queryKey: ["groups"] });
         }}
         aspectRatio="2/3"
+        extraActions={
+          <div className="flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCoverFace("front")}
+              className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${coverFace === "front" ? "border-accent bg-accent text-white" : "border-border bg-card text-secondary hover:text-foreground"}`}
+            >
+              Front
+            </button>
+            <button
+              type="button"
+              onClick={() => setCoverFace("back")}
+              className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${coverFace === "back" ? "border-accent bg-accent text-white" : "border-border bg-card text-secondary hover:text-foreground"}`}
+            >
+              Back
+            </button>
+          </div>
+        }
       />
       <ConfirmDialog
         open={confirmDelete}
@@ -302,7 +321,14 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
         onGoBack={goBack}
         imageUrl={group.frontImagePath}
         imageAlt={group.name}
-        onImageClick={canWriteGroup ? () => setCoverOpen(true) : undefined}
+        alternateImageUrl={group.backImagePath}
+        alternateImageAlt={`${group.name} back cover`}
+        primaryImageLabel="front cover"
+        alternateImageLabel="back cover"
+        imageContainerClassName="relative flex flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/35"
+        imageClassName="h-auto w-auto max-h-72 max-w-[20rem] object-contain md:max-h-96 md:max-w-[24rem]"
+        imageFallbackClassName="h-72 w-56 items-center justify-center bg-card text-muted md:h-96 md:w-72"
+        onImageClick={canWriteGroup ? (imageSlot) => { setCoverFace(imageSlot === "alternate" ? "back" : "front"); setCoverOpen(true); } : undefined}
         imageFallback={<Layers className="h-14 w-14" />}
         counts={[
           ...countMetrics,
@@ -315,7 +341,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
               <button
                 type="button"
                 onClick={() => onNavigate({ page: "compilation", id })}
-                className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
+                className={`${HERO_ACTION_BUTTON_CLASS} text-secondary`}
                 title={hasCompilationItems ? "Standalone Compilation" : "Standalone Player"}
               >
                 <Play className="h-4 w-4" />
@@ -325,7 +351,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
               <button
                 type="button"
                 onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white hover:bg-accent-hover"
+                className={HERO_PRIMARY_ACTION_BUTTON_CLASS}
                 title="Edit"
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
@@ -336,7 +362,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
                 <button
                   type="button"
                   onClick={() => setShowOpsMenu((value) => !value)}
-                  className="rounded border border-border bg-card p-2 text-secondary hover:text-foreground"
+                  className={`${HERO_ACTION_BUTTON_CLASS} text-secondary`}
                   title="More actions"
                   aria-haspopup="menu"
                   aria-expanded={showOpsMenu}

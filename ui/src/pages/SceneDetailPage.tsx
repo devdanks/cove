@@ -1,5 +1,5 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, scenes, segmentDisplayProfiles, tagApplications, entityImages, metadata, fileOps } from "../api/client";
+import { faces, scenes, segmentDisplayProfiles, tagApplications, entityImages, metadata, fileOps, galleries } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay, CustomFieldsEditor, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { 
   Pencil, Plus, Trash2, Search, Eye, EyeOff, ArrowLeft, ThumbsUp,
@@ -32,7 +32,7 @@ import { VideoPlayer } from "../components/VideoPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
-import { PerformerTile } from "../components/EntityCards";
+import { PerformerTile, EntityRefBadge } from "../components/EntityCards";
 import { trackInteraction } from "../utils/interactionTracking";
 import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
 import { SceneVisualSimilarityPanel, useSceneVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
@@ -188,6 +188,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const canIdentifyScene = canLibraryAutoTag && canWriteScene;
   const canDownloadScene = canRunJobs && canWriteScene;
   const seekRef = useRef<((time: number) => void) | null>(null);
+  const trackedPageVisitSceneIdRef = useRef<number | null>(null);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const [videoTime, setVideoTime] = useState(0);
   const [coverOpen, setCoverOpen] = useState(false);
@@ -216,10 +217,13 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const effectiveResumeTime = initialSeekTo ?? effectiveSceneResumeTime;
 
   useEffect(() => {
-    if (!scene || !trackPlaybackActivity) return;
-    trackInteraction({ hostType: "scene", hostId: id, kind: "pageVisit" });
-    queryClient.invalidateQueries({ queryKey: ["engagement", "scene", id] });
-  }, [id, queryClient, scene, trackPlaybackActivity]);
+    const sceneId = scene?.id;
+    if (!sceneId || !trackPlaybackActivity) return;
+    if (trackedPageVisitSceneIdRef.current === sceneId) return;
+    trackedPageVisitSceneIdRef.current = sceneId;
+    trackInteraction({ hostType: "scene", hostId: sceneId, kind: "pageVisit" });
+    queryClient.invalidateQueries({ queryKey: ["engagement", "scene", sceneId] });
+  }, [queryClient, scene?.id, trackPlaybackActivity]);
 
   useEffect(() => {
     if (scene) document.title = `${scene.title || scene.files?.[0]?.basename || `Scene ${id}`} | Cove`;
@@ -440,7 +444,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       <img
         src={studioImageUrl}
         alt={scene.studioName || "Studio"}
-        className="max-h-[5rem] max-w-full object-contain"
+        className="h-20 w-auto max-w-full object-contain"
         onError={(event) => { (event.target as HTMLImageElement).style.display = "none"; }}
       />
     </button>
@@ -966,26 +970,17 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       {scene.groups.length > 0 && (
         <div>
           <h6 className="mb-2 text-sm text-muted">Groups</h6>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {scene.groups.map((group) => {
-              const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "group", id: group.id }, () => onNavigate({ page: "group", id: group.id }));
-
-              return (
-                <a
-                  key={group.id}
-                  {...linkProps}
-                  className="rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-accent/60"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-foreground">{group.name}</div>
-                      <div className="mt-1 text-xs text-secondary">Scene #{group.sceneIndex}</div>
-                    </div>
-                    <Layers className="h-5 w-5 text-muted" />
-                  </div>
-                </a>
-              );
-            })}
+          <div className="flex flex-wrap gap-2">
+            {scene.groups.map((group) => (
+              <EntityRefBadge
+                key={group.id}
+                route={{ page: "group", id: group.id }}
+                onNavigate={onNavigate}
+                imageUrl={entityImages.groupFrontImageUrl(group.id)}
+                icon={<Layers className="h-5 w-5" />}
+                label={group.name}
+              />
+            ))}
           </div>
         </div>
       )}
@@ -993,30 +988,17 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       {scene.galleries.length > 0 && (
         <div>
           <h6 className="mb-2 text-sm text-muted">Galleries</h6>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {scene.galleries.map((gallery) => {
-              const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "gallery", id: gallery.id }, () => onNavigate({ page: "gallery", id: gallery.id }));
-
-              return (
-                <a
-                  key={gallery.id}
-                  {...linkProps}
-                  className="group overflow-hidden rounded-xl border border-border bg-card text-left transition-colors hover:border-accent/60"
-                >
-                  <div className="flex aspect-video items-center justify-center bg-gradient-to-br from-surface to-card">
-                    <FolderOpen className="h-10 w-10 text-muted" />
-                  </div>
-                  <div className="p-3">
-                    <p className="truncate text-sm font-medium text-foreground group-hover:text-accent">
-                      {gallery.title || "Untitled"}
-                    </p>
-                    {gallery.date && (
-                      <p className="mt-1 text-xs text-secondary">{formatDate(gallery.date)}</p>
-                    )}
-                  </div>
-                </a>
-              );
-            })}
+          <div className="flex flex-wrap gap-2">
+            {scene.galleries.map((gallery) => (
+              <EntityRefBadge
+                key={gallery.id}
+                route={{ page: "gallery", id: gallery.id }}
+                onNavigate={onNavigate}
+                imageUrl={galleries.coverUrl(gallery.id)}
+                icon={<FolderOpen className="h-5 w-5" />}
+                label={gallery.title || "Untitled"}
+              />
+            ))}
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, ExternalLink, Eye, FileAudio, Files, FolderOpen, Image, Link2, Mic2, MoreVertical, Rows3, Trash2 } from "lucide-react";
+import { Check, Clapperboard, Download, ExternalLink, Eye, FileAudio, Files, FolderOpen, Image, Layers, Link2, Mic2, MoreVertical, RefreshCw, Rows3, Trash2 } from "lucide-react";
 import { audios, entityImages, fileOps } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
@@ -10,13 +10,14 @@ import { BookmarkButton } from "../components/BookmarkButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
+import { GenerateDialog } from "../components/GenerateDialog";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
 import type { FieldProvenance, SceneHistory } from "../api/types";
 import { InteractiveRating } from "../components/Rating";
 import { CustomFieldsDisplay, FieldProvenanceHover, formatDate, formatDuration, formatFileSize, TagBadge, resolveTagProvenance } from "../components/shared";
-import { EntityReferencePopovers, PerformerTile } from "../components/EntityCards";
+import { EntityRefBadge, MediaStudioSubtitle, PerformerTile, StudioHeaderImage } from "../components/EntityCards";
 import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useBackNavigation } from "../hooks/useBackNavigation";
@@ -53,6 +54,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   const [coverOpen, setCoverOpen] = useState(false);
   const [showScrapeDialog, setShowScrapeDialog] = useState(false);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const canReadAudio = canReadEntity("audio", hasPermission);
   const canWriteAudio = canWriteEntity("audio", hasPermission);
@@ -90,8 +92,11 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
     },
   });
   const revealFileMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
+  const rescanAudioMut = useMutation({ mutationFn: () => audios.rescan(id) });
   const canRevealFiles = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
   const canDownloadAudio = canWriteAudio && hasPermission("jobs.run") && (audio?.files.length ?? 0) === 0 && (audio?.urls.length ?? 0) > 0;
+  const canLibraryScan = hasPermission("library.scan");
+  const canGenerateAudio = hasPermission("jobs.run") && canWriteAudio;
 
   useEffect(() => {
     if (!audio) {
@@ -130,9 +135,6 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
       .join(" • ") || undefined;
   }, [audio]);
   const detailSubtitle = subtitleText;
-  const headerImage = audio?.imagePath ? (
-    <img src={audio.imagePath} alt={`${displayTitle} cover`} className="h-20 w-20 rounded-2xl border border-border object-cover shadow-lg shadow-black/20" />
-  ) : undefined;
   const audioCoverUrl = audio?.imagePath ?? undefined;
   const tabs = useMemo(() => {
     const nextTabs: MediaDetailTab[] = [{ key: "details", label: "Details" }];
@@ -253,12 +255,13 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
         aspectRatio="1/1"
       />
     ) : null}
+    <GenerateDialog open={showGenerate} onClose={() => setShowGenerate(false)} audioIds={[id]} />
     <MediaDetailLayout
       title={<FieldProvenanceHover fieldProvenance={audio.fieldProvenance} fieldKey="title">{displayTitle}</FieldProvenanceHover>}
-      subtitle={detailSubtitle}
+      subtitle={<MediaStudioSubtitle date={audio.date} studioId={audio.studioId} studioName={audio.studioName} fieldProvenance={audio.fieldProvenance} onNavigate={onNavigate} canReadStudio={canReadStudio} />}
       backLabel={backLabel}
       onGoBack={goBack}
-      headerImage={headerImage}
+      headerImage={<StudioHeaderImage studioId={audio.studioId} studioName={audio.studioName} onNavigate={onNavigate} />}
       media={audioMedia}
       mediaAspectRatio={primaryFile?.hasVideoTrack ? "video" : "auto"}
       mediaFullBleed={primaryFile?.hasVideoTrack ?? false}
@@ -346,6 +349,25 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
                       <Image className="h-3.5 w-3.5" /> Set Cover...
                     </button>
                   ) : null}
+                  {(audio.files?.length ?? 0) > 0 && canLibraryScan ? (
+                    <button
+                      type="button"
+                      onClick={() => { rescanAudioMut.mutate(); setShowOpsMenu(false); }}
+                      disabled={rescanAudioMut.isPending}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface disabled:opacity-60"
+                    >
+                      <RefreshCw className={["h-3.5 w-3.5", rescanAudioMut.isPending ? "animate-spin" : ""].join(" ")} /> Rescan
+                    </button>
+                  ) : null}
+                  {canGenerateAudio ? (
+                    <button
+                      type="button"
+                      onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface"
+                    >
+                      <Clapperboard className="h-3.5 w-3.5" /> Generate…
+                    </button>
+                  ) : null}
                   {canDeleteAudio ? (
                     <button
                       type="button"
@@ -383,8 +405,6 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
               <DetailGrid
                 fieldProvenance={audio.fieldProvenance}
                 items={[
-                  { label: "Studio", value: audio.studioName, fieldKey: "studio" },
-                  { label: "Date", value: audio.date ? formatDate(audio.date) : undefined, fieldKey: "date" },
                   { label: "Duration", value: audio.maxDuration > 0 ? formatDuration(audio.maxDuration) : undefined },
                   { label: "Tracks", value: audio.tracks.length > 0 ? String(audio.tracks.length) : undefined },
                   { label: "Files", value: String(audio.fileCount) },
@@ -450,28 +470,18 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
             {canReadGroups && audio.groups.length > 0 ? (
               <div>
                 <h3 className="text-sm text-muted mb-2">Groups</h3>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="flex flex-wrap gap-2">
                   {audio.groups.map((group) => (
-                    <button
+                    <EntityRefBadge
                       key={group.id}
-                      type="button"
-                      onClick={() => onNavigate({ page: "group", id: group.id })}
-                      className="rounded-xl border border-border bg-card p-4 text-left transition hover:border-accent/60"
-                    >
-                      <div className="text-sm font-medium text-foreground">{group.name}</div>
-                    </button>
+                      route={{ page: "group", id: group.id }}
+                      onNavigate={onNavigate}
+                      imageUrl={entityImages.groupFrontImageUrl(group.id)}
+                      icon={<Layers className="h-5 w-5" />}
+                      label={group.name}
+                    />
                   ))}
                 </div>
-              </div>
-            ) : null}
-            {canReadStudio && audio.studioId && audio.studioName ? (
-              <div>
-                <h3 className="text-sm text-muted mb-2">Studio</h3>
-                <FieldProvenanceHover fieldProvenance={audio.fieldProvenance} fieldKey="studio">
-                  <button type="button" onClick={() => onNavigate({ page: "studio", id: audio.studioId! })} className="text-accent hover:underline">
-                    {audio.studioName}
-                  </button>
-                </FieldProvenanceHover>
               </div>
             ) : null}
             {audio.customFields && Object.keys(audio.customFields).length > 0 ? (

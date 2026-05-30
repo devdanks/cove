@@ -15,6 +15,8 @@ const fieldDescriptionFallbacks: Record<string, string> = {
   "Video extensions": "File extensions treated as videos during library scans.",
   "Image extensions": "File extensions treated as images during library scans.",
   "Gallery extensions": "Archive or gallery file extensions discovered during scans.",
+  "Audio extensions": "File extensions treated as audio during library scans.",
+  "Text extensions": "File extensions treated as text documents during library scans.",
   "Calculate MD5 checksums during scan": "Computes MD5 hashes while scanning so exact duplicate checks have stable file fingerprints.",
   "Exclude patterns": "Path fragments or glob-like patterns ignored during library scans.",
   "Excluded image patterns": "Image-specific path patterns ignored during scans.",

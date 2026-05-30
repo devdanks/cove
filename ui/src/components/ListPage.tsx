@@ -1515,7 +1515,7 @@ export function ListPage({
   );
 }
 
-function PaginationControls({ page, totalPages, goTo }: { page: number; totalPages: number; goTo: (p: number) => void }) {
+export function PaginationControls({ page, totalPages, goTo }: { page: number; totalPages: number; goTo: (p: number) => void }) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState(String(page));
 

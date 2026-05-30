@@ -745,7 +745,7 @@ public class ScenesController(ISceneRepository sceneRepo, Data.CoveContext db, M
             [])).ToList(),
         MapWholeSceneGroups(s),
         s.SceneGalleries.Where(sg => sg.Gallery != null).Select(sg => new GallerySummaryDto(sg.Gallery!.Id, sg.Gallery.Title, sg.Gallery.Date?.ToString("yyyy-MM-dd"))).ToList(),
-        [],
+        s.RemoteIds.Select(remoteId => new SceneRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
         customFieldValues,
         s.CreatedAt.ToString("o"), s.UpdatedAt.ToString("o"),
         ParentSceneId: s.ParentSceneId,

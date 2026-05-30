@@ -126,16 +126,28 @@ public class MetadataController(
             var allowNonSceneWork = !hasSceneSelection || hasPathSelection;
             var generateNonSceneMd5 = opts?.Md5 == true && allowNonSceneWork;
 
+            var sceneWorkRequested = hasSceneSelection
+                || opts?.Thumbnails == true
+                || opts?.Previews == true
+                || opts?.Sprites == true
+                || opts?.SegmentThumbnails == true
+                || opts?.SegmentPreviews == true
+                || opts?.Markers == true
+                || opts?.Phashes == true
+                || opts?.Md5 == true;
+
             var scenes = hasSceneSelection
                 ? await dbCtx.Scenes.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).Where(s => selectedSceneIds!.Contains(s.Id)).AsSplitQuery().ToListAsync(ct)
-                : await dbCtx.Scenes.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).AsSplitQuery().ToListAsync(ct);
+                : sceneWorkRequested
+                    ? await dbCtx.Scenes.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).AsSplitQuery().ToListAsync(ct)
+                    : new List<Scene>();
 
             if (!hasSceneSelection && opts?.Paths is { Count: > 0 } paths)
             {
                 var filterPaths = NormalizeFilterPaths(paths);
                 scenes = scenes.Where(s =>
                 {
-                    var file = s.Files.FirstOrDefault();
+                    var file = s.Files.OrderBy(f => f.Id).FirstOrDefault();
                     if (file == null) return false;
                     var filePath = Path.Combine(file.ParentFolder?.Path ?? "", file.Basename);
                     return IsUnderAnyPath(filePath, filterPaths);
@@ -145,14 +157,14 @@ public class MetadataController(
             // Build work items (read-only snapshot) so we don't touch DbContext from parallel threads
             var workItems = scenes.Select(s =>
             {
-                var file = s.Files.FirstOrDefault();
+                var file = s.Files.OrderBy(f => f.Id).FirstOrDefault();
                 return new
                 {
                     Scene = s,
                     File = file,
                     Path = file != null ? Path.Combine(file.ParentFolder?.Path ?? "", file.Basename) : "",
-                    HasPhash = file?.Fingerprints.Any(f => f.Type == "phash" && !string.IsNullOrWhiteSpace(f.Value)) ?? false,
-                    HasMd5 = file?.Fingerprints.Any(f => f.Type == "md5" && !string.IsNullOrWhiteSpace(f.Value)) ?? false,
+                    HasPhash = s.Files.Any(f => f.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value))),
+                    HasMd5 = s.Files.Any(f => f.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value))),
                 };
             }).Where(w => w.File != null).ToList();
 
@@ -214,13 +226,11 @@ public class MetadataController(
 
                 if (opts?.Thumbnails == true)
                 {
-                    if (opts?.Overwrite == true)
-                    {
-                        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(BitConverter.GetBytes(item.Scene.Id)));
-                        var thumbPath = Path.Combine(config.GeneratedPath, "screenshots", hash[..2], $"{item.Scene.Id}.jpg");
-                        if (System.IO.File.Exists(thumbPath)) System.IO.File.Delete(thumbPath);
-                    }
-                    await thumbnailService.GenerateSceneThumbnailAsync(item.Scene.Id, null, token);
+                    var thumbPath = thumbnailService.GetThumbnailPathForScene(item.Scene.Id);
+                    var thumbExists = System.IO.File.Exists(thumbPath);
+                    if (opts?.Overwrite == true && thumbExists) System.IO.File.Delete(thumbPath);
+                    if (opts?.Overwrite == true || !thumbExists)
+                        await thumbnailService.GenerateSceneThumbnailAsync(item.Scene.Id, null, token);
                 }
 
                 if (opts?.Previews == true)
@@ -333,6 +343,12 @@ public class MetadataController(
                             : imageFile.Basename;
                         return IsUnderAnyPath(imagePath, filterPaths);
                     }).ToList();
+                }
+
+                if (opts?.ImageIds is { Count: > 0 } imageIdFilter)
+                {
+                    var imageIdSet = imageIdFilter.ToHashSet();
+                    imageFiles = imageFiles.Where(imageFile => imageFile.ImageId.HasValue && imageIdSet.Contains(imageFile.ImageId.Value)).ToList();
                 }
 
                 var imageTotal = imageFiles.Count;
@@ -462,6 +478,12 @@ public class MetadataController(
                     }).ToList();
                 }
 
+                if (opts?.AudioIds is { Count: > 0 } audioIdFilter)
+                {
+                    var audioIdSet = audioIdFilter.ToHashSet();
+                    audioFiles = audioFiles.Where(audioFile => audioFile.AudioId.HasValue && audioIdSet.Contains(audioFile.AudioId.Value)).ToList();
+                }
+
                 var audioTotal = audioFiles.Count;
                 var audioProcessed = 0;
 
@@ -512,6 +534,12 @@ public class MetadataController(
                             : textFile.Basename;
                         return IsUnderAnyPath(textPath, filterPaths);
                     }).ToList();
+                }
+
+                if (opts?.TextIds is { Count: > 0 } textIdFilter)
+                {
+                    var textIdSet = textIdFilter.ToHashSet();
+                    textFiles = textFiles.Where(textFile => textFile.TextDocumentId.HasValue && textIdSet.Contains(textFile.TextDocumentId.Value)).ToList();
                 }
 
                 var textTotal = textFiles.Count;

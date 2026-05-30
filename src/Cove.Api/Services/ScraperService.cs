@@ -2191,6 +2191,12 @@ public class ScraperService
                     case "parseDate":
                         current = ApplyParseDate(current, stepValue?.ToString());
                         break;
+                    case "feetToCm":
+                        current = ApplyFeetToCm(current);
+                        break;
+                    case "lbToKg":
+                        current = ApplyLbToKg(current);
+                        break;
                     case "map":
                         current = ApplyMap(current, stepValue);
                         break;
@@ -2225,12 +2231,144 @@ public class ScraperService
 
     private static string ApplyParseDate(string value, string? format)
     {
-        if (!string.IsNullOrWhiteSpace(format) && DateTime.TryParseExact(value, format, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var exactDate))
-            return exactDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var trimmed = value?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
+            return value ?? string.Empty;
 
-        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedDate)
+        if (!string.IsNullOrWhiteSpace(format))
+        {
+            var fmt = format.Trim();
+
+            // stash special-case formats: the raw value is an epoch timestamp.
+            if (string.Equals(fmt, "unix", StringComparison.OrdinalIgnoreCase))
+            {
+                var match = Regex.Match(trimmed, @"-?\d+");
+                if (match.Success && long.TryParse(match.Value, out var seconds))
+                    return DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+            else if (string.Equals(fmt, "unixmilli", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fmt, "unixmillis", StringComparison.OrdinalIgnoreCase))
+            {
+                var match = Regex.Match(trimmed, @"-?\d+");
+                if (match.Success && long.TryParse(match.Value, out var millis))
+                    return DateTimeOffset.FromUnixTimeMilliseconds(millis).UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                // stash uses Go reference-time layouts (e.g. "2006-01-02", "January 2, 2006").
+                // Convert to an equivalent .NET custom format before exact parsing.
+                var netFormat = ConvertGoLayoutToNetFormat(fmt);
+                if (!string.IsNullOrEmpty(netFormat)
+                    && DateTime.TryParseExact(trimmed, netFormat, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var exactDate))
+                    return exactDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+                // Tolerate yml that already used a .NET-style layout.
+                if (DateTime.TryParseExact(trimmed, fmt, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var rawDate))
+                    return rawDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+        }
+
+        return DateTime.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedDate)
             ? parsedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-            : value;
+            : value ?? string.Empty;
+    }
+
+    // Go reference time is "Mon Jan 2 15:04:05 MST 2006". Each canonical token maps
+    // to a .NET custom date/time specifier. Ordered longest-first so multi-character
+    // tokens win before their single-character substrings during scanning.
+    private static readonly (string Go, string Net)[] GoLayoutTokens = new[]
+    {
+        (".000000", ".ffffff"),
+        ("January", "MMMM"),
+        ("Z07:00", "K"),
+        ("Monday", "dddd"),
+        ("-07:00", "zzz"),
+        (".000", ".fff"),
+        ("Z0700", "K"),
+        ("-0700", "zzz"),
+        ("2006", "yyyy"),
+        ("Jan", "MMM"),
+        ("Mon", "ddd"),
+        ("MST", ""),
+        ("_2", "d"),
+        ("06", "yy"),
+        ("01", "MM"),
+        ("02", "dd"),
+        ("03", "hh"),
+        ("04", "mm"),
+        ("05", "ss"),
+        ("15", "HH"),
+        ("PM", "tt"),
+        ("pm", "tt"),
+        ("1", "M"),
+        ("2", "d"),
+        ("3", "h"),
+        ("4", "m"),
+        ("5", "s"),
+    };
+
+    private static readonly (string Go, string Net)[] GoLayoutTokensOrdered =
+        GoLayoutTokens.OrderByDescending(t => t.Go.Length).ToArray();
+
+    private static string ConvertGoLayoutToNetFormat(string goLayout)
+    {
+        var sb = new StringBuilder();
+        var i = 0;
+        while (i < goLayout.Length)
+        {
+            var matched = false;
+            foreach (var (go, net) in GoLayoutTokensOrdered)
+            {
+                if (i + go.Length <= goLayout.Length
+                    && string.CompareOrdinal(goLayout, i, go, 0, go.Length) == 0)
+                {
+                    sb.Append(net);
+                    i += go.Length;
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (matched)
+                continue;
+
+            var c = goLayout[i];
+            // Escape literal letters so .NET does not treat them as format specifiers.
+            if (char.IsLetter(c))
+                sb.Append('\\').Append(c);
+            else
+                sb.Append(c);
+            i++;
+        }
+
+        return sb.ToString();
+    }
+
+    // stash feetToCm: "5'10\"" / "5 ft 10 in" -> centimetres (rounded integer).
+    private static string ApplyFeetToCm(string value)
+    {
+        var numbers = Regex.Matches(value, @"\d+(?:\.\d+)?")
+            .Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture))
+            .ToList();
+        if (numbers.Count == 0)
+            return value;
+
+        var feet = numbers[0];
+        var inches = numbers.Count > 1 ? numbers[1] : 0;
+        var cm = (feet * 30.48) + (inches * 2.54);
+        return Math.Round(cm, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture);
+    }
+
+    // stash lbToKg: "150 lbs" -> kilograms (rounded integer).
+    private static string ApplyLbToKg(string value)
+    {
+        var match = Regex.Match(value, @"\d+(?:\.\d+)?");
+        if (!match.Success)
+            return value;
+
+        var pounds = double.Parse(match.Value, CultureInfo.InvariantCulture);
+        var kg = pounds * 0.45359237;
+        return Math.Round(kg, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture);
     }
 
     private static string ApplyMap(string value, object? stepValue)

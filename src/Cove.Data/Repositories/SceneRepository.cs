@@ -124,6 +124,7 @@ public class SceneRepository : ISceneRepository
             .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
             .Include(s => s.GroupItems).ThenInclude(item => item.Group)
             .Include(s => s.Files)
+            .Include(s => s.RemoteIds)
             .AsSplitQuery()
             .Where(s => pagedIds.Contains(s.Id))
             .AsNoTracking()

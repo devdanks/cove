@@ -1,5 +1,12 @@
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Heart } from "lucide-react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Heart, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+
+// Cove standard EntityHero action button styles. Use these for favorite/organized/edit/overflow
+// so corner rounding, size, and border treatment stay consistent across all EntityHero pages.
+export const HERO_ACTION_BUTTON_CLASS =
+  "inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:border-accent hover:text-foreground disabled:cursor-not-allowed";
+export const HERO_PRIMARY_ACTION_BUTTON_CLASS =
+  "inline-flex h-10 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed";
 
 export interface EntityHeroCount {
   key: string;
@@ -17,11 +24,15 @@ export interface EntityHeroLayoutProps {
   backgroundOverlayClassName?: string;
   imageUrl?: string | null;
   imageAlt?: string;
+  alternateImageUrl?: string | null;
+  alternateImageAlt?: string;
+  primaryImageLabel?: string;
+  alternateImageLabel?: string;
   imageContainerClassName?: string;
   imageClassName?: string;
   imageFallbackClassName?: string;
   imageFallback?: ReactNode;
-  onImageClick?: () => void;
+  onImageClick?: (imageSlot?: "primary" | "alternate") => void;
   imageActionTitle?: string;
   imageCarouselUrls?: string[];
   imageCarouselIndex?: number;
@@ -59,6 +70,10 @@ export function EntityHeroLayout({
   backgroundOverlayClassName,
   imageUrl,
   imageAlt,
+  alternateImageUrl,
+  alternateImageAlt,
+  primaryImageLabel = "front cover",
+  alternateImageLabel = "back cover",
   imageContainerClassName,
   imageClassName,
   imageFallbackClassName,
@@ -100,17 +115,21 @@ export function EntityHeroLayout({
   const hasCarousel = carouselUrls.length > 1 && onImageCarouselIndexChange != null;
   const boundedCarouselIndex = carouselUrls.length > 0 ? Math.min(Math.max(imageCarouselIndex, 0), carouselUrls.length - 1) : 0;
   const resolvedImageUrl = carouselUrls[boundedCarouselIndex] ?? imageUrl;
-  const [optimisticOrganized, setOptimisticOrganized] = useState<boolean | null>(null);
-  const displayedOrganized = typeof organized === "boolean" ? optimisticOrganized ?? organized : organized;
+  const hasAlternateImage = !hasCarousel && Boolean(alternateImageUrl);
+  const [showAlternateImage, setShowAlternateImage] = useState(false);
+  const displayedImageSlot = hasAlternateImage && showAlternateImage ? "alternate" : "primary";
+  const displayedImageUrl = displayedImageSlot === "alternate" ? alternateImageUrl : resolvedImageUrl;
+  const displayedImageAlt = displayedImageSlot === "alternate" ? alternateImageAlt ?? imageAlt : imageAlt;
+  const displayedOrganized = organized;
 
   useEffect(() => {
-    if (optimisticOrganized !== null && organized === optimisticOrganized) {
-      setOptimisticOrganized(null);
+    if (!hasAlternateImage && showAlternateImage) {
+      setShowAlternateImage(false);
     }
-  }, [optimisticOrganized, organized]);
+  }, [hasAlternateImage, showAlternateImage]);
 
   const favoriteTitle = favorite ? "Remove favorite" : "Favorite";
-  const heroActionClassName = "inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:border-accent hover:text-foreground disabled:cursor-not-allowed";
+  const heroActionClassName = HERO_ACTION_BUTTON_CLASS;
   const favoriteAction = typeof favorite === "boolean" ? (
     onFavoriteToggle ? (
       <button
@@ -135,9 +154,7 @@ export function EntityHeroLayout({
       <button
         type="button"
         onClick={() => {
-          const nextOrganized = !displayedOrganized;
-          setOptimisticOrganized(nextOrganized);
-          onOrganizedToggle(nextOrganized);
+          onOrganizedToggle(!organized);
         }}
         disabled={organizedPending}
         aria-pressed={displayedOrganized}
@@ -155,11 +172,14 @@ export function EntityHeroLayout({
   const hasHeaderActions = Boolean(organizedAction || favoriteAction || actions);
   const imageContent = (
     <>
-      {resolvedImageUrl ? (
+      {displayedImageUrl ? (
         <img
-          src={resolvedImageUrl}
-          alt={imageAlt ?? ""}
+          src={displayedImageUrl}
+          alt={displayedImageAlt ?? ""}
           className={resolvedImageClassName}
+          onLoad={(event) => {
+            event.currentTarget.style.display = "";
+          }}
           onError={(e) => {
             (e.target as HTMLImageElement).style.display = "none";
             const fallback = (e.target as HTMLImageElement).nextElementSibling as HTMLElement | null;
@@ -170,7 +190,7 @@ export function EntityHeroLayout({
       <div
         className={[
           resolvedFallbackClassName,
-          resolvedImageUrl ? "hidden" : "flex",
+          displayedImageUrl ? "hidden" : "flex",
         ].join(" ")}
       >
         {imageFallback}
@@ -208,8 +228,23 @@ export function EntityHeroLayout({
           </span>
         </>
       ) : null}
+      {hasAlternateImage ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setShowAlternateImage((current) => !current);
+          }}
+          className="absolute bottom-2 right-2 z-30 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/70 text-white shadow-lg transition hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-accent"
+          aria-label={showAlternateImage ? `Show ${primaryImageLabel}` : `Show ${alternateImageLabel}`}
+          title={showAlternateImage ? `Show ${primaryImageLabel}` : `Show ${alternateImageLabel}`}
+        >
+          <RefreshCw className="h-5 w-5" />
+        </button>
+      ) : null}
       {onImageClick ? (
-        <span className="pointer-events-none absolute inset-x-3 bottom-3 rounded-lg bg-black/70 px-3 py-2 text-center text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        <span className={`pointer-events-none absolute inset-x-3 ${hasAlternateImage ? "bottom-14" : "bottom-3"} rounded-lg bg-black/70 px-3 py-2 text-center text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100`}>
           {imageActionTitle}
         </span>
       ) : null}
@@ -246,14 +281,14 @@ export function EntityHeroLayout({
           </div>
 
           <div className={resolvedHeroRowClassName}>
-            {onImageClick && !hasCarousel ? (
-              <button type="button" onClick={onImageClick} title={imageActionTitle} className={`${resolvedImageContainerClassName} group focus:outline-none focus:ring-2 focus:ring-accent`}>
+            {onImageClick && !hasCarousel && !hasAlternateImage ? (
+              <button type="button" onClick={() => onImageClick(displayedImageSlot)} title={imageActionTitle} className={`${resolvedImageContainerClassName} group focus:outline-none focus:ring-2 focus:ring-accent`}>
                 {imageContent}
               </button>
             ) : (
               <div className={`${resolvedImageContainerClassName} ${onImageClick ? "group focus-within:ring-2 focus-within:ring-accent" : ""}`}>
                 {onImageClick ? (
-                  <button type="button" onClick={onImageClick} title={imageActionTitle} aria-label={imageActionTitle} className="absolute inset-0 z-10 focus:outline-none" />
+                  <button type="button" onClick={() => onImageClick(displayedImageSlot)} title={imageActionTitle} aria-label={imageActionTitle} className="absolute inset-0 z-10 focus:outline-none" />
                 ) : null}
                 {imageContent}
               </div>

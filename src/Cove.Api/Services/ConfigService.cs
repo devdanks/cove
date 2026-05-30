@@ -79,6 +79,7 @@ public class ConfigService
             CreateImageClipsFromVideos = cfg.CreateImageClipsFromVideos,
             GalleryCoverRegex = cfg.GalleryCoverRegex,
             DeleteGeneratedDefault = cfg.DeleteGeneratedDefault,
+            LogLevel = cfg.LogLevel,
             Interface = new InterfaceConfigDto
             {
                 Language = cfg.Interface.Language,
@@ -303,6 +304,8 @@ public class ConfigService
         cfg.CreateImageClipsFromVideos = dto.CreateImageClipsFromVideos;
         cfg.GalleryCoverRegex = string.IsNullOrWhiteSpace(dto.GalleryCoverRegex) ? cfg.GalleryCoverRegex : dto.GalleryCoverRegex.Trim();
         cfg.DeleteGeneratedDefault = dto.DeleteGeneratedDefault;
+        if (!string.IsNullOrWhiteSpace(dto.LogLevel))
+            cfg.LogLevel = dto.LogLevel.Trim();
 
         cfg.Interface.Language = dto.Interface.Language;
         cfg.Interface.MenuItems = NormalizeMenuItems(dto.Interface.MenuItems);
@@ -442,7 +445,8 @@ public class ConfigService
             return [.. InterfaceConfig.DefaultMenuItems];
 
         if (MatchesMenuItems(normalizedItems, InterfaceConfig.LegacyDefaultMenuItems)
-            || MatchesMenuItems(normalizedItems, InterfaceConfig.SegmentsDefaultMenuItems))
+            || MatchesMenuItems(normalizedItems, InterfaceConfig.SegmentsDefaultMenuItems)
+            || MatchesMenuItems(normalizedItems, InterfaceConfig.FacesDefaultMenuItems))
             return [.. InterfaceConfig.DefaultMenuItems];
 
         return normalizedItems;
