@@ -136,7 +136,8 @@ public class EntityDetailCountControllerTests
         var controller = new GalleriesController(
             new GalleryRepository(context),
             context,
-            null!)
+            new NoOpUserEngagementService(),
+            new NoOpScanService())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

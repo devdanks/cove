@@ -42,6 +42,8 @@ const {
     deleteAudioImage: vi.fn(),
     uploadTextImage: vi.fn(),
     deleteTextImage: vi.fn(),
+    studioImageUrl: vi.fn((id: number) => `/studio-${id}.jpg`),
+    groupFrontImageUrl: vi.fn((id: number) => `/group-${id}.jpg`),
   },
   mockPlayback: {
     recordIntervals: vi.fn(() => Promise.resolve()),

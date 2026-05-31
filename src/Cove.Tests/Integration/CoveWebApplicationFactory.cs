@@ -24,6 +24,8 @@ public sealed class CoveWebApplicationFactory : WebApplicationFactory<Program>
 {
     public const int TestUserId = 1;
 
+    private static readonly object ServerStartEnvironmentLock = new();
+
     private readonly string _environmentName;
     private readonly int _port = ReserveLoopbackPort();
     private readonly string _connectionString = $"Data Source=file:cove-{Guid.NewGuid():N}?mode=memory&cache=shared";
@@ -144,16 +146,36 @@ public sealed class CoveWebApplicationFactory : WebApplicationFactory<Program>
         if (_serverStarted)
             return;
 
-        StartServer();
-        var addresses = Services.GetRequiredService<IServer>()
-            .Features
-            .Get<IServerAddressesFeature>()?
-            .Addresses;
-        var address = addresses?.LastOrDefault();
-        if (!string.IsNullOrWhiteSpace(address))
-            ClientOptions.BaseAddress = new Uri(address);
+        lock (ServerStartEnvironmentLock)
+        {
+            if (_serverStarted)
+                return;
 
-        _serverStarted = true;
+            var previousAspNetEnvironment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            var previousDotNetEnvironment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+
+            try
+            {
+                Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", _environmentName);
+                Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", _environmentName);
+                StartServer();
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousAspNetEnvironment);
+                Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", previousDotNetEnvironment);
+            }
+
+            var addresses = Services.GetRequiredService<IServer>()
+                .Features
+                .Get<IServerAddressesFeature>()?
+                .Addresses;
+            var address = addresses?.LastOrDefault();
+            if (!string.IsNullOrWhiteSpace(address))
+                ClientOptions.BaseAddress = new Uri(address);
+
+            _serverStarted = true;
+        }
     }
 }
 

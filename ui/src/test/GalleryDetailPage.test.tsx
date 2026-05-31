@@ -107,6 +107,9 @@ vi.mock("../components/EntityCards", () => ({
   PerformerTile: ({ performer, onClick }: { performer: { name: string }; onClick: () => void }) => (
     <button onClick={onClick}>{performer.name}</button>
   ),
+  PerformerBadgeRow: ({ performers }: { performers: Array<{ name: string }> }) => (
+    <div>{performers.map((performer) => performer.name).join(", ")}</div>
+  ),
 }));
 
 vi.mock("../components/QuickViewDialog", () => ({

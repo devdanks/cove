@@ -235,7 +235,17 @@ public class FileOpsController(CoveContext db, ILogger<FileOpsController> logger
         {
             if (normalized.Length > 2 && normalized[1] == ':' && normalized[2] != '\\')
             {
-                normalized = normalized[..2] + Path.DirectorySeparatorChar + normalized[2..].TrimStart('\\');
+                var tail = normalized[2..].TrimStart('\\');
+                var separatorIndex = tail.IndexOf(Path.DirectorySeparatorChar);
+                if (separatorIndex >= 0)
+                {
+                    var root = Path.GetPathRoot(Environment.CurrentDirectory) ?? string.Concat(normalized[0], ':', Path.DirectorySeparatorChar);
+                    normalized = Path.Combine(root, tail[(separatorIndex + 1)..]);
+                }
+                else
+                {
+                    normalized = normalized[..2] + Path.DirectorySeparatorChar + tail;
+                }
             }
         }
         return Path.GetFullPath(normalized);

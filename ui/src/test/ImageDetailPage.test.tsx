@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageDetailPage } from "../pages/ImageDetailPage";
 
-const { mockImages, mockFaces, mockPlayback, mockSetFavorite, mockSetRating, mockGoBack } = vi.hoisted(() => ({
+const { mockImages, mockFaces, mockEntityImages, mockPlayback, mockSetFavorite, mockSetRating, mockGoBack } = vi.hoisted(() => ({
   mockImages: {
     get: vi.fn(),
     delete: vi.fn(),
@@ -14,6 +14,9 @@ const { mockImages, mockFaces, mockPlayback, mockSetFavorite, mockSetRating, moc
   },
   mockFaces: {
     imageFaces: vi.fn(),
+  },
+  mockEntityImages: {
+    studioImageUrl: vi.fn((id: number) => `/studio-${id}.jpg`),
   },
   mockPlayback: {
     recordIntervals: vi.fn(() => Promise.resolve()),
@@ -26,6 +29,7 @@ const { mockImages, mockFaces, mockPlayback, mockSetFavorite, mockSetRating, moc
 vi.mock("../api/client", () => ({
   images: mockImages,
   faces: mockFaces,
+  entityImages: mockEntityImages,
   playback: mockPlayback,
 }));
 
