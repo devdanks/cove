@@ -33,6 +33,7 @@ import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
 import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
+import { isProtectedBuiltInGroup } from "../components/DynamicGroupFilterEditor";
 
 interface Props {
   id: number;
@@ -129,7 +130,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const canReadGroups = canReadEntity("group", hasPermission);
   const canReadScenes = canReadEntity("scene", hasPermission);
   const canWriteGroup = canWriteEntity("group", hasPermission);
-  const canDeleteGroup = canDeleteEntity("group", hasPermission);
+  const canDeleteGroup = canDeleteEntity("group", hasPermission) && !isProtectedBuiltInGroup(group?.querySourceKey);
   const canReadStudios = canReadEntity("studio", hasPermission);
   const canReadTags = canReadEntity("tag", hasPermission);
   const canEngageGroup = canReadGroups && (user?.kind === "user" || user?.kind === "system");

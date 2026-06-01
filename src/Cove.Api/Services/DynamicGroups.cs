@@ -58,6 +58,11 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
         ("Continue Watching", ContinueWatchingSourceKey),
     ];
 
+    /// <summary>Source keys for the system-managed dynamic groups that must not be deleted.</summary>
+    public static bool IsProtectedBuiltInGroup(string? querySourceKey)
+        => !string.IsNullOrWhiteSpace(querySourceKey)
+            && BuiltInGroups.Any(builtIn => string.Equals(builtIn.SourceKey, querySourceKey, StringComparison.OrdinalIgnoreCase));
+
     private readonly Dictionary<string, IDynamicGroupSource> _sources = sources.ToDictionary(source => source.Key, StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<DynamicGroupSourceDto> GetSources()

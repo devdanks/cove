@@ -844,7 +844,7 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
         )}
         {scene.studioName && scene.studioId && !selecting && (
           <div className="absolute top-0 right-0 p-1 z-[5]">
-            <img src={entityImages.studioImageUrl(scene.studioId)} alt={scene.studioName} className="max-h-8 max-w-[120px] object-contain drop-shadow-md"
+            <img src={entityImages.studioImageUrl(scene.studioId)} alt={scene.studioName} className="h-8 w-auto max-w-[120px] object-contain drop-shadow-md"
               onError={(e) => { const el = e.target as HTMLImageElement; el.style.display = "none"; if (el.nextElementSibling) (el.nextElementSibling as HTMLElement).style.display = ""; }} />
             <span className="text-xs font-medium text-white bg-black/60 px-1.5 py-0.5 rounded" style={{ display: "none" }}>{scene.studioName}</span>
           </div>

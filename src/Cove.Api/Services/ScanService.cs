@@ -539,6 +539,15 @@ public class ScanService(
                 .Where(file => file.SceneId.HasValue && file.SceneId.Value != 0)
                 .GroupBy(file => file.SceneId)
                 .Select(group => group.First())
+                .Where(file =>
+                {
+                    var sceneId = file.SceneId!.Value;
+                    return (options.GenerateCovers && !File.Exists(thumbnailService.GetThumbnailPathForScene(sceneId)))
+                        || (options.GeneratePreviews && !File.Exists(thumbnailService.GetPreviewPath(sceneId)))
+                        || (options.GenerateSprites && (!File.Exists(thumbnailService.GetSpritePath(sceneId)) || !File.Exists(thumbnailService.GetSpriteVttPath(sceneId))))
+                        || (options.GeneratePhashes && !file.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value)))
+                        || (options.GenerateMd5 && !file.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value)));
+                })
                 .ToList();
 
             var total = Math.Max(sceneFiles.Count, 1);
@@ -554,17 +563,26 @@ public class ScanService(
 
                 if (options.GenerateCovers)
                 {
-                    await thumbnailService.GenerateSceneThumbnailAsync(sceneId, null, token);
+                    var thumbnailPath = thumbnailService.GetThumbnailPathForScene(sceneId);
+                    if (!File.Exists(thumbnailPath))
+                        await thumbnailService.GenerateSceneThumbnailAsync(sceneId, null, token);
                 }
                 if (options.GeneratePreviews)
                 {
-                    await thumbnailService.GenerateScenePreviewAsync(sceneId, token);
+                    var previewPath = thumbnailService.GetPreviewPath(sceneId);
+                    if (!File.Exists(previewPath))
+                        await thumbnailService.GenerateScenePreviewAsync(sceneId, token);
                 }
                 if (options.GenerateSprites)
                 {
-                    await thumbnailService.GenerateSceneSpriteAsync(sceneId, token);
+                    var spritePath = thumbnailService.GetSpritePath(sceneId);
+                    var spriteVttPath = thumbnailService.GetSpriteVttPath(sceneId);
+                    if (!File.Exists(spritePath) || !File.Exists(spriteVttPath))
+                        await thumbnailService.GenerateSceneSpriteAsync(sceneId, token);
                 }
-                if (options.GeneratePhashes && sceneFile.ParentFolder != null)
+                if (options.GeneratePhashes
+                    && sceneFile.ParentFolder != null
+                    && !sceneFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
                     var filePath = Path.Combine(sceneFile.ParentFolder.Path, sceneFile.Basename);
                     var phash = await fingerprintService.ComputeVideoPhashAsync(filePath, sceneFile.Duration, token);
@@ -589,7 +607,9 @@ public class ScanService(
                         await innerDb.SaveChangesAsync(token);
                     }
                 }
-                if (options.GenerateMd5 && sceneFile.ParentFolder != null)
+                if (options.GenerateMd5
+                    && sceneFile.ParentFolder != null
+                    && !sceneFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
                     var filePath = Path.Combine(sceneFile.ParentFolder.Path, sceneFile.Basename);
                     var md5 = await fingerprintService.ComputeMd5Async(filePath, token);
@@ -651,10 +671,11 @@ public class ScanService(
 
                 if (options.GenerateImageThumbnails && imageFile.ImageId.HasValue)
                 {
-                    await thumbnailService.GenerateImageThumbnailAsync(imageFile.ImageId.Value, ct: token);
+                    await thumbnailService.GenerateImageThumbnailAsync(imageFile.ImageId.Value, overwrite: false, ct: token);
                 }
 
-                if (options.GenerateImagePhashes)
+                if (options.GenerateImagePhashes
+                    && !imageFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
                     var filePath = Path.Combine(imageFile.ParentFolder.Path, imageFile.Basename);
                     var phash = await fingerprintService.ComputeImagePhashAsync(filePath, token);
@@ -680,7 +701,8 @@ public class ScanService(
                     }
                 }
 
-                if (options.GenerateMd5)
+                if (options.GenerateMd5
+                    && !imageFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
                     var filePath = Path.Combine(imageFile.ParentFolder.Path, imageFile.Basename);
                     var md5 = await fingerprintService.ComputeMd5Async(filePath, token);
@@ -741,7 +763,8 @@ public class ScanService(
                     return;
 
                 var filePath = Path.Combine(audioFile.ParentFolder.Path, audioFile.Basename);
-                if (options.GenerateAudioPhashes)
+                if (options.GenerateAudioPhashes
+                    && !audioFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
                     var phash = await fingerprintService.ComputeAudioPhashAsync(filePath, token);
                     if (!string.IsNullOrWhiteSpace(phash))
@@ -755,7 +778,8 @@ public class ScanService(
                     }
                 }
 
-                if (options.GenerateMd5)
+                if (options.GenerateMd5
+                    && !audioFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
                     var md5 = await fingerprintService.ComputeMd5Async(filePath, token);
                     if (!string.IsNullOrWhiteSpace(md5))
@@ -804,7 +828,8 @@ public class ScanService(
                     return;
 
                 var filePath = Path.Combine(textFile.ParentFolder.Path, textFile.Basename);
-                if (options.GenerateTextPhashes)
+                if (options.GenerateTextPhashes
+                    && !textFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
                     var phash = await fingerprintService.ComputeTextPhashAsync(filePath, token);
                     if (!string.IsNullOrWhiteSpace(phash))
@@ -818,7 +843,8 @@ public class ScanService(
                     }
                 }
 
-                if (options.GenerateMd5)
+                if (options.GenerateMd5
+                    && !textFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
                     var md5 = await fingerprintService.ComputeMd5Async(filePath, token);
                     if (!string.IsNullOrWhiteSpace(md5))

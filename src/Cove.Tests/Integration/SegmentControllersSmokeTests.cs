@@ -155,7 +155,30 @@ public sealed class SegmentDisplayProfilesControllerSmokeTests
         listResponse.EnsureSuccessStatusCode();
         var profiles = await listResponse.Content.ReadApiJsonAsync<List<SegmentDisplayProfileDto>>();
         Assert.NotNull(profiles);
-        Assert.NotEmpty(profiles);
+        Assert.Equal(3, profiles.Count);
+        var globalDefaultProfile = Assert.Single(profiles, profile => profile.Name == "Default" && profile.UserId == null && profile.IsDefault);
+        var userDefaultProfile = Assert.Single(profiles, profile => profile.Name == "Default" && profile.UserId == CoveWebApplicationFactory.TestUserId && profile.IsDefault);
+        Assert.Single(profiles, profile => profile.Name == "Raw" && profile.UserId == null);
+
+        var globalRulesResponse = await client.GetAsync($"/api/segment-display-profiles/{globalDefaultProfile.Id}/rules");
+        globalRulesResponse.EnsureSuccessStatusCode();
+        var globalRules = await globalRulesResponse.Content.ReadApiJsonAsync<List<SegmentDisplayRuleDto>>();
+        Assert.NotNull(globalRules);
+        var globalDefaultRule = Assert.Single(globalRules);
+        Assert.Equal(SegmentHostType.Scene, globalDefaultRule.HostType);
+        Assert.True(globalDefaultRule.Visible);
+        Assert.Equal(10, globalDefaultRule.MinDurationSec);
+        Assert.Equal(8, globalDefaultRule.MergeGapSec);
+
+        var userRulesResponse = await client.GetAsync($"/api/segment-display-profiles/{userDefaultProfile.Id}/rules");
+        userRulesResponse.EnsureSuccessStatusCode();
+        var userRules = await userRulesResponse.Content.ReadApiJsonAsync<List<SegmentDisplayRuleDto>>();
+        Assert.NotNull(userRules);
+        var userDefaultRule = Assert.Single(userRules);
+        Assert.Equal(SegmentHostType.Scene, userDefaultRule.HostType);
+        Assert.True(userDefaultRule.Visible);
+        Assert.Equal(10, userDefaultRule.MinDurationSec);
+        Assert.Equal(8, userDefaultRule.MergeGapSec);
 
         var previewResponse = await client.PostAsJsonAsync("/api/segment-display-profiles/preview", new SegmentDisplayProfilePreviewRequestDto(
             sceneId,

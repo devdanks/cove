@@ -7,6 +7,8 @@ export interface Route {
   spanKey?: string;
   profileId?: number;
   derivedQueryDescriptor?: SegmentDerivedQueryDescriptor;
+  manualTopicId?: string;
+  manualSlideId?: string;
 }
 
 interface RouteHistoryEntry {
@@ -40,6 +42,14 @@ function parsePath(pathname: string, search?: string): Route {
     if (Number.isInteger(id) && id > 0) {
       return applyRouteSearch({ page: "compilation", id }, search);
     }
+  }
+
+  if (parts[0] === "manual") {
+    return applyRouteSearch({
+      page: "manual",
+      manualTopicId: parts.length > 1 ? decodeURIComponent(parts[1]) : undefined,
+      manualSlideId: parts.length > 2 ? decodeURIComponent(parts[2]) : undefined,
+    }, search);
   }
 
   const page = parts[0];
@@ -79,6 +89,15 @@ export function buildRoutePath(route: Route): string {
 
   if (route.page === "compilation" && route.id != null) {
     return `/compilation/${route.id}/play`;
+  }
+
+  if (route.page === "manual") {
+    const segments = ["manual"];
+    if (route.manualTopicId) {
+      segments.push(encodeURIComponent(route.manualTopicId));
+      if (route.manualSlideId) segments.push(encodeURIComponent(route.manualSlideId));
+    }
+    return `/${segments.join("/")}`;
   }
 
   if (route.id != null) {

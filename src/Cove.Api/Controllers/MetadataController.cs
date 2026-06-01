@@ -163,6 +163,10 @@ public class MetadataController(
                     Scene = s,
                     File = file,
                     Path = file != null ? Path.Combine(file.ParentFolder?.Path ?? "", file.Basename) : "",
+                    HasThumbnail = System.IO.File.Exists(thumbnailService.GetThumbnailPathForScene(s.Id)),
+                    HasPreview = System.IO.File.Exists(thumbnailService.GetPreviewPath(s.Id)),
+                    HasSprite = System.IO.File.Exists(thumbnailService.GetSpritePath(s.Id))
+                        && System.IO.File.Exists(thumbnailService.GetSpriteVttPath(s.Id)),
                     HasPhash = s.Files.Any(f => f.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value))),
                     HasMd5 = s.Files.Any(f => f.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value))),
                 };
@@ -179,7 +183,14 @@ public class MetadataController(
             var generateSceneMd5 = opts?.Md5 == true;
 
             workItems = workItems
-                .Where(item => generateSceneFiles
+                .Where(item => (generateSceneFiles && (
+                        overwrite
+                        || (opts?.Thumbnails == true && !item.HasThumbnail)
+                        || (opts?.Previews == true && !item.HasPreview)
+                        || (opts?.Sprites == true && !item.HasSprite)
+                        || opts?.SegmentThumbnails == true
+                        || opts?.SegmentPreviews == true
+                        || opts?.Markers == true))
                     || (generateScenePhashes && (overwrite || !item.HasPhash))
                     || (generateSceneMd5 && (overwrite || !item.HasMd5)))
                 .ToList();
@@ -235,24 +246,26 @@ public class MetadataController(
 
                 if (opts?.Previews == true)
                 {
+                    var previewPath = thumbnailService.GetPreviewPath(item.Scene.Id);
                     if (opts?.Overwrite == true)
                     {
-                        var previewPath = thumbnailService.GetPreviewPath(item.Scene.Id);
                         if (System.IO.File.Exists(previewPath)) System.IO.File.Delete(previewPath);
                     }
-                    await thumbnailService.GenerateScenePreviewAsync(item.Scene.Id, token);
+                    if (opts?.Overwrite == true || !System.IO.File.Exists(previewPath))
+                        await thumbnailService.GenerateScenePreviewAsync(item.Scene.Id, token);
                 }
 
                 if (opts?.Sprites == true)
                 {
+                    var spritePath = thumbnailService.GetSpritePath(item.Scene.Id);
+                    var vttPath = thumbnailService.GetSpriteVttPath(item.Scene.Id);
                     if (opts?.Overwrite == true)
                     {
-                        var spritePath = thumbnailService.GetSpritePath(item.Scene.Id);
-                        var vttPath = thumbnailService.GetSpriteVttPath(item.Scene.Id);
                         if (System.IO.File.Exists(spritePath)) System.IO.File.Delete(spritePath);
                         if (System.IO.File.Exists(vttPath)) System.IO.File.Delete(vttPath);
                     }
-                    await thumbnailService.GenerateSceneSpriteAsync(item.Scene.Id, token);
+                    if (opts?.Overwrite == true || !System.IO.File.Exists(spritePath) || !System.IO.File.Exists(vttPath))
+                        await thumbnailService.GenerateSceneSpriteAsync(item.Scene.Id, token);
                 }
 
                 if (generateSegmentThumbnails && segmentPreviewsBySceneId.TryGetValue(item.Scene.Id, out var segmentPreviews))

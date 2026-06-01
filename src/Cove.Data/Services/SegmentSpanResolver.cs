@@ -13,8 +13,11 @@ namespace Cove.Data.Services;
 
 public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccessor principalAccessor, IMemoryCache memoryCache)
 {
+    private const double BuiltInDefaultMergeGapSec = 8d;
+    private const double BuiltInDefaultMinDurationSec = 10d;
     private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> SceneCacheKeys = new();
     private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> ProfileCacheKeys = new();
+    private static readonly SemaphoreSlim ProfileInitializationLock = new(1, 1);
 
     public async Task<SceneResolvedSpansDto> ResolveSceneAsync(int sceneId, int? profileId, CancellationToken ct)
     {
@@ -210,45 +213,54 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
     public async Task<SegmentDisplayProfile> EnsureDefaultProfileAsync(int? userId, CancellationToken ct)
     {
-        await EnsureBuiltInProfilesAsync(ct);
-
-        if (userId.HasValue)
+        await ProfileInitializationLock.WaitAsync(ct);
+        try
         {
-            var userProfile = await db.SegmentDisplayProfiles.FirstOrDefaultAsync(
-                profile => profile.UserId == userId.Value && profile.IsDefault,
-                ct);
-            if (userProfile is not null)
-                return userProfile;
+            await EnsureBuiltInProfilesLockedAsync(ct);
 
-            userProfile = new SegmentDisplayProfile
+            if (userId.HasValue)
             {
-                Name = "Default",
-                Description = "User default segment display profile",
-                UserId = userId.Value,
-                IsDefault = true,
-                Version = 1,
-            };
+                var userProfile = await db.SegmentDisplayProfiles.FirstOrDefaultAsync(
+                    profile => profile.UserId == userId.Value && profile.IsDefault,
+                    ct);
+                if (userProfile is not null)
+                    return userProfile;
 
-            db.SegmentDisplayProfiles.Add(userProfile);
-            await db.SaveChangesAsync(ct);
-            return userProfile;
+                userProfile = new SegmentDisplayProfile
+                {
+                    Name = "Default",
+                    Description = "User default segment display profile",
+                    UserId = userId.Value,
+                    IsDefault = true,
+                    Version = 1,
+                };
+
+                db.SegmentDisplayProfiles.Add(userProfile);
+                db.SegmentDisplayRules.Add(CreateBuiltInDefaultRule(userProfile));
+                await db.SaveChangesAsync(ct);
+                return userProfile;
+            }
+
+            var globalDefault = await db.SegmentDisplayProfiles.FirstOrDefaultAsync(
+                profile => profile.UserId == null && profile.IsDefault,
+                ct);
+            if (globalDefault is not null)
+                return globalDefault;
+
+            throw new InvalidOperationException("No global segment display profile exists.");
         }
-
-        var globalDefault = await db.SegmentDisplayProfiles.FirstOrDefaultAsync(
-            profile => profile.UserId == null && profile.IsDefault,
-            ct);
-        if (globalDefault is not null)
-            return globalDefault;
-
-        throw new InvalidOperationException("No global segment display profile exists.");
+        finally
+        {
+            ProfileInitializationLock.Release();
+        }
     }
 
     private async Task<SegmentDisplayProfile> ResolveProfileAsync(int? profileId, CancellationToken ct)
     {
-        await EnsureBuiltInProfilesAsync(ct);
-
         if (profileId.HasValue)
         {
+            await EnsureBuiltInProfilesAsync(ct);
+
             var explicitProfile = await db.SegmentDisplayProfiles.AsNoTracking().FirstOrDefaultAsync(profile => profile.Id == profileId.Value, ct);
             if (explicitProfile is null)
                 throw new InvalidOperationException($"Segment display profile {profileId.Value} was not found.");
@@ -613,6 +625,19 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
     private async Task EnsureBuiltInProfilesAsync(CancellationToken ct)
     {
+        await ProfileInitializationLock.WaitAsync(ct);
+        try
+        {
+            await EnsureBuiltInProfilesLockedAsync(ct);
+        }
+        finally
+        {
+            ProfileInitializationLock.Release();
+        }
+    }
+
+    private async Task EnsureBuiltInProfilesLockedAsync(CancellationToken ct)
+    {
         var changed = false;
 
         var rawProfile = await db.SegmentDisplayProfiles.FirstOrDefaultAsync(
@@ -633,11 +658,11 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         }
 
         var defaultProfile = await db.SegmentDisplayProfiles.FirstOrDefaultAsync(
-            profile => profile.UserId == null && profile.IsDefault,
+            profile => profile.UserId == null && profile.IsSystem && profile.Name == "Default",
             ct);
         if (defaultProfile is null)
         {
-            db.SegmentDisplayProfiles.Add(new SegmentDisplayProfile
+            defaultProfile = new SegmentDisplayProfile
             {
                 Name = "Default",
                 Description = "Built-in default segment display profile",
@@ -645,13 +670,27 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
                 IsSystem = true,
                 IsDefault = true,
                 Version = 1,
-            });
+            };
+            db.SegmentDisplayProfiles.Add(defaultProfile);
+            db.SegmentDisplayRules.Add(CreateBuiltInDefaultRule(defaultProfile));
             changed = true;
         }
 
         if (changed)
             await db.SaveChangesAsync(ct);
     }
+
+    private static SegmentDisplayRule CreateBuiltInDefaultRule(SegmentDisplayProfile profile)
+        => new()
+        {
+            Profile = profile,
+            HostType = SegmentHostType.Scene,
+            Visible = true,
+            MinDurationSec = BuiltInDefaultMinDurationSec,
+            MergeGapSec = BuiltInDefaultMergeGapSec,
+            Priority = 1,
+            UserId = profile.UserId,
+        };
 
     private sealed record SpanBucketKey(
         string SourceKey,

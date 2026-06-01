@@ -500,7 +500,7 @@ function StudioRecommendationCard({ studio, engagement, onNavigate }: { studio: 
     >
       <div className="relative aspect-video bg-surface flex items-center justify-center p-4">
         {studio.imagePath ? (
-          <img src={studio.imagePath} alt={studio.name} className="max-w-full max-h-full object-contain" loading="lazy" />
+          <img src={studio.imagePath} alt={studio.name} className="h-full w-full object-contain" loading="lazy" />
         ) : (
           <Building2 className="w-10 h-10 text-muted" />
         )}

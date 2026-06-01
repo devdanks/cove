@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, Check, ChevronLeft, ChevronRight, Database, ExternalLink, FolderOpen, HelpCircle, ImageIcon, LayoutGrid, Play, RefreshCw, Settings, Tag, X } from "lucide-react";
+import { BookOpen, Check, ChevronLeft, ChevronRight, Database, ExternalLink, FolderOpen, HelpCircle, ImageIcon, LayoutGrid, Play, RefreshCw, Search, Settings, Tag, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { ExtensionTutorialTopic } from "../api/types";
 import { normalizeManualContext, uniqueManualContexts, type TutorialOpenRequest } from "./ManualContext";
@@ -8,6 +8,11 @@ export const TUTORIAL_STORYBOARD_STORAGE_KEY = "cove-tutorial-storyboard-complet
 export const TUTORIAL_STORYBOARD_EVENT = "cove:tutorial-storyboard-open";
 
 export type TutorialSlideMockKind = "tasks" | "feed" | "metadata" | "settings" | "scenePlayer" | "tagging" | "images" | "extension";
+type ManualBoxTone = "green" | "blue" | "purple" | "orange" | "pink" | "teal";
+type ManualBoxPointContent = {
+  tone?: ManualBoxTone;
+  text: string;
+};
 
 export type { TutorialOpenRequest } from "./ManualContext";
 
@@ -21,6 +26,7 @@ export interface TutorialStoryboardSlide {
   mockKind?: TutorialSlideMockKind;
   points?: string[];
   links?: { label: string; url: string }[];
+  topicLinks?: { label: string; topicId: string; slideId?: string }[];
 }
 
 export interface TutorialStoryboardTopic {
@@ -40,126 +46,720 @@ interface TutorialTopicEntry {
   depth: number;
 }
 
-const builtinTutorialTopics: TutorialStoryboardTopic[] = [
+export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
   {
     id: "getting-started",
     title: "Getting Started",
-    description: "The first pass through setup, scanning, browsing, and where to return later.",
+    description: "Get your library indexed, then learn where everything shows up.",
     pages: ["home", "settings"],
     order: 10,
     slides: [
       {
-        id: "tasks",
-        title: "Start with Scan & Generate",
-        caption: "Scan after adding folders, then generate the media Cove needs for fast browsing.",
-        mockKind: "tasks",
-        points: ["Scan reads library folders", "Generate creates previews and thumbnails", "Jobs keep running while you browse"],
+        id: "welcome",
+        title: "Welcome to Cove",
+        caption: "Cove organizes your media into scenes, images, performers, tags, and more so you can browse and find things fast.",
+        imageSrc: "/manual/screenshots/nav-bar.png",
+        imageAlt: "Cove top navigation bar with content type links",
+        points: [
+          "Everything starts by pointing Cove at the folders you already have",
+          "Once indexed, your media shows up across the content pages in the top bar",
+          "Open this manual any time from the Help button to come back to a topic",
+        ],
+        topicLinks: [
+          { label: "How list pages work", topicId: "list-pages" },
+          { label: "What the content types are for", topicId: "content-types" },
+        ],
       },
       {
-        id: "browse",
-        title: "Pick the right browsing shape",
-        caption: "Scenes and images can move between grid, feed, wall, and infinite sessions.",
-        mockKind: "feed",
-        points: ["Grid is quick scanning", "Feed shows context", "Infinite keeps long sessions smooth"],
+        id: "scan-generate",
+        title: "Run Scan, then Generate",
+        caption: "Scan finds your files and adds them to the library. Generate creates the previews, thumbnails, and sprites that make browsing smooth.",
+        imageSrc: "/manual/screenshots/settings-scan-generate.png",
+        imageAlt: "Scan and Generate controls in Settings",
+        points: [
+          "[green] Scan, run it first after adding a library folder",
+          "[blue] Generate, run it next to build previews and thumbnails",
+          "Both run in the background, so you can keep browsing while they work",
+        ],
       },
       {
-        id: "metadata",
-        title: "Clean metadata from the item",
-        caption: "Use Scrape or Identify from a detail page first, then scale the workflow up when the match looks right.",
-        mockKind: "metadata",
-        points: ["Review fields before applying", "Tune providers in Settings", "Batch only after a single-item check"],
+        id: "viewing-content",
+        title: "Where your content lives",
+        caption: "Each content type has its own page in the top navigation bar. Scenes, images, performers, studios, tags, and groups all have a home there.",
+        imageSrc: "/manual/screenshots/nav-bar.png",
+        imageAlt: "Cove top navigation bar with content type links",
+        points: [
+          "[green] the content pages you can jump between",
+          "Each page opens a list you can sort, filter, and switch views on",
+          "Click any item to open its detail page with playback and metadata",
+        ],
+        topicLinks: [
+          { label: "How list pages work", topicId: "list-pages" },
+        ],
       },
       {
-        id: "return",
-        title: "Replay this any time",
-        caption: "Open Help from the top bar to jump back into the manual for the page you are on.",
-        mockKind: "settings",
-        points: ["Topics can target specific pages", "Extensions can add their own topics", "Links can open a specific topic or slide"],
+        id: "whats-next",
+        title: "Where to go next",
+        caption: "Once your library is in, these are the areas most people explore first.",
+        imageSrc: "/manual/screenshots/nav-bar.png",
+        imageAlt: "Cove navigation bar to explore content pages next",
+        points: [
+          "Pull in titles, performers, and tags automatically with metadata collection",
+          "Add downloaders to bring new media into Cove",
+          "Learn the list pages once and every content page feels familiar",
+        ],
+        topicLinks: [
+          { label: "Metadata collection", topicId: "metadata" },
+          { label: "Downloaders", topicId: "downloaders" },
+          { label: "List pages", topicId: "list-pages" },
+        ],
       },
     ],
   },
   {
-    id: "scenes",
-    title: "Scenes",
-    description: "Watching, browsing, resuming, and managing scene metadata.",
-    pages: ["scenes", "scene"],
+    id: "list-pages",
+    title: "List Pages",
+    description: "Sorting, filtering, views, and the controls every content page shares.",
+    pages: ["scenes", "images", "galleries", "performers", "studios", "audios", "texts"],
     order: 20,
     slides: [
       {
-        id: "watching",
-        title: "Watch from the detail page",
-        caption: "Scene detail pages center playback, timeline context, and the metadata you need while watching.",
-        mockKind: "scenePlayer",
-        points: ["Resume applies when a real position exists", "Configured default starts handle long videos", "Timeline and metadata stay close to the player"],
+        id: "anatomy",
+        title: "One list page, learned everywhere",
+        caption: "Every content page works the same way. Once you know one, you know them all. The toolbar above the results holds every control you need.",
+        imageSrc: "/manual/screenshots/list-page-anatomy.png",
+        imageAlt: "A content list page with the toolbar controls highlighted",
+        points: [
+          "[green] the view switcher for grid, wall, feed, and other layouts",
+          "[blue] sort order and direction",
+          "[purple] filters, including saved filters you can reuse",
+          "[orange] page size, with an infinite option for no pages (social media style)",
+          "[pink] card size, to fit more or fewer items on screen",
+          "[teal] create a new item from this page",
+        ],
+        topicLinks: [
+          { label: "What each content type is for", topicId: "content-types" },
+          { label: "Searching within a page", topicId: "search" },
+        ],
       },
       {
-        id: "scene-feed",
-        title: "Use Feed for review sessions",
-        caption: "Feed mode keeps playback and metadata in one vertical session for browsing many scenes.",
-        mockKind: "feed",
-        points: ["Infinite mode keeps loading results", "Selection options appear after selecting an item", "The floating auto-scroll control follows the session"],
+        id: "cards",
+        title: "Get more from each card",
+        caption: "Cards do more than they show at a glance. A few actions are worth knowing about right away.",
+        imageSrc: "/manual/screenshots/card-options.png",
+        imageAlt: "A single card with its menu open and linked chips highlighted",
+        points: [
+          "[green] the card menu, with Save for Later and Quick View",
+          "Save for Later drops an item into a built-in group to revisit",
+          "Quick View opens an item without leaving the list",
+          "[blue] hover performers, tags, or groups on a card and click to open them",
+        ],
       },
     ],
   },
   {
-    id: "images",
-    title: "Images",
-    description: "Image browsing modes, wall sessions, lightbox review, and metadata cleanup.",
-    pages: ["images", "image", "galleries", "gallery"],
+    id: "content-types",
+    title: "Content Types",
+    description: "What scenes, images, performers, tags, and groups are for.",
     order: 30,
     slides: [
       {
-        id: "image-modes",
-        title: "Choose the image view",
-        caption: "Grid, wall, tagger, and feed each support a different kind of image workflow.",
-        mockKind: "images",
-        points: ["Grid is dense and direct", "Wall preserves a visual scan", "Feed carries more context per image"],
+        id: "media",
+        title: "Your media",
+        caption: "These are the things you actually watch, view, listen to, or read.",
+        imageSrc: "/manual/screenshots/nav-bar.png",
+        imageAlt: "Top navigation bar showing the content type pages",
+        points: [
+          "Scenes are videos, with playback, a timeline, and rich metadata",
+          "Images and galleries hold single pictures and collections of them",
+          "Audio and text cover everything else you want to keep and organize",
+        ],
+        topicLinks: [
+          { label: "Watching and browsing scenes", topicId: "special-views" },
+          { label: "Segments inside a scene", topicId: "segments" },
+        ],
       },
       {
-        id: "image-metadata",
-        title: "Review before batching",
-        caption: "Open image details or scrape one item before applying large metadata changes.",
-        mockKind: "metadata",
-        points: ["Use single-item review for provider quality", "Bulk edit applies only after selection", "Galleries and tags can be cleaned from the same flow"],
+        id: "people-labels",
+        title: "People, studios, and labels",
+        caption: "These connect your media together so you can find related items quickly.",
+        imageSrc: "/manual/screenshots/people-labels.png",
+        imageAlt: "A scene detail page showing its studio, tags, performers, and groups",
+        points: [
+          "[blue] performers are the people in your media, with their own pages and filters",
+          "[green] studios are the sources your media came from",
+          "[purple] tags label anything you want to find again",
+          "[orange] groups gather items into collections",
+        ],
+        topicLinks: [
+          { label: "Groups and dynamic groups", topicId: "groups" },
+          { label: "Tagging in depth", topicId: "tagging" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "downloaders",
+    title: "Downloaders",
+    description: "Add media to Cove with downloader extensions.",
+    pages: ["downloads", "downloaders"],
+    order: 40,
+    slides: [
+      {
+        id: "downloaders-what",
+        title: "What downloaders do",
+        caption: "Downloaders are extensions that bring new media into your library from supported sources.",
+        imageSrc: "/manual/screenshots/downloaders-discover.png",
+        imageAlt: "Discover page showing downloader extensions you can add",
+        points: [
+          "Each downloader knows how to fetch from a specific kind of source",
+          "Downloaded items land in your library like any other scene or image",
+          "You add the downloaders you want, so Cove only does what you need",
+        ],
+      },
+      {
+        id: "downloaders-get",
+        title: "Get and use a downloader",
+        caption: "Downloaders come from the same place as other extensions. Install one, then use it from the download flow.",
+        imageSrc: "/manual/screenshots/downloaders-discover.png",
+        imageAlt: "Discover page with a downloader extension highlighted",
+        points: [
+          "[green] find downloaders in Discover and install the ones you want",
+          "[blue] start a download and pick the installed downloader to use",
+          "Downloads run in the background and appear when they finish",
+        ],
+        topicLinks: [
+          { label: "Browsing and installing extensions", topicId: "extensions" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "metadata",
+    title: "Metadata Collection",
+    description: "Fill in titles, performers, tags, and more, automatically.",
+    order: 50,
+    slides: [
+      {
+        id: "metadata-overview",
+        title: "Let Cove fill in the details",
+        caption: "Metadata collection pulls in titles, performers, studios, tags, and images so you spend less time typing and more time browsing.",
+        imageSrc: "/manual/screenshots/tagger-view.png",
+        imageAlt: "Metadata collection tools reviewing item details",
+        points: [
+          "Scrapers read details from a source and suggest them for an item",
+          "Metadata servers can match and enrich many items at once",
+          "Field provenance shows where each value came from",
+        ],
+        topicLinks: [
+          { label: "Scrapers", topicId: "metadata-scrapers" },
+          { label: "Metadata servers", topicId: "metadata-servers" },
+          { label: "The tagger view", topicId: "metadata-tagger" },
+          { label: "Field provenance", topicId: "metadata-provenance" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "metadata-scrapers",
+    title: "Scrapers",
+    description: "Pull details for a single item from a source.",
+    parentTopicId: "metadata",
+    order: 51,
+    slides: [
+      {
+        id: "scrapers-run",
+        title: "Scrape one item first",
+        caption: "Scrapers read an item's details from a source so you can review and apply them. Start with one item before doing many.",
+        imageSrc: "/manual/screenshots/scraper-run.png",
+        imageAlt: "A scrape result with fields ready to review",
+        points: [
+          "[green] start a scrape from an item's detail page",
+          "[blue] review the suggested fields before you apply them",
+          "Apply only the fields you want, then scale up once it looks right",
+        ],
+      },
+    ],
+  },
+  {
+    id: "metadata-servers",
+    title: "Metadata Servers",
+    description: "Match and enrich many items at once.",
+    parentTopicId: "metadata",
+    order: 52,
+    slides: [
+      {
+        id: "servers-overview",
+        title: "Enrich at scale",
+        caption: "A metadata server can identify items and return rich details across your library, which is handy once a single scrape looks good.",
+        imageSrc: "/manual/screenshots/tagger-view.png",
+        imageAlt: "Reviewing enriched metadata across many items",
+        points: [
+          "Configure a server once in Settings, then reuse it everywhere",
+          "Identify matches an item to a known entry and fills it in",
+          "Use it for batches after you trust the results on a few items",
+        ],
+        topicLinks: [
+          { label: "Scrapers", topicId: "metadata-scrapers" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "metadata-tagger",
+    title: "Tagger View",
+    description: "A fast loop for cleaning metadata across many items.",
+    parentTopicId: "metadata",
+    order: 53,
+    slides: [
+      {
+        id: "tagger-view",
+        title: "Clean metadata in a loop",
+        caption: "The tagger view is built for making the same kind of decision across many items quickly.",
+        imageSrc: "/manual/screenshots/tagger-view.png",
+        imageAlt: "The tagger view with items lined up for review",
+        points: [
+          "[green] the item you are reviewing, with its suggested matches",
+          "[blue] apply or skip, then move straight to the next item",
+          "Filter first so you only see the items you want to work through",
+        ],
+      },
+    ],
+  },
+  {
+    id: "metadata-provenance",
+    title: "Field Provenance",
+    description: "See where each piece of metadata came from.",
+    parentTopicId: "metadata",
+    order: 54,
+    slides: [
+      {
+        id: "provenance",
+        title: "Know where a value came from",
+        caption: "Field provenance shows the source of a value so you can trust it or replace it with confidence.",
+        imageSrc: "/manual/screenshots/field-provenance.png",
+        imageAlt: "A field with its provenance details shown on hover",
+        points: [
+          "[green] hover a field to see where its value came from",
+          "Sources can be a scrape, a server, or your own manual edit",
+          "Use this when two sources disagree and you need to choose",
+        ],
       },
     ],
   },
   {
     id: "tagging",
     title: "Tagging",
-    description: "Tagger views, segment-derived data, and metadata review loops.",
-    pages: ["tags", "tag", "segments", "segment", "faces", "face"],
-    order: 40,
+    description: "Label content consistently so browsing and filtering stay useful.",
+    pages: ["tags", "tag"],
+    order: 60,
     slides: [
       {
-        id: "tagger-views",
-        title: "Use tagger views for fast cleanup",
-        caption: "Tagger views are built for repeated metadata decisions across many results.",
-        mockKind: "tagging",
-        points: ["Select an item to reveal bulk options", "Use filters before selecting all matching", "Move to detail pages when one item needs care"],
+        id: "tagging-basics",
+        title: "Tags describe what something is",
+        caption: "Tags are reusable labels. Add them to scenes, images, galleries, performers, groups, and other content so related things stay easy to find.",
+        imageSrc: "/manual/screenshots/tagging-basics.png",
+        imageAlt: "A tag detail page showing aliases and related content types",
+        points: [
+          "[green] use tags for genres, qualities, sources, themes, or any label you want to search later",
+          "[blue] tags can have aliases and relationships, so one idea can still be found by several names",
+          "The tag graph helps you spot related tags and clean up overlaps over time",
+        ],
+        topicLinks: [
+          { label: "The tag graph", topicId: "special-views", slideId: "tags-graph" },
+          { label: "The tagger view", topicId: "metadata-tagger" },
+        ],
       },
       {
-        id: "segments",
-        title: "Segments connect metadata to time",
-        caption: "Segments and spans help Cove turn scene time ranges into reusable browsing and tagging context.",
-        mockKind: "scenePlayer",
-        points: ["Resolved spans can open directly in the player", "Raw segments remain available for inspection", "Infinite result windows can restore earlier pages"],
+        id: "occurrence-tagging",
+        title: "Tag when something appears",
+        caption: "Some tags are about a whole item. Others are about where a performer, face, tag, or other thing appears inside a scene.",
+        imageSrc: "/manual/screenshots/occurrence-tagging.png",
+        imageAlt: "A scene edit page showing whole-scene tags, performer occurrence tags, and the timeline overlay",
+        points: [
+          "[green] use normal tags when the whole item should carry the label",
+          "[blue] use occurrence tagging when timing matters and you want to know where something appears",
+          "[purple] occurrence tagging works with segments, which also power player bars, filters, and compilations",
+        ],
+        topicLinks: [
+          { label: "Segments and time ranges", topicId: "segments" },
+          { label: "Raw and derived segments", topicId: "segments-raw-derived" },
+        ],
       },
     ],
   },
   {
-    id: "settings",
-    title: "Settings",
-    description: "Configuration areas for navigation, playback, feed behavior, themes, and extensions.",
-    pages: ["settings", "stats", "logs"],
-    order: 50,
+    id: "segments",
+    title: "Segments",
+    description: "Track meaningful time ranges inside scenes and reuse them.",
+    pages: ["segments", "segment"],
+    order: 70,
     slides: [
       {
-        id: "settings-map",
-        title: "Settings is the control room",
-        caption: "Use Settings when the browsing experience, playback behavior, extensions, or library paths need adjustment.",
-        mockKind: "settings",
-        points: ["Navigation controls top-level tabs", "Scene Player controls watching defaults", "Extensions can add panels and tutorial topics"],
+        id: "segments-overview",
+        title: "Scene moments become reusable",
+        caption: "Segments are time ranges inside a scene. They let Cove show when tags, performers, faces, and other entities are present, then reuse those ranges in playback and organization.",
+        imageSrc: "/manual/screenshots/segments-derived.png",
+        imageAlt: "Segments marked along a scene timeline",
+        points: [
+          "Use segments to see where tags, performers, faces, and other entities appear in a scene",
+          "Watch dedicated parts of scenes, build compilations, or turn a segment into a sub-scene",
+          "Derived segments are usually the ones you browse, play, filter, and add to compilations",
+        ],
+        topicLinks: [
+          { label: "Raw and derived segments", topicId: "segments-raw-derived" },
+          { label: "Display profiles", topicId: "segments-display-profiles" },
+          { label: "Building compilations", topicId: "segments-compilations" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "segments-raw-derived",
+    title: "Raw vs Derived",
+    description: "The two kinds of segments and when each appears.",
+    parentTopicId: "segments",
+    order: 71,
+    slides: [
+      {
+        id: "raw-derived",
+        title: "Raw and derived segments",
+        caption: "Raw segments are the marks recorded directly on a scene. Derived segments are Cove's calculated results from raw marks, tags, performers, faces, and display settings.",
+        imageSrc: "/manual/screenshots/segments-derived.png",
+        imageAlt: "A scene timeline showing raw and derived segments",
+        points: [
+          "[green] raw segments, the original marks on the timeline",
+          "[blue] derived segments, the ranges most useful for player bars, filters, and compilations",
+          "You usually inspect raw segments for source detail and use derived segments for actual browsing",
+        ],
+      },
+    ],
+  },
+  {
+    id: "segments-display-profiles",
+    title: "Display Profiles",
+    description: "Control how derived segments are shaped.",
+    parentTopicId: "segments",
+    order: 72,
+    slides: [
+      {
+        id: "display-profiles",
+        title: "Shape your results with profiles",
+        caption: "A display profile is a saved set of rules for turning raw segments into the derived ones you see. Switch profiles to get different views of the same scenes.",
+        imageSrc: "/manual/screenshots/display-profiles.png",
+        imageAlt: "Display profile selector with derived results",
+        points: [
+          "[green] pick a display profile to change how results are built",
+          "Different profiles suit different ways of browsing the same library",
+          "Profiles are saved, so you can reuse a setup you like",
+        ],
+      },
+    ],
+  },
+  {
+    id: "segments-compilations",
+    title: "Compilations",
+    description: "Turn grouped content into a playable sequence.",
+    parentTopicId: "segments",
+    order: 73,
+    slides: [
+      {
+        id: "compilations",
+        title: "Build a compilation from a group",
+        caption: "A compilation plays grouped content back to back. Segments are especially powerful here, but compilations can include any supported content type.",
+        imageSrc: "/manual/screenshots/compilation-play.png",
+        imageAlt: "A compilation playing content from a group",
+        points: [
+          "[green] a group of content ready to play as a compilation",
+          "[blue] the compilation player moving from one item to the next",
+          "Use segments for precise scene excerpts, or mix in other content when the group calls for it",
+        ],
+        topicLinks: [
+          { label: "Groups and dynamic groups", topicId: "groups" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "search",
+    title: "Search",
+    description: "Find items fast from a page or across everything.",
+    pages: ["search"],
+    order: 80,
+    slides: [
+      {
+        id: "page-search",
+        title: "Search within a page",
+        caption: "The search bar on each content page looks across more than just the title.",
+        imageSrc: "/manual/screenshots/search-bar.png",
+        imageAlt: "A page search bar with results",
+        points: [
+          "[green] the page search bar, scoped to the current content type",
+          "It matches titles, tags and their aliases, and the description",
+          "It also matches performers and their aliases, and the studio",
+        ],
+      },
+      {
+        id: "global-search",
+        title: "Search across everything",
+        caption: "When you are not sure where something lives, the global search looks across content types at once.",
+        imageSrc: "/manual/screenshots/global-search.png",
+        imageAlt: "Global search with grouped results",
+        points: [
+          "[green] open global search to look everywhere at once",
+          "Results are grouped by content type so you can jump straight in",
+          "Use it as a fast way to reach any item without browsing first",
+        ],
+      },
+    ],
+  },
+  {
+    id: "groups",
+    title: "Groups",
+    description: "Collections you build by hand or that update themselves.",
+    pages: ["groups", "group"],
+    order: 90,
+    slides: [
+      {
+        id: "groups-basics",
+        title: "Gather items into groups",
+        caption: "A group is a collection of items. You can build one by hand and add anything you like to it.",
+        imageSrc: "/manual/screenshots/group-detail.png",
+        imageAlt: "A group detail page with its items",
+        points: [
+          "[green] the items collected inside the group",
+          "Add scenes, images, segments, and more to the same group",
+          "Groups can even contain other groups for deeper organizing",
+        ],
+      },
+      {
+        id: "dynamic-builtin",
+        title: "Dynamic and built-in groups",
+        caption: "Some groups fill themselves based on a filter, and Cove ships with a few that track your activity automatically.",
+        imageSrc: "/manual/screenshots/dynamic-groups.png",
+        imageAlt: "Dynamic groups including the built-in ones",
+        points: [
+          "[green] dynamic groups that update from a saved filter",
+          "[blue] the built-in Watch History, Continue Watching, and Save for Later",
+          "The built-in groups are managed by Cove and cannot be deleted",
+        ],
+        topicLinks: [
+          { label: "Building compilations", topicId: "segments-compilations" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "special-views",
+    title: "Special Views",
+    description: "Feed, vertical view, and the tag graph.",
+    pages: ["feed", "graph"],
+    order: 100,
+    slides: [
+      {
+        id: "feed-vertical",
+        title: "Feed and vertical view",
+        caption: "Feed and vertical views are great for social media style browsing",
+        imageSrc: "/manual/screenshots/feed-view.png",
+        imageAlt: "Feed view with a scrolling session",
+        points: [
+          "[green] switch a list into feed or vertical view",
+          "Each item plays in place as you scroll through the session",
+          "Pair it with infinite page size for an uninterrupted run",
+        ],
+      },
+      {
+        id: "tags-graph",
+        title: "The tag graph",
+        caption: "The tag graph shows how your tags relate to each other, which helps you understand and tidy up your labels.",
+        imageSrc: "/manual/screenshots/tags-graph.png",
+        imageAlt: "The tag graph view",
+        points: [
+          "[green] the graph of tags and how they connect",
+          "Use it to spot related tags and clean up overlaps",
+          "Click a tag in the graph to jump straight to it",
+        ],
+      },
+    ],
+  },
+  {
+    id: "security",
+    title: "Security",
+    description: "Users, roles, permissions, content rules, and share links.",
+    pages: ["users", "user"],
+    order: 110,
+    slides: [
+      {
+        id: "security-overview",
+        title: "Control access deliberately",
+        caption: "Security settings decide who can sign in, what actions they can take, what content they can see, and what can be shared outside an account.",
+        imageSrc: "/manual/screenshots/security-overview.png",
+        imageAlt: "Security settings with the Security and Access menu expanded and the users page visible",
+        points: [
+          "[green] users, roles, content rules, and share links live together in Security and Access",
+          "[blue] each page controls a different layer of access",
+          "Use them together: users sign in, roles grant actions, content rules limit visibility, and share links grant scoped temporary access",
+        ],
+        topicLinks: [
+          { label: "Users", topicId: "security-users" },
+          { label: "Roles and permissions", topicId: "security-roles-permissions" },
+          { label: "Content rules", topicId: "security-content-rules" },
+          { label: "Share links", topicId: "security-sharing" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "security-users",
+    title: "Users",
+    description: "Create accounts and assign access.",
+    parentTopicId: "security",
+    pages: ["users", "user"],
+    order: 111,
+    slides: [
+      {
+        id: "users",
+        title: "Give each person an account",
+        caption: "User accounts let people sign in separately, keep their own activity, and receive the role that fits how they should use Cove.",
+        imageSrc: "/manual/screenshots/users-admin.png",
+        imageAlt: "User management with accounts and roles",
+        points: [
+          "[green] the list of users and their assigned roles",
+          "Create accounts for people who should sign in directly",
+          "Change a user's role when their access needs to change",
+        ],
+        topicLinks: [
+          { label: "Roles and permissions", topicId: "security-roles-permissions" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "security-roles-permissions",
+    title: "Roles and Permissions",
+    description: "Choose what each type of user can do.",
+    parentTopicId: "security",
+    order: 112,
+    slides: [
+      {
+        id: "roles-permissions",
+        title: "Roles bundle permissions",
+        caption: "A role is the set of permissions a user receives. Use roles to separate everyday browsing from administrative actions.",
+        imageSrc: "/manual/screenshots/roles-permissions.png",
+        imageAlt: "Roles list with a role permission panel open",
+        points: [
+          "[green] permissions cover actions like managing settings, users, metadata, downloads, and library content",
+          "[blue] open a role to review exactly what it can do",
+          "Give users the smallest role that still lets them do their work",
+          "Pair roles with content rules when users should only see part of the library",
+        ],
+        topicLinks: [
+          { label: "Content rules", topicId: "security-content-rules" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "security-content-rules",
+    title: "Content Rules",
+    description: "Limit which library items a role can see.",
+    parentTopicId: "security",
+    order: 113,
+    slides: [
+      {
+        id: "content-rules",
+        title: "Rules shape visibility",
+        caption: "Content rules decide which items are visible to a role. They are useful when an account should browse only a specific part of the library.",
+        imageSrc: "/manual/screenshots/content-rules.png",
+        imageAlt: "Content rules settings with the create rule panel open",
+        points: [
+          "[green] use content rules to allow or hide content by the criteria Cove supports",
+          "[blue] review saved rules and entity overrides in one place",
+          "Rules work alongside permissions: one controls visibility, the other controls actions",
+          "Review rules carefully before assigning them to a role used by other people",
+        ],
+        topicLinks: [
+          { label: "Users", topicId: "security-users" },
+          { label: "Share links", topicId: "security-sharing" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "security-sharing",
+    title: "Share Links",
+    description: "Share selected content without creating an account.",
+    parentTopicId: "security",
+    order: 114,
+    slides: [
+      {
+        id: "share-links",
+        title: "Share selected content",
+        caption: "Share links let you hand out access to specific content without giving someone a full account.",
+        imageSrc: "/manual/screenshots/share-links.png",
+        imageAlt: "Creating a share link",
+        points: [
+          "[green] create a share link for the content you choose",
+          "Send the link to give someone scoped access",
+          "Manage or revoke links from the same place later",
+        ],
+      },
+    ],
+  },
+  {
+    id: "appearance",
+    title: "Themes and Layout",
+    description: "Make Cove look how you want.",
+    order: 120,
+    slides: [
+      {
+        id: "color-palette",
+        title: "Choose a color palette",
+        caption: "Color palettes set Cove's core colors, including the background, surfaces, accent color, text, borders, and navigation.",
+        imageSrc: "/manual/screenshots/theme-picker.png",
+        imageAlt: "Appearance settings showing the color palette controls",
+        points: [
+          "[green] choose a palette to set the overall color system",
+          "Changes apply right away so you can try a few quickly",
+          "Use palettes as the foundation before fine-tuning style and layout",
+        ],
+      },
+      {
+        id: "style-layout",
+        title: "Choose style and layout",
+        caption: "Style options change the feel of surfaces and controls. Layout options change how pages are arranged for browsing.",
+        imageSrc: "/manual/screenshots/style-layout-options.png",
+        imageAlt: "Appearance settings showing style and layout options",
+        points: [
+          "[green] pick a style and adjust its extra options when they appear",
+          "[blue] choose the layout that matches how you like to browse",
+          "Combine a palette, style, and layout into a setup that feels right",
+        ],
+      },
+    ],
+  },
+  {
+    id: "extensions",
+    title: "Extensions",
+    description: "Discover and install add-ons, including downloaders.",
+    pages: ["extensions", "registry", "discover"],
+    order: 130,
+    slides: [
+      {
+        id: "discover-install",
+        title: "Discover and install extensions",
+        caption: "Extensions add new abilities to Cove, from downloaders to scrapers to whole new panels. You browse and install them from Discover.",
+        imageSrc: "/manual/screenshots/extensions-discover.png",
+        imageAlt: "The Discover page listing available extensions",
+        points: [
+          "[green] browse available extensions in Discover",
+          "[blue] install the ones you want with a click",
+          "Installed extensions can add their own panels and manual topics",
+        ],
+        topicLinks: [
+          { label: "Downloaders", topicId: "downloaders" },
+          { label: "Metadata collection", topicId: "metadata" },
+        ],
       },
     ],
   },
@@ -180,17 +780,49 @@ interface Props {
   request?: TutorialOpenRequest;
   currentPage?: string;
   extensionTopics?: ExtensionTutorialTopic[];
+  onTopicChange?: (topicId: string, slideId?: string) => void;
 }
 
-export function TutorialStoryboardDialog({ open, onClose, request, currentPage, extensionTopics = [] }: Props) {
+export function TutorialStoryboardDialog({ open, onClose, request, currentPage, extensionTopics = [], onTopicChange }: Props) {
   const topics = useMemo(() => mergeTutorialTopics(extensionTopics), [extensionTopics]);
   const topicEntries = useMemo(() => buildTopicEntries(topics), [topics]);
+  const orderedTopicIds = useMemo(() => topicEntries.map((entry) => entry.topic.id), [topicEntries]);
+  const parentByChild = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const topic of topics) {
+      if (topic.parentTopicId && topics.some((candidate) => candidate.id === topic.parentTopicId)) {
+        map.set(topic.id, topic.parentTopicId);
+      }
+    }
+    return map;
+  }, [topics]);
+  const parentIdsWithChildren = useMemo(() => new Set(parentByChild.values()), [parentByChild]);
+
   const [selectedTopicId, setSelectedTopicId] = useState(() => pickInitialTopicId(topics, request, currentPage));
   const [index, setIndex] = useState(0);
+  const [search, setSearch] = useState("");
+  // Nested topics start collapsed. A parent counts as expanded when its id is in this
+  // set, or when it is on the path to the currently selected topic (so the active
+  // branch is always visible).
+  const [expandedTopicIds, setExpandedTopicIds] = useState<Set<string>>(() => new Set());
+
   const selectedTopic = topics.find((topic) => topic.id === selectedTopicId) ?? topics[0];
   const slide = selectedTopic.slides[index] ?? selectedTopic.slides[0];
   const isLast = index === selectedTopic.slides.length - 1;
   const progressLabel = `${index + 1} of ${selectedTopic.slides.length}`;
+  const currentOrderIndex = orderedTopicIds.indexOf(selectedTopic.id);
+  const isVeryFirst = currentOrderIndex <= 0 && index === 0;
+  const isVeryLast = currentOrderIndex === orderedTopicIds.length - 1 && isLast;
+
+  const selectedAncestors = useMemo(
+    () => new Set([selectedTopic.id, ...ancestorsOf(selectedTopic.id, parentByChild)]),
+    [selectedTopic.id, parentByChild],
+  );
+  const isTopicOpen = (topicId: string) => expandedTopicIds.has(topicId) || selectedAncestors.has(topicId);
+  const trimmedSearch = search.trim();
+  const visibleEntries = trimmedSearch
+    ? topicEntries.filter(({ topic }) => matchesTopicSearch(topic, trimmedSearch))
+    : topicEntries.filter(({ topic }) => ancestorsOf(topic.id, parentByChild).every((ancestorId) => isTopicOpen(ancestorId)));
 
   useEffect(() => {
     if (!open) return;
@@ -199,23 +831,26 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
     const nextSlideIndex = request?.slideId ? Math.max(0, nextTopic.slides.findIndex((item) => item.id === request.slideId)) : 0;
     setSelectedTopicId(nextTopic.id);
     setIndex(nextSlideIndex);
+    setSearch("");
   }, [currentPage, open, request, topics]);
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")) return;
       if (event.key === "Escape") {
         markCompleteAndClose();
       } else if (event.key === "ArrowRight") {
-        setIndex((current) => Math.min(selectedTopic.slides.length - 1, current + 1));
+        goToNext();
       } else if (event.key === "ArrowLeft") {
-        setIndex((current) => Math.max(0, current - 1));
+        goToPrevious();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, selectedTopic.slides.length]);
+  }, [open, selectedTopic.id, index, isLast, currentOrderIndex, orderedTopicIds]);
 
   if (!open || !selectedTopic || !slide) return null;
 
@@ -224,9 +859,49 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
     onClose();
   }
 
-  function chooseTopic(topicId: string) {
+  function chooseTopic(topicId: string, slideId?: string) {
+    const target = topics.find((topic) => topic.id === topicId);
+    const slideIndex = slideId && target ? Math.max(0, target.slides.findIndex((item) => item.id === slideId)) : 0;
     setSelectedTopicId(topicId);
-    setIndex(0);
+    setIndex(slideIndex);
+    if (parentIdsWithChildren.has(topicId)) {
+      setExpandedTopicIds((current) => (current.has(topicId) ? current : new Set(current).add(topicId)));
+    }
+    onTopicChange?.(topicId, slideId);
+  }
+
+  function toggleTopicCollapse(topicId: string) {
+    setExpandedTopicIds((current) => {
+      const next = new Set(current);
+      if (next.has(topicId)) next.delete(topicId);
+      else next.add(topicId);
+      return next;
+    });
+  }
+
+  function goToNext() {
+    if (!isLast) {
+      setIndex((current) => Math.min(selectedTopic.slides.length - 1, current + 1));
+      return;
+    }
+    const nextTopicId = orderedTopicIds[currentOrderIndex + 1];
+    if (!nextTopicId) {
+      markCompleteAndClose();
+      return;
+    }
+    chooseTopic(nextTopicId);
+  }
+
+  function goToPrevious() {
+    if (index > 0) {
+      setIndex((current) => Math.max(0, current - 1));
+      return;
+    }
+    const previousTopicId = orderedTopicIds[currentOrderIndex - 1];
+    if (!previousTopicId) return;
+    const previousTopic = topics.find((topic) => topic.id === previousTopicId);
+    const lastSlideId = previousTopic?.slides[previousTopic.slides.length - 1]?.id;
+    chooseTopic(previousTopicId, lastSlideId);
   }
 
   return (
@@ -248,23 +923,56 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
         </div>
 
         <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[17rem_minmax(0,1.45fr)_minmax(18rem,0.55fr)]">
-          <aside className="hidden min-h-0 border-r border-border bg-nav/40 p-3 lg:block">
+          <aside className="hidden min-h-0 flex-col border-r border-border bg-nav/40 p-3 lg:flex">
             <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-muted">Topics</div>
+            <div className="relative mb-2">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search topics"
+                aria-label="Search manual topics"
+                className="w-full rounded-lg border border-border bg-input py-1.5 pl-8 pr-2 text-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
+              />
+            </div>
             <div className="space-y-1 overflow-y-auto pr-1">
-              {topicEntries.map(({ topic, depth }) => (
-                <button
-                  key={topic.id}
-                  type="button"
-                  onClick={() => chooseTopic(topic.id)}
-                  data-topic-depth={depth}
-                  style={{ paddingLeft: `${0.75 + depth * 1.1}rem` }}
-                  className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${topic.id === selectedTopic.id ? "bg-accent/15 text-accent" : "text-secondary hover:bg-card hover:text-foreground"}`}
-                >
-                  <span className="block truncate text-sm font-medium">{topic.title}</span>
-                  {topic.description ? <span className="mt-0.5 line-clamp-2 block text-xs text-muted">{topic.description}</span> : null}
-                  {topic.extensionId ? <span className="mt-1 block text-[11px] text-muted">Extension</span> : null}
-                </button>
-              ))}
+              {visibleEntries.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-muted">No topics match “{trimmedSearch}”.</div>
+              ) : (
+                visibleEntries.map(({ topic, depth }) => {
+                  const hasChildren = parentIdsWithChildren.has(topic.id);
+                  const expanded = isTopicOpen(topic.id);
+                  const showToggle = hasChildren && !trimmedSearch;
+                  return (
+                    <div key={topic.id} className="flex items-stretch gap-1" style={{ paddingLeft: `${depth * 1.1}rem` }}>
+                      {showToggle ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleTopicCollapse(topic.id)}
+                          className="flex w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-card hover:text-foreground"
+                          aria-label={expanded ? `Collapse ${topic.title}` : `Expand ${topic.title}`}
+                          aria-expanded={expanded}
+                        >
+                          <ChevronRight className={`h-4 w-4 transition-transform ${expanded ? "rotate-90" : ""}`} />
+                        </button>
+                      ) : (
+                        <span className="w-6 shrink-0" aria-hidden="true" />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => chooseTopic(topic.id)}
+                        data-topic-depth={depth}
+                        className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-left transition-colors ${topic.id === selectedTopic.id ? "bg-accent/15 text-accent" : "text-secondary hover:bg-card hover:text-foreground"}`}
+                      >
+                        <span className="block truncate text-sm font-medium">{topic.title}</span>
+                        {topic.description ? <span className="mt-0.5 line-clamp-2 block text-xs text-muted">{topic.description}</span> : null}
+                        {topic.extensionId ? <span className="mt-1 block text-[11px] text-muted">Extension</span> : null}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </aside>
 
@@ -290,10 +998,7 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
             {(slide.points?.length ?? 0) > 0 ? (
               <div className="mt-5 space-y-2">
                 {slide.points!.map((point) => (
-                  <div key={point} className="flex items-start gap-2 rounded-lg border border-border bg-card/70 px-3 py-2 text-sm text-secondary">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-                    <span>{point}</span>
-                  </div>
+                  <ManualBoxPoint key={point} point={point} />
                 ))}
               </div>
             ) : null}
@@ -314,6 +1019,27 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
               </div>
             ) : null}
 
+            {(() => {
+              const topicLinks = (slide.topicLinks ?? []).filter((link) => topics.some((topic) => topic.id === link.topicId));
+              if (topicLinks.length === 0) return null;
+              return (
+                <div className="mt-5 space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted">Keep going</div>
+                  {topicLinks.map((link) => (
+                    <button
+                      key={`${link.topicId}:${link.slideId ?? ""}:${link.label}`}
+                      type="button"
+                      onClick={() => chooseTopic(link.topicId, link.slideId)}
+                      className="inline-flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card/70 px-3 py-2 text-sm text-accent transition-colors hover:border-accent hover:bg-card"
+                    >
+                      <span className="truncate">{link.label}</span>
+                      <ChevronRight className="h-4 w-4 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+
             <div className="mt-auto pt-6">
               <div className="mb-4 flex gap-1.5">
                 {selectedTopic.slides.map((item, itemIndex) => (
@@ -329,8 +1055,8 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
                   type="button"
-                  onClick={() => setIndex((current) => Math.max(0, current - 1))}
-                  disabled={index === 0}
+                  onClick={goToPrevious}
+                  disabled={isVeryFirst}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-secondary transition-colors hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <ChevronLeft className="h-4 w-4" />
@@ -338,14 +1064,11 @@ export function TutorialStoryboardDialog({ open, onClose, request, currentPage, 
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (isLast) markCompleteAndClose();
-                    else setIndex((current) => Math.min(selectedTopic.slides.length - 1, current + 1));
-                  }}
+                  onClick={goToNext}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
                 >
-                  {isLast ? "Done" : "Next"}
-                  {isLast ? <Check className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  {isVeryLast ? "Done" : "Next"}
+                  {isVeryLast ? <Check className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </button>
               </div>
             </div>
@@ -422,6 +1145,29 @@ function buildTopicEntries(topics: TutorialStoryboardTopic[]): TutorialTopicEntr
   return entries;
 }
 
+function ancestorsOf(topicId: string, parentByChild: Map<string, string>): string[] {
+  const result: string[] = [];
+  let current = parentByChild.get(topicId);
+  let guard = 0;
+  while (current && guard++ < 32) {
+    result.push(current);
+    current = parentByChild.get(current);
+  }
+  return result;
+}
+
+function matchesTopicSearch(topic: TutorialStoryboardTopic, query: string): boolean {
+  const needle = query.toLowerCase();
+  if (topic.title.toLowerCase().includes(needle)) return true;
+  if (topic.description?.toLowerCase().includes(needle)) return true;
+  return topic.slides.some(
+    (slide) =>
+      slide.title.toLowerCase().includes(needle) ||
+      slide.caption?.toLowerCase().includes(needle) ||
+      slide.points?.some((point) => point.toLowerCase().includes(needle)),
+  );
+}
+
 function normalizeManualLinks(links?: { label: string; url: string }[]) {
   return (links ?? [])
     .map((link) => ({ label: link.label?.trim(), url: normalizeManualLinkUrl(link.url) }))
@@ -437,6 +1183,62 @@ function normalizeManualLinkUrl(url?: string) {
     return undefined;
   }
 }
+
+function ManualBoxPoint({ point }: { point: string }) {
+  const parsed = parseManualBoxPoint(point);
+  const tone = parsed.tone;
+  const toneClasses = tone ? manualBoxToneClasses[tone] : "border-border bg-card/70";
+  const dotClasses = tone ? manualBoxDotClasses[tone] : "bg-accent";
+
+  return (
+    <div
+      data-box-tone={tone}
+      className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm text-secondary transition-colors ${toneClasses}`}
+    >
+      <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${dotClasses}`} aria-hidden="true" />
+      <span>{parsed.text}</span>
+    </div>
+  );
+}
+
+function parseManualBoxPoint(point: string): ManualBoxPointContent {
+  const trimmed = point.trim();
+  const explicit = trimmed.match(/^\[(green|blue|purple|orange|pink|teal)\]\s*(.*)$/i);
+  if (explicit) {
+    return {
+      tone: explicit[1].toLowerCase() as ManualBoxTone,
+      text: explicit[2].trim() || trimmed,
+    };
+  }
+
+  const legacy = trimmed.match(/^(?:the\s+)?(green|blue|purple|orange|pink|teal)\s+box(?:\s+is)?[:\s-]+(.*)$/i);
+  if (legacy) {
+    return {
+      tone: legacy[1].toLowerCase() as ManualBoxTone,
+      text: legacy[2].trim() || trimmed,
+    };
+  }
+
+  return { text: trimmed };
+}
+
+const manualBoxToneClasses: Record<ManualBoxTone, string> = {
+  green: "border-green-500/55 hover:border-green-400/75",
+  blue: "border-blue-500/55 hover:border-blue-400/75",
+  purple: "border-violet-500/55 hover:border-violet-400/75",
+  orange: "border-orange-500/55 hover:border-orange-400/75",
+  pink: "border-pink-500/55 hover:border-pink-400/75",
+  teal: "border-teal-500/55 hover:border-teal-400/75",
+};
+
+const manualBoxDotClasses: Record<ManualBoxTone, string> = {
+  green: "bg-green-400",
+  blue: "bg-blue-400",
+  purple: "bg-violet-400",
+  orange: "bg-orange-400",
+  pink: "bg-pink-400",
+  teal: "bg-teal-400",
+};
 
 function resolveManualImageSrc(imageSrc: string | undefined, extensionId: string | undefined) {
   const value = imageSrc?.trim();
@@ -548,11 +1350,48 @@ function scoreTopicContextMatch(topic: TutorialStoryboardTopic, context: string,
   return undefined;
 }
 
+function SlideImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  const fileName = src.split("/").pop() ?? src;
+
+  if (failed) {
+    return (
+      <div className="flex h-full min-h-[34rem] flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-border bg-card p-10 text-center shadow-xl">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+          <ImageIcon className="h-8 w-8" />
+        </div>
+        <div className="max-w-md">
+          <div className="text-sm font-semibold uppercase tracking-wide text-muted">Screenshot pending</div>
+          <div className="mt-2 text-base font-medium text-foreground">{alt}</div>
+          <div className="mt-2 rounded bg-background px-3 py-1.5 font-mono text-xs text-secondary">{fileName}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-[34rem] items-center justify-center overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+      <img src={src} alt={alt} onError={() => setFailed(true)} className="block max-h-full w-full object-contain bg-black" />
+    </div>
+  );
+}
+
 function StoryboardPreview({ slide }: { slide: TutorialStoryboardSlide }) {
   if (slide.imageSrc) {
+    return <SlideImage src={slide.imageSrc} alt={slide.imageAlt ?? slide.title} />;
+  }
+
+  if (!slide.mockKind) {
     return (
-      <div className="flex h-full min-h-[34rem] items-center justify-center overflow-hidden rounded-lg border border-border bg-card shadow-xl">
-        <img src={slide.imageSrc} alt={slide.imageAlt ?? slide.title} className="block max-h-full w-full object-contain bg-black" />
+      <div className="flex h-full min-h-[34rem] flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-10 text-center shadow-xl">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/15 text-accent">
+          <BookOpen className="h-8 w-8" />
+        </div>
+        <div className="max-w-md">
+          <div className="text-xl font-semibold text-foreground">{slide.title}</div>
+          {slide.caption ? <p className="mt-2 text-sm leading-6 text-secondary">{slide.caption}</p> : null}
+        </div>
       </div>
     );
   }

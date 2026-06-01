@@ -1,10 +1,37 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { TutorialStoryboardDialog } from "../components/TutorialStoryboardDialog";
+import { TutorialStoryboardDialog, builtinTutorialTopics } from "../components/TutorialStoryboardDialog";
 import type { ExtensionTutorialTopic } from "../api/types";
 
 describe("TutorialStoryboardDialog", () => {
+  it("gives every built-in manual slide a screenshot", () => {
+    const missing = builtinTutorialTopics.flatMap((topic) =>
+      topic.slides
+        .filter((slide) => !slide.imageSrc || !slide.imageAlt)
+        .map((slide) => `${topic.id}/${slide.id}`),
+    );
+
+    expect(missing).toEqual([]);
+  });
+
+  it("renders colored manual callouts without the box label text", () => {
+    render(
+      <TutorialStoryboardDialog
+        open
+        onClose={vi.fn()}
+        request={{ topicId: "list-pages", slideId: "anatomy" }}
+      />,
+    );
+
+    expect(screen.queryByText(/Green box:/i)).not.toBeInTheDocument();
+
+    const point = screen.getByText("the view switcher for grid, wall, feed, and other layouts").closest("[data-box-tone]");
+    expect(point).not.toBeNull();
+    expect(point).toHaveAttribute("data-box-tone", "green");
+    expect((point as HTMLElement).className).toContain("border-green-500/55");
+  });
+
   it("renders extension manual subtopics under their parent topic", async () => {
     const user = userEvent.setup();
     const extensionTopics: ExtensionTutorialTopic[] = [
@@ -97,7 +124,7 @@ describe("TutorialStoryboardDialog", () => {
 
     expect(screen.getByRole("heading", { name: "Docs Search" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Find related docs" })).toBeInTheDocument();
-    expect(screen.getByText("Search")).toBeInTheDocument();
+    expect(screen.getByText("Search", { selector: "strong" })).toBeInTheDocument();
   });
 
   it("prefers explicit settings contexts over generic settings page topics", () => {

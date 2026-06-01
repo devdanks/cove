@@ -6,6 +6,13 @@ import { Field } from "./EditModal";
 
 export const FILTER_DYNAMIC_SOURCE_KEY = "filter";
 
+/** Source keys for system-managed dynamic groups that cannot be deleted. */
+export const PROTECTED_BUILTIN_GROUP_SOURCE_KEYS = ["save-for-later", "watch-history", "continue-watching"];
+
+export function isProtectedBuiltInGroup(querySourceKey?: string | null) {
+  return !!querySourceKey && PROTECTED_BUILTIN_GROUP_SOURCE_KEYS.includes(querySourceKey);
+}
+
 const DEFAULT_FIND_FILTER: FindFilter = {
   page: 1,
   perPage: 40,

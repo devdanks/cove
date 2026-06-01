@@ -162,6 +162,8 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
     {
         var g = await groupRepo.GetByIdAsync(id, ct);
         if (g == null) return NotFound();
+        if (DynamicGroupResolver.IsProtectedBuiltInGroup(g.QuerySourceKey))
+            return Conflict(new { error = "This is a built-in group and cannot be deleted." });
         await _customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Group, id, ct);
         await groupRepo.DeleteAsync(id, ct);
         return NoContent();
@@ -226,11 +228,13 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         if (ids.Length == 0) return Ok(new { deleted = 0 });
 
         var groups = await db.Groups.Where(group => ids.Contains(group.Id)).ToListAsync(ct);
-        foreach (var group in groups)
+        var deletable = groups.Where(group => !DynamicGroupResolver.IsProtectedBuiltInGroup(group.QuerySourceKey)).ToList();
+        var skipped = groups.Count - deletable.Count;
+        foreach (var group in deletable)
             await _customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Group, group.Id, ct);
-        db.Groups.RemoveRange(groups);
+        db.Groups.RemoveRange(deletable);
         await db.SaveChangesAsync(ct);
-        return Ok(new { deleted = groups.Count });
+        return Ok(new { deleted = deletable.Count, skipped });
     }
 
     [HttpPut("reorder")]

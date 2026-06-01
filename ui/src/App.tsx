@@ -321,6 +321,12 @@ function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => v
   }, []);
 
   useEffect(() => {
+    if (route.page === "manual") {
+      setTutorialRequest({ topicId: route.manualTopicId, slideId: route.manualSlideId });
+      setTutorialOpen(true);
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const topicId = params.get("tutorial") ?? undefined;
     if (!topicId) {
@@ -445,10 +451,18 @@ function AppShell({ route, navigate }: { route: Route; navigate: (r: Route) => v
       </main>
       <TutorialStoryboardDialog
         open={tutorialOpen}
-        onClose={() => setTutorialOpen(false)}
+        onClose={() => {
+          setTutorialOpen(false);
+          if (route.page === "manual") navigate({ page: "home" });
+        }}
         request={tutorialRequest}
         currentPage={route.page}
         extensionTopics={manifest?.tutorialTopics ?? []}
+        onTopicChange={(topicId, slideId) => {
+          if (route.page === "manual") {
+            navigateToUrl(buildRoutePath({ page: "manual", manualTopicId: topicId, manualSlideId: slideId }), { replace: true, state: { page: "manual", manualTopicId: topicId, manualSlideId: slideId } });
+          }
+        }}
       />
     </div>
   );
@@ -505,6 +519,7 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
   return (
     <>
       {route.page === "home" && <HomePage onNavigate={navigate} />}
+      {route.page === "manual" && <HomePage onNavigate={navigate} />}
       {route.page === "scenes" && <ScenesPage onNavigate={navigate} />}
       {route.page === "scene" && route.id !== undefined && <SceneDetailPage id={route.id} initialSeekTo={route.seekTo} onNavigate={navigate} />}
       {route.page === "audios" && <AudiosPage onNavigate={navigate} />}
