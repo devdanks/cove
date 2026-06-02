@@ -23,6 +23,10 @@ const { mockVideos, mockSegmentDisplayProfiles, mockSegmentLibrary, mockGoBack }
   mockGoBack: vi.fn(),
 }));
 
+vi.mock("../hooks/useDocumentTitle", () => ({
+  useDocumentTitle: () => {},
+}));
+
 vi.mock("../api/client", () => ({
   videos: mockVideos,
   segmentDisplayProfiles: mockSegmentDisplayProfiles,

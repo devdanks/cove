@@ -29,6 +29,10 @@ const { mockFaces, mockPerformers, mockEntityEngagement, mockGoBack } = vi.hoist
   mockGoBack: vi.fn(),
 }));
 
+vi.mock("../hooks/useDocumentTitle", () => ({
+  useDocumentTitle: () => {},
+}));
+
 vi.mock("../api/client", () => ({
   faces: mockFaces,
   performers: mockPerformers,

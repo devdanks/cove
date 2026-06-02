@@ -27,6 +27,10 @@ const { mockGroups, mockVideos, mockGoBack } = vi.hoisted(() => ({
   mockGoBack: vi.fn(),
 }));
 
+vi.mock("../hooks/useDocumentTitle", () => ({
+  useDocumentTitle: () => {},
+}));
+
 vi.mock("../api/client", () => ({
   groups: mockGroups,
   videos: mockVideos,

@@ -38,6 +38,10 @@ const {
   mockGoBack: vi.fn(),
 }));
 
+vi.mock("../hooks/useDocumentTitle", () => ({
+  useDocumentTitle: () => {},
+}));
+
 vi.mock("../api/client", () => ({
   galleries: mockGalleries,
   images: mockImages,

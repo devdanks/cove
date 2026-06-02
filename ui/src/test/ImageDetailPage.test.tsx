@@ -26,6 +26,10 @@ const { mockImages, mockFaces, mockEntityImages, mockPlayback, mockSetFavorite, 
   mockGoBack: vi.fn(),
 }));
 
+vi.mock("../hooks/useDocumentTitle", () => ({
+  useDocumentTitle: () => {},
+}));
+
 vi.mock("../api/client", () => ({
   images: mockImages,
   faces: mockFaces,

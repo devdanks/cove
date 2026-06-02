@@ -54,6 +54,10 @@ const {
   mockTrackInteraction: vi.fn(),
 }));
 
+vi.mock("../hooks/useDocumentTitle", () => ({
+  useDocumentTitle: () => {},
+}));
+
 vi.mock("../api/client", () => ({
   audios: mockAudios,
   texts: mockTexts,
