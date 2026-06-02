@@ -27,6 +27,7 @@ import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { useDetailListSelection } from "../hooks/useDetailListSelection";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 import { withRequiredMultiId } from "../utils/detailRelationFilters";
@@ -141,10 +142,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     fallbackFavorite: tag?.favorite,
   });
 
-  useEffect(() => {
-    if (tag) document.title = `${tag.name} | Cove`;
-    return () => { document.title = "Cove"; };
-  }, [tag]);
+  useDocumentTitle(tag?.name);
 
   // Keyboard shortcuts
   useEffect(() => {

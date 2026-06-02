@@ -55,6 +55,14 @@ public static class DataServiceExtensions
         services.AddScoped<EmbeddingService>();
         services.AddScoped<SegmentSpanResolver>();
         services.AddScoped<FacePerformerPropagationService>();
+        services.AddScoped<IEmbeddingRepository, EmbeddingRepository>();
+        services.AddScoped<ISegmentRepository, SegmentRepository>();
+        services.AddScoped<IDetectionRepository, DetectionRepository>();
+        services.AddScoped<IFaceRepository, FaceRepository>();
+        services.AddScoped<ITagApplicationRepository, TagApplicationRepository>();
+        services.AddScoped<IAiRunRepository, AiRunRepository>();
+        services.AddScoped<ICustomFieldRepository, CustomFieldRepository>();
+        services.AddScoped<IFacePerformerPropagationService>(sp => sp.GetRequiredService<FacePerformerPropagationService>());
         services.AddScoped<IUserEngagementService, UserEngagementService>();
         services.AddScoped<IEmbeddingService>(sp => sp.GetRequiredService<EmbeddingService>());
         services.AddScoped<ITextEncoderRegistry>(sp => sp.GetRequiredService<EmbeddingService>());

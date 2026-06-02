@@ -38,6 +38,7 @@ import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
 import { SceneVisualSimilarityPanel, useSceneVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
 import { SceneAudioSimilarityPanel, useSceneAudioSimilarityAvailable } from "../components/AudioSimilarityPanel";
 import { EntityReferenceMultiSelector, EntityReferenceSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
 const DetailMergeDialog = lazy(() => import("../components/DetailMergeDialog").then((module) => ({ default: module.DetailMergeDialog })));
@@ -225,10 +226,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     queryClient.invalidateQueries({ queryKey: ["engagement", "scene", sceneId] });
   }, [queryClient, scene?.id, trackPlaybackActivity]);
 
-  useEffect(() => {
-    if (scene) document.title = `${scene.title || scene.files?.[0]?.basename || `Scene ${id}`} | Cove`;
-    return () => { document.title = "Cove"; };
-  }, [scene, id]);
+  useDocumentTitle(scene ? scene.title || scene.files?.[0]?.basename || `Scene ${id}` : null);
 
   // Disable background animations on video player pages for GPU performance
   // Controlled by gradient > "Pause on Scene Player" setting (default: on)

@@ -22,6 +22,7 @@ import { FieldProvenanceHover, formatDate } from "../components/shared";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import type { DetailListDisplayMode } from "../components/DetailListToolbar";
 
 interface Props {
@@ -324,16 +325,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
     { key: "similar", label: "Similar Faces", icon: <Sparkles className="h-4 w-4" />, count: similarFacesPage.totalCount },
   ], [face?.appearanceCount, faceAppearancesPage.totalCount, similarFacesPage.totalCount]);
 
-  useEffect(() => {
-    if (!face) {
-      return;
-    }
-
-    document.title = `${title} | Cove`;
-    return () => {
-      document.title = "Cove";
-    };
-  }, [face, title]);
+  useDocumentTitle(face ? title : null);
 
   useEffect(() => {
     setHeroImageIndex((current) => Math.min(current, Math.max(0, heroImageUrls.length - 1)));

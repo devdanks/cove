@@ -40,3 +40,14 @@ public interface IFaceSuggester
         return suggestionsByFaceId;
     }
 }
+/// <summary>
+/// Propagates a face-to-performer link change to the scene/image performer lists.
+/// When a face is linked or unlinked from a performer, this service updates the
+/// corresponding scene and image performer associations. Available to any extension
+/// that manages face identity assignments.
+/// </summary>
+public interface IFacePerformerPropagationService
+{
+    Task ApplyLinkChangeAsync(int faceId, int? oldPerformerId, int? newPerformerId,
+        CancellationToken cancellationToken = default);
+}

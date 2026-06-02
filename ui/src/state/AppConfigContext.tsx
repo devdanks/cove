@@ -179,7 +179,9 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     return normalizeConfig(configQuery.data, authUser?.uiPreferences?.keybindingOverrides);
   }, [authUser?.uiPreferences?.keybindingOverrides, configQuery.data]);
   useEffect(() => {
-    document.title = config?.ui.title?.trim() || "Cove";
+    const appTitle = config?.ui.title?.trim() || "Cove";
+    const pageTitle = document.body.dataset.covePageTitle?.trim();
+    document.title = pageTitle ? `${pageTitle} | ${appTitle}` : appTitle;
   }, [config?.ui.title]);
 
   useEffect(() => {

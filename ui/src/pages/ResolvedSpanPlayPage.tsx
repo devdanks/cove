@@ -13,6 +13,7 @@ import { SegmentVisualSimilarityPanel, useSegmentVisualSimilarityAvailable } fro
 import { VideoPlayer } from "../components/VideoPlayer";
 import { ProvenanceBadge, TagBadge } from "../components/shared";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { buildSubSceneCreate } from "../utils/subSceneCreation";
 
 interface Props {
@@ -32,17 +33,8 @@ export function ResolvedSpanPlayPage({ sceneId, spanKey, profileId, derivedQuery
     queryFn: () => scenes.segments.spanDetail(sceneId, spanKey, profileId),
   });
 
-  useEffect(() => {
-    if (!detail) {
-      return;
-    }
-
-    const title = detail.span.tagName || detail.span.kind || detail.sceneTitle || `Span ${detail.span.spanKey}`;
-    document.title = `${title} | Cove`;
-    return () => {
-      document.title = "Cove";
-    };
-  }, [detail]);
+  const title = detail?.span.tagName || detail?.span.kind || detail?.sceneTitle || (detail ? `Span ${detail.span.spanKey}` : null);
+  useDocumentTitle(title);
 
   if (isLoading) {
     return (

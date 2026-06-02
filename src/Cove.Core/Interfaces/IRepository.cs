@@ -29,6 +29,7 @@ public interface ITagRepository : IRepository<Tag>
     Task<(IReadOnlyList<Tag> Items, int TotalCount)> FindAsync(TagFilter? filter, FindFilter? findFilter, CancellationToken ct = default);
     Task<Tag?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default);
     Task<Tag?> GetByNameAsync(string name, CancellationToken ct = default);
+    Task<IReadOnlyList<Tag>> FindByNamesAsync(IReadOnlyList<string> names, CancellationToken ct = default);
 }
 
 public interface IStudioRepository : IRepository<Studio>

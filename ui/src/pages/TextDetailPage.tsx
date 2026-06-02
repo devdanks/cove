@@ -21,6 +21,7 @@ import { EntityRefBadge, MediaStudioSubtitle, PerformerTile, StudioHeaderImage }
 import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 import { getTextDisplayTitle, pickPrimaryTextFile } from "../utils/audioTextDisplay";
 import { TextEditPanel } from "./TextEditPanel";
@@ -182,16 +183,7 @@ export function TextDetailPage({ id, onNavigate }: Props) {
   const canLibraryScan = hasPermission("library.scan");
   const canGenerateText = hasPermission("jobs.run") && canWriteText;
 
-  useEffect(() => {
-    if (!text) {
-      return;
-    }
-
-    document.title = `${getTextDisplayTitle(text)} | Cove`;
-    return () => {
-      document.title = "Cove";
-    };
-  }, [text]);
+  useDocumentTitle(text ? getTextDisplayTitle(text) : null);
 
   useEffect(() => {
     if (!text || !trackTextActivity) {

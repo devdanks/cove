@@ -1183,6 +1183,15 @@ public class TagRepository : ITagRepository
             _ => true,
         };
     }
+
+    public async Task<IReadOnlyList<Tag>> FindByNamesAsync(IReadOnlyList<string> names, CancellationToken ct = default)
+    {
+        var loweredNames = names.Select(n => n.ToLowerInvariant()).ToList();
+        return await _db.Tags
+            .Where(t => loweredNames.Contains(t.Name.ToLower()))
+            .AsNoTracking()
+            .ToListAsync(ct);
+    }
 }
 
 public class StudioRepository : IStudioRepository

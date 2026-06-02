@@ -14,6 +14,7 @@ import { resolveKeybinding } from "../keyboard/keybindings";
 import { useAppConfig } from "../state/AppConfigContext";
 import { useCustomFieldDefinitions } from "../hooks/useCustomFieldDefinitions";
 import { clampEntityCardSizeLevel, getEntityCardMaxLevel, getEntityCardMinWidthPx, useEntityCardSize } from "../hooks/useEntityCardSize";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { reshuffleRandomSort, withSeededRandomSort } from "../utils/seededRandomSort";
 import { trackInteraction } from "../utils/interactionTracking";
 import { LIST_PER_PAGE_OPTIONS, toolbarIconButtonClass, toolbarSegmentClass, toolbarSelectClass } from "./listToolbarStyles";
@@ -1044,11 +1045,7 @@ export function ListPage({
 
   useKeySequence(listBindings);
 
-  // Set page title (e.g., "Scenes | Cove")
-  useEffect(() => {
-    document.title = `${title} | Cove`;
-    return () => { document.title = "Cove"; };
-  }, [title]);
+  useDocumentTitle(title);
 
   return (
     <div className="list-page space-y-0">

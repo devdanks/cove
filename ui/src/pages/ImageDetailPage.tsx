@@ -21,6 +21,7 @@ import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import type { FaceHostFace, TagApplication } from "../api/types";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 import { ImageVisualSimilarityPanel, useImageVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
@@ -156,10 +157,7 @@ export function ImageDetailPage({ id, onNavigate }: Props) {
     }
   }, [activeTab, tabs]);
 
-  useEffect(() => {
-    if (image) document.title = `${displayTitle} | Cove`;
-    return () => { document.title = "Cove"; };
-  }, [displayTitle, image]);
+  useDocumentTitle(image ? displayTitle : null);
 
   useEffect(() => {
     if (!image || !trackImageActivity) return;

@@ -29,6 +29,7 @@ import { PerformerMetadataTaggerDialog } from "../components/MetadataTaggerDialo
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { useDetailListSelection } from "../hooks/useDetailListSelection";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission, hasAnyPermission } from "../auth/visibility";
 import { withRequiredMultiId } from "../utils/detailRelationFilters";
@@ -158,10 +159,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
     },
   });
 
-  useEffect(() => {
-    if (performer) document.title = `${performer.name} | Cove`;
-    return () => { document.title = "Cove"; };
-  }, [performer]);
+  useDocumentTitle(performer?.name);
 
   // Keyboard shortcuts
   useEffect(() => {

@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Data.Services;
 
-public sealed class FacePerformerPropagationService(CoveContext db, IFieldProvenanceService? fieldProvenanceService = null)
+public sealed class FacePerformerPropagationService(CoveContext db, IFieldProvenanceService? fieldProvenanceService = null) : IFacePerformerPropagationService
 {
     private const string ExtensionDataOwner = "cove.face-performer-propagation";
     private const string SourceKey = "face-performer-propagation";

@@ -34,6 +34,7 @@ import { VirtualizedInfiniteList } from "../components/VirtualizedInfiniteList";
 import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
 import { isProtectedBuiltInGroup } from "../components/DynamicGroupFilterEditor";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 interface Props {
   id: number;
@@ -157,10 +158,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const hasCompilationItems = groupItems.some((item) => item.kind === "sceneRange")
     || playbackManifest?.items.some((item) => item.startSec > 0 || item.endSec != null) === true;
 
-  useEffect(() => {
-    if (group) document.title = `${group.name} | Cove`;
-    return () => { document.title = "Cove"; };
-  }, [group]);
+  useDocumentTitle(group?.name);
 
   useEffect(() => {
     if (!showOpsMenu) return;

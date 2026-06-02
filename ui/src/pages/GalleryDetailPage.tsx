@@ -27,6 +27,7 @@ import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { useDetailListSelection } from "../hooks/useDetailListSelection";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { withRequiredMultiId } from "../utils/detailRelationFilters";
 import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
 import { EntityReferenceMultiSelector } from "../components/EntityReferenceSelector";
@@ -101,10 +102,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
     fileinfo: "galleries.read",
   }, hasPermission);
 
-  useEffect(() => {
-    if (gallery) document.title = `${gallery.title || `Gallery ${id}`} | Cove`;
-    return () => { document.title = "Cove"; };
-  }, [gallery, id]);
+  useDocumentTitle(gallery ? gallery.title || `Gallery ${id}` : null);
 
   // Close ops menu on outside click
   useEffect(() => {

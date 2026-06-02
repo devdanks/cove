@@ -28,6 +28,7 @@ import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useDetailListQuery } from "../hooks/useDetailListQuery";
 import { useDetailListSelection } from "../hooks/useDetailListSelection";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, filterItemsByPermission } from "../auth/visibility";
 import { withRequiredMultiId, withRequiredSingleId } from "../utils/detailRelationFilters";
@@ -153,10 +154,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
     fallbackRating: undefined,
   });
 
-  useEffect(() => {
-    if (studio) document.title = `${studio.name} | Cove`;
-    return () => { document.title = "Cove"; };
-  }, [studio]);
+  useDocumentTitle(studio?.name);
 
   // Close ops menu on outside click
   useEffect(() => {

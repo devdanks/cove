@@ -427,7 +427,7 @@ public partial class StashMigrationService
             var groupIdMap = await RunBulkInsertPhaseAsync(
                 "groups",
                 sw,
-                () => ImportGroupsAsync(conn, studioIdMap, progress, GroupsStart, GroupsEnd, ct));
+                () => ImportGroupsAsync(conn, blobMap, studioIdMap, progress, GroupsStart, GroupsEnd, ct));
             _db.ChangeTracker.Clear();
 
             var (sceneCount, sceneIdMap, sceneGeneratedMap) = await RunBulkInsertPhaseAsync(

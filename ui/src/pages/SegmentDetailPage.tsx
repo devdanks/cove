@@ -15,6 +15,7 @@ import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { FieldProvenanceHover, formatDate, ProvenanceBadge, TagBadge } from "../components/shared";
 import { EntityReferenceSelector } from "../components/EntityReferenceSelector";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { SegmentVisualSimilarityPanel, useSegmentVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
 import { buildSubSceneCreate } from "../utils/subSceneCreation";
 
@@ -472,16 +473,7 @@ export function SegmentDetailPage({ id, onNavigate }: Props) {
       },
     ];
   }, [canReadScenes, canWriteSegments, nextSegment, onNavigate, previousSegment, segment]);
-  useEffect(() => {
-    if (!segment) {
-      return;
-    }
-
-    document.title = `${displayTitle} | Cove`;
-    return () => {
-      document.title = "Cove";
-    };
-  }, [displayTitle, segment]);
+  useDocumentTitle(segment ? displayTitle : null);
 
   useEffect(() => {
     const handler = (event: MouseEvent) => {

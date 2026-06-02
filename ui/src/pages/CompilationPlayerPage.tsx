@@ -1,9 +1,9 @@
-import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { groups } from "../api/client";
 import { CompilationPlayer } from "../components/CompilationPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 interface Props {
   id: number;
@@ -21,16 +21,7 @@ export function CompilationPlayerPage({ id, onNavigate }: Props) {
     queryFn: () => groups.items.playbackManifest(id),
   });
 
-  useEffect(() => {
-    if (!group) {
-      return;
-    }
-
-    document.title = `${group.name} | Cove`;
-    return () => {
-      document.title = "Cove";
-    };
-  }, [group]);
+  useDocumentTitle(group?.name);
 
   if (groupLoading || manifestLoading) {
     return (

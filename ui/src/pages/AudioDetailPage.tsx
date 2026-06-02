@@ -21,6 +21,7 @@ import { EntityRefBadge, MediaStudioSubtitle, PerformerTile, StudioHeaderImage }
 import { PerformerContextTagList, getPerformerContextTags } from "../components/PerformerContextTags";
 import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { useBackNavigation } from "../hooks/useBackNavigation";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { trackInteraction } from "../utils/interactionTracking";
 import { getAudioDisplayTitle, pickPrimaryAudioFile } from "../utils/audioTextDisplay";
@@ -98,16 +99,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
   const canLibraryScan = hasPermission("library.scan");
   const canGenerateAudio = hasPermission("jobs.run") && canWriteAudio;
 
-  useEffect(() => {
-    if (!audio) {
-      return;
-    }
-
-    document.title = `${getAudioDisplayTitle(audio)} | Cove`;
-    return () => {
-      document.title = "Cove";
-    };
-  }, [audio]);
+  useDocumentTitle(audio ? getAudioDisplayTitle(audio) : null);
 
   useEffect(() => {
     if (!audio || !trackAudioActivity) {

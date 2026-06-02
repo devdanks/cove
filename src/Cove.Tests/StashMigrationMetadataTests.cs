@@ -853,6 +853,54 @@ INSERT INTO studio_stash_ids (studio_id, endpoint, stash_id) VALUES
         Assert.Contains(importedStudio.RemoteIds, remoteId => remoteId.Endpoint == "https://stash-b.local" && remoteId.RemoteId == "202");
     }
 
+    [Fact]
+    public async Task ImportGroupsAsync_ImportsFrontAndBackImageBlobs()
+    {
+        await using var context = CreateContext();
+
+        await using var stash = new SqliteConnection("Data Source=:memory:");
+        await stash.OpenAsync();
+        await ExecuteSqlAsync(stash, @"
+CREATE TABLE groups (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  aliases TEXT,
+  duration INTEGER,
+  date TEXT,
+  rating INTEGER,
+  studio_id INTEGER,
+  director TEXT,
+  description TEXT,
+  front_image_blob TEXT,
+  back_image_blob TEXT
+);
+CREATE TABLE group_urls (group_id INTEGER NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0);
+INSERT INTO groups (id, name, front_image_blob, back_image_blob) VALUES (1, 'Imported Group', 'front-blob', 'back-blob');
+");
+
+        var service = CreateService(context);
+        var groupIdMap = Assert.IsType<Dictionary<int, int>>(await InvokePrivateAsync(
+            service,
+            "ImportGroupsAsync",
+            stash,
+            new Dictionary<string, string>
+            {
+                ["front-blob"] = "cove-front",
+                ["back-blob"] = "cove-back",
+            },
+            new Dictionary<int, int>(),
+            NullJobProgress.Instance,
+            0d,
+            1d,
+            CancellationToken.None));
+
+        var importedGroup = await context.Groups.SingleAsync(group => group.Id == groupIdMap[1]);
+
+        Assert.Equal("Imported Group", importedGroup.Name);
+        Assert.Equal("cove-front", importedGroup.FrontImageBlobId);
+        Assert.Equal("cove-back", importedGroup.BackImageBlobId);
+    }
+
         [Fact]
         public async Task ReconcileImportedZipLinksAsync_PreservesZipFileIdsForImportedImages()
         {
